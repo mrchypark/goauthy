@@ -179,7 +179,6 @@ func TestUpstreamLogoutHasSignedFormContract(t *testing.T) {
 	}
 }
 
-
 func TestOTPRoutesPublicNoBrowserAuth(t *testing.T) {
 	doc := &openapi3.T{Paths: openapi3.NewPaths()}
 	if err := addAccountOperations(doc, Features{Recovery: true}); err != nil {
@@ -326,5 +325,63 @@ func TestPublicPasskeySchemasComplete(t *testing.T) {
 		if finishBody.Properties[field] == nil {
 			t.Fatalf("passkey finish missing %s", field)
 		}
+	}
+}
+
+func TestWebauthnStartSchemaAcceptsUsernameAndPurpose(t *testing.T) {
+	doc := &openapi3.T{Paths: openapi3.NewPaths()}
+	if err := addAccountOperations(doc, Features{Passkeys: true}); err != nil {
+		t.Fatal(err)
+	}
+	op := doc.Paths.Value("/auth/v1/users/webauthn_start").Post
+	if op == nil {
+		t.Fatal("missing webauthn_start")
+	}
+	schema := op.RequestBody.Value.Content["application/json"].Schema.Value
+	if schema.Properties["username"] == nil {
+		t.Fatal("webauthn_start missing username property")
+	}
+	if schema.Properties["purpose"] == nil {
+		t.Fatal("webauthn_start missing purpose property")
+	}
+	if schema.Properties["email"] != nil {
+		t.Fatal("webauthn_start must not accept email")
+	}
+	if err := schema.VisitJSON(map[string]any{"purpose": map[string]any{"Login": ""}}); err != nil {
+		t.Fatalf("valid payload rejected: %v", err)
+	}
+	if err := schema.VisitJSON(map[string]any{"purpose": map[string]any{"Login": ""}, "username": "alice"}); err != nil {
+		t.Fatalf("payload with username rejected: %v", err)
+	}
+	if err := schema.VisitJSON(map[string]any{"purpose": map[string]any{"Login": ""}, "unknown": "x"}); err == nil {
+		t.Fatal("unexpected field accepted")
+	}
+	if schema.Properties["username"].Value.Description == "" {
+		t.Fatal("username description missing")
+	}
+	if !strings.Contains(schema.Properties["username"].Value.Description, "absent") {
+		t.Fatal("username description should document absent cookie case")
+	}
+}
+
+func TestWebauthnFinishHasFormContent(t *testing.T) {
+	doc := &openapi3.T{Paths: openapi3.NewPaths()}
+	if err := addAccountOperations(doc, Features{Passkeys: true}); err != nil {
+		t.Fatal(err)
+	}
+	op := doc.Paths.Value("/auth/v1/users/webauthn_finish").Post
+	if op == nil {
+		t.Fatal("missing webauthn_finish")
+	}
+	jsonContent := op.RequestBody.Value.Content["application/json"]
+	formContent := op.RequestBody.Value.Content["application/x-www-form-urlencoded"]
+	if jsonContent == nil {
+		t.Fatal("webauthn_finish missing application/json content")
+	}
+	if formContent == nil {
+		t.Fatal("webauthn_finish missing application/x-www-form-urlencoded content")
+	}
+	if formContent.Schema != jsonContent.Schema {
+		t.Fatal("form and json schemas must be identical")
 	}
 }

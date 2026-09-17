@@ -222,10 +222,13 @@ func addAccountOperations(doc *openapi3.T, features Features) error {
 		del := doc.Paths.Value("/auth/v1/users/{subject}/webauthn/delete/{name}").Delete
 		del.RequestBody.Value.Required = false
 		del.Description = "Self deletion requires the JSON modification token. Administrator reset of another subject requires an empty body. API keys are read-only and cannot delete."
-		strictBody("/auth/v1/users/webauthn_start", "POST", map[string]*openapi3.Schema{"purpose": openapi3.NewObjectSchema().WithProperty("Login", str).WithRequired([]string{"Login"})}, "purpose")
+		username := openapi3.NewStringSchema()
+		username.Description = "Optional username for a fresh passkey-only login when the remembered cookie is absent. A present invalid cookie is rejected."
+		strictBody("/auth/v1/users/webauthn_start", "POST", map[string]*openapi3.Schema{"purpose": openapi3.NewObjectSchema().WithProperty("Login", str).WithRequired([]string{"Login"}), "username": username}, "purpose")
 		strictBody("/auth/v1/users/webauthn_finish", "POST", map[string]*openapi3.Schema{"code": str, "data": str}, "code", "data")
-		doc.Paths.Value("/auth/v1/users/webauthn_start").Post.Responses.Status(200).Value.WithJSONSchema(openapi3.NewObjectSchema().WithProperty("code", str).WithPropertyRef("rcr", assertion).WithProperty("exp", openapi3.NewDateTimeSchema()).WithRequired([]string{"code", "rcr", "exp"}))
 		finishLogin := doc.Paths.Value("/auth/v1/users/webauthn_finish").Post
+		finishLogin.RequestBody.Value.Content["application/x-www-form-urlencoded"] = finishLogin.RequestBody.Value.Content["application/json"]
+		doc.Paths.Value("/auth/v1/users/webauthn_start").Post.Responses.Status(200).Value.WithJSONSchema(openapi3.NewObjectSchema().WithProperty("code", str).WithPropertyRef("rcr", assertion).WithProperty("exp", openapi3.NewDateTimeSchema()).WithRequired([]string{"code", "rcr", "exp"}))
 		finishLogin.Responses.Status(200).Value.Content = openapi3.Content{"text/html": {Schema: &openapi3.SchemaRef{Value: str}}}
 		finishLogin.AddResponse(303, openapi3.NewResponse().WithDescription("Authorization redirect via Location, same as password login"))
 		doc.Paths.Value("/auth/v1/users/{subject}/webauthn/auth/start").Post.Responses.Status(200).Value.WithJSONSchema(openapi3.NewObjectSchema().WithProperty("code", str).WithPropertyRef("rcr", assertion).WithProperty("exp", openapi3.NewInt64Schema()).WithRequired([]string{"code", "rcr", "exp"}))

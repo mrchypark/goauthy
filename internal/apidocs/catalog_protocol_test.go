@@ -105,3 +105,155 @@ func TestDCRBackchannelMetadataSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestProfileRoutesPresence(t *testing.T) {
+	doc := &openapi3.T{OpenAPI: "3.0.3"}
+	if err := addProtocolOperations(doc, Features{}); err != nil {
+		t.Fatal(err)
+	}
+	get := doc.Paths.Value("/auth/profile").Get
+	post := doc.Paths.Value("/auth/profile").Post
+	if get == nil || post == nil {
+		t.Fatal("GET or POST /auth/profile missing")
+	}
+	if get.OperationID != "profileGet" {
+		t.Fatalf("unexpected GET operation ID %q", get.OperationID)
+	}
+	if post.OperationID != "profilePost" {
+		t.Fatalf("unexpected POST operation ID %q", post.OperationID)
+	}
+}
+
+func TestProfileGETSecurityAndParameters(t *testing.T) {
+	doc := &openapi3.T{OpenAPI: "3.0.3"}
+	if err := addProtocolOperations(doc, Features{}); err != nil {
+		t.Fatal(err)
+	}
+	get := doc.Paths.Value("/auth/profile").Get
+	if get.Security == nil || len(*get.Security) != 1 || (*get.Security)[0]["browserSession"] == nil {
+		t.Fatal("GET /auth/profile must require browserSession")
+	}
+	found := false
+	for _, p := range get.Parameters {
+		if p.Value.Name == "interaction" && p.Value.In == "query" && p.Value.Required {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("GET /auth/profile missing required query parameter interaction")
+	}
+	if get.Responses.Status(200) == nil {
+		t.Fatal("GET /auth/profile missing 200 response")
+	}
+	if get.Responses.Status(403) == nil {
+		t.Fatal("GET /auth/profile missing 403 response")
+	}
+	if get.Responses.Status(503) == nil {
+		t.Fatal("GET /auth/profile missing 503 response")
+	}
+	if get.Responses.Status(400) == nil {
+		t.Fatal("GET /auth/profile missing 400 response")
+	}
+	ct := get.Responses.Status(200).Value.Content
+	if ct["text/html"] == nil {
+		t.Fatal("GET /auth/profile 200 must be text/html")
+	}
+}
+
+func TestProfilePOSTSecurityAndFormFields(t *testing.T) {
+	doc := &openapi3.T{OpenAPI: "3.0.3"}
+	if err := addProtocolOperations(doc, Features{}); err != nil {
+		t.Fatal(err)
+	}
+	post := doc.Paths.Value("/auth/profile").Post
+	if post.Security == nil || len(*post.Security) != 1 || (*post.Security)[0]["browserSession"] == nil {
+		t.Fatal("POST /auth/profile must require browserSession")
+	}
+	foundInteraction := false
+	for _, p := range post.Parameters {
+		if p.Value.Name == "interaction" && p.Value.In == "query" && p.Value.Required {
+			foundInteraction = true
+		}
+	}
+	if !foundInteraction {
+		t.Fatal("POST /auth/profile missing required query parameter interaction")
+	}
+	if post.RequestBody == nil {
+		t.Fatal("POST /auth/profile missing request body")
+	}
+	ct := post.RequestBody.Value.Content["application/x-www-form-urlencoded"]
+	if ct == nil {
+		t.Fatal("POST /auth/profile must accept form-urlencoded")
+	}
+	schema := doc.Components.Schemas["ProfileRequest"].Value
+	if schema == nil {
+		t.Fatal("ProfileRequest schema missing from components")
+	}
+	requiredSet := map[string]bool{}
+	for _, r := range schema.Required {
+		requiredSet[r] = true
+	}
+	if !requiredSet["interaction"] || !requiredSet["csrf_token"] {
+		t.Fatal("POST /auth/profile form must require interaction and csrf_token")
+	}
+	optionalFields := []string{"given_name", "family_name", "preferred_username", "birthdate", "phone", "street", "zip", "city", "country", "tz"}
+	for _, field := range optionalFields {
+		if schema.Properties[field] == nil {
+			t.Fatalf("POST /auth/profile form missing optional field %q", field)
+		}
+		if requiredSet[field] {
+			t.Fatalf("POST /auth/profile optional field %q must not be required", field)
+		}
+	}
+	protected := []string{"email", "roles"}
+	for _, field := range protected {
+		if schema.Properties[field] != nil {
+			t.Fatalf("POST /auth/profile must not expose protected field %q", field)
+		}
+	}
+	for _, status := range []int{200, 303, 400, 403, 409, 503} {
+		if post.Responses.Status(status) == nil {
+			t.Fatalf("POST /auth/profile missing %d response", status)
+		}
+	}
+}
+
+func TestProfilePOSTForbiddenFieldsRejected(t *testing.T) {
+	doc := &openapi3.T{OpenAPI: "3.0.3"}
+	if err := addProtocolOperations(doc, Features{}); err != nil {
+		t.Fatal(err)
+	}
+	schema := doc.Components.Schemas["ProfileRequest"].Value
+	if schema.AdditionalProperties.Has != nil && *schema.AdditionalProperties.Has {
+		t.Fatal("ProfileRequest must reject additional properties")
+	}
+}
+
+func TestProfileDescriptionMentionsRevalidateFlag(t *testing.T) {
+	doc := &openapi3.T{OpenAPI: "3.0.3"}
+	if err := addProtocolOperations(doc, Features{}); err != nil {
+		t.Fatal(err)
+	}
+	getDesc := doc.Paths.Value("/auth/profile").Get.Description
+	postDesc := doc.Paths.Value("/auth/profile").Post.Description
+	if !strings.Contains(getDesc, "GOAUTHY_USER_VALUES_REVALIDATE_DURING_LOGIN") {
+		t.Fatal("GET /auth/profile description must mention the feature flag")
+	}
+	if !strings.Contains(postDesc, "GOAUTHY_USER_VALUES_REVALIDATE_DURING_LOGIN") {
+		t.Fatal("POST /auth/profile description must mention the feature flag")
+	}
+	if !strings.Contains(postDesc, "409") {
+		t.Fatal("POST /auth/profile description must mention 409 CAS conflict")
+	}
+}
+
+func TestProtocolNoFallbackBrowserSessionScheme(t *testing.T) {
+	doc := &openapi3.T{OpenAPI: "3.0.3"}
+	if err := addProtocolOperations(doc, Features{}); err != nil {
+		t.Fatal(err)
+	}
+	scheme := doc.Components.SecuritySchemes["browserSession"]
+	if scheme != nil && scheme.Value.Name == "session" {
+		t.Fatal("browserSession must not invent fallback cookie name 'session'; reuse the global definition")
+	}
+}

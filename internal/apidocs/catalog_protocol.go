@@ -102,6 +102,10 @@ func addProtocolOperations(doc *openapi3.T, features Features) error {
 		}
 	}
 	operation("POST", "/auth/login", "login", "Authenticate a browser session", formBody(ref("LoginRequest", form(map[string]*openapi3.Schema{"interaction": stringSchema, "username": stringSchema, "password": stringSchema}, "interaction", "username", "password")), true), 200, 400, 401, 403, 406, 503)
+	operation("GET", "/auth/profile", "profileGet", "Render profile continuation form", nil, 200, 403, 503)
+	profileForm := ref("ProfileRequest", form(map[string]*openapi3.Schema{"interaction": stringSchema, "csrf_token": stringSchema, "given_name": stringSchema, "family_name": stringSchema, "preferred_username": stringSchema, "birthdate": stringSchema, "phone": stringSchema, "street": stringSchema, "zip": stringSchema, "city": stringSchema, "country": stringSchema, "tz": stringSchema}, "interaction", "csrf_token"))
+	operation("POST", "/auth/profile", "profilePost", "Submit profile continuation update", formBody(profileForm, true), 200, 303, 400, 403, 409, 503)
+	doc.Paths.Value("/auth/profile").Post.AddParameter(openapi3.NewQueryParameter("interaction").WithSchema(stringSchema).WithRequired(true))
 	// OAuth client authentication is selected by the registered client. Form
 	// credentials/private_key_jwt are described in the body, not a fake HTTP scheme.
 	doc.Components.SecuritySchemes["clientBasic"] = &openapi3.SecuritySchemeRef{Value: &openapi3.SecurityScheme{Type: "http", Scheme: "basic", Description: "Registered OAuth client ID and secret."}}
@@ -138,7 +142,7 @@ func addProtocolOperations(doc *openapi3.T, features Features) error {
 	for _, name := range []string{"prompt", "max_age", "resource", "response_mode"} {
 		doc.Paths.Value("/oidc/authorize").Get.AddParameter(openapi3.NewQueryParameter(name).WithSchema(stringSchema))
 	}
-	for _, path := range []string{"/oidc/authorize", "/auth/login", "/oidc/device/verify", "/oidc/device/login", "/oidc/logout"} {
+	for _, path := range []string{"/oidc/authorize", "/auth/login", "/auth/profile", "/oidc/device/verify", "/oidc/device/login", "/oidc/logout"} {
 		for _, op := range doc.Paths.Value(path).Operations() {
 			if op.Responses.Status(200) != nil {
 				op.Responses.Status(200).Value.Content = openapi3.Content{"text/html": {Schema: &openapi3.SchemaRef{Value: stringSchema}}}
@@ -148,6 +152,14 @@ func addProtocolOperations(doc *openapi3.T, features Features) error {
 	doc.Components.Schemas["LoginRequest"].Value.WithoutAdditionalProperties()
 	doc.Paths.Value("/auth/login").Post.Description = "Requires the Init browser session and one-use interaction created by authorize. Exactly one occurrence of each of the three form fields; cross-site requests rejected. Success may continue an authorization redirect or render a passkey step-up page."
 	doc.Paths.Value("/auth/login").Post.AddResponse(303, openapi3.NewResponse().WithDescription("Authorization redirect"))
+	doc.Paths.Value("/auth/profile").Get.Security = &openapi3.SecurityRequirements{{"browserSession": {}}}
+	doc.Paths.Value("/auth/profile").Get.Description = "Default off; enable with GOAUTHY_USER_VALUES_REVALIDATE_DURING_LOGIN. Requires an authenticated browser session and a valid one-use interaction from the authorize flow. The form retains auth_time and renders fields configured by the user-values policy."
+	doc.Paths.Value("/auth/profile").Get.AddParameter(openapi3.NewQueryParameter("interaction").WithSchema(stringSchema).WithRequired(true))
+	doc.Paths.Value("/auth/profile").Post.Security = &openapi3.SecurityRequirements{{"browserSession": {}}}
+	doc.Paths.Value("/auth/profile").Post.Description = "Default off; enable with GOAUTHY_USER_VALUES_REVALIDATE_DURING_LOGIN. Requires an authenticated session, matching interaction in query and body, and a valid csrf_token. Accepts optional given_name, family_name, preferred_username, birthdate, phone, street, zip, city, country, tz fields; email and roles are not accepted. Success continues the authorization redirect. Responses: 400 validation error, 403 denied or invalid session, 409 CAS conflict, 503 feature disabled or storage unavailable."
+	doc.Components.Schemas["ProfileRequest"].Value.WithoutAdditionalProperties()
+	doc.Paths.Value("/auth/profile").Get.AddResponse(400, openapi3.NewResponse().WithDescription(http.StatusText(400)))
+	doc.Paths.Value("/auth/profile").Post.AddResponse(400, openapi3.NewResponse().WithDescription(http.StatusText(400)))
 	doc.Components.Schemas["DeviceAuthorizationRequest"].Value.WithRequired([]string{"scope"}).WithoutAdditionalProperties()
 	doc.Components.Schemas["DeviceVerificationRequest"].Value.WithProperty("action", openapi3.NewStringSchema().WithEnum("approve", "deny")).WithoutAdditionalProperties()
 	deviceResponse := form(map[string]*openapi3.Schema{"device_code": stringSchema, "user_code": stringSchema, "verification_uri": stringSchema, "verification_uri_complete": stringSchema, "expires_in": openapi3.NewInt64Schema(), "interval": openapi3.NewInt64Schema()}, "device_code", "user_code", "verification_uri", "expires_in", "interval")
