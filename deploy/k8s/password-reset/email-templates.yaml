@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: goauthy-email-templates
+  namespace: goauthy
+data:
+  email-templates.toml: |
+    [[templates]]
+    lang = "ko"
+    typ = "password_reset"
+    subject = "GoAuthy E2E 비밀번호 초기화"
+    header = "GoAuthy E2E 비밀번호 초기화"
+    text = "이 메일은 GoAuthy E2E 한국어 템플릿으로 전송되었습니다."
+    click_link = "아래 링크를 사용하여 비밀번호를 초기화하세요."
+    validity = "이 링크는 짧은 시간 동안만 유효합니다."
+    expires = "링크 만료 시각:"
+    footer = "요청하지 않았다면 이 메일을 무시하세요."
+
+    [[templates]]
+    lang = "ko"
+    typ = "registered_already"
+    subject = "GoAuthy E2E 이미 등록된 사용자"
+    header = "GoAuthy E2E 이미 등록된 사용자"
+    text = "이 이메일은 이미 GoAuthy E2E에 등록되어 있습니다."
+    footer = "요청하지 않았다면 이 메일을 무시하세요."
+    
+    [[templates]]
+    lang = "ko"
+    typ = "password_new"
+    subject = "GoAuthy E2E 비밀번호 설정"
+    header = "GoAuthy E2E 비밀번호 설정"
+    text = "이 메일은 GoAuthy E2E 한국어 공개 등록 템플릿으로 전송되었습니다."
+    click_link = "아래 링크를 사용하여 비밀번호를 설정하세요."
+    validity = "이 링크는 짧은 시간 동안만 유효합니다."
+    expires = "링크 만료 시각:"
+    footer = "요청하지 않았다면 이 메일을 무시하세요."

@@ -1,0 +1,284 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+  labels:
+    app.kubernetes.io/name: goauthy
+spec:
+  serviceName: goauthy
+  podManagementPolicy: Parallel
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goauthy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: goauthy
+        app.kubernetes.io/component: object-store-client
+    spec:
+      serviceAccountName: goauthy
+      automountServiceAccountToken: false
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: goauthy
+                topologyKey: kubernetes.io/hostname
+      securityContext:
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-for-rhiza-bucket
+          image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+          command: ["/bin/sh", "-ec"]
+          args:
+            - >-
+              until mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
+              mc stat local/rhiza >/dev/null; do sleep 2; done
+          env:
+            - name: MC_CONFIG_DIR
+              value: /tmp/.mc
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: goauthy-secrets
+                  key: minio-root-user
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: goauthy-secrets
+                  key: minio-root-password
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: mc-tmp
+              mountPath: /tmp
+      containers:
+        - name: goauthy
+          image: goauthy:e2e
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: peer
+              protocol: UDP
+              containerPort: 8444
+          env:
+            - name: GOAUTHY_ISSUER
+              value: http://127.0.0.1:18080
+            - name: SQLITE_TMPDIR
+              value: /tmp
+            - name: GOAUTHY_SIGNING_KEY_ROTATION_PERIOD
+              value: 720h
+            - name: GOAUTHY_BROWSER_SESSION_IDLE_TIMEOUT
+              value: 90m
+            - name: GOAUTHY_CLUSTER_ID
+              value: goauthy-e2e
+            - name: GOAUTHY_RHIZA_PROFILE
+              value: cluster
+            - name: GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE
+              value: "true"
+            - name: GOAUTHY_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: GOAUTHY_RHIZA_PEER_ADDR
+              value: :8444
+            - name: GOAUTHY_RHIZA_MEMBERS
+              valueFrom:
+                secretKeyRef:
+                  name: goauthy-secrets
+                  key: rhiza-members
+            - name: GOAUTHY_RHIZA_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: goauthy-secrets
+                  key: rhiza-admin-token
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_ENDPOINT
+              value: minio.goauthy.svc.cluster.local:9000
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_INSECURE
+              value: "true"
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_BUCKET
+              value: rhiza
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_PREFIX
+              value: goauthy-e2e
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_REGION
+              value: us-east-1
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: goauthy-secrets
+                  key: minio-root-user
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: goauthy-secrets
+                  key: minio-root-password
+            - name: GOAUTHY_DATA_DIR
+              value: /var/lib/goauthy
+            - name: GOAUTHY_MASTER_KEY_DIR
+              value: /run/secrets/master-keys
+            - name: GOAUTHY_ACTIVE_MASTER_KEY_ID
+              value: dev-1
+            - name: GOAUTHY_OAUTH_HMAC_SECRET_FILE
+              value: /run/secrets/oauth-hmac
+            - name: GOAUTHY_BOOTSTRAP_CLIENT_SECRET_FILE
+              value: /run/secrets/bootstrap-client
+            - name: GOAUTHY_DCR_REGISTRATION_TOKEN_FILE
+              value: /run/secrets/dcr-registration-token
+            - name: GOAUTHY_DCR_ALLOWED_SCOPES
+              value: "openid goauthy.read"
+            - name: GOAUTHY_DCR_DEFAULT_SCOPES
+              value: openid
+            - name: GOAUTHY_RFC8252_LOOPBACK_REDIRECTS
+              value: "false"
+            - name: GOAUTHY_BOOTSTRAP_CLIENT_CREDENTIALS_TOKEN_LIFETIME
+              value: 1h
+            - name: GOAUTHY_BOOTSTRAP_POST_LOGOUT_REDIRECT_URIS
+              value: '["http://localhost:5555/logout?from=goauthy"]'
+            - name: GOAUTHY_BOOTSTRAP_USER
+              value: admin
+            - name: GOAUTHY_BOOTSTRAP_USER_SUBJECT
+              value: bootstrap-admin
+            - name: GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE
+              value: /run/secrets/bootstrap-user-password-phc
+            - name: GOAUTHY_BOOTSTRAP_ALLOWED_RESOURCES
+              value: '["https://api.example.test/v1"]'
+            - name: GOAUTHY_BOOTSTRAP_BACKCHANNEL_LOGOUT_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: goauthy-backchannel
+                  key: logout-uri
+                  optional: true
+            - name: GOAUTHY_BOOTSTRAP_BACKCHANNEL_ALLOW_PRIVATE
+              valueFrom:
+                configMapKeyRef:
+                  name: goauthy-backchannel
+                  key: allow-private
+                  optional: true
+            - name: GOAUTHY_BOOTSTRAP_BACKCHANNEL_ALLOW_HTTP
+              valueFrom:
+                configMapKeyRef:
+                  name: goauthy-backchannel
+                  key: allow-http
+                  optional: true
+            - name: GOAUTHY_BOOTSTRAP_BACKCHANNEL_CA_FILE
+              valueFrom:
+                configMapKeyRef:
+                  name: goauthy-backchannel
+                  key: ca-file
+                  optional: true
+            - name: GOAUTHY_BACKCHANNEL_RETRY_BASE
+              valueFrom:
+                configMapKeyRef:
+                  name: goauthy-backchannel
+                  key: retry-base
+                  optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 3
+          volumeMounts:
+            - name: sqlite-tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /var/lib/goauthy
+            - name: secrets
+              mountPath: /run/secrets/master-keys
+              subPath: master-keys
+              readOnly: true
+            - name: secrets
+              mountPath: /run/secrets/oauth-hmac
+              subPath: oauth-hmac
+              readOnly: true
+            - name: secrets
+              mountPath: /run/secrets/bootstrap-client
+              subPath: bootstrap-client
+              readOnly: true
+            - name: secrets
+              mountPath: /run/secrets/dcr-registration-token
+              subPath: dcr-registration-token
+              readOnly: true
+            - name: secrets
+              mountPath: /run/secrets/bootstrap-user-password-phc
+              subPath: bootstrap-user-password-phc
+              readOnly: true
+            - name: backchannel-ca
+              mountPath: /run/backchannel-ca
+              readOnly: true
+      volumes:
+        - name: mc-tmp
+          emptyDir: {}
+        - name: secrets
+          secret:
+            secretName: goauthy-secrets
+            defaultMode: 288
+            items:
+              - key: dev-1
+                path: master-keys/dev-1
+              - key: oauth-hmac
+                path: oauth-hmac
+              - key: bootstrap-client
+                path: bootstrap-client
+              - key: dcr-registration-token
+                path: dcr-registration-token
+              - key: bootstrap-user-password-phc
+                path: bootstrap-user-password-phc
+        - name: sqlite-tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: data
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: backchannel-ca
+          secret:
+            secretName: goauthy-backchannel-ca
+            optional: true
+            defaultMode: 288

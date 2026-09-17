@@ -1,0 +1,31 @@
+# Calico ordered policies provide an explicit Deny, which overrides the
+# Kubernetes allow policies used by the normal app manifest.
+apiVersion: crd.projectcalico.org/v1
+kind: NetworkPolicy
+metadata:
+  name: isolate-goauthy-2-peer
+  namespace: goauthy
+spec:
+  order: 0
+  selector: statefulset.kubernetes.io/pod-name == 'goauthy-2'
+  types:
+    - Ingress
+    - Egress
+  ingress:
+    - action: Deny
+      protocol: UDP
+      destination:
+        ports: [8444]
+    - action: Deny
+      protocol: TCP
+      destination:
+        ports: [8444]
+  egress:
+    - action: Deny
+      protocol: UDP
+      destination:
+        ports: [8444]
+    - action: Deny
+      protocol: TCP
+      destination:
+        ports: [8444]

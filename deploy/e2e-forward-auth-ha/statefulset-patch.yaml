@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_ISSUER
+              value: http://127.0.0.1:18080
+            - name: GOAUTHY_FORWARD_AUTH_HEADERS
+              value: "true"
+            - name: GOAUTHY_ENABLE_SELF_DELETE
+              value: "true"
+            - name: GOAUTHY_BOOTSTRAP_USER
+              value: admin@goauthy.e2e
+            - name: GOAUTHY_BOOTSTRAP_USER_ROLES
+              value: '["forward-auth-admin"]'
+            - name: GOAUTHY_BOOTSTRAP_USER_GROUPS
+              value: '["forward-auth-group"]'

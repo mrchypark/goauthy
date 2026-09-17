@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          env:
+            # Registration chooses Korean; English fallback must not mask a
+            # missing persisted-language or override-catalogue connection.
+            - name: GOAUTHY_EMAIL_TEMPLATE_LANG
+              value: en
+            - name: GOAUTHY_OPEN_USER_REG
+              value: "true"
+            - name: GOAUTHY_USER_REG_DOMAIN_RESTRICTION
+              value: goauthy.e2e
+            - name: GOAUTHY_PASSWORD_NEW_EXPIRY
+              value: 72h

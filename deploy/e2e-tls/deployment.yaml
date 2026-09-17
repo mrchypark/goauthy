@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: goauthy-tls
+  namespace: goauthy-tls-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: goauthy-tls
+  template:
+    metadata:
+      labels:
+        app: goauthy-tls
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+        - name: goauthy
+          image: goauthy:e2e
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8443
+          env:
+            - name: GOAUTHY_LISTEN_ADDR
+              value: ":8443"
+            - name: GOAUTHY_ISSUER
+              value: https://localhost
+            - name: GOAUTHY_DATA_DIR
+              value: /data
+            - name: GOAUTHY_RHIZA_PROFILE
+              value: dev
+            - name: GOAUTHY_CLUSTER_ID
+              value: goauthy-tls-e2e
+            - name: GOAUTHY_NODE_ID
+              value: goauthy-tls-e2e-0
+            - name: GOAUTHY_TLS_CERT_FILE
+              value: /run/tls/tls.crt
+            - name: GOAUTHY_TLS_KEY_FILE
+              value: /run/tls/tls.key
+            - name: GOAUTHY_MASTER_KEY_DIR
+              value: /run/secrets/master-keys
+            - name: GOAUTHY_OAUTH_HMAC_SECRET_FILE
+              value: /run/secrets/oauth-hmac
+            - name: GOAUTHY_BOOTSTRAP_CLIENT_SECRET_FILE
+              value: /run/secrets/bootstrap-client
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: bootstrap
+              mountPath: /run/secrets
+              readOnly: true
+            - name: tls
+              mountPath: /run/tls
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: 8443
+            periodSeconds: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: bootstrap
+          secret:
+            secretName: goauthy-bootstrap
+            defaultMode: 288
+            items:
+              - key: dev-1
+                path: master-keys/dev-1
+              - key: oauth-hmac
+                path: oauth-hmac
+              - key: bootstrap-client
+                path: bootstrap-client
+        - name: tls
+          projected:
+            defaultMode: 288
+            sources:
+              - secret:
+                  name: goauthy-tls
+                  items:
+                    - key: tls.crt
+                      path: tls.crt
+                    - key: tls.key
+                      path: tls.key
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: goauthy-tls
+  namespace: goauthy-tls-e2e
+spec:
+  selector:
+    app: goauthy-tls
+  ports:
+    - port: 8443
+      targetPort: 8443

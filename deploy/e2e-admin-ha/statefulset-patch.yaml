@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_ISSUER
+              value: http://127.0.0.1:18080
+            - name: GOAUTHY_BOOTSTRAP_USER
+              value: admin
+            - name: GOAUTHY_BOOTSTRAP_USER_SUBJECT
+              value: bootstrap-admin
+            - name: GOAUTHY_BOOTSTRAP_USER_ROLES
+              value: '["rauthy_admin"]'

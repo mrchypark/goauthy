@@ -1,0 +1,49 @@
+# Apply only when passkeys are enabled and goauthy-secrets has passkey-key.
+# Kubernetes fsGroup makes projected secrets group-readable. Copy as the
+# application's UID into a memory-backed volume; keep the loader owner-only.
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: prepare-passkey-cookie-key
+          image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+          command: ["/bin/sh", "-ec"]
+          args:
+            - >-
+              umask 077;
+              cp /run/passkey-source/passkey-key /run/passkey/passkey-key;
+              chmod 0400 /run/passkey/passkey-key;
+              test "$(wc -c < /run/passkey/passkey-key)" -eq 32
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: secrets
+              mountPath: /run/passkey-source/passkey-key
+              subPath: passkey-key
+              readOnly: true
+            - name: passkey-cookie-key
+              mountPath: /run/passkey
+      containers:
+        - name: goauthy
+          volumeMounts:
+            - name: passkey-cookie-key
+              mountPath: /run/passkey
+              readOnly: true
+      volumes:
+        - name: passkey-cookie-key
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi

@@ -1,0 +1,32 @@
+# Chart: oci://quay.io/cilium/charts/cilium:1.20.0
+# Chart digest: sha256:8009baed89d99fd84f7ee5cfdbf3a1fae8153452132549833956b6aca8b9d738
+# All digests are multi-architecture manifest-list digests from that chart.
+ipam:
+  mode: kubernetes
+kubeProxyReplacement: "false"
+k8sNetworkPolicy:
+  enabled: true
+image:
+  repository: quay.io/cilium/cilium
+  tag: v1.20.0
+  digest: sha256:383968cd5e8873f7976fa76aa6196045643558f4cc9518a207b9335cb24a0e93
+  useDigest: true
+  pullPolicy: IfNotPresent
+operator:
+  replicas: 1
+  image:
+    repository: quay.io/cilium/operator
+    tag: v1.20.0
+    genericDigest: sha256:80744a8cc7c91c2f9e6347629406844eb35d79b30a732c6d41c15b17232a74f3
+    useDigest: true
+    pullPolicy: IfNotPresent
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+    image:
+      repository: quay.io/cilium/hubble-relay
+      tag: v1.20.0
+      digest: sha256:2ca16981c7eb98df0ba9c9d18896bb9ca628b5cbd40dc9801339f4741f91ee94
+      useDigest: true
+      pullPolicy: IfNotPresent

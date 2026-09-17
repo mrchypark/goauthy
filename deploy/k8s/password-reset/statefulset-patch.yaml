@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_PASSWORD_RECOVERY_ENABLED
+              value: "true"
+            - name: GOAUTHY_POW_DIFFICULTY
+              value: "10"
+            - name: GOAUTHY_POW_EXPIRY
+              value: 30s
+            - name: GOAUTHY_PASSWORD_RESET_KEY_FILE
+              value: /run/secrets/password-reset-key
+            - name: GOAUTHY_SMTP_HOST
+              value: goauthy-smtp-sink.goauthy.svc.cluster.local
+            - name: GOAUTHY_SMTP_PORT
+              value: "1025"
+            - name: GOAUTHY_SMTP_FROM
+              value: support@goauthy.e2e
+            - name: GOAUTHY_SMTP_ALLOW_INSECURE
+              value: "true"
+            - name: GOAUTHY_SMTP_TIMEOUT
+              value: 10s
+            - name: GOAUTHY_EMAIL_TEMPLATES_FILE
+              value: /etc/goauthy/email-templates/email-templates.toml
+            - name: GOAUTHY_EMAIL_TEMPLATE_LANG
+              value: ko
+            - name: GOAUTHY_BOOTSTRAP_USER_EMAIL
+              value: admin@goauthy.e2e
+          volumeMounts:
+            - name: password-reset-key
+              mountPath: /run/secrets/password-reset-key
+              subPath: password-reset-key
+              readOnly: true
+            - name: email-templates
+              mountPath: /etc/goauthy/email-templates
+              readOnly: true
+      volumes:
+        - name: password-reset-key
+          secret:
+            secretName: goauthy-secrets
+            defaultMode: 288
+            items:
+              - key: password-reset-key
+                path: password-reset-key
+        - name: email-templates
+          configMap:
+            name: goauthy-email-templates
+            items:
+              - key: email-templates.toml
+                path: email-templates.toml

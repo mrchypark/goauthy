@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_ISSUER
+              value: http://127.0.0.1:18080
+            - name: GOAUTHY_WEB_ID_ENABLED
+              value: "true"
+            - name: GOAUTHY_BOOTSTRAP_USER
+              value: webid@example.test
+            - name: GOAUTHY_BOOTSTRAP_USER_SUBJECT
+              value: webid-subject

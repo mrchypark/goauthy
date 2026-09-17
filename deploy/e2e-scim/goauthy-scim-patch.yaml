@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_SCIM_PROVIDERS_FILE
+              value: /run/scim-providers/providers.json
+          volumeMounts:
+            - name: scim-providers
+              mountPath: /run/scim-providers
+              readOnly: true
+            - name: scim-provider-token
+              mountPath: /run/scim-provider-token
+              readOnly: true
+            - name: scim-provider-ca
+              mountPath: /run/scim-provider-ca
+              readOnly: true
+      volumes:
+        - name: scim-providers
+          secret:
+            secretName: goauthy-scim-providers
+            defaultMode: 0440
+        - name: scim-provider-token
+          secret:
+            secretName: goauthy-scim-provider-token
+            defaultMode: 0440
+        - name: scim-provider-ca
+          secret:
+            secretName: goauthy-scim-provider-ca
+            defaultMode: 0440

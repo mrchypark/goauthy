@@ -1,0 +1,149 @@
+package oauth
+
+import (
+	"context"
+	"errors"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/mrchypark/goauthy/internal/clients"
+	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/ory/fosite"
+	"github.com/ory/fosite/handler/oauth2"
+)
+
+const passwordSnapshotExtra = "goauthy_password_snapshot"
+const passwordAuthTimeExtra = "goauthy_password_auth_time"
+
+type passwordAuthenticationKey struct{}
+
+type passwordGrantHandler struct {
+	*oauth2.ResourceOwnerPasswordCredentialsGrantHandler
+	*Store
+	users             *identity.Store
+	onPasswordExpired func(context.Context, string) error
+}
+
+func newPasswordGrantHandler(store *Store, users *identity.Store, strategy oauth2.CoreStrategy, config *fosite.Config) *passwordGrantHandler {
+	h := &passwordGrantHandler{Store: store, users: users}
+	h.ResourceOwnerPasswordCredentialsGrantHandler = &oauth2.ResourceOwnerPasswordCredentialsGrantHandler{
+		HandleHelper: &oauth2.HandleHelper{AccessTokenStrategy: strategy, AccessTokenStorage: store, Config: config},
+		ResourceOwnerPasswordCredentialsGrantStorage: h, RefreshTokenStrategy: strategy, Config: config,
+	}
+	return h
+}
+
+func (h *passwordGrantHandler) Authenticate(ctx context.Context, username, password string) (string, error) {
+	snapshot, ok := ctx.Value(passwordAuthenticationKey{}).(*identity.Authentication)
+	if !ok || h.users == nil {
+		return "", fosite.ErrServerError
+	}
+	auth, err := h.users.AuthenticatePasswordGrant(ctx, username, []byte(password), h.onPasswordExpired)
+	if errors.Is(err, identity.ErrPasswordExpired) {
+		if auth.Subject == "" {
+			return "", fosite.ErrServerError
+		}
+		return "", fosite.ErrAccessDenied.WithHint("Password reset required.")
+	}
+	if errors.Is(err, identity.ErrInvalidCredentials) {
+		return "", fosite.ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	*snapshot = auth
+	return auth.Subject, nil
+}
+
+func (h *passwordGrantHandler) HandleTokenEndpointRequest(ctx context.Context, request fosite.AccessRequester) error {
+	if !h.CanHandleTokenEndpointRequest(ctx, request) {
+		return fosite.ErrUnknownRequest
+	}
+	if !request.GetClient().GetGrantTypes().Has("password") {
+		return fosite.ErrUnauthorizedClient
+	}
+	form := request.GetRequestForm()
+	if _, ok := exactlyOne(form, "username"); !ok {
+		return fosite.ErrInvalidRequest
+	}
+	if _, ok := exactlyOne(form, "password"); !ok {
+		return fosite.ErrInvalidRequest
+	}
+	var scopes []string
+	if client, ok := request.GetClient().(*clients.Client); ok {
+		scopes = client.DefaultScopes
+	} else {
+		var err error
+		scopes, err = h.dynamicClients.DefaultScopes(ctx, request.GetClient().GetID())
+		if err != nil {
+			return fosite.ErrServerError
+		}
+	}
+	// The pinned password producer selects defaults and ignores resource.
+	request.SetRequestedScopes(append(fosite.Arguments(nil), scopes...))
+	form.Set("scope", strings.Join(scopes, " "))
+	delete(form, "resource")
+	request.SetRequestedAudience(nil)
+	snapshot := identity.Authentication{}
+	ctx = context.WithValue(ctx, passwordAuthenticationKey{}, &snapshot)
+	if err := h.ResourceOwnerPasswordCredentialsGrantHandler.HandleTokenEndpointRequest(ctx, request); err != nil {
+		if errors.Is(err, fosite.ErrAccessDenied) {
+			return fosite.ErrAccessDenied.WithHint("Password reset required.")
+		}
+		return err
+	}
+	session, ok := request.GetSession().(*fosite.DefaultSession)
+	if !ok || snapshot.Subject == "" || snapshot.PasswordGeneration < 1 || snapshot.AuthenticationGeneration < 1 {
+		return fosite.ErrServerError
+	}
+	if session.Extra == nil {
+		session.Extra = map[string]interface{}{}
+	}
+	session.Extra[passwordSnapshotExtra] = snapshot
+	session.Extra[passwordAuthTimeExtra] = strconv.FormatInt(time.Now().UTC().Unix(), 10)
+	for _, scope := range scopes {
+		request.GrantScope(scope)
+	}
+	return nil
+}
+
+func (h *passwordGrantHandler) PopulateTokenEndpointResponse(ctx context.Context, request fosite.AccessRequester, response fosite.AccessResponder) error {
+	if !h.CanHandleTokenEndpointRequest(ctx, request) {
+		return fosite.ErrUnknownRequest
+	}
+	session, ok := request.GetSession().(*fosite.DefaultSession)
+	if !ok {
+		return fosite.ErrServerError
+	}
+	snapshot, ok := session.Extra[passwordSnapshotExtra].(identity.Authentication)
+	if !ok || snapshot.Subject != session.Subject {
+		return fosite.ErrInvalidGrant
+	}
+	delete(session.Extra, passwordSnapshotExtra)
+	if err := h.users.RecordPasswordLogin(ctx, snapshot); err != nil {
+		return err
+	}
+	ctx, err := h.beginPasswordTX(ctx, snapshot.Subject, snapshot.PasswordGeneration, snapshot.AuthenticationGeneration)
+	if err != nil {
+		return err
+	}
+	defer h.Rollback(ctx)
+	lifetime := fosite.GetEffectiveLifespan(request.GetClient(), fosite.GrantTypePassword, fosite.AccessToken, h.Config.GetAccessTokenLifespan(ctx))
+	accessSignature, err := h.IssueAccessToken(ctx, lifetime, request, response)
+	if err != nil {
+		return err
+	}
+	// Rauthy selects refresh issuance by enabled flow, not offline_access.
+	if request.GetClient().GetGrantTypes().Has("refresh_token") {
+		refresh, signature, err := h.RefreshTokenStrategy.GenerateRefreshToken(ctx, request)
+		if err != nil {
+			return err
+		}
+		if err := h.CreateRefreshTokenSession(ctx, signature, accessSignature, request.Sanitize(nil)); err != nil {
+			return err
+		}
+		response.SetExtra("refresh_token", refresh)
+	}
+	return h.Commit(ctx)
+}

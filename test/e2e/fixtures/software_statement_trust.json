@@ -1,0 +1,20 @@
+{
+  "issuers": [
+    {
+      "issuer": "https://publisher.example.test",
+      "audience": "https://id.example.test/oidc/register",
+      "jwks": {
+        "keys": [
+          {
+            "use": "sig",
+            "kty": "OKP",
+            "kid": "statement-1",
+            "crv": "Ed25519",
+            "alg": "EdDSA",
+            "x": "ebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+# Cilium deny rules override the normal Kubernetes allow policies. The target
+# StatefulSet label is set by Kubernetes, not supplied by the application.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: isolate-goauthy-2-peer
+  namespace: goauthy
+spec:
+  endpointSelector:
+    matchLabels:
+      statefulset.kubernetes.io/pod-name: goauthy-2
+  ingressDeny:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: goauthy
+      toPorts:
+        - ports:
+            - port: "8444"
+              protocol: UDP
+            - port: "8444"
+              protocol: TCP
+  egressDeny:
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: goauthy
+      toPorts:
+        - ports:
+            - port: "8444"
+              protocol: UDP
+            - port: "8444"
+              protocol: TCP

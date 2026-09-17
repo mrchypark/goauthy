@@ -27,6 +27,29 @@ go.work.sum
 # env file
 .env
 
+# Local development secrets
+/secrets/
+
+# Local browser verification artifacts
+/output/playwright/
+
+# Root build binaries (make / go build output)
+/goauthy
+/goauthy-upstream-fixture
+/ymldbg
+/ymldbg.go
+
+# Scratch probes (Rust/Go build artifacts, test fixtures)
+/owned/tmp/
+
+# Temporary backup files
+*.bak
+*.bak[0-9]
+
+# Exact scratch debug files
+/internal/identity/debug_federated_test.go
+
 # Editor/IDE
 # .idea/
 # .vscode/
+/internal/upstreamprovider/config.go.new

@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: goauthy
+  namespace: goauthy
+  labels:
+    app.kubernetes.io/name: goauthy
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: goauthy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: peer
+      protocol: UDP
+      port: 8444
+      targetPort: peer
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: goauthy-client
+  namespace: goauthy
+  labels:
+    app.kubernetes.io/name: goauthy
+spec:
+  selector:
+    app.kubernetes.io/name: goauthy
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

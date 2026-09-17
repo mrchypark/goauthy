@@ -1,0 +1,12 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: goauthy
+  namespace: goauthy
+  labels:
+    app.kubernetes.io/name: goauthy
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goauthy
