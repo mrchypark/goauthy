@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -97,11 +98,22 @@ func TestThemeLinkEscapesUntrustedResolverURL(t *testing.T) {
 		t.Fatalf("status=%d", response.Code)
 	}
 	body := response.Body.String()
-	if strings.Contains(body, `<script`) || strings.Contains(body, `</script>`) || strings.Contains(body, `onerror="`) || strings.Contains(body, `/123"><`) {
+	if strings.Contains(body, `/123"><`) || strings.Contains(body, `alert(1)`) {
 		t.Fatalf("untrusted resolver value escaped into HTML: %q", body)
+	}
+	if strings.Contains(body, `<script>alert(1)</script>`) {
+		t.Fatalf("literal injection script present in body: %q", body)
+	}
+	wantEscaped := `/auth/v1/theme/rauthy/123%5c%22%3e%3cscript%3ealert%281%29%3c/script%3e`
+	if !strings.Contains(body, `<link rel="stylesheet" href="`+wantEscaped+`">`) {
+		t.Fatalf("escaped malicious URL not in stylesheet href: %q", body)
 	}
 	if !strings.Contains(body, `<link rel="stylesheet" href="/auth/v1/theme/global.css">`) {
 		t.Fatalf("missing global stylesheet link: %q", body)
+	}
+	nonceMatches := regexp.MustCompile(`<script nonce="([^"]+)"`).FindAllStringSubmatch(body, -1)
+	if len(nonceMatches) == 0 {
+		t.Fatalf("expected at least one legitimate nonce script: %q", body)
 	}
 }
 

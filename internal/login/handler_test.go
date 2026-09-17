@@ -35,8 +35,15 @@ func TestLoginCompletesAuthorizationAndRotatesSession(t *testing.T) {
 	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
 	page := httptest.NewRecorder()
 	h.Authorize(page, get)
-	if got := page.Header().Get("Content-Security-Policy"); got != authorizationFormCSP(authorizeValues().Get("redirect_uri")) {
-		t.Fatalf("authorization form policy=%q", got)
+	nonceMatches := regexp.MustCompile(`<script nonce="([^"]+)"`).FindAllStringSubmatch(page.Body.String(), -1)
+	if len(nonceMatches) != 1 || nonceMatches[0][1] == "" {
+		t.Fatalf("expected exactly one script nonce, got %d", len(nonceMatches))
+	}
+	nonce := nonceMatches[0][1]
+	got := page.Header().Get("Content-Security-Policy")
+	wantCSP := authorizationFormCSP(authorizeValues().Get("redirect_uri")) + "; script-src 'nonce-" + nonce + "'; connect-src 'self'"
+	if got != wantCSP {
+		t.Fatalf("authorization form policy=%q want=%q", got, wantCSP)
 	}
 	if page.Code != http.StatusOK || page.Header().Get("Cache-Control") != "no-store" || !strings.Contains(page.Body.String(), `name="interaction"`) {
 		t.Fatalf("authorize status=%d headers=%#v body=%s", page.Code, page.Header(), page.Body.String())
