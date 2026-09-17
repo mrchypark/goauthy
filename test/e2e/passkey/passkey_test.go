@@ -325,13 +325,33 @@ func assertBrowserPasskeyButtonLogin(t *testing.T, browserCtx context.Context, b
 		}
 	})
 
-	if err := chromedp.Run(browserCtx,
-		chromedp.Navigate(authorizeURL),
-		chromedp.WaitVisible(`input[name="username"]`),
-		chromedp.SetValue(`input[name="username"]`, username),
-		chromedp.Click(`#passkey-btn`),
-	); err != nil {
-		t.Fatal(err)
+	ctx, cancel := context.WithTimeout(browserCtx, 15*time.Second)
+	defer cancel()
+	if err := chromedp.Run(ctx, chromedp.Navigate(authorizeURL)); err != nil {
+		t.Fatalf("passkey button login: navigate: %v", err)
+	}
+
+	select {
+	case result := <-redirect:
+		code := result.location.Query().Get("code")
+		errParam := result.location.Query().Get("error")
+		if errParam != "" {
+			t.Fatalf("passkey button login: authorize immediate error redirect: error=%q code=%q", errParam, code)
+		}
+		if code != "" {
+			t.Fatalf("passkey button login: authorize returned code without interaction (pre-existing session?)")
+		}
+	default:
+	}
+
+	if err := chromedp.Run(ctx, chromedp.WaitVisible(`input[name="username"]`, chromedp.ByQuery)); err != nil {
+		t.Fatalf("passkey button login form: %v", err)
+	}
+	if err := chromedp.Run(ctx, chromedp.SetValue(`input[name="username"]`, username, chromedp.ByQuery)); err != nil {
+		t.Fatalf("passkey button login form: %v", err)
+	}
+	if err := chromedp.Run(ctx, chromedp.Click(`#passkey-btn`, chromedp.ByQuery)); err != nil {
+		t.Fatalf("passkey button login form: %v", err)
 	}
 
 	select {
