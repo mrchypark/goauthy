@@ -53,7 +53,7 @@ func TestPasskeyVirtualAuthenticatorAcrossPods(t *testing.T) {
 	password := requiredEnv(t, "GOAUTHY_E2E_BROWSER_PASSWORD")
 	subject := requiredEnv(t, "GOAUTHY_E2E_BROWSER_SUBJECT")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 	auth := newVirtualAuthenticator(t, ctx)
 	defer auth.close()
@@ -136,6 +136,13 @@ func TestPasskeyVirtualAuthenticatorAcrossPods(t *testing.T) {
 	if status := passwordLoginStatus(t, browserClient(t), tertiary, username, password, "passkey-password-disabled"); status != http.StatusUnauthorized {
 		t.Fatalf("fresh password login after conversion status=%d, want 401", status)
 	}
+
+	// Browser-button E2E: after conversion the production inline JS must
+	// complete a real passkey login via #passkey-btn.  Clear Chrome cookies
+	// first so the redirect proves a fresh credential ceremony, not a
+	// pre-existing session.
+	beforeCounter := credentials[0].SignCount
+	assertBrowserPasskeyButtonLogin(t, browserCtx, primary, username, "btn-e2e-state", beforeCounter, auth)
 
 	// Rauthy's reverse conversion is authorized by a distinct, UV WebAuthn
 	// PasswordNew proof. Keep the browser session across all three pods: the
@@ -264,6 +271,92 @@ func assertForcedMFABootstrapClient(t *testing.T, browserCtx context.Context, au
 	freshPassword := browserClient(t)
 	interaction = beginDynamicAuthorization(t, freshPassword, primary, clientID, redirectURI, "forced-mfa-fresh-password", "")
 	_ = passwordForcedMFA(t, freshPassword, secondary, interaction, username, password)
+}
+
+// assertBrowserPasskeyButtonLogin exercises the production login page's
+// #passkey-btn through real inline JavaScript.  It clears Chrome cookies,
+// navigates to an OIDC authorize URL, fills the username field, and clicks
+// the passkey button.  The production JS performs fetch(webauthn_start),
+// navigator.credentials.get (served by the virtual authenticator), and a
+// native form POST to webauthn_finish which redirects to the registered
+// callback.  A network.EventRequestWillBeSent listener captures that
+// redirect and asserts non-empty code, exact state, and no error.
+func assertBrowserPasskeyButtonLogin(t *testing.T, browserCtx context.Context, base, username, state string, wantAfterCounter int64, auth *virtualAuthenticator) {
+	t.Helper()
+	// Clear all Chrome cookies so the login is a fresh credential ceremony.
+	if err := chromedp.Run(browserCtx, network.ClearBrowserCookies()); err != nil {
+		t.Fatal(err)
+	}
+	// Verify no cookies remain for the origin.
+	if err := chromedp.Run(browserCtx, chromedp.ActionFunc(func(c context.Context) error {
+		cookies, err := network.GetCookies().WithURLs([]string{base + "/"}).Do(c)
+		if err != nil {
+			return err
+		}
+		if len(cookies) != 0 {
+			return fmt.Errorf("cookies remain after clear: %d", len(cookies))
+		}
+		return nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	authorizeURL := base + "/oidc/authorize?response_type=code&client_id=goauthy-dev&redirect_uri=" + url.QueryEscape(defaultRedirect) + "&scope=openid+goauthy.read&state=" + url.QueryEscape(state) + "&nonce=" + url.QueryEscape(state) + "&code_challenge=" + strings.Repeat("c", 43) + "&code_challenge_method=S256"
+
+	type redirectResult struct {
+		location *url.URL
+	}
+	redirect := make(chan redirectResult, 1)
+	chromedp.ListenTarget(browserCtx, func(ev interface{}) {
+		req, ok := ev.(*network.EventRequestWillBeSent)
+		if !ok {
+			return
+		}
+		if req.Request.Method != "GET" {
+			return
+		}
+		loc, err := url.Parse(req.Request.URL)
+		if err != nil || loc.Host != "localhost:5555" || loc.Path != "/callback" {
+			return
+		}
+		select {
+		case redirect <- redirectResult{location: loc}:
+		default:
+		}
+	})
+
+	if err := chromedp.Run(browserCtx,
+		chromedp.Navigate(authorizeURL),
+		chromedp.WaitVisible(`input[name="username"]`),
+		chromedp.SetValue(`input[name="username"]`, username),
+		chromedp.Click(`#passkey-btn`),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case result := <-redirect:
+		code := result.location.Query().Get("code")
+		gotState := result.location.Query().Get("state")
+		errParam := result.location.Query().Get("error")
+		if code == "" {
+			t.Fatalf("passkey button login: empty code in callback %s", result.location)
+		}
+		if gotState != state {
+			t.Fatalf("passkey button login: state=%q want=%q", gotState, state)
+		}
+		if errParam != "" {
+			t.Fatalf("passkey button login: error=%q in callback", errParam)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("passkey button login: timed out waiting for callback redirect")
+	}
+
+	// The virtual authenticator counter must have advanced.
+	after := auth.credentials(t)
+	if len(after) != 1 || after[0].SignCount <= wantAfterCounter {
+		t.Fatalf("passkey button login: counter did not advance: before=%d after=%+v", wantAfterCounter, after)
+	}
 }
 
 func dynamicAuthorizationURL(base, clientID, redirectURI, state, prompt string) string {
