@@ -469,12 +469,35 @@ func (s *Store) LoadAuthorizationInteractionReadOnlyByDigest(ctx context.Context
 	return s.loadAuthorizationInteractionReadOnly(ctx, sessionDigest, interactionDigest, true)
 }
 
+// LoadAuthorizationInteractionReadOnlyForSession returns an unconsumed
+// authorization request bound to a live AUTHENTICATED session without extending
+// its idle lifetime. It rejects init sessions, expired/revoked sessions,
+// wrong-session bindings, and consumed interactions.
+func (s *Store) LoadAuthorizationInteractionReadOnlyForSession(ctx context.Context, sessionToken, token string) (AuthorizationInteraction, error) {
+	sessionDigest, err := tokenDigest(sessionToken)
+	if err != nil {
+		return AuthorizationInteraction{}, ErrNotFound
+	}
+	digest, err := tokenDigest(token)
+	if err != nil {
+		return AuthorizationInteraction{}, ErrNotFound
+	}
+	return s.loadAuthorizationInteractionReadOnlyAuth(ctx, sessionDigest, digest, false, true)
+}
+
 func (s *Store) loadAuthorizationInteractionReadOnly(ctx context.Context, sessionDigest, digest string, requireInitSession bool) (AuthorizationInteraction, error) {
+	return s.loadAuthorizationInteractionReadOnlyAuth(ctx, sessionDigest, digest, requireInitSession, false)
+}
+
+func (s *Store) loadAuthorizationInteractionReadOnlyAuth(ctx context.Context, sessionDigest, digest string, requireInitSession bool, requireAuthenticated bool) (AuthorizationInteraction, error) {
 	session, _, err := s.loadSession(ctx, sessionDigest, s.timeNow())
 	if err != nil {
 		return AuthorizationInteraction{}, err
 	}
 	if requireInitSession && (session.Subject != "" || session.AuthenticationMethod != "") {
+		return AuthorizationInteraction{}, ErrNotFound
+	}
+	if requireAuthenticated && !session.Authenticated() {
 		return AuthorizationInteraction{}, ErrNotFound
 	}
 	now := s.timeNow().UnixMilli()
