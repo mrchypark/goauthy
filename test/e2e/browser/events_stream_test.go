@@ -40,7 +40,7 @@ func TestCreationEventsStream(t *testing.T) {
 	ids := map[eventlog.Type]string{}
 	for _, base := range nodes {
 		events := collectStreamEvents(t, client, base, "latest=1000&level=info", func(events []eventlog.Event) bool {
-			return hasEvent(events, "admin-created@goauthy.e2e", eventlog.NewUserRegistered) && hasEvent(events, "admin-created@goauthy.e2e", eventlog.NewRauthyAdmin) && hasEvent(events, "open@goauthy.e2e", eventlog.NewUserRegistered)
+			return hasEvent(events, "admin-created@goauthy.e2e", eventlog.NewUserRegistered) && hasEvent(events, "admin-created@goauthy.e2e", eventlog.NewRauthyAdmin) && hasEvent(events, "open@goauthy.e2e", eventlog.NewUserRegistered) && hasEvent(events, "Reset via Password Reset Form: open@goauthy.e2e", eventlog.UserPasswordReset)
 		})
 		for _, typ := range []eventlog.Type{eventlog.NewUserRegistered, eventlog.NewRauthyAdmin} {
 			matches := matchingEvents(events, "admin-created@goauthy.e2e", typ)
@@ -56,23 +56,26 @@ func TestCreationEventsStream(t *testing.T) {
 		if len(ordinary) != 1 || ordinary[0].Level != eventlog.Info || ordinary[0].Timestamp <= 0 || ordinary[0].Data != nil {
 			t.Fatalf("history stream ordinary events node=%s: %+v", base, ordinary)
 		}
+		resetMatches := matchingEvents(events, "Reset via Password Reset Form: open@goauthy.e2e", eventlog.UserPasswordReset)
+		if len(resetMatches) != 1 || resetMatches[0].Level != eventlog.Notice || resetMatches[0].Data != nil || resetMatches[0].IP == nil || resetMatches[0].Timestamp <= 0 {
+			t.Fatalf("history stream password reset node=%s: %+v", base, resetMatches)
+		}
+		if prior := ids[eventlog.UserPasswordReset]; prior != "" && prior != resetMatches[0].ID {
+			t.Fatalf("history stream reset ID differs node=%s", base)
+		}
+		ids[eventlog.UserPasswordReset] = resetMatches[0].ID
 	}
 
-	// OpenRegistrationAcrossPods completes the first-password form last. That
-	// now emits a notice too; latest=1 is the newest notice, not newest admin.
-	var latestNoticeID string
+	// latest=1&level=notice returns the single newest event with rank >= Notice.
+	// Background events (e.g. LoginNewLocation at Warning rank) may outrank the
+	// password-reset notice, so only assert structural invariants here.
 	for _, base := range nodes {
 		events := collectStreamEvents(t, client, base, "latest=1&level=notice", func(events []eventlog.Event) bool {
 			return len(events) > 0
 		})
-		matches := matchingEvents(events, "Reset via Password Reset Form: open@goauthy.e2e", eventlog.UserPasswordReset)
-		if len(events) != 1 || len(matches) != 1 || events[0].Level != eventlog.Notice || events[0].Data != nil || events[0].IP == nil || events[0].Timestamp <= 0 {
-			t.Fatalf("notice stream node=%s events=%+v", base, matches)
+		if len(events) != 1 || events[0].ID == "" || events[0].Timestamp <= 0 || events[0].Level.Rank() < eventlog.Notice.Rank() {
+			t.Fatalf("notice stream node=%s events=%+v", base, events)
 		}
-		if latestNoticeID != "" && latestNoticeID != matches[0].ID {
-			t.Fatalf("latest notice ID differs node=%s", base)
-		}
-		latestNoticeID = matches[0].ID
 	}
 
 	// latest=0 starts after the historical high-water mark. Create a fresh
