@@ -10,6 +10,11 @@ import (
 
 func userValuesPolicyFromEnv(getenv func(string) string) (identity.UserValuesPolicy, error) {
 	policy := identity.UserValuesPolicy{}
+	rawRevalidate := getenv("GOAUTHY_USER_VALUES_REVALIDATE_DURING_LOGIN")
+	if rawRevalidate != "" && rawRevalidate != "true" && rawRevalidate != "false" {
+		return identity.UserValuesPolicy{}, fmt.Errorf("GOAUTHY_USER_VALUES_REVALIDATE_DURING_LOGIN must be true or false")
+	}
+	policy.RevalidateDuringLogin = rawRevalidate == "true"
 	for _, field := range []struct {
 		name  string
 		value *string

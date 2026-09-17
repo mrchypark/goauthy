@@ -135,6 +135,7 @@ type Handler struct {
 	upstreamProviders func(ctx context.Context) ([]UpstreamProvider, error)
 	lockdown          *loginpolicy.LockdownStore
 	captchaSiteKey    string
+	userValuesPolicy  *identity.UserValuesPolicy
 }
 
 // SetMetrics attaches a metrics registry for authentication counters.
@@ -305,6 +306,21 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if session, sessionToken, ok := h.session(r); ok && session.Authenticated() && !reauthenticate(request, session, h.now()) {
 		if _, err := h.identity.UserBySubject(r.Context(), session.Subject); err == nil && (!request.ForceMFA || session.AuthenticationMethod == "mfa") {
+			needs, checkErr := h.needsProfileUpdate(r, session.Subject, request.ClientID)
+			if checkErr != nil {
+				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+				return
+			}
+			if prompted(request.Prompt, "none") {
+				if needs {
+					h.oauth.CompleteAuthorizationWithSession(w, r, session.Subject, request.RequestedScopes, session.CreatedAt, session.ID, session.AuthenticationMethod)
+					return
+				}
+			}
+			if needs {
+				h.createProfileInteraction(w, r, sessionToken, request.RequestID, session, r.URL.RequestURI())
+				return
+			}
 			// Legacy sessions have no peer binding. They remain usable for the
 			// normal browser flow, but must not cross the FedCM credential
 			// boundary because FedCM resolution requires a bound peer.
@@ -1029,6 +1045,15 @@ func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.
 	}
 	if h.metrics != nil {
 		h.metrics.AuthSuccess()
+	}
+	needs, checkErr := h.needsProfileUpdate(r, subject, request.ClientID)
+	if checkErr != nil {
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		return
+	}
+	if needs {
+		h.createProfileInteraction(w, r, newSession.Token, request.RequestID, newSession.Session, original.URL.RequestURI())
+		return
 	}
 	h.oauth.CompleteAuthorizationWithSession(w, original, subject, request.RequestedScopes, newSession.CreatedAt, newSession.ID, newSession.AuthenticationMethod)
 }

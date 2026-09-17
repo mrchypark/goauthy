@@ -50,8 +50,7 @@ func (p UserValuesPolicy) ConfigResponse() UserValuesConfigResponse {
 		Birthdate: userValueModeOrDefault(p.Birthdate, false), Street: userValueModeOrDefault(p.Street, false),
 		ZIP: userValueModeOrDefault(p.ZIP, false), City: userValueModeOrDefault(p.City, false),
 		Country: userValueModeOrDefault(p.Country, false), Phone: userValueModeOrDefault(p.Phone, false),
-		// Login revalidation is not yet implemented; expose its pinned default.
-		RevalidateDuringLogin: false,
+		RevalidateDuringLogin: p.RevalidateDuringLogin,
 		Timezone:              userValueModeOrDefault(p.Timezone, false), PreferredUsername: PreferredUsernameConfigResponse{
 			Mode: mode, Immutable: immutable, Blacklist: blacklist, PatternHTML: patternHTML,
 			PatternHint: hint, EmailFallback: preferred.EmailFallback(),

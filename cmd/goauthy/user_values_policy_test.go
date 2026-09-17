@@ -116,6 +116,45 @@ func TestPreferredUsernameImmutableFromEnv(t *testing.T) {
 	}
 }
 
+func TestRevalidateDuringLoginFromEnv(t *testing.T) {
+	for _, tc := range []struct {
+		name, value   string
+		want, invalid bool
+	}{
+		{"default", "", false, false},
+		{"true", "true", true, false},
+		{"false", "false", false, false},
+		{"1", "1", false, true},
+		{"T", "T", false, true},
+		{"TRUE", "TRUE", false, true},
+		{"False", "False", false, true},
+		{"whitespace", " true ", false, true},
+		{"true with spaces", "true ", false, true},
+		{"invalid", "yes", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			policy, err := userValuesPolicyFromEnv(func(key string) string {
+				if key == "GOAUTHY_USER_VALUES_REVALIDATE_DURING_LOGIN" {
+					return tc.value
+				}
+				return ""
+			})
+			if tc.invalid {
+				if err == nil || !strings.Contains(err.Error(), "GOAUTHY_USER_VALUES_REVALIDATE_DURING_LOGIN") {
+					t.Fatalf("expected env-specific error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if policy.RevalidateDuringLogin != tc.want {
+				t.Fatalf("RevalidateDuringLogin=%v want=%v", policy.RevalidateDuringLogin, tc.want)
+			}
+		})
+	}
+}
+
 func TestPreferredUsernamePresentationFromEnv(t *testing.T) {
 	settings := map[string]string{
 		"GOAUTHY_USER_VALUES_PREFERRED_USERNAME":              "required",

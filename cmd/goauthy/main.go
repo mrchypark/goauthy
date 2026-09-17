@@ -980,6 +980,12 @@ func run() (err error) {
 		return err
 	}
 	loginHandler.SetLockdownStore(lockdownStore)
+	if err := loginHandler.SetUserValuesPolicy(userValuesPolicy); err != nil {
+		return fmt.Errorf("configure login user values policy: %w", err)
+	}
+	if err := oauthServer.SetUserValuesPolicy(userValuesPolicy, identityStore.NeedsProfileUpdate); err != nil {
+		return fmt.Errorf("configure oauth user values policy: %w", err)
+	}
 	if loginLocationSender == nil && os.Getenv("GOAUTHY_SMTP_HOST") != "" {
 		loginLocationSender, err = smtpSenderFromEnv(os.Getenv)
 		if err != nil {
@@ -1184,6 +1190,8 @@ func run() (err error) {
 	} else {
 		handler.HandleFunc("POST /auth/login", loginHandler.Login)
 	}
+	handler.HandleFunc("GET /auth/profile", loginHandler.Profile)
+	handler.HandleFunc("POST /auth/profile", loginHandler.Profile)
 	if fedcmRuntime != nil {
 		handler.Handle(fedcm.ManifestPath, fedcmRuntime.handler)
 		handler.Handle(fedcm.ConfigPath, fedcmRuntime.handler)
