@@ -203,6 +203,22 @@ stop_goauthy() {
 	pid=
 }
 start_goauthy
+if [ "${GOAUTHY_E2E_PROFILE_REVALIDATION:-}" = 1 ]; then
+	export GOAUTHY_E2E_URL="$base_url"
+	export GOAUTHY_E2E_SECONDARY_URL="$base_url"
+	export GOAUTHY_E2E_TERTIARY_URL="$base_url"
+	export GOAUTHY_E2E_BROWSER_USERNAME=admin
+	export GOAUTHY_E2E_BROWSER_PASSWORD=correct-horse-browser-staple
+	export GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple
+	go test -mod=readonly -count=1 -timeout=3m -v ./test/e2e/browser -run '^TestProfileRevalidationPrepareLive$'
+	stop_goauthy
+	export GOAUTHY_USER_VALUES_REVALIDATE_DURING_LOGIN=true
+	export GOAUTHY_USER_VALUES_CITY=required
+	start_goauthy
+	go test -mod=readonly -count=1 -timeout=3m -v ./test/e2e/browser -run '^TestProfileRevalidationCompleteLive$'
+	echo 'standalone profile revalidation E2E passed'
+	exit 0
+fi
 if [ "${GOAUTHY_E2E_TERNAL_DEVICE:-0}" = 1 ] || [ "${GOAUTHY_E2E_AUTHCODE_NATIVE_UI:-0}" = 1 ] || [ "${GOAUTHY_E2E_DEVICE_DPOP:-0}" = 1 ]; then
 	consumer_test='^TestTernalDeviceCLILive$'
 	if [ "${GOAUTHY_E2E_AUTHCODE_NATIVE_UI:-0}" = 1 ]; then

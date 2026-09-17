@@ -379,22 +379,26 @@ func TestWorkerMaxAttempts(t *testing.T) {
 func TestWorkerBoundsKeyLoadToLease(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0).UTC()
 	w, db := newTestWorker(t)
-	w.LeaseDuration = 200 * time.Millisecond
+	w.LeaseDuration = time.Minute
 	w.RequestTimeout = 100 * time.Millisecond
-	loaderDone := make(chan struct{})
-	w.LoadSigningKey = func(ctx context.Context) (oidc.SigningKey, error) {
-		<-ctx.Done()
-		close(loaderDone)
-		return oidc.SigningKey{}, ctx.Err()
-	}
 	insertDelivery(t, db, "event-lease-bound", "client-1", "sid", "https://8.8.8.8/logout", false, false, now)
+	stepStart := time.Now()
+	var loaderCalled bool
+	w.LoadSigningKey = func(ctx context.Context) (oidc.SigningKey, error) {
+		loaderCalled = true
+		dl, ok := ctx.Deadline()
+		if !ok {
+			t.Error("loader context has no deadline")
+		} else if dl.After(stepStart.Add(w.LeaseDuration + 100*time.Millisecond)) {
+			t.Errorf("loader deadline %v exceeds lease bound %v", dl, stepStart.Add(w.LeaseDuration))
+		}
+		return oidc.SigningKey{}, context.DeadlineExceeded
+	}
 	if err := w.Step(context.Background(), now); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-loaderDone:
-	default:
-		t.Fatal("key loading outlived lease")
+	if !loaderCalled {
+		t.Fatal("LoadSigningKey was not called; lease guard skipped the loader")
 	}
 	attempts, done, failed, _ := deliveryState(t, db, "event-lease-bound", "client-1")
 	if attempts != 1 || done || failed {
