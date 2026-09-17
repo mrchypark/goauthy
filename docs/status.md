@@ -1,4 +1,34 @@
-## 2026-09-17 Qualification ledger / federated creation correction / schema v102
+## 2026-09-18 Actual Ternal operational qualification / runtime image / open-registration E2E
+
+### Runtime image
+
+`ghcr.io/mrchypark/ternal@sha256:c1a59b226d1b4933d085b37e33776deac5535dfad8a1eaa861e579237759db32` — runtime `402096573a1799c728df3611fcf29cf1f3bc6a7e`, linux/amd64, UID 65532. Grype 0.118.0 DB 2026-09-17T06:31:43Z, zero matches/ignored exit 0.
+
+### Actual Ternal operational qualification
+
+Ternal consumer (commit `52df50507fadfd460e2ad39eac1f5a3e8b130a13`) OIDC + same-cookie auth/session and hosts PASS. GCS standalone run `2183abd5-4c6b-4e43-ab42-ad035264aadb` and HA-3 run `b0f87aa5-b77e-4e82-8eff-700584419d66`: same pre-fault token / full JWKS / all 3 physical hosts / survivor / replacement emptyDir loss. All owned K8s resources + secrets + GCS exact prefixes verified absent. HA startup required four restarts before readiness. No physical node fault / CNI enforcement; shared IED policy disabled, must isolate approved env.
+
+### New test coverage (2026-09-18)
+
+- New passkey actual Chrome button PASS 1.95s
+- Profile 2-phase HTTP PASS: prepare 1.49s / complete 0.77s
+- Profile dedicated race 151.353s
+- OpenAPI d6293df6 regression PASS
+- Lease e5b7850f focused race count3 PASS 44.440s
+- CSP/theme 9e568fbf focused race single run 36.280s
+- Full 5090 normal FAILED exactly cmd OpenAPI + 2 login assertions then fixed focused; old race pending
+- CI 9e568fbf run 35242030951 Vet PASS, Unit Race pending
+- Combined real standalone open-registration / password-reset entire E2E now PASSED (`/tmp/goauthy-openreg-stream-corrected-live-0918.log`, mail notification and latest notice tests corrected)
+
+### Open items
+
+- Current PR-head Unit, Race, and Vet/session-policy checks are required before merge readiness; consult the PR checks for their latest status
+
+- Broader parity paused; resident credentials / hash-chain requirement not established
+
+---
+
+## 2026-09-17 Qualification ledger / federated creation correction / schema v102 (historical, superseded above)
 
 ### Current qualification ledger (verified 2026-09-17)
 

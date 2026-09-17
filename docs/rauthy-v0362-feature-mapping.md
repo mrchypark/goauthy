@@ -3,20 +3,20 @@
 **생성일:** 2026-09-12  
 **기준:** Rauthy v0.36.2 (commit `dd61ac3c84d6b238108dc8438b53043b5177a662`)
 
-**현재 자격 (2026-09-17):** 6개 감사 게이트 전체 PASS — P0 보안 autolink guards + creator race, P0 compile+normal/vet, P1 upstream MFA, P1 admin mapping+profile, P1 실제 새 E2E+스키마, P2 전체 프로덕션 race (61패키지) + Kind V4 E2E + MinIO S3 복구. 스키마 v102. 광범위한 Rauthy 패리티 목표는 일시 중지; event-hash 런타임 미구현. 상세 [status.md](status.md) 참조.
+**현재 자격 (2026-09-18):** Runtime image `ghcr.io/mrchypark/ternal@sha256:c1a59b226d1b4933d085b37e33776deac5535dfad8a1eaa861e579237759db32` (runtime `402096573a1799c728df3611fcf29cf1f3bc6a7e`, linux/amd64, UID 65532). Grype 0.118.0 zero matches exit 0. Ternal consumer OIDC + same-cookie auth/session and hosts PASS (GCS standalone + HA-3). New passkey Chrome button PASS 1.95s; profile 2-phase HTTP PASS; profile dedicated race 151.353s; OpenAPI regression PASS; lease focused race PASS; CSP/theme focused race PASS; combined open-registration/password-reset E2E PASS. Current PR-head Unit, Race, and Vet/session-policy checks are required before merge readiness; consult the PR checks for their latest status. Broad parity paused. 상세 [status.md](status.md) 참조.
 
-**검증된 사실 (2026-09-17):**
+**검증된 사실 (2026-09-18):**
 
-- Baseline f63a: 6 local audit gates PASS
-- CI head51b normal/vet PASS; race CANCELLED when superseded
-- Candidate f1443a3d pushed; CI run 35222763242 in progress
-- Frozen f1443a3d branding 83.586s and storage 164.346s tests PASS
-- Immutable image `ghcr.io/mrchypark/ternal@sha256:b618c4afd388ca3f175d7783835d3ce0fb964541c192141dcf5faa0433ecf29e` published; Grype 0.118.0 0 matches/0 ignored exit 0; live operational qualification pending
-- CNI deny test FAILED on IED/GKE `gke_ied-cluster`: HTTP remained reachable after removing the allow policy because NetworkPolicy enforcement is disabled. The corrected preflight blocks before creating resources; the test namespace is absent.
-- Discoverable credentials pinned at `ResidentKeyDiscouraged` — not an established required gap
-- Global hash-chain runtime absent; upstream requirement not established
-- Fresh-browser passkey-only login: confirmed open
-- Profile login revalidation: confirmed open
+- Runtime image sha256:c1a59b226d1b… published; Grype zero matches exit 0
+- Ternal consumer 52df5050 OIDC + same-cookie auth/session and hosts PASS
+- GCS standalone run 2183abd5 + HA-3 run b0f87aa5: same pre-fault token / full JWKS / all 3 physical hosts / survivor / replacement emptyDir loss; all owned K8s resources + secrets + GCS exact prefixes verified absent
+- HA startup required four restarts before readiness; physical node failure and enforced CNI isolation remain unqualified.
+- New passkey actual Chrome button PASS 1.95s; profile 2-phase HTTP PASS prepare 1.49 / complete 0.77; profile dedicated race 151.353s
+- OpenAPI d6293df6 regression PASS; lease e5b7850f focused race count3 PASS 44.440s; CSP/theme 9e568fbf focused race single run 36.280s
+- Full 5090 normal FAILED exactly cmd OpenAPI + 2 login assertions then fixed focused; old race pending
+- CI 9e568fbf run 35242030951 Vet PASS; Unit Race pending
+- Combined real standalone open-registration / password-reset entire E2E PASSED (/tmp/goauthy-openreg-stream-corrected-live-0918.log)
+- Broader parity paused; resident credentials / hash-chain requirement not established
 
 > **Historical snapshot (2026-09-12, unverified 2026-09-17):** The rows and counts in all feature tables below reflect the original baseline audit. Do not treat them as current completion metrics. Verified gate results are in [status.md](status.md).
 
