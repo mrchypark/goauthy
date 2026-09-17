@@ -33,6 +33,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+const nonceLen = 16
+
 const (
 	authorizePath       = "/oidc/authorize"
 	interactionLifetime = 5 * time.Minute
@@ -43,7 +45,50 @@ const (
 	failureWriteGrace   = 5 * time.Second
 )
 
-var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p>{{.ContinueTo}} {{.ClientID}}</p><form method="post" action="../auth/login"><input type="hidden" name="interaction" value="{{.Interaction}}"><label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label>{{if .CaptchaSiteKey}}<div class="captcha-container" data-sitekey="{{.CaptchaSiteKey}}"></div><input type="hidden" name="captcha_response" id="captcha_response">{{end}}<button type="submit">{{.SignIn}}</button></form>{{if .Providers}}<div style="margin:1.5em 0;text-align:center;border-top:1px solid #ccc;padding-top:1em"><span style="background:#fff;padding:0 0.5em;color:#666;font-size:0.9em">or</span></div>{{range .Providers}}<a href="/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" style="display:block;margin:0.5em 0;padding:0.75em;border:1px solid #ccc;border-radius:4px;text-align:center;text-decoration:none;color:#333">{{.Name}}</a>{{end}}{{end}}</main></body></html>`))
+var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p>{{.ContinueTo}} {{.ClientID}}</p><form method="post" action="../auth/login"><input type="hidden" name="interaction" value="{{.Interaction}}"><label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label>{{if .CaptchaSiteKey}}<div class="captcha-container" data-sitekey="{{.CaptchaSiteKey}}"></div><input type="hidden" name="captcha_response" id="captcha_response">{{end}}<button type="submit">{{.SignIn}}</button>{{if .PasskeyLogin}}<button type="button" id="passkey-btn">{{.PasskeyButton}}</button><div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div style="margin:1.5em 0;text-align:center;border-top:1px solid #ccc;padding-top:1em"><span style="background:#fff;padding:0 0.5em;color:#666;font-size:0.9em">or</span></div>{{range .Providers}}<a href="/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" style="display:block;margin:0.5em 0;padding:0.75em;border:1px solid #ccc;border-radius:4px;text-align:center;text-decoration:none;color:#333">{{.Name}}</a>{{end}}{{end}}</main>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
+(function(){
+  var btn=document.getElementById('passkey-btn');
+  var err=document.getElementById('passkey-error');
+  if(!btn||!err)return;
+  btn.addEventListener('click',async function(){
+    var usernameField=document.querySelector('input[name="username"]');
+    if(!usernameField||!usernameField.reportValidity())return;
+    btn.disabled=true;
+    err.textContent='';
+    try{
+      var startResp=await fetch('../auth/v1/users/webauthn_start',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({purpose:{Login:document.querySelector('input[name="interaction"]').value},username:usernameField.value})});
+      if(!startResp.ok){err.textContent='Passkey login failed';btn.disabled=false;return;}
+      var startJSON=await startResp.json();
+      function toBase64URL(buf){return btoa(String.fromCharCode.apply(null,new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+      function padB64(s){return s+Array((4-s.length%4)%4+1).join('=');}
+      function b64urlToBytes(s){return Uint8Array.from(atob(padB64(s.replace(/-/g,'+').replace(/_/g,'/'))),function(c){return c.charCodeAt(0);});}
+      var rcr=startJSON.rcr;
+      var pk=rcr.publicKey;
+      pk.challenge=b64urlToBytes(pk.challenge);
+      if(pk.allowCredentials){pk.allowCredentials.forEach(function(c){c.id=b64urlToBytes(c.id);});}
+      var assertion=await navigator.credentials.get({publicKey:pk});
+      var uh=assertion.response.userHandle;
+      var response={clientDataJSON:toBase64URL(assertion.response.clientDataJSON),authenticatorData:toBase64URL(assertion.response.authenticatorData),signature:toBase64URL(assertion.response.signature),userHandle:uh?toBase64URL(uh):null};
+      var data=JSON.stringify({id:assertion.id,rawId:toBase64URL(assertion.rawId),type:assertion.type,response:response,clientExtensionResults:assertion.getClientExtensionResults()});
+      var form=document.createElement('form');
+      form.method='POST';
+      form.action='../auth/v1/users/webauthn_finish';
+      var codeInput=document.createElement('input');
+      codeInput.type='hidden';
+      codeInput.name='code';
+      codeInput.value=startJSON.code;
+      form.appendChild(codeInput);
+      var dataInput=document.createElement('input');
+      dataInput.type='hidden';
+      dataInput.name='data';
+      dataInput.value=data;
+      form.appendChild(dataInput);
+      document.body.appendChild(form);
+      form.submit();
+    }catch(e){err.textContent='Passkey login failed';btn.disabled=false;}
+  });
+})();
+</script>{{end}}</body></html>`))
 
 const fedCMLandingPayload = "goauthy-fedcm-login/v1"
 
@@ -333,7 +378,18 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if err := loginPage.Execute(w, loginPageData{ClientID: request.ClientID, Interaction: interaction.Token, ThemeURL: themeURL, CaptchaSiteKey: h.captchaSiteKey, Providers: providers, Messages: messages}); err != nil {
+	pageData := loginPageData{ClientID: request.ClientID, Interaction: interaction.Token, ThemeURL: themeURL, CaptchaSiteKey: h.captchaSiteKey, Providers: providers, Messages: messages}
+	if h.passkeys != nil {
+		nonce, err := generateNonce()
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		pageData.PasskeyLogin = true
+		pageData.PasskeyNonce = nonce
+		w.Header().Set("Content-Security-Policy", authorizationFormCSPWithNonce(request.RedirectURI, nonce))
+	}
+	if err := loginPage.Execute(w, pageData); err != nil {
 		return
 	}
 }
@@ -545,6 +601,14 @@ func newFedCMRequestID() (string, error) {
 		return "", err
 	}
 	return "fedcm:" + base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+func generateNonce() (string, error) {
+	raw := make([]byte, nonceLen)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func (h *Handler) fedCMPost(w http.ResponseWriter, r *http.Request) {
@@ -1333,8 +1397,42 @@ func decodePasskeyStart(w http.ResponseWriter, r *http.Request) (passkeyStartReq
 }
 
 func decodePasskeyFinish(w http.ResponseWriter, r *http.Request) (passkeyFinishRequest, error) {
+	ct := r.Header.Get("Content-Type")
+	if len(r.Header.Values("Content-Type")) == 1 {
+		mediaType, _, err := mime.ParseMediaType(ct)
+		if err == nil && mediaType == "application/x-www-form-urlencoded" {
+			return decodePasskeyFinishForm(w, r)
+		}
+	}
 	var payload passkeyFinishRequest
 	return payload, decodeStrictJSON(w, r, passkeyFinishLimit, &payload)
+}
+
+func decodePasskeyFinishForm(w http.ResponseWriter, r *http.Request) (passkeyFinishRequest, error) {
+	var payload passkeyFinishRequest
+	r.Body = http.MaxBytesReader(w, r.Body, passkeyFinishLimit)
+	if err := r.ParseForm(); err != nil {
+		return payload, err
+	}
+	if len(r.PostForm) != len(r.Form) {
+		return payload, errors.New("query parameters not allowed")
+	}
+	code := r.PostForm.Get("code")
+	data := r.PostForm.Get("data")
+	if code == "" || data == "" {
+		return payload, errors.New("missing required fields")
+	}
+	if len(r.PostForm["code"]) != 1 || len(r.PostForm["data"]) != 1 {
+		return payload, errors.New("duplicate fields")
+	}
+	for key := range r.PostForm {
+		if key != "code" && key != "data" {
+			return payload, errors.New("unknown field")
+		}
+	}
+	payload.Code = code
+	payload.Data = data
+	return payload, nil
 }
 
 func decodeStrictJSON(w http.ResponseWriter, r *http.Request, limit int64, target any) error {

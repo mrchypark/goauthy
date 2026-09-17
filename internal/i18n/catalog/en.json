@@ -5,5 +5,6 @@
   "password": "Password",
   "sign_out": "Sign out",
   "confirm_sign_out": "Confirm that you want to sign out.",
-  "signed_in": "Signed in."
+  "signed_in": "Signed in.",
+  "passkey_button": "Sign in with passkey"
 }

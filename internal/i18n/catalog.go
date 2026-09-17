@@ -34,6 +34,7 @@ type Messages struct {
 	SignOut        string `json:"sign_out"`
 	ConfirmSignOut string `json:"confirm_sign_out"`
 	SignedIn       string `json:"signed_in"`
+	PasskeyButton  string `json:"passkey_button"`
 }
 
 var catalogs = map[string]Messages{
@@ -64,17 +65,17 @@ func mustCatalog(data []byte, language string) Messages {
 		panic("invalid embedded i18n catalog")
 	}
 	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF || len(values) != 7 {
+	if err := decoder.Decode(&trailing); err != io.EOF || len(values) != 8 {
 		panic("invalid embedded i18n catalog")
 	}
-	messages := Messages{SignIn: values["sign_in"], ContinueTo: values["continue_to"], Username: values["username"], Password: values["password"], SignOut: values["sign_out"], ConfirmSignOut: values["confirm_sign_out"], SignedIn: values["signed_in"]}
+	messages := Messages{SignIn: values["sign_in"], ContinueTo: values["continue_to"], Username: values["username"], Password: values["password"], SignOut: values["sign_out"], ConfirmSignOut: values["confirm_sign_out"], SignedIn: values["signed_in"], PasskeyButton: values["passkey_button"]}
 	messages.Language = language
 	return messages
 }
 
 func catalogKey(key string) bool {
 	switch key {
-	case "sign_in", "continue_to", "username", "password", "sign_out", "confirm_sign_out", "signed_in":
+	case "sign_in", "continue_to", "username", "password", "sign_out", "confirm_sign_out", "signed_in", "passkey_button":
 		return true
 	default:
 		return false

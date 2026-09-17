@@ -1,6 +1,7 @@
 package login
 
 import (
+	"fmt"
 	"net/url"
 	"strings"
 
@@ -36,4 +37,15 @@ func authorizationFormCSP(validatedRedirect string) string {
 		}
 	}
 	return "default-src 'none'; style-src 'self'; form-action " + action + "; frame-ancestors 'none'"
+}
+
+// authorizationFormCSPWithNonce returns the same policy as authorizationFormCSP
+// but adds script-src with the given nonce and connect-src self so the login
+// page may include a nonce-governed inline script that calls fetch.
+func authorizationFormCSPWithNonce(validatedRedirect, nonce string) string {
+	base := authorizationFormCSP(validatedRedirect)
+	if nonce == "" {
+		return base
+	}
+	return base + fmt.Sprintf("; script-src 'nonce-%s'; connect-src 'self'", nonce)
 }
