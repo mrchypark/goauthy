@@ -51,6 +51,7 @@ Render and inspect either profile before any apply:
 kustomize build deploy/ternal-no-pvc
 kustomize build deploy/ternal-no-pvc/standalone
 kustomize build deploy/ternal-no-pvc/gcs-standalone
+kustomize build deploy/ternal-no-pvc/gcs-ha
 ```
 
 Before accepting user traffic, verify rendered ConfigMap/Secret names and keys
@@ -73,6 +74,27 @@ JSON key, `GOOGLE_APPLICATION_CREDENTIALS`, or a static cloud credential. The
 bucket's `goauthy/` prefix must remain exclusive to this provider instance.
 Actual metadata-service and GCS egress reachability still require IED runtime
 validation before activation.
+
+## GCS HA profile
+
+`deploy/ternal-no-pvc/gcs-ha` is the three-voter HA profile for native GCS.
+It reuses the base HA overlay (3 replicas, peer port 8444, PDB minAvailable
+2) and replaces S3 object-store config with
+`GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER=gcs`,
+`object-store-bucket`, and `object-store-prefix` from the ConfigMap.
+
+`ternal-goauthy-config` must contain `issuer`, `object-store-bucket`,
+`object-store-prefix`, `bootstrap-client-id`, `bootstrap-redirect-uri`,
+and `bootstrap-username`. `ternal-goauthy-secrets` must contain
+`master-key-ternal-1`, `oauth-hmac`, `bootstrap-client`,
+`bootstrap-user-password-phc`, `rhiza-members`, and `rhiza-admin-token`.
+The S3 keys (`s3-endpoint`, `s3-region`, `s3-access-key`,
+`s3-secret-key`) are not used.
+
+The ServiceAccount needs Workload Identity access to the GCS bucket and
+metadata-service egress. Do not apply this overlay over an existing
+standalone deployment without an explicit migration plan. Rendering passes
+all automated checks; this is not live qualification.
 
 ## S3 recovery regression check
 

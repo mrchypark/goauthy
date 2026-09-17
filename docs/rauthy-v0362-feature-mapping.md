@@ -53,7 +53,7 @@
 | 22 | 패스키 등록 후 세션 MFA 업그레이드 | 🔶 부분 | `internal/passkey` | Kind E2E 미검증 |
 | 23 | 패스키+비밀번호 쿠키 흐름 | 🔶 부분 | `internal/passkey` | CookieKey 제거 대기 |
 | 24 | 무비밀번호 계정 생명주기 | ❌ 미구현 | — | 계정 생성/등록/복구 없음 |
-| 25 | Discoverable Credentials | ❌ 미구현 | — | Rauthy v0.36.2 신기능 |
+| 25 | Discoverable Credentials | — | — | not established as required; upstream pinned at ResidentKeyDiscouraged, `require_resident_key=false` ([source](https://github.com/sebadob/rauthy/blob/dd61ac3c84d6b238108dc8438b53043b5177a662/src/data/src/entity/webauthn.rs#L981)) |
 
 ## 6. 비밀번호/복구 (5개)
 
@@ -168,15 +168,12 @@
    - 관리자 라이프사이클
    - Kind E2E
 
-2. **Discoverable Credentials** (#25)
-   - Rauthy v0.36.2 신기능
-   - 패스키 저장소 관리
 
-3. **크리덴셜 스터핑 감지** (#48)
+2. **크리덴셜 스터핑 감지** (#48)
    - 분산 시도 감지
    - 자동 IP 차단
 
-4. **하우스키핑/업데이트 확인** (#62)
+3. **하우스키핑/업데이트 확인** (#62)
    - 싱글톤 정리 작업
    - 버전 체크
 
