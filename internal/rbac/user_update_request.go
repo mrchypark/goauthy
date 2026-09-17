@@ -7,8 +7,6 @@ import (
 	"math"
 	"mime"
 	"net/http"
-	"regexp"
-	"time"
 	"unicode/utf8"
 
 	"github.com/mrchypark/goauthy/internal/i18n"
@@ -32,16 +30,6 @@ type UserUpdateRequest struct {
 
 // UserValuesRequest contains only the standard profile values accepted by the API.
 type UserValuesRequest = identity.UserValuesRequest
-
-var (
-	userValueDate  = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
-	userValuePhone = regexp.MustCompile(`^\+[0-9]{0,32}$`)
-	// Rust's \s is Unicode White_Space; Go's \s is ASCII only. Include
-	// vertical tab, NEL and Unicode separators to preserve the upstream regex.
-	userValueStreet = regexp.MustCompile(`^[a-zA-Z0-9À-ÿ.\-\s\x{000B}\x{0085}\p{Z}]{0,48}$`)
-	userValueAlnum  = regexp.MustCompile(`^[a-zA-Z0-9]{1,24}$`)
-	userValueCity   = regexp.MustCompile(`^[a-zA-Z0-9À-ÿ\-\s\x{000B}\x{0085}\p{Z}]{0,48}$`)
-)
 
 func decodeUserUpdate(w http.ResponseWriter, r *http.Request) (UserUpdateRequest, error) {
 	var input UserUpdateRequest
@@ -125,21 +113,8 @@ func decodeUserUpdate(w http.ResponseWriter, r *http.Request) (UserUpdateRequest
 }
 
 func validateUserValues(v UserValuesRequest) error {
-	if v.Birthdate != nil && !userValueDate.MatchString(*v.Birthdate) ||
-		v.Phone != nil && !userValuePhone.MatchString(*v.Phone) ||
-		v.Street != nil && !userValueStreet.MatchString(*v.Street) ||
-		v.ZIP != nil && !userValueAlnum.MatchString(*v.ZIP) ||
-		v.City != nil && !userValueCity.MatchString(*v.City) ||
-		v.Country != nil && !userValueCity.MatchString(*v.Country) {
+	if err := identity.ValidateUserValuesSyntax(v); err != nil {
 		return ErrInvalid
-	}
-	if v.Timezone != nil {
-		if *v.Timezone == "" || *v.Timezone == "Local" || len(*v.Timezone) > 48 {
-			return ErrInvalid
-		}
-		if _, err := time.LoadLocation(*v.Timezone); err != nil {
-			return ErrInvalid
-		}
 	}
 	return nil
 }
