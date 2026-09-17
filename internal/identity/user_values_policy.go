@@ -9,6 +9,7 @@ import "errors"
 type UserValuesPolicy struct {
 	GivenName, FamilyName, Birthdate, Street, ZIP, City, Country, Phone, Timezone string
 	PreferredUsername                                                             *PreferredUsernamePolicy
+	RevalidateDuringLogin                                                         bool
 }
 
 var ErrUserValuesPolicy = errors.New("invalid user values policy")

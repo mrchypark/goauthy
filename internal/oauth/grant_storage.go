@@ -41,6 +41,7 @@ type transaction struct {
 	principalSubject                    string
 	principalRevision                   int64
 	accounts                            []accountExpiry
+	profileSnap                         profileSnapshot
 	customCatalogRevision               int64
 	customCatalogSet                    bool
 	clientPolicyPrefix                  string
@@ -179,6 +180,7 @@ func (s *Store) BeginTX(ctx context.Context) (context.Context, error) {
 		exchangeActorRequestCutoffArgument:  -1,
 	}
 	tx.accounts, _ = ctx.Value(accountExpiryContextKey{}).([]accountExpiry)
+	tx.profileSnap, _ = ctx.Value(profileRevalidationContextKey{}).(profileSnapshot)
 	tx.dpopPolicy, _ = ctx.Value(dpopPolicyContextKey{}).(dpopPolicySnapshot)
 	if snapshot, ok := ctx.Value(principalSnapshotContextKey{}).(principalSnapshot); ok {
 		if snapshot.subject != "" && snapshot.revision > 0 {
@@ -493,6 +495,9 @@ func (tx *transaction) principalGuard() (string, []any) {
 		return "", nil
 	}
 	guard, args := tx.accountExpiryGuard()
+	profileGuard, profileArgs := profileGuard(tx.profileSnap)
+	guard += profileGuard
+	args = append(args, profileArgs...)
 	if tx.kind == "password" {
 		guard += ` AND EXISTS (SELECT 1 FROM identity_users u JOIN identity_authentication_modes m ON m.subject=u.subject WHERE u.subject=? AND u.password_generation=? AND m.mode='password' AND m.generation=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?))`
 		args = append(args, tx.principalSubject, tx.passwordGeneration, tx.authenticationGeneration, accountExpiryCutoff{})

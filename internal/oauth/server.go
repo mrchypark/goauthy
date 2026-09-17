@@ -167,6 +167,12 @@ type Server struct {
 	beforeTokenIssue func()
 	// beforeAuthorizationIssue is package-test-only deterministic race injection.
 	beforeAuthorizationIssue func()
+	// userValuesPolicy is the static profile revalidation policy. Default is
+	// zero (off). When RevalidateDuringLogin is true, needsProfileUpdate must
+	// be non-nil. The policy is validated at setter time; it is not activated
+	// through main/env/config response surfaces.
+	userValuesPolicy   identity.UserValuesPolicy
+	needsProfileUpdate func(context.Context, identity.UserValuesPolicy, string, string) (bool, error)
 }
 
 // SetMetrics attaches a metrics registry for token counters.
@@ -1240,6 +1246,26 @@ func (s *Server) completeAuthorization(w http.ResponseWriter, r *http.Request, s
 	if err != nil {
 		s.provider.WriteAuthorizeError(r.Context(), w, authorizeRequest, fosite.ErrAccessDenied)
 		return
+	}
+	// Capture the raw identity_user_profiles snapshot BEFORE ResolveProfile
+	// and NeedsProfileUpdate. The snapshot fences the code commit so a
+	// concurrent profile mutation cannot issue a code on a stale profile.
+	if s.needsProfileUpdate != nil && s.userValuesPolicy.RevalidateDuringLogin && authorizeRequest.GetClient().GetID() != "rauthy" {
+		profileSnap, snapErr := s.store.captureProfileSnapshot(issueContext, subject)
+		if snapErr != nil {
+			s.provider.WriteAuthorizeError(r.Context(), w, authorizeRequest, fosite.ErrServerError)
+			return
+		}
+		issueContext = context.WithValue(issueContext, profileRevalidationContextKey{}, profileSnap)
+		needs, checkErr := s.needsProfileUpdate(issueContext, s.userValuesPolicy, subject, authorizeRequest.GetClient().GetID())
+		if checkErr != nil {
+			s.provider.WriteAuthorizeError(r.Context(), w, authorizeRequest, fosite.ErrServerError)
+			return
+		}
+		if needs {
+			s.provider.WriteAuthorizeError(r.Context(), w, authorizeRequest, errInteractionRequired)
+			return
+		}
 	}
 	if s.beforeAuthorizationIssue != nil {
 		s.beforeAuthorizationIssue()
