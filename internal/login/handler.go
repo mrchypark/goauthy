@@ -524,6 +524,8 @@ type loginPageData struct {
 	ClientID, Interaction, ThemeURL string
 	CaptchaSiteKey                  string
 	Providers                       []UpstreamProvider
+	PasskeyLogin                    bool
+	PasskeyNonce                    string
 	i18n.Messages
 }
 
@@ -1046,6 +1048,12 @@ func (h *Handler) setFedCMSessionCookie(w http.ResponseWriter, token string, exp
 
 // WebAuthnStart begins a passkey assertion bound to the current unauthenticated
 // browser session and its original OAuth authorization interaction.
+//
+// Two entry points share this endpoint:
+//   - Cookie present: normal passwordless passkey login (subject from cookie).
+//   - Cookie absent + Username: passkey-only login (subject from
+//     LookupPasskeyOnlySubject).  Absent cookie without username, or a
+//     tampered/invalid cookie, is rejected—no fallback.
 func (h *Handler) WebAuthnStart(w http.ResponseWriter, r *http.Request) {
 	securityHeaders(w)
 	if r.Method != http.MethodPost {
@@ -1065,37 +1073,115 @@ func (h *Handler) WebAuthnStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	session, _, ok := h.session(r)
+	session, sessionToken, ok := h.session(r)
 	if !ok || session.Authenticated() {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	cookie, err := r.Cookie(h.passkeyCookieName())
-	if err != nil || cookie.Value == "" {
-		http.Error(w, "Invalid login request", http.StatusUnauthorized)
-		return
-	}
-	subject, err := h.passkeys.SubjectFromCookie(cookie.Value)
-	if err != nil {
-		http.Error(w, "Invalid login request", http.StatusUnauthorized)
-		return
-	}
-	user, err := h.identity.UserBySubject(r.Context(), subject)
-	if err != nil {
-		if errors.Is(err, identity.ErrInactiveSubject) {
-			http.Error(w, "Invalid login request", http.StatusUnauthorized)
-			return
-		}
-		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-		return
-	}
+
 	_, allowed := h.allowPasskeyLogin(w, r)
 	if !allowed {
 		return
 	}
-	rcr, code, exp, err := h.passkeys.BeginLogin(r.Context(), subject, user.Username, payload.Purpose.Login, session.ID)
+
+	// Parse/validate the passkey cookie BEFORE interaction validation so that
+	// a present-but-invalid cookie always yields 401 (not a different error
+	// from interaction or OAuth validation). The DB lookup for the cookie
+	// subject is deferred until after interaction validation.
+	var (
+		cookieSubject string
+		fresh         bool
+	)
+	cookie, cookieErr := r.Cookie(h.passkeyCookieName())
+	switch {
+	case cookieErr == nil && cookie.Value != "":
+		// Cookie present: parse cryptographic cookie. If tampered/invalid,
+		// reject 401 immediately—never fall through to username lookup.
+		cookieSubject, err = h.passkeys.SubjectFromCookie(cookie.Value)
+		if err != nil {
+			http.Error(w, "Invalid login request", http.StatusUnauthorized)
+			return
+		}
+
+	case errors.Is(cookieErr, http.ErrNoCookie):
+		// Absent cookie: only permit fresh identity lookup when a username
+		// is provided.
+		if payload.Username == "" {
+			http.Error(w, "Invalid login request", http.StatusUnauthorized)
+			return
+		}
+		fresh = true
+
+	default:
+		// Present but empty or unreadable cookie: always reject.
+		http.Error(w, "Invalid login request", http.StatusUnauthorized)
+		return
+	}
+
+	// Validate the live init session against the original OAuth request
+	// before issuing any WebAuthn challenge.
+	interaction, err := h.browser.LoadAuthorizationInteractionReadOnly(r.Context(), sessionToken, payload.Purpose.Login)
 	if err != nil {
-		if errors.Is(err, passkey.ErrNotFound) || errors.Is(err, passkey.ErrInvalid) {
+		http.Error(w, "Invalid login request", http.StatusForbidden)
+		return
+	}
+	original, err := h.originalAuthorizeRequest(r, interaction.Payload)
+	if err != nil {
+		http.Error(w, "Invalid login request", http.StatusForbidden)
+		return
+	}
+	request, err := h.oauth.ValidateAuthorizationRequest(original)
+	if err != nil {
+		http.Error(w, "Invalid login request", http.StatusForbidden)
+		return
+	}
+
+	// Resolve subject and username. The cookie user DB lookup happens here,
+	// after interaction and OAuth validation, to prevent a username oracle.
+	var (
+		subject  string
+		username string
+	)
+	if fresh {
+		subject, username, err = h.identity.LookupPasskeyOnlySubject(r.Context(), payload.Username)
+		if err != nil {
+			http.Error(w, "Invalid login request", http.StatusUnauthorized)
+			return
+		}
+	} else {
+		subject = cookieSubject
+		user, userErr := h.identity.UserBySubject(r.Context(), subject)
+		if userErr != nil {
+			if errors.Is(userErr, identity.ErrInactiveSubject) {
+				http.Error(w, "Invalid login request", http.StatusUnauthorized)
+				return
+			}
+			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+			return
+		}
+		username = user.Username
+	}
+
+	// Fresh passkey-only accounts always require user verification (UV).
+	// Use BeginMFALogin for fresh OR when the authorization request forces
+	// MFA, avoiding a mode race that relied on BeginLogin auto-upgrade.
+	if fresh || request.ForceMFA {
+		rcr, code, exp, mfaErr := h.passkeys.BeginMFALogin(r.Context(), subject, username, payload.Purpose.Login, session.ID)
+		if mfaErr != nil {
+			if errors.Is(mfaErr, passkey.ErrNotFound) || errors.Is(mfaErr, passkey.ErrInvalid) {
+				http.Error(w, "Invalid login request", http.StatusUnauthorized)
+				return
+			}
+			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(passkeyStartResponse{Code: code, RCR: rcr, Exp: exp.UTC()})
+		return
+	}
+	rcr, code, exp, loginErr := h.passkeys.BeginLogin(r.Context(), subject, username, payload.Purpose.Login, session.ID)
+	if loginErr != nil {
+		if errors.Is(loginErr, passkey.ErrNotFound) || errors.Is(loginErr, passkey.ErrInvalid) {
 			http.Error(w, "Invalid login request", http.StatusUnauthorized)
 			return
 		}
@@ -1161,7 +1247,8 @@ func (h *Handler) WebAuthnFinish(w http.ResponseWriter, r *http.Request) {
 }
 
 type passkeyStartRequest struct {
-	Purpose struct {
+	Username string `json:"username,omitempty"`
+	Purpose  struct {
 		Login string `json:"Login"`
 	} `json:"purpose"`
 }
