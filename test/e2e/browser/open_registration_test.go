@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/http/httptest"
 	stdmail "net/mail"
 	"net/url"
 	"os"
@@ -57,7 +58,7 @@ func TestOpenRegistrationAcrossPods(t *testing.T) {
 	if response.StatusCode != http.StatusBadRequest {
 		t.Fatalf("domain-rejected registration status=%d", response.StatusCode)
 	}
-	if count := smtpMessageCount(t, mailbox, sinkURL); count != 0 {
+	if count := smtpMessageCount(t, mailbox, sinkURL, "outside@example.test"); count != 0 {
 		t.Fatalf("domain-rejected registration sent %d messages", count)
 	}
 
@@ -78,7 +79,7 @@ func TestOpenRegistrationAcrossPods(t *testing.T) {
 	if response.StatusCode != http.StatusBadRequest {
 		t.Fatalf("missing given_name registration status=%d", response.StatusCode)
 	}
-	if count := smtpMessageCount(t, mailbox, sinkURL); count != 0 {
+	if count := smtpMessageCount(t, mailbox, sinkURL, "open@goauthy.e2e"); count != 0 {
 		t.Fatalf("rejected missing given_name sent %d messages", count)
 	}
 	response = post(primary, request("open@goauthy.e2e", proof))
@@ -196,12 +197,15 @@ func TestOpenRegistrationAcrossPods(t *testing.T) {
 	if passwordResetURL.MatchString(registered.plain) || passwordResetURL.MatchString(registered.html) {
 		t.Fatal("registered-already email must not contain an activation bearer URL")
 	}
-	if count := smtpMessageCount(t, mailbox, sinkURL); count != 2 {
-		t.Fatalf("duplicate registration mail count=%d, want 2", count)
+	if count := smtpSubjectCount(t, mailbox, sinkURL, "open@goauthy.e2e", passwordNewTemplateSubject); count != 1 {
+		t.Fatalf("activation mail count=%d, want 1", count)
+	}
+	if count := smtpSubjectCount(t, mailbox, sinkURL, "open@goauthy.e2e", registeredAlreadySubject); count != 1 {
+		t.Fatalf("registered-already mail count=%d, want 1", count)
 	}
 }
 
-func smtpMessageCount(t *testing.T, client *http.Client, sinkURL string) int {
+func smtpMessageCount(t *testing.T, client *http.Client, sinkURL string, recipient ...string) int {
 	t.Helper()
 	response := do(t, client, http.MethodGet, sinkURL+"/messages", nil, nil)
 	defer response.Body.Close()
@@ -212,7 +216,59 @@ func smtpMessageCount(t *testing.T, client *http.Client, sinkURL string) int {
 	if response.StatusCode != http.StatusOK || err != nil {
 		t.Fatalf("SMTP mailbox status=%d decode=%v", response.StatusCode, err)
 	}
-	return len(mailbox.Messages)
+	if len(recipient) == 0 {
+		return len(mailbox.Messages)
+	}
+	want := strings.ToLower(recipient[0])
+	var count int
+	for _, msg := range mailbox.Messages {
+		for _, to := range msg.To {
+			if strings.ToLower(to) == want {
+				count++
+				break
+			}
+		}
+	}
+	return count
+}
+
+func smtpSubjectCount(t *testing.T, client *http.Client, sinkURL, recipient, subject string) int {
+	t.Helper()
+	response := do(t, client, http.MethodGet, sinkURL+"/messages", nil, nil)
+	defer response.Body.Close()
+	var mailbox struct {
+		Messages []smtpSinkMessage `json:"messages"`
+	}
+	err := json.NewDecoder(io.LimitReader(response.Body, 128<<10)).Decode(&mailbox)
+	if response.StatusCode != http.StatusOK || err != nil {
+		t.Fatalf("SMTP mailbox status=%d decode=%v", response.StatusCode, err)
+	}
+	want := strings.ToLower(recipient)
+	var count int
+	for _, msg := range mailbox.Messages {
+		matched := false
+		for _, to := range msg.To {
+			if strings.ToLower(to) == want {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		message, err := stdmail.ReadMessage(strings.NewReader(msg.Data))
+		if err != nil {
+			continue
+		}
+		decoded, err := new(mime.WordDecoder).DecodeHeader(message.Header.Get("Subject"))
+		if err != nil {
+			continue
+		}
+		if decoded == subject {
+			count++
+		}
+	}
+	return count
 }
 
 func waitForRegisteredAlreadyMail(t *testing.T, client *http.Client, sinkURL, recipient string) resetMail {
@@ -265,4 +321,43 @@ func registeredAlreadyMailFromSMTP(raw string) (resetMail, bool) {
 		return resetMail{}, false
 	}
 	return mail, mail.plain != "" && mail.html != ""
+}
+
+func TestSMTPMessageCountFilter(t *testing.T) {
+	payload := `{"messages":[` +
+		`{"to":["a@x.test"],"data":"Subject: test\r\n\r\nbody"},` +
+		`{"to":["b@x.test","a@x.test"],"data":"Subject: security\r\n\r\nbody"},` +
+		`{"to":["c@x.test"],"data":"Subject: test\r\n\r\nbody"}` +
+		`]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, payload)
+	}))
+	defer srv.Close()
+
+	c := &http.Client{Timeout: time.Second}
+	if got := smtpMessageCount(t, c, srv.URL); got != 3 {
+		t.Fatalf("unfiltered count=%d, want 3", got)
+	}
+	if got := smtpMessageCount(t, c, srv.URL, "a@x.test"); got != 2 {
+		t.Fatalf("filtered a@x.test count=%d, want 2", got)
+	}
+	if got := smtpMessageCount(t, c, srv.URL, "b@x.test"); got != 1 {
+		t.Fatalf("filtered b@x.test count=%d, want 1", got)
+	}
+	if got := smtpMessageCount(t, c, srv.URL, "A@X.Test"); got != 2 {
+		t.Fatalf("case-insensitive count=%d, want 2", got)
+	}
+	if got := smtpMessageCount(t, c, srv.URL, "missing@x.test"); got != 0 {
+		t.Fatalf("missing recipient count=%d, want 0", got)
+	}
+	if got := smtpSubjectCount(t, c, srv.URL, "a@x.test", "test"); got != 1 {
+		t.Fatalf("subject-filtered a@x.test/test count=%d, want 1", got)
+	}
+	if got := smtpSubjectCount(t, c, srv.URL, "a@x.test", "security"); got != 1 {
+		t.Fatalf("subject-filtered a@x.test/security count=%d, want 1", got)
+	}
+	if got := smtpSubjectCount(t, c, srv.URL, "b@x.test", "security"); got != 1 {
+		t.Fatalf("subject-filtered b@x.test/security count=%d, want 1", got)
+	}
 }
