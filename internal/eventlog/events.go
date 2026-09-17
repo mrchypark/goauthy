@@ -343,7 +343,7 @@ func (s *Store) VerifyIntegrity(ctx context.Context) (bool, error) {
 		return false, errors.New("nil store")
 	}
 	r, err := s.db.Query(ctx, rhiza.QueryRequest{
-		SQL:       `SELECT o.sequence,e.id,e.timestamp,e.level,e.typ,e.ip,e.data,e.text,e.prev_hash,e.integrity_hash FROM event_log_order o JOIN event_log e ON e.id=o.event_id ORDER BY o.sequence ASC`,
+		SQL:       `SELECT e.id,e.timestamp,e.level,e.typ,e.ip,e.data,e.text,e.prev_hash,e.integrity_hash FROM event_log_order o JOIN event_log e ON e.id=o.event_id ORDER BY o.sequence ASC`,
 		Consistency: rhiza.ConsistencyLinearizable,
 	})
 	if err != nil {
@@ -351,7 +351,7 @@ func (s *Store) VerifyIntegrity(ctx context.Context) (bool, error) {
 	}
 	var prevHash string
 	for _, row := range r.Rows {
-		if len(row) != 10 {
+		if len(row) != 9 {
 			return false, fmt.Errorf("invalid event row")
 		}
 		id, ok := row[0].(string)
