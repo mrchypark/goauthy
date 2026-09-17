@@ -5,6 +5,21 @@
 
 **현재 자격 (2026-09-17):** 6개 감사 게이트 전체 PASS — P0 보안 autolink guards + creator race, P0 compile+normal/vet, P1 upstream MFA, P1 admin mapping+profile, P1 실제 새 E2E+스키마, P2 전체 프로덕션 race (61패키지) + Kind V4 E2E + MinIO S3 복구. 스키마 v102. 광범위한 Rauthy 패리티 목표는 일시 중지; event-hash 런타임 미구현. 상세 [status.md](status.md) 참조.
 
+**검증된 사실 (2026-09-17):**
+
+- Baseline f63a: 6 local audit gates PASS
+- CI head51b normal/vet PASS; race CANCELLED when superseded
+- Candidate f1443a3d pushed; CI run 35222763242 in progress
+- Frozen f1443a3d branding 83.586s and storage 164.346s tests PASS
+- Immutable image `ghcr.io/mrchypark/ternal@sha256:b618c4afd388ca3f175d7783835d3ce0fb964541c192141dcf5faa0433ecf29e` published; Grype 0.118.0 0 matches/0 ignored exit 0; live operational qualification pending
+- CNI deny test FAILED on IED/GKE `gke_ied-cluster`: HTTP remained reachable after removing the allow policy because NetworkPolicy enforcement is disabled. The corrected preflight blocks before creating resources; the test namespace is absent.
+- Discoverable credentials pinned at `ResidentKeyDiscouraged` — not an established required gap
+- Global hash-chain runtime absent; upstream requirement not established
+- Fresh-browser passkey-only login: confirmed open
+- Profile login revalidation: confirmed open
+
+> **Historical snapshot (2026-09-12, unverified 2026-09-17):** The rows and counts in all feature tables below reflect the original baseline audit. Do not treat them as current completion metrics. Verified gate results are in [status.md](status.md).
+
 ## 1. OIDC/OAuth 코어 (12개)
 
 | # | Rauthy Feature | GoAuthy Status | 패키지 | 비고 |
@@ -149,6 +164,8 @@
 ---
 
 ## 통계 요약
+
+> **Historical snapshot (2026-09-12, unverified 2026-09-17):** The counts and percentages below reflect the original baseline audit and have not been re-verified against current production code. Some features counted as 미구현 or 부분 may have been implemented or advanced since. Do not treat these as current completion metrics. See [status.md](status.md) for verified gate results.
 
 | 상태 | 수 | 비율 |
 |------|-----|------|

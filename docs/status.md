@@ -56,7 +56,21 @@ Schema is now v102 (was v58 at parity.md baseline date). Migrations v98-v102: sc
 
 ### Completion (2026-09-17)
 
-All six audit gates PASS. Broad Rauthy behavior-parity goal remains paused/outside this scope; event-hash runtime unimplemented (pre-existing, not claimed). Historical entries below are clearly dated and preserved as-is.
+**현재 검증된 사실 (2026-09-17):**
+
+- Baseline f63a: 6 local audit gates PASS (full ./... V3, vet V3, Kind V4 E2E 11.946s)
+- CI head51b normal/vet PASS; race CANCELLED when superseded
+- Candidate f1443a3d pushed; CI run 35222763242 in progress
+- Frozen f1443a3d branding 83.586s and storage 164.346s tests PASS
+- Immutable image `ghcr.io/mrchypark/ternal@sha256:b618c4afd388ca3f175d7783835d3ce0fb964541c192141dcf5faa0433ecf29e` published; Grype 0.118.0 0 matches/0 ignored exit 0; live operational qualification pending
+- Native GCS HA overlay render PASS; live operational qualification pending
+- CNI deny test FAILED on IED/GKE `gke_ied-cluster`: HTTP remained reachable after removing the allow policy because NetworkPolicy enforcement is disabled. The corrected preflight blocks before creating resources; the test namespace is absent.
+- Discoverable credentials pinned at `ResidentKeyDiscouraged` — not an established required gap
+- Global hash-chain runtime absent; upstream requirement not established
+- Fresh-browser passkey-only login: confirmed open
+- Profile login revalidation: confirmed open
+
+Broad Rauthy behavior-parity goal remains paused/outside this scope; event-hash runtime unimplemented (pre-existing, not claimed). Historical entries below are clearly dated and preserved as-is.
 
 ## 2026-09-12 Managed Kind #6 EXIT0 / lifecycle E2E PASS / canonical broad suites PASS
 
@@ -720,6 +734,8 @@ Pinned v0.36.2 `src/common/src/regex.rs` and dynamic client request confirm RE_U
 
 ---
 
+> **Historical snapshot (2026-09-12, unverified 2026-09-17):** The rows and counts in all feature tables below reflect the original baseline audit. Do not treat them as current completion metrics. Verified gate results are in the qualification ledger above.
+
 ## 1. Rauthy v0.36.2 전체 기능 목록
 
 ### 1.1 OIDC/OAuth 코어
@@ -869,6 +885,8 @@ Pinned v0.36.2 `src/common/src/regex.rs` and dynamic client request confirm RE_U
 ---
 
 ## 2. 구현 현황 요약
+
+> **Historical snapshot (2026-09-12, unverified 2026-09-17):** The counts and percentages below reflect the original baseline audit and have not been re-verified against current production code. Some features counted as 미구현 or 부분 may have been implemented or advanced since. Do not treat these as current completion metrics. Verified gate results are in the qualification ledger above.
 
 | 상태 | 수 | 비율 |
 |------|-----|------|
