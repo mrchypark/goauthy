@@ -1,0 +1,319 @@
+package oidc
+
+import (
+	"context"
+	"encoding/base64"
+	"errors"
+	"time"
+
+	"github.com/mrchypark/rhiza"
+)
+
+const masterKeyStatusScanLimit = 64
+
+var ErrUnsafeMasterKeyStatus = errors.New("master-key reference status is unsafe")
+
+// MasterKeyReferenceFamily is a cryptographically authenticated count of the
+// live envelopes in one storage family. Counts never include ciphertext or
+// plaintext.
+type MasterKeyReferenceFamily struct {
+	ByKeyID map[string]int64
+	Total   int64
+}
+
+// MasterKeyReferenceStatus is read-only evidence for deciding whether a
+// non-active master key is still referenced. Safe only says every scanned
+// envelope authenticates and uses ActiveMasterKeyID; it never authorizes key
+// deletion.
+type MasterKeyReferenceStatus struct {
+	ActiveMasterKeyID        string
+	CheckedAt                time.Time
+	SigningKeys              MasterKeyReferenceFamily
+	DCRIdempotency           MasterKeyReferenceFamily
+	Upstream                 MasterKeyReferenceFamily
+	ManagedClients           MasterKeyReferenceFamily
+	LoginRevoke              MasterKeyReferenceFamily
+	GeneratedAPIKeyBootstrap MasterKeyReferenceFamily
+	Safe                     bool
+}
+
+// InspectMasterKeyReferences linearly reads every durable envelope family plus
+// every DCR and upstream envelope that is live at now. Each bounded page uses
+// linearizable consistency and every envelope is authenticated before it is
+// counted. Malformed, tampered, or unknown-key rows fail closed with
+// ErrUnsafeMasterKeyStatus and no partial result marked Safe.
+//
+// The scan is not a cluster-wide write barrier. Before removing a key,
+// operators must first ensure every pod reports the same active ID and wait
+// past DCR/upstream TTLs and signing-key retirement windows.
+func InspectMasterKeyReferences(ctx context.Context, db *rhiza.DB, keyring *Keyring, issuer string, now time.Time) (MasterKeyReferenceStatus, error) {
+	status := MasterKeyReferenceStatus{SigningKeys: emptyReferenceFamily(), DCRIdempotency: emptyReferenceFamily(), Upstream: emptyReferenceFamily(), ManagedClients: emptyReferenceFamily(), LoginRevoke: emptyReferenceFamily(), GeneratedAPIKeyBootstrap: emptyReferenceFamily()}
+	if ctx == nil || db == nil || keyring == nil || now.IsZero() {
+		return status, ErrUnsafeMasterKeyStatus
+	}
+	activeID, err := keyring.ActiveMasterKeyID()
+	if err != nil {
+		return status, ErrUnsafeMasterKeyStatus
+	}
+	normalizedIssuer, err := NormalizeIssuer(issuer)
+	if err != nil || normalizedIssuer != issuer {
+		return status, ErrUnsafeMasterKeyStatus
+	}
+	now = now.UTC().Truncate(time.Millisecond)
+	status.ActiveMasterKeyID, status.CheckedAt = activeID, now
+
+	if err := scanSigningKeyReferences(ctx, db, keyring, normalizedIssuer, &status.SigningKeys); err != nil {
+		return unsafeMasterKeyStatus(status)
+	}
+	if err := scanDCRIdempotencyReferences(ctx, db, keyring, now, &status.DCRIdempotency); err != nil {
+		return unsafeMasterKeyStatus(status)
+	}
+	if err := scanUpstreamReferences(ctx, db, keyring, now, &status.Upstream); err != nil {
+		return unsafeMasterKeyStatus(status)
+	}
+	if err := scanManagedClientReferences(ctx, db, keyring, &status.ManagedClients); err != nil {
+		return unsafeMasterKeyStatus(status)
+	}
+	if err := scanLoginRevokeReferences(ctx, db, keyring, &status.LoginRevoke); err != nil {
+		return unsafeMasterKeyStatus(status)
+	}
+	if err := scanGeneratedAPIKeyBootstrapReferences(ctx, db, keyring, &status.GeneratedAPIKeyBootstrap); err != nil {
+		return unsafeMasterKeyStatus(status)
+	}
+	status.Safe = familyUsesOnly(status.SigningKeys, activeID) && familyUsesOnly(status.DCRIdempotency, activeID) && familyUsesOnly(status.Upstream, activeID) && familyUsesOnly(status.ManagedClients, activeID) && familyUsesOnly(status.LoginRevoke, activeID) && familyUsesOnly(status.GeneratedAPIKeyBootstrap, activeID)
+	return status, nil
+}
+
+func scanLoginRevokeReferences(ctx context.Context, db *rhiza.DB, keyring *Keyring, family *MasterKeyReferenceFamily) error {
+	exists, err := loginRevokeTableExists(ctx, db)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	cursor := ""
+	for {
+		result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT subject,generation,code_envelope FROM identity_login_revoke WHERE subject > ? ORDER BY subject LIMIT ?`, Args: []any{cursor, int64(masterKeyStatusScanLimit)}, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil {
+			return err
+		}
+		for _, row := range result.Rows {
+			if len(row) != 3 {
+				return ErrUnsafeMasterKeyStatus
+			}
+			subject, subjectOK := row[0].(string)
+			generation, generationOK := row[1].(string)
+			envelope, envelopeOK := loginRevokeEnvelopeBytes(row[2])
+			if !subjectOK || !generationOK || subject == "" || generation == "" || !envelopeOK || len(envelope) == 0 {
+				return ErrUnsafeMasterKeyStatus
+			}
+			keyID, err := keyring.PurposeEnvelopeKeyID(LoginRevokeCodePurpose(subject, generation), envelope)
+			if err != nil {
+				return ErrUnsafeMasterKeyStatus
+			}
+			addReference(family, keyID)
+			cursor = subject
+		}
+		if len(result.Rows) < masterKeyStatusScanLimit {
+			return nil
+		}
+	}
+}
+
+func scanGeneratedAPIKeyBootstrapReferences(ctx context.Context, db *rhiza.DB, keyring *Keyring, family *MasterKeyReferenceFamily) error {
+	result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT payload_envelope FROM generated_api_key_bootstrap WHERE singleton=1 AND payload_envelope IS NOT NULL`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(result.Rows) > 1 {
+		return ErrUnsafeMasterKeyStatus
+	}
+	if len(result.Rows) == 0 {
+		return nil
+	}
+	if len(result.Rows[0]) != 1 {
+		return ErrUnsafeMasterKeyStatus
+	}
+	envelope, ok := result.Rows[0][0].([]byte)
+	if !ok || len(envelope) == 0 {
+		return ErrUnsafeMasterKeyStatus
+	}
+	keyID, err := keyring.PurposeEnvelopeKeyID(GeneratedAPIKeyBootstrapEnvelopePurpose, envelope)
+	if err != nil {
+		return ErrUnsafeMasterKeyStatus
+	}
+	addReference(family, keyID)
+	return nil
+}
+
+func scanManagedClientReferences(ctx context.Context, db *rhiza.DB, keyring *Keyring, family *MasterKeyReferenceFamily) error {
+	cursor := ""
+	for {
+		result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT id,generation,secret_envelope FROM managed_oauth_clients WHERE secret_envelope IS NOT NULL AND id > ? ORDER BY id LIMIT ?`, Args: []any{cursor, int64(masterKeyStatusScanLimit)}, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil {
+			return err
+		}
+		for _, row := range result.Rows {
+			if len(row) != 3 {
+				return ErrUnsafeMasterKeyStatus
+			}
+			id, idOK := row[0].(string)
+			generation, genOK := row[1].(string)
+			if !idOK || !genOK || id == "" || generation == "" {
+				return ErrUnsafeMasterKeyStatus
+			}
+			var envelope []byte
+			switch value := row[2].(type) {
+			case []byte:
+				envelope = value
+			case string:
+				envelope = []byte(value)
+			default:
+				return ErrUnsafeMasterKeyStatus
+			}
+			keyID, err := keyring.PurposeEnvelopeKeyID(ManagedClientSecretPurpose(id, generation), envelope)
+			if err != nil {
+				return ErrUnsafeMasterKeyStatus
+			}
+			addReference(family, keyID)
+			cursor = id
+		}
+		if len(result.Rows) < masterKeyStatusScanLimit {
+			return nil
+		}
+	}
+}
+
+func emptyReferenceFamily() MasterKeyReferenceFamily {
+	return MasterKeyReferenceFamily{ByKeyID: make(map[string]int64)}
+}
+
+func unsafeMasterKeyStatus(status MasterKeyReferenceStatus) (MasterKeyReferenceStatus, error) {
+	status.Safe = false
+	return status, ErrUnsafeMasterKeyStatus
+}
+
+func familyUsesOnly(family MasterKeyReferenceFamily, activeID string) bool {
+	for keyID := range family.ByKeyID {
+		if keyID != activeID {
+			return false
+		}
+	}
+	return true
+}
+
+func scanSigningKeyReferences(ctx context.Context, db *rhiza.DB, keyring *Keyring, issuer string, family *MasterKeyReferenceFamily) error {
+	cursor := ""
+	for {
+		result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT kid,private_envelope FROM oidc_signing_keys WHERE kid > ? ORDER BY kid LIMIT ?`, Args: []any{cursor, int64(masterKeyStatusScanLimit)}, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil {
+			return err
+		}
+		for _, row := range result.Rows {
+			if len(row) != 2 {
+				return ErrUnsafeMasterKeyStatus
+			}
+			kid, kidOK := row[0].(string)
+			envelopeText, envelopeOK := row[1].(string)
+			if !kidOK || !validKeyID(kid) || !envelopeOK {
+				return ErrUnsafeMasterKeyStatus
+			}
+			envelope, ok := decodeCanonicalEnvelope(envelopeText)
+			if !ok {
+				return ErrUnsafeMasterKeyStatus
+			}
+			keyID, err := keyring.SigningKeyEnvelopeKeyID(issuer, kid, envelope)
+			if err != nil {
+				return ErrUnsafeMasterKeyStatus
+			}
+			addReference(family, keyID)
+			cursor = kid
+		}
+		if len(result.Rows) < masterKeyStatusScanLimit {
+			return nil
+		}
+	}
+}
+
+func scanDCRIdempotencyReferences(ctx context.Context, db *rhiza.DB, keyring *Keyring, now time.Time, family *MasterKeyReferenceFamily) error {
+	principalCursor, keyCursor := "", ""
+	for {
+		result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT principal_digest,key_digest,response_envelope FROM dcr_registration_idempotency WHERE expires_at_unix_ms > ? AND (principal_digest > ? OR (principal_digest = ? AND key_digest > ?)) ORDER BY principal_digest,key_digest LIMIT ?`, Args: []any{now.UnixMilli(), principalCursor, principalCursor, keyCursor, int64(masterKeyStatusScanLimit)}, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil {
+			return err
+		}
+		for _, row := range result.Rows {
+			if len(row) != 3 {
+				return ErrUnsafeMasterKeyStatus
+			}
+			principal, principalOK := row[0].(string)
+			key, keyOK := row[1].(string)
+			envelopeText, envelopeOK := row[2].(string)
+			if !principalOK || !keyOK || !validDigest43(principal) || !validDigest43(key) || !envelopeOK {
+				return ErrUnsafeMasterKeyStatus
+			}
+			envelope, ok := decodeCanonicalEnvelope(envelopeText)
+			if !ok {
+				return ErrUnsafeMasterKeyStatus
+			}
+			keyID, err := keyring.PurposeEnvelopeKeyID("dcr-registration-response", envelope)
+			if err != nil {
+				return ErrUnsafeMasterKeyStatus
+			}
+			addReference(family, keyID)
+			principalCursor, keyCursor = principal, key
+		}
+		if len(result.Rows) < masterKeyStatusScanLimit {
+			return nil
+		}
+	}
+}
+
+func scanUpstreamReferences(ctx context.Context, db *rhiza.DB, keyring *Keyring, now time.Time, family *MasterKeyReferenceFamily) error {
+	cursor := ""
+	for {
+		result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT state_digest,secret_envelope FROM upstream_provider_transactions WHERE expires_at_unix_ms > ? AND state_digest > ? ORDER BY state_digest LIMIT ?`, Args: []any{now.UnixMilli(), cursor, int64(masterKeyStatusScanLimit)}, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil {
+			return err
+		}
+		for _, row := range result.Rows {
+			if len(row) != 2 {
+				return ErrUnsafeMasterKeyStatus
+			}
+			stateDigest, stateOK := row[0].(string)
+			envelopeText, envelopeOK := row[1].(string)
+			if !stateOK || !validDigest43(stateDigest) || !envelopeOK {
+				return ErrUnsafeMasterKeyStatus
+			}
+			envelope, ok := decodeCanonicalEnvelope(envelopeText)
+			if !ok {
+				return ErrUnsafeMasterKeyStatus
+			}
+			keyID, err := keyring.PurposeEnvelopeKeyID("upstream/transaction", envelope)
+			if err != nil {
+				return ErrUnsafeMasterKeyStatus
+			}
+			addReference(family, keyID)
+			cursor = stateDigest
+		}
+		if len(result.Rows) < masterKeyStatusScanLimit {
+			return nil
+		}
+	}
+}
+
+func decodeCanonicalEnvelope(text string) ([]byte, bool) {
+	envelope, err := base64.RawURLEncoding.DecodeString(text)
+	return envelope, err == nil && len(envelope) != 0 && base64.RawURLEncoding.EncodeToString(envelope) == text
+}
+
+func validDigest43(value string) bool {
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	return err == nil && len(decoded) == 32 && base64.RawURLEncoding.EncodeToString(decoded) == value
+}
+
+func addReference(family *MasterKeyReferenceFamily, keyID string) {
+	family.ByKeyID[keyID]++
+	family.Total++
+}

@@ -1,0 +1,11 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ternal-goauthy
+  namespace: ternal-auth
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goauthy
+      app.kubernetes.io/part-of: ternal

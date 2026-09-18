@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          ports:
+            - $patch: replace
+            - name: http
+              containerPort: 8443
+            - name: peer
+              protocol: UDP
+              containerPort: 8444
+          env:
+            - name: GOAUTHY_LISTEN_ADDR
+              value: ":8443"
+            - name: GOAUTHY_ISSUER
+              value: https://localhost:18443
+            - name: GOAUTHY_TLS_CERT_FILE
+              value: /run/tls/tls.crt
+            - name: GOAUTHY_TLS_KEY_FILE
+              value: /run/tls/tls.key
+            - name: GOAUTHY_FEDCM_CONFIG_FILE
+              value: /run/secrets/fedcm-config
+          volumeMounts:
+            - name: secrets
+              mountPath: /run/secrets/fedcm-config
+              subPath: fedcm-config
+              readOnly: true
+            - name: tls
+              mountPath: /run/tls
+              readOnly: true
+          startupProbe:
+            $patch: replace
+            httpGet:
+              path: /readyz
+              port: http
+              scheme: HTTPS
+            periodSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
+            $patch: replace
+            httpGet:
+              path: /readyz
+              port: http
+              scheme: HTTPS
+            periodSeconds: 10
+          readinessProbe:
+            $patch: replace
+            httpGet:
+              path: /readyz
+              port: http
+              scheme: HTTPS
+            periodSeconds: 2
+            failureThreshold: 3
+      volumes:
+        - name: secrets
+          secret:
+            secretName: goauthy-secrets
+            defaultMode: 288
+            items:
+              - key: dev-1
+                path: master-keys/dev-1
+              - key: oauth-hmac
+                path: oauth-hmac
+              - key: bootstrap-client
+                path: bootstrap-client
+              - key: dcr-registration-token
+                path: dcr-registration-token
+              - key: bootstrap-user-password-phc
+                path: bootstrap-user-password-phc
+              - key: fedcm-config
+                path: fedcm-config
+        - name: tls
+          secret:
+            secretName: goauthy-fedcm-tls
+            defaultMode: 288

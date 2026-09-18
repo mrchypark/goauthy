@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "id": "FM-goauthy-e2e-kind-inotify-instances",
+  "state": "active",
+  "scope": "repo",
+  "match": {
+    "paths": ["Makefile", "scripts/e2e-*.sh"]
+  },
+  "failure": {
+    "invariant": "Each newly created Kind node has fs.inotify.max_user_instances of at least 256 before E2E images load.",
+    "trigger": "A Kind node inherits fs.inotify.max_user_instances below 256.",
+    "mechanism": "The E2E workload exhausts the low instance limit even though max_user_watches is high.",
+    "impact": "The E2E result is an infrastructure failure instead of evidence about GoAuthy."
+  },
+  "root": {
+    "cause": "The first preflight checked max_user_watches, which is a different inotify limit from the observed exhausted max_user_instances limit.",
+    "detection_gap": "The control did not measure the exact kernel setting implicated by the observed failure."
+  },
+  "evidence": {
+    "verifier": "scripts/e2e-preflight.sh kind-inotify",
+    "refs": ["scripts/e2e-preflight.sh", "Makefile", "kind-goauthy-v29-admin-api-keys-deterministic"],
+    "sanitized": true
+  },
+  "control": {
+    "kind": "wrapper",
+    "mode": "block",
+    "artifact": "scripts/e2e-preflight.sh",
+    "current_args": ["kind-inotify", "--value", "256"]
+  },
+  "replay": {
+    "failure_args": ["kind-inotify", "--value", "255"],
+    "valid_args": ["kind-inotify", "--value", "256"],
+    "failure_exit": 1,
+    "valid_exit": 0,
+    "oracle": "The same preflight exits 1 one instance below the floor and exits 0 at the floor."
+  },
+  "owner": "goauthy E2E maintainers",
+  "review_after": "2027-03-01",
+  "duplicates": [],
+  "supersedes": []
+}

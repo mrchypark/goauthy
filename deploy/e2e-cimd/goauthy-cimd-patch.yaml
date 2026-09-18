@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      hostAliases:
+        - ip: 8.8.8.8
+          hostnames:
+            - cimd.e2e.test
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_CIMD_ENABLED
+              value: "true"
+            - name: SSL_CERT_FILE
+              value: /run/cimd-ca/ca.crt
+          volumeMounts:
+            - name: cimd-fixture-ca
+              mountPath: /run/cimd-ca
+              readOnly: true
+      volumes:
+        - name: cimd-fixture-ca
+          configMap:
+            name: cimd-fixture-ca

@@ -1,0 +1,10 @@
+[package]
+name = "goauthy-rauthy-cron-reference"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+cron = "=0.17.0"
+chrono = "=0.4.44"
+chrono-tz = "=0.10.4"

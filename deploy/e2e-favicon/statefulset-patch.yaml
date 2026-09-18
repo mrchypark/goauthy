@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_ISSUER
+              value: https://localhost:__E2E_PORT__/tenant
+            - name: GOAUTHY_TLS_CERT_FILE
+              value: /run/goauthy-tls/tls.crt
+            - name: GOAUTHY_TLS_KEY_FILE
+              value: /run/goauthy-tls/tls.key
+            - name: GOAUTHY_FAVICON_FILE
+              value: /run/goauthy-favicon/favicon
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+          livenessProbe:
+            httpGet:
+              scheme: HTTPS
+          startupProbe:
+            httpGet:
+              scheme: HTTPS
+          volumeMounts:
+            - name: goauthy-tls
+              mountPath: /run/goauthy-tls
+              readOnly: true
+            - name: goauthy-favicon
+              mountPath: /run/goauthy-favicon
+              readOnly: true
+      volumes:
+        - name: goauthy-tls
+          secret:
+            secretName: goauthy-tls
+            defaultMode: 0440
+        - name: goauthy-favicon
+          secret:
+            secretName: goauthy-favicon
+            defaultMode: 0440

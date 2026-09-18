@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_ISSUER
+              value: https://localhost:__E2E_PORT__
+            - name: GOAUTHY_TLS_CERT_FILE
+              value: /run/goauthy-tls/tls.crt
+            - name: GOAUTHY_TLS_KEY_FILE
+              value: /run/goauthy-tls/tls.key
+            - name: GOAUTHY_UPSTREAM_PROVIDERS_FILE
+              value: /run/upstream-providers/providers.json
+            - name: SSL_CERT_FILE
+              value: /run/upstream-ca/ca-certificates.crt
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+          livenessProbe:
+            httpGet:
+              scheme: HTTPS
+          startupProbe:
+            httpGet:
+              scheme: HTTPS
+          volumeMounts:
+            - name: goauthy-tls
+              mountPath: /run/goauthy-tls
+              readOnly: true
+            - name: upstream-providers
+              mountPath: /run/upstream-providers
+              readOnly: true
+            - name: upstream-provider-secret
+              mountPath: /run/upstream-secret
+              readOnly: true
+            - name: upstream-ca
+              mountPath: /run/upstream-ca
+              readOnly: true
+      volumes:
+        - name: goauthy-tls
+          secret:
+            secretName: goauthy-tls
+            defaultMode: 0440
+        - name: upstream-providers
+          configMap:
+            name: upstream-providers
+            defaultMode: 0444
+        - name: upstream-provider-secret
+          secret:
+            secretName: upstream-provider-secret
+            defaultMode: 0440
+        - name: upstream-ca
+          configMap:
+            name: upstream-ca
+            defaultMode: 0444

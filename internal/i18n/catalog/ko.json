@@ -1,0 +1,10 @@
+{
+  "sign_in": "로그인",
+  "continue_to": "다음으로 계속",
+  "username": "사용자 이름",
+  "password": "비밀번호",
+  "sign_out": "로그아웃",
+  "confirm_sign_out": "로그아웃하시겠습니까?",
+  "signed_in": "로그인되었습니다.",
+  "passkey_button": "패스키로 로그인"
+}

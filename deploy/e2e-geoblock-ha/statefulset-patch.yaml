@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_ISSUER
+              value: http://127.0.0.1:19980
+            - name: GOAUTHY_TRUSTED_PROXIES
+              value: 127.0.0.0/8
+            - name: GOAUTHY_GEOBLOCK_ENABLED
+              value: "true"
+            - name: GOAUTHY_GEOBLOCK_TYPE
+              value: whitelist
+            - name: GOAUTHY_GEOBLOCK_COUNTRIES
+              value: KR
+            - name: GOAUTHY_GEOBLOCK_BLOCK_UNKNOWN
+              value: "true"
+            - name: GOAUTHY_GEOBLOCK_MAXMIND_DB
+              value: /run/geoblock/country.mmdb
+            - name: GOAUTHY_GEOBLOCK_COUNTRY_HEADER
+              value: X-Country
+          volumeMounts:
+            - name: geoblock-country-db
+              mountPath: /run/geoblock
+              readOnly: true
+      volumes:
+        - name: geoblock-country-db
+          configMap:
+            name: geoblock-country-db

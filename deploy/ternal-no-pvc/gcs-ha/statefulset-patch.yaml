@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ternal-goauthy
+  namespace: ternal-auth
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER
+              value: gcs
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: ternal-goauthy-config
+                  key: object-store-bucket
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: ternal-goauthy-config
+                  key: object-store-prefix
+            - $patch: delete
+              name: GOAUTHY_RHIZA_OBJECT_STORE_ENDPOINT
+            - $patch: delete
+              name: GOAUTHY_RHIZA_OBJECT_STORE_REGION
+            - $patch: delete
+              name: GOAUTHY_RHIZA_OBJECT_STORE_ACCESS_KEY
+            - $patch: delete
+              name: GOAUTHY_RHIZA_OBJECT_STORE_SECRET_KEY

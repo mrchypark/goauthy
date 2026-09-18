@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_IP_BLACKLIST_ENABLED
+              value: "true"
+            - name: GOAUTHY_TRUSTED_PROXIES
+              value: 127.0.0.1/32
+            - name: GOAUTHY_GEOBLOCK_ENABLED
+              value: "false"

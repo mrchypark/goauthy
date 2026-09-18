@@ -1,0 +1,27 @@
+# Applied briefly by the harness before the positive flow.  Cilium deny rules
+# take precedence over the Kubernetes allow rule in deploy/e2e-cimd.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: deny-cimd-public-egress
+  namespace: goauthy
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: goauthy
+  egressDeny:
+    - toCIDR:
+        - 8.8.8.8/32
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # Service externalIP translation may occur before Cilium evaluates the
+    # endpoint identity. Deny the translated fixture destination as well.
+    - toEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: goauthy-cimd-fixture
+      toPorts:
+        - ports:
+            - port: "8443"
+              protocol: TCP

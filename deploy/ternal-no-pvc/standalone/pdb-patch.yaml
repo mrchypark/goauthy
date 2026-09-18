@@ -1,0 +1,7 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ternal-goauthy
+  namespace: ternal-auth
+spec:
+  minAvailable: 1

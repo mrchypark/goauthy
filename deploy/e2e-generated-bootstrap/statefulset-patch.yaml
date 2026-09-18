@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_API_KEY_BOOTSTRAP_FILE
+              value: /run/secrets/api-key-bootstrap
+            - name: GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_FILE
+              value: /var/lib/goauthy/generated-bootstrap.secrets
+            - name: GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_TTL_SECONDS
+              value: "0"
+          volumeMounts:
+            - name: secrets
+              mountPath: /run/secrets/api-key-bootstrap
+              subPath: api-key-bootstrap
+              readOnly: true
+      volumes:
+        - name: secrets
+          secret:
+            items:
+              - key: dev-1
+                path: master-keys/dev-1
+              - key: oauth-hmac
+                path: oauth-hmac
+              - key: bootstrap-client
+                path: bootstrap-client
+              - key: dcr-registration-token
+                path: dcr-registration-token
+              - key: bootstrap-user-password-phc
+                path: bootstrap-user-password-phc
+              - key: api-key-bootstrap
+                path: api-key-bootstrap

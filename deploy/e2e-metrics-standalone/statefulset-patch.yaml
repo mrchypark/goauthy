@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          ports:
+            - name: metrics
+              containerPort: 9090
+          env:
+            - name: GOAUTHY_METRICS_LISTEN_ADDR
+              value: :9090
+            - name: GOAUTHY_METRICS_TOKEN_FILE
+              value: /run/secrets/metrics-token
+          volumeMounts:
+            - name: secrets
+              mountPath: /run/secrets/metrics-token
+              subPath: metrics-token
+              readOnly: true
+      volumes:
+        - name: secrets
+          secret:
+            items:
+              - key: dev-1
+                path: master-keys/dev-1
+              - key: oauth-hmac
+                path: oauth-hmac
+              - key: bootstrap-client
+                path: bootstrap-client
+              - key: dcr-registration-token
+                path: dcr-registration-token
+              - key: bootstrap-user-password-phc
+                path: bootstrap-user-password-phc
+              - key: metrics-token
+                path: metrics-token

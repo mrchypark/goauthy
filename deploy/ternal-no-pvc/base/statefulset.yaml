@@ -1,0 +1,219 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ternal-goauthy
+  namespace: ternal-auth
+  labels:
+    app.kubernetes.io/name: goauthy
+    app.kubernetes.io/part-of: ternal
+spec:
+  serviceName: ternal-goauthy
+  podManagementPolicy: Parallel
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goauthy
+      app.kubernetes.io/part-of: ternal
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: goauthy
+        app.kubernetes.io/part-of: ternal
+        app.kubernetes.io/component: object-store-client
+    spec:
+      serviceAccountName: ternal-goauthy
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: goauthy
+                    app.kubernetes.io/part-of: ternal
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: goauthy
+          # Candidate only; replace with a reviewed immutable digest before apply.
+          image: goauthy:ternal-no-pvc-candidate
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: peer
+              protocol: UDP
+              containerPort: 8444
+          env:
+            - name: GOAUTHY_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: ternal-goauthy-config
+                  key: issuer
+            - name: GOAUTHY_LISTEN_ADDR
+              value: :8080
+            - name: GOAUTHY_CLUSTER_ID
+              value: ternal-goauthy-ied
+            - name: GOAUTHY_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: GOAUTHY_DATA_DIR
+              value: /var/lib/goauthy
+            - name: SQLITE_TMPDIR
+              value: /tmp
+            - name: GOAUTHY_RHIZA_PROFILE
+              value: cluster
+            - name: GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE
+              value: "true"
+            - name: GOAUTHY_RHIZA_PEER_ADDR
+              value: :8444
+            - name: GOAUTHY_RHIZA_MEMBERS
+              valueFrom:
+                secretKeyRef:
+                  name: ternal-goauthy-secrets
+                  key: rhiza-members
+            - name: GOAUTHY_RHIZA_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: ternal-goauthy-secrets
+                  key: rhiza-admin-token
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: ternal-goauthy-config
+                  key: s3-endpoint
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: ternal-goauthy-config
+                  key: s3-bucket
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: ternal-goauthy-config
+                  key: s3-prefix
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: ternal-goauthy-config
+                  key: s3-region
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ternal-goauthy-secrets
+                  key: s3-access-key
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ternal-goauthy-secrets
+                  key: s3-secret-key
+            - name: GOAUTHY_MASTER_KEY_DIR
+              value: /run/secrets/master-keys
+            - name: GOAUTHY_ACTIVE_MASTER_KEY_ID
+              value: ternal-1
+            - name: GOAUTHY_OAUTH_HMAC_SECRET_FILE
+              value: /run/secrets/oauth-hmac
+            - name: GOAUTHY_BOOTSTRAP_CLIENT_SECRET_FILE
+              value: /run/secrets/bootstrap-client
+            - name: GOAUTHY_BOOTSTRAP_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: ternal-goauthy-config
+                  key: bootstrap-client-id
+            - name: GOAUTHY_BOOTSTRAP_REDIRECT_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: ternal-goauthy-config
+                  key: bootstrap-redirect-uri
+            - name: GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE
+              value: /run/secrets/bootstrap-user-password-phc
+            - name: GOAUTHY_BOOTSTRAP_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: ternal-goauthy-config
+                  key: bootstrap-username
+            - name: GOAUTHY_BOOTSTRAP_USER_SUBJECT
+              value: ternal-bootstrap-admin
+            - name: GOAUTHY_BOOTSTRAP_USER_ROLES
+              value: '["rauthy_admin"]'
+            - name: GOAUTHY_BOOTSTRAP_USER_GROUPS
+              value: '["ternal-admins"]'
+            - name: GOAUTHY_RFC8252_LOOPBACK_REDIRECTS
+              value: "false"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 3
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/goauthy
+            - name: sqlite-tmp
+              mountPath: /tmp
+            - name: secrets
+              mountPath: /run/secrets/master-keys
+              subPath: master-keys
+              readOnly: true
+            - name: secrets
+              mountPath: /run/secrets/oauth-hmac
+              subPath: oauth-hmac
+              readOnly: true
+            - name: secrets
+              mountPath: /run/secrets/bootstrap-client
+              subPath: bootstrap-client
+              readOnly: true
+            - name: secrets
+              mountPath: /run/secrets/bootstrap-user-password-phc
+              subPath: bootstrap-user-password-phc
+              readOnly: true
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: sqlite-tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: secrets
+          secret:
+            secretName: ternal-goauthy-secrets
+            defaultMode: 288
+            items:
+              - key: master-key-ternal-1
+                path: master-keys/ternal-1
+              - key: oauth-hmac
+                path: oauth-hmac
+              - key: bootstrap-client
+                path: bootstrap-client
+              - key: bootstrap-user-password-phc
+                path: bootstrap-user-password-phc

@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_ISSUER
+              value: http://127.0.0.1:18080
+            - name: GOAUTHY_DCR_SOFTWARE_STATEMENT_TRUST_FILE
+              value: /run/secrets/software-statement-trust/trust.json
+          volumeMounts:
+            - name: software-statement-trust
+              mountPath: /run/secrets/software-statement-trust
+              readOnly: true
+      volumes:
+        - name: software-statement-trust
+          secret:
+            secretName: goauthy-software-statement-trust
+            defaultMode: 288

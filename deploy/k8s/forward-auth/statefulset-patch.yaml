@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_BOOTSTRAP_USER
+              value: admin@goauthy.e2e
+            - name: GOAUTHY_BOOTSTRAP_USER_ROLES
+              value: '["forward-auth-admin"]'
+            - name: GOAUTHY_BOOTSTRAP_USER_GROUPS
+              value: '["forward-auth-group"]'
