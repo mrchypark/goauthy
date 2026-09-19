@@ -111,7 +111,7 @@ jobs:
           fail-build: true
           only-fixed: false
           output-format: table
-          grype-version: '0.118.0'
+          grype-version: 'v0.118.0'
 
       - name: Login to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
