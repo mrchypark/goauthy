@@ -54,7 +54,10 @@ func TestRunDeadlineCancelsJobAndStops(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	reports := 0
-	err = schedule.Run(ctx, db, "deadline", time.UTC, time.Second, 100*time.Millisecond, func(jobCtx context.Context) error {
+	// Attempt timeout must leave headroom for consensus-backed lease
+	// acquisition (CAS budget ttl/3); a tighter budget flakes under loaded
+	// -race CI while proving nothing about deadline cancellation.
+	err = schedule.Run(ctx, db, "deadline", time.UTC, time.Second, 2*time.Second, func(jobCtx context.Context) error {
 		<-jobCtx.Done()
 		return jobCtx.Err()
 	}, func(_ time.Time, executed bool, err error) {
