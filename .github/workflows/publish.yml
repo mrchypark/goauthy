@@ -1,0 +1,156 @@
+name: Publish container
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/mrchypark/goauthy
+
+jobs:
+  publish:
+    name: Publish container image
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        ||
+        github.event_name == 'workflow_run'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_branch == 'main'
+          && github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.head_repository.full_name == github.repository
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Resolve source SHA
+        id: source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          SOURCE_EVENT_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            sha="$WORKFLOW_RUN_HEAD_SHA"
+          else
+            sha="$SOURCE_EVENT_SHA"
+          fi
+
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid source SHA: $sha"
+            exit 1
+          fi
+
+          current=$(gh api "repos/$REPOSITORY/git/refs/heads/main" --jq '.object.sha')
+          if [ "$current" != "$sha" ]; then
+            echo "::error::main HEAD mismatch: source=$sha main=$current"
+            exit 1
+          fi
+
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Verify CI succeeded for source SHA
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          runs=$(gh api "repos/$REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=$SOURCE_SHA&status=success&per_page=100" | jq --arg sha "$SOURCE_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .event == "push" and .conclusion == "success" and .status == "completed")] | length')
+          if [ "$runs" -lt 1 ]; then
+            echo "::error::No successful CI push run found for SHA $SOURCE_SHA on main"
+            exit 1
+          fi
+          echo "Verified $runs successful CI run(s) for $SOURCE_SHA"
+
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Build image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:sha-${{ steps.source.outputs.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan image with Grype
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2
+        with:
+          image: ${{ env.IMAGE }}:sha-${{ steps.source.outputs.sha }}
+          severity-cutoff: high
+          fail-build: true
+          only-fixed: false
+          output-format: table
+          grype-version: 'v0.118.0'
+
+      - name: Login to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Push image
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/$REPOSITORY/git/refs/heads/main" --jq '.object.sha')
+          if [ "$current" != "$SOURCE_SHA" ]; then
+            echo "::error::main HEAD changed: expected $SOURCE_SHA, got $current"
+            exit 1
+          fi
+          echo "main HEAD still at $SOURCE_SHA"
+          docker push "$IMAGE:sha-$SOURCE_SHA"
+          docker push "$IMAGE:latest"
+
+      - name: Print digest summary
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+          fullref=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE:sha-$SOURCE_SHA")
+          if [[ "$fullref" != *@sha256:* ]]; then
+            echo "::error::Unexpected digest format: $fullref"
+            exit 1
+          fi
+          {
+            echo "## Published container"
+            echo ""
+            echo "| Tag | Digest |"
+            echo "|-----|--------|"
+            echo "| \`latest\` | \`${fullref#*@}\` |"
+            echo "| \`sha-${SOURCE_SHA}\` | \`${fullref#*@}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
