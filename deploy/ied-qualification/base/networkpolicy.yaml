@@ -1,0 +1,117 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: goauthy-qual-ha3-ingress-peer
+  namespace: ternal-auth
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: goauthy
+      app.kubernetes.io/part-of: goauthy-qual-0917
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: goauthy
+              app.kubernetes.io/part-of: goauthy-qual-0917
+      ports:
+        - protocol: UDP
+          port: 8444
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: goauthy
+              app.kubernetes.io/part-of: goauthy-qual-0917
+      ports:
+        - protocol: UDP
+          port: 8444
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 169.254.169.254/32
+      ports:
+        - protocol: TCP
+          port: 80
+    - to:
+        - ipBlock:
+            cidr: 169.254.169.252/32
+      ports:
+        - protocol: TCP
+          port: 988
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: goauthy-qual-s1-ingress
+  namespace: ternal-auth
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: goauthy
+      app.kubernetes.io/part-of: goauthy-qual-s1-0917
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 169.254.169.254/32
+      ports:
+        - protocol: TCP
+          port: 80
+    - to:
+        - ipBlock:
+            cidr: 169.254.169.252/32
+      ports:
+        - protocol: TCP
+          port: 988
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443

@@ -1,6 +1,9 @@
 # 사용자 연결을 관리하는 인증 컬렉션
 
-2026-09-06 요구사항/구현 체크리스트. **전체 인증 연결 기능 완료 문서가 아니다.**
+2026-09-06에 시작한 요구사항/구현 기록이다. 이 문서에는 당시 중간 상태를 설명하는
+역사적 절이 남아 있다. **현재 제품 상태는 [capabilities.md](capabilities.md)와
+[external-credential-consumer-contract.md](external-credential-consumer-contract.md)를
+우선한다.**
 사용자 확인: **관리자가 컬렉션 구조·인증 방식을 정의하고, 사용자는 자신의
 외부 SaaS 연결과 agent 등록을 생성·관리한다.** Rhiza 및 standalone/exact-three
 HA 요구사항은 유지한다. Rauthy 동등성 목록과는 별도의 제품 확장이다.
@@ -99,7 +102,13 @@ state/PKCE 저장소다. 이 테이블을 장기 credential 저장소로 재해�
 
 ## 필수 보안·HA 조건
 
-### OAuth2 프로토콜 계층 구현 상태 (2026-09-06)
+### OAuth2 프로토콜 계층 구현 상태 (2026-09-06 당시 기록)
+
+이 절은 최초 프로토콜 계층을 구현했을 당시의 기록이다. 이후 provider 저장/API,
+사용자 callback, encrypted credential, reconnect, use grant와 credential delivery가
+추가되었다. 현재 계약은
+[external-credential-consumer-contract.md](external-credential-consumer-contract.md)를
+따른다.
 
 `internal/saas/oauth2.go`는 관리자 공급자 설정을 받을 표준 교환 계층이다.
 authorization/token URL, callback, client ID, scopes와 명시적 client 인증
@@ -122,12 +131,15 @@ authorization/token URL, callback, client ID, scopes와 명시적 client 인증
   redirect 거절, 응답 header/time 제한. 표준 `net/http`, `net/netip`,
   `crypto/tls`를 사용한다. 테스트는 resolver/dial 외부 경계만 대체하며
   실제 인증서 검증과 고정된 dial 주소를 확인했다. 사설망 공급자는 기본 거절한다.
-- [ ] 관리자 설정 저장/API, 승인된 outbound 목적지 정책과 DNS 경계,
-  콜백의 일회성 state/세션/연결 바인딩, encrypted credential 저장,
-  durable refresh claim, 동의/작업 위임, 사용자 연결/해제 UI 및 서비스 E2E.
+- [x] 관리자 provider 저장/API, 일회성 state/세션/연결 callback 바인딩,
+  encrypted OAuth/API-key credential 저장, reconnect/local revoke, owner use grant와
+  제한된 credential delivery가 production route에 연결되어 있다.
+- [ ] consumer-facing automatic refresh coordinator, provider-side remote revoke,
+  provider revision migration, stable consumer SDK/reference adapter와 실제 외부 SaaS
+  계정에 대한 제품 qualification은 남아 있다.
 
-위 transport의 주소 분류는 완료했지만 관리자/컬렉션별 허용 공급자·작업과
-연결하는 인가 계층은 아직 없다. Keep-alive는 per-request IP 검증 구현에서
+위 transport의 주소 분류와 관리자/컬렉션별 provider binding, 등록된 API-key
+operation/use-grant 인가 계층은 현재 연결되어 있다. Keep-alive는 per-request IP 검증 구현에서
 소켓 pool을 남기지 않도록 비활성화했다. 서비스 수준 성능 증거가 있을 때
 정책을 보존하는 연결 pool을 검토하며 현재 proxy/임의 URL 호출 API는 없다.
 
@@ -158,13 +170,15 @@ GitHub는 고정 endpoint와 `read:user offline_access` preset을 사용하며 g
 OAuth2 필드를 함께 지정하면 거절한다. `kind: oauth2`는 `auth_endpoint`,
 `token_endpoint`, `scopes`, 명시적 `auth_style: header|params`가 추가로 필요하다.
 표준 엔진은 기존 `golang.org/x/oauth2`를 사용한다. OIDC discovery는 이 설정
-로더의 구현 범위가 아니다. **예시 callback 경로의 handler는 아직 구현하지 않았다.**
+로더의 구현 범위가 아니다. 이 파일 기반 provider 외에도 DB-backed provider와
+실제 `/auth/v1/saas/callback/{provider_id}` callback handler가 현재 구현되어 있다.
 
-`GET /auth/v1/saas/providers`는 full administrator browser session으로만
-설정된 `id`, `kind`, `callback_uri`, `scopes`를 조회한다. secret, 파일 경로,
-client ID와 token endpoint는 반환하지 않는다. API-key/Bearer와 cookie 혼합도
-거절한다. 운영 중 공급자 자체의 관리자 CRUD/화면과 사용자 동의 연결은
-후속 단계이며, 이 API만으로 실제 SaaS 연결을 생성하지 않는다.
+`GET /auth/v1/saas/providers`는 file/DB provider metadata를 합쳐 조회한다. 현재
+full administrator browser session과 별도 resource/scope를 가진 관리자 human
+Bearer 경로가 있으며, secret은 반환하지 않는다. DB provider에는 revision-guarded
+create/update/delete가 존재한다. 정확한 현재 필드와 권한은
+[external-credential-consumer-contract.md](external-credential-consumer-contract.md)의
+provider 등록 계약을 따른다.
 
 schema v68부터 컬렉션의 `provider_ids` 배열로 허용 공급자를 지정한다.
 관리자 HTTP 요청은 현재 설정된 공급자만 허용하고, 저장소는 중복 없는
@@ -428,12 +442,15 @@ Pod 교체 후 테스트 사용자 cleanup이 삭제된 primary forward를 사�
 - 원본 토큰 반출과 임의 HTTP 프록시는 첫 구현에 포함하지 않는다. 필요한
   경우 한 connector의 고정 HTTPS 읽기 작업으로 위임을 검증한다.
 
-## 현재 구현: 비밀이 없는 draft 연결
+## 메타데이터 계층: authcollection
 
 schema v64의 `auth_collection_definitions`, `auth_collection_connections`와
 `internal/authcollection`을 추가했다. 인증 방식은 현재 의도 표시값이며
-`oauth2`, `api_key`, `device_flow` 선택 자체로 외부 인증을 수행하지 않는다.
-실제 credential은 받거나 저장하지 않으며 모든 연결 상태는 `draft`다.
+`oauth2`, `api_key`, `device_flow` 선택 자체가 credential을 저장하는 것은 아니다.
+이 패키지는 계속 **비밀이 없는 metadata/ownership 계층**이다. 실제 API key와
+OAuth credential lifecycle은 별도 `internal/saas` 저장/HTTP 계층이 담당한다.
+따라서 authcollection row의 `state=draft`를 SaaS credential의 연결 상태로
+해석하면 안 된다.
 
 | 경로 | 권한과 동작 |
 |---|---|
@@ -452,7 +469,8 @@ schema v64의 `auth_collection_definitions`, `auth_collection_connections`와
 인증 방식/필드 변경과 삭제는 충돌로 거절한다. 삭제된 정의 ID는 재사용하지 않는다.
 
 관리자는 `/auth/v1/admin/collections`에서 정의를 만들고 수정·삭제하며,
-사용자는 `/account`의 **My connections**에서 자신의 draft를 관리한다.
+사용자는 `/account`의 **My connections**에서 자신의 metadata row를 관리한다.
+OAuth/API-key credential 상태와 연결/해제는 별도 SaaS API/UI가 이 row에 결합한다.
 비활성 정의는 생성/수정을 막고 기존 레코드 조회/삭제는 허용한다. 충돌 응답은
 입력값을 보존하고 재조회 안내를 표시하며 자동 덮어쓰기하지 않는다.
 선택지는 JSON 문자열 배열로 편집하여 공백과 줄바꿈을 보존한다.
@@ -484,5 +502,6 @@ viewport의 populated form을 캡처하고 가로 overflow도 검사한다. 실�
 exact-three runner는 별도 API chaos 실행에서 생성한 **동일 connection ID와
 revision/metadata**를 보존한 채 goauthy-0을 교체하고 살아 있는 Pod에서
 조회·수정·삭제한다. 그 뒤 primary forward를 다시 열고 UI/API를 재실행한다.
-단일 Kind host에서 수행하는 Pod 교체이며 물리 host 장애, 쿼럼 상실,
-아직 구현되지 않은 credential refresh 장애까지 검증한 것으로 계산하지 않는다.
+단일 Kind host에서 수행하는 Pod 교체이며 물리 host 장애나 쿼럼 상실을 이
+authcollection CRUD gate가 검증한 것으로 계산하지 않는다. Credential refresh와
+delivery는 별도 SaaS/use-grant 검증 범위를 따른다.
