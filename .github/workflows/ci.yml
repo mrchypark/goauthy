@@ -63,5 +63,6 @@ jobs:
           go-version-file: go.mod
 
       - name: test -race
-        run: go test -race -timeout=60m -p 3 ./...
+        run: go test -race -timeout=90m -p 3 ./...
+        # Known passing race suite (OAuth) takes ~56m; 60m timeout has too little headroom.
 
