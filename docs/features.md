@@ -1,5 +1,10 @@
 # Rauthy v0.36.2 feature baseline
 
+This file is the **Rauthy parity ledger**, not the product support matrix. For the current
+GoAuthy support boundary, use [capabilities.md](capabilities.md). Dated entries below are
+kept as implementation and qualification evidence and may describe intermediate states
+that were superseded by later source.
+
 This is the implementation ledger for the fixed upstream tag
 [`v0.36.2`](https://github.com/sebadob/rauthy/releases/tag/v0.36.2), commit
 `dd61ac3c84d6b238108dc8438b53043b5177a662` (published 2026-08-08).  It is
@@ -140,7 +145,9 @@ Historical gate results below apply only to their named profile, not all E2E.
   Full login package passes (80.554s); unsafe host/userinfo/wildcard rejection
   has focused unit coverage. See the dated entry in [STATUS.md](STATUS.md).
 
-User-requested product extension (2026-09-06), separate from Rauthy parity:
+User-requested product extension (2026-09-06), separate from Rauthy parity. The current
+support classification is maintained in [capabilities.md](capabilities.md); the dated text
+below records implementation history and should not be read as the current product state:
 [administrator-defined authentication collections and user-owned SaaS/agent connections](auth-collections.md).
 Draft-only metadata/ownership APIs and administrator/account management UI are
 implemented, with actual Chromium standalone/restart and exact-three/pod-replacement

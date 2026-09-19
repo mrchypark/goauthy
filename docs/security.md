@@ -63,9 +63,15 @@ GoAuthy는 **Argon2id v=19**를 사용합니다:
 | UpperCase | 1 | 최소 대문자 수 |
 | Digits | 1 | 최소 숫자 수 |
 | History | 3 | 패스워드 이력 |
-| ValidDays | 180 | 패스워드 유효 기간 |
+| ValidDays | 0 | production에서는 패스워드 자동 만료 비활성화 |
 | BlockCommonPasswords | true | 일반 패스워드 차단 |
 | MinEntropyBits | 60 | 최소 엔트로피 비트 |
+
+`credential.DefaultRules()` 자체에는 과거 호환을 위한 `ValidDays=180` 기본값이
+남아 있지만, 현재 production startup은 이를 `0`으로 고정하며
+`GOAUTHY_PASSWORD_VALID_DAYS`의 0이 아닌 값을 거절한다. 따라서 실제 서버의
+기본 동작은 기간 기반 패스워드 만료를 사용하지 않는다. 만료 정책을 다시 노출하려면
+reset/self-service lifecycle과 함께 별도 제품 기능으로 검증해야 한다.
 
 ### 일반 패스워드 차단
 

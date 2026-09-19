@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: goauthy-qual-config
+  namespace: ternal-auth
+  labels:
+    app.kubernetes.io/name: goauthy
+    app.kubernetes.io/part-of: goauthy-qual-0917
+data:
+  # Issuer URLs - overridden at runtime via port-forward
+  issuer-ha3: http://127.0.0.1:18091
+  issuer-s1: http://127.0.0.1:18092
+  # GCS object store - bucket from existing ternal IED config
+  gcs-bucket: GOAUTHY_QUAL_GCS_BUCKET
+  # Prefixes are generated per-run UUID by the harness script.
+  # The script patches this ConfigMap before apply.
+  gcs-prefix-ha3: GOAUTHY_QUAL_PREFIX_HA3
+  gcs-prefix-s1: GOAUTHY_QUAL_PREFIX_S1
+  # Bootstrap client - explicit, not relying on defaults
+  bootstrap-client-id-ha3: qual-ha3-goauthy
+  bootstrap-redirect-uri-ha3: http://127.0.0.1:18091/oidc/callback
+  bootstrap-client-id-s1: qual-s1-goauthy
+  bootstrap-redirect-uri-s1: http://127.0.0.1:18092/oidc/callback

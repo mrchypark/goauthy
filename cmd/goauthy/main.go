@@ -72,7 +72,13 @@ const (
 )
 
 func main() {
-	if err := run(); err != nil {
+	var err error
+	if len(os.Args) > 1 && os.Args[1] == "config" {
+		err = runConfigCommand(os.Args[2:], os.Getenv, os.Stdout)
+	} else {
+		err = run()
+	}
+	if err != nil {
 		slog.Error("goauthy stopped", "error", err)
 		os.Exit(1)
 	}
@@ -88,70 +94,27 @@ func run() (err error) {
 	if tracingShutdown != nil {
 		defer func() { _ = tracingShutdown(context.Background()) }()
 	}
-	issuer, err := oidc.NormalizeIssuer(env("GOAUTHY_ISSUER", "http://localhost:8080"))
+	appConfig, err := loadApplicationConfig(os.Getenv)
 	if err != nil {
 		return err
 	}
-	swaggerConfig, err := swaggerConfigFromEnv(os.Getenv)
-	if err != nil {
-		return err
-	}
-	tlsConfig, tlsReloader, err := tlsConfigFromEnv(os.Getenv)
-	if err != nil {
-		return err
-	}
-	if err := validateIssuerTLS(issuer, tlsReloader != nil); err != nil {
-		return err
-	}
-	favicon, err := faviconFromEnv(os.Getenv)
-	if err != nil {
-		return fmt.Errorf("configure favicon: %w", err)
-	}
-	cimdConfigured, err := cimdEnabled(os.Getenv)
-	if err != nil {
-		return err
-	}
-	cimdIgnoreUnknownAuthFlows, err := cimdIgnoreUnknownAuthFlowsFromEnv(os.Getenv)
-	if err != nil {
-		return err
-	}
-	cimdDangerAllowUnvalidatedResource, err := cimdDangerAllowUnvalidatedResourceFromEnv(os.Getenv)
-	if err != nil {
-		return err
-	}
-	recoveryEnabled, err := passwordRecoveryEnabled(os.Getenv)
-	if err != nil {
-		return err
-	}
-	openRegistration, passwordNewExpiry, err := openRegistrationFromEnv(os.Getenv, recoveryEnabled, issuer)
-	if err != nil {
-		return err
-	}
-	userValuesPolicy, err := userValuesPolicyFromEnv(os.Getenv)
-	if err != nil {
-		return err
-	}
-	openRegistration.UserValuesPolicy = userValuesPolicy
-	passkeyConfig, err := passkeyConfigFromEnv(os.Getenv)
-	if err != nil {
-		return err
-	}
-	forwardAuthHeaders, err := forwardAuthHeadersFromEnv(os.Getenv)
-	if err != nil {
-		return err
-	}
-	selfDeleteEnabled, err := selfDeleteEnabledFromEnv(os.Getenv)
-	if err != nil {
-		return err
-	}
-	webIDEnabled, err := webIDEnabledFromEnv(os.Getenv)
-	if err != nil {
-		return err
-	}
-	notificationConfig, err := notificationsFromEnv(os.Getenv)
-	if err != nil {
-		return fmt.Errorf("configure event notifications: %w", err)
-	}
+	issuer := appConfig.Issuer
+	swaggerConfig := appConfig.Swagger
+	tlsConfig := appConfig.TLS
+	tlsReloader := appConfig.TLSReloader
+	favicon := appConfig.Favicon
+	cimdConfigured := appConfig.CIMDEnabled
+	cimdIgnoreUnknownAuthFlows := appConfig.CIMDIgnoreUnknownAuthFlows
+	cimdDangerAllowUnvalidatedResource := appConfig.CIMDDangerUnvalidated
+	recoveryEnabled := appConfig.RecoveryEnabled
+	openRegistration := appConfig.OpenRegistration
+	passwordNewExpiry := appConfig.PasswordNewExpiry
+	userValuesPolicy := appConfig.UserValuesPolicy
+	passkeyConfig := appConfig.Passkey
+	forwardAuthHeaders := appConfig.ForwardAuthHeaders
+	selfDeleteEnabled := appConfig.SelfDeleteEnabled
+	webIDEnabled := appConfig.WebIDEnabled
+	notificationConfig := appConfig.Notifications
 	masterKeyDir := env("GOAUTHY_MASTER_KEY_DIR", "./secrets/master-keys")
 	keyring, err := oidc.LoadKeyring(
 		masterKeyDir,
@@ -165,10 +128,7 @@ func run() (err error) {
 		return err
 	}
 
-	rhizaConfig, err := storage.RhizaConfigFromEnv(os.Getenv)
-	if err != nil {
-		return fmt.Errorf("configure rhiza: %w", err)
-	}
+	rhizaConfig := appConfig.Rhiza
 	backupConfig, err := scheduledBackupFromEnv(os.Getenv, rhizaConfig)
 	if err != nil {
 		return err

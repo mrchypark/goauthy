@@ -1,10 +1,16 @@
 # goauthy
 
+[**Current product capabilities:**](docs/capabilities.md) use this matrix to decide which
+features are Qualified, Preview, Experimental, or Unsupported. The dated execution ledger
+remains in [docs/status.md](docs/status.md), while Rauthy parity is tracked separately.
+
 [**Qualification (2026-09-17):**](docs/status.md) All six audit gates PASS — normal, race, vet, Kind pre/post pod replacement, schema v97→v102 upgrade, and real MinIO v98–102 fresh-dir recovery. Full pinned Rauthy goal remains incomplete; see [docs/status.md](docs/status.md) for current ledger.
 
 [프로젝트 목표·진행 현황·남은 작업](docs/status.md)
 
-GoAuthy is a Go port targeting the feature behavior of Rauthy `v0.36.2`, with
+GoAuthy uses Rauthy `v0.36.2` as a fixed behavior baseline while also providing
+GoAuthy-specific external-connection and credential-delegation capabilities. Rauthy parity
+is a compatibility ledger rather than the sole product roadmap. GoAuthy uses
 official Rhiza `v0.12.3` (commit `97a9d18aadc66d3b5390f6fa64de2d65dd9f0d48`) as its only database. Rhiza
 `v0.9.0` is retracted because its published proxy-cached commit was wrong.
 v0.10.0 remains the historical baseline for earlier recorded runs.
@@ -607,6 +613,26 @@ curl -i http://localhost:8080/oidc/jwks.json
 curl -u goauthy-dev:$(cat secrets/bootstrap-client) -d grant_type=client_credentials \
   -d scope=goauthy.read http://localhost:8080/oidc/token
 ```
+
+The startup configuration that has been moved into the typed application-config
+boundary can be validated without opening Rhiza or starting listeners:
+
+```bash
+GOAUTHY_RHIZA_PROFILE=dev \
+GOAUTHY_CLUSTER_ID=goauthy-dev \
+GOAUTHY_NODE_ID=goauthy-dev-0 \
+GOAUTHY_DATA_DIR=.goauthy-data \
+go run ./cmd/goauthy config check
+
+# Prints a secret-free summary of the same centralized configuration slice.
+go run ./cmd/goauthy config dump-effective
+```
+
+`config dump-effective` reports only non-secret values and boolean presence for
+static object-store credentials. This command is intentionally a preflight for
+the configuration already centralized in `applicationConfig`; settings that have
+not yet been moved into that boundary continue to be validated during normal
+startup.
 
 `goauthy-password` reads one password line from standard input and prints only
 its current-policy Argon2id PHC value. Mount that value as the bootstrap PHC
