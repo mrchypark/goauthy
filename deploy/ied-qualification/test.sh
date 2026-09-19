@@ -19,6 +19,57 @@ for manifest in "$root"/deploy/ied-qualification/base/*.yaml; do
 	cat "$manifest"
 done >"$render"
 
+# Manifests must survive strict duplicate-key parsing. A concatenated second
+# body is a duplicate-key error that lenient parsers silently accept (last value
+# wins) and strict parsers reject, so the rendered resources would not be the
+# reviewed ones. Fall back to a document/entry count when PyYAML is missing.
+if python3 -c 'import yaml' >/dev/null 2>&1; then
+	python3 - "$root"/deploy/ied-qualification/base/*.yaml <<'PY' || exit 1
+import sys
+
+import yaml
+
+
+class Strict(yaml.SafeLoader):
+	pass
+
+
+def construct_mapping(loader, node, deep=False):
+	seen = set()
+	for key_node, _ in node.value:
+		key = loader.construct_object(key_node, deep=deep)
+		if key in seen:
+			raise yaml.constructor.ConstructorError(
+				None, None, "duplicate key: %r" % (key,), key_node.start_mark
+			)
+		seen.add(key)
+	return yaml.SafeLoader.construct_mapping(loader, node, deep)
+
+
+Strict.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_mapping)
+
+for path in sys.argv[1:]:
+	with open(path, encoding="utf-8") as handle:
+		documents = [doc for doc in yaml.load_all(handle, Loader=Strict) if doc is not None]
+	if not documents:
+		print("%s has no YAML documents" % path, file=sys.stderr)
+		sys.exit(1)
+	for document in documents:
+		if not isinstance(document, dict) or "apiVersion" not in document or "kind" not in document:
+			print("%s contains a document without apiVersion/kind" % path, file=sys.stderr)
+			sys.exit(1)
+PY
+else
+	for manifest in "$root"/deploy/ied-qualification/base/*.yaml; do
+		documents=$(grep -c '^---$' "$manifest" || true)
+		apis=$(grep -c '^apiVersion:' "$manifest" || true)
+		[ "$((documents + 1))" -eq "$apis" ] || {
+			echo "$manifest declares $apis top-level apiVersion entries for $((documents + 1)) documents" >&2
+			exit 1
+		}
+	done
+fi
+
 # --- HA3 checks ---
 ha3='select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-0917")'
 
@@ -72,6 +123,25 @@ test "$(yq -r "$s1 | .spec.template.spec.serviceAccountName" "$render")" = terna
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-s1-0917") | .spec.template.spec.containers[0].env[] | select(.name == "GOAUTHY_RHIZA_PROFILE") | .value' "$render")" = standalone
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-s1-0917") | .spec.template.spec.containers[0].env[] | select(.name == "GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER") | .value' "$render")" = gcs
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-s1-0917") | .metadata.labels."app.kubernetes.io/part-of"' "$render")" = goauthy-qual-s1-0917
+
+# Both profiles must pin the same digest-resolved image, and standalone1 must
+# wire the bootstrap administrator password file it declares.
+ha3_image=$(yq -r "$ha3 | .spec.template.spec.containers[0].image" "$render")
+s1_image=$(yq -r "$s1 | .spec.template.spec.containers[0].image" "$render")
+case "$s1_image" in
+	*@sha256:*) ;;
+	*) echo "qualification image must be digest-pinned: $s1_image" >&2; exit 1 ;;
+esac
+[ "$ha3_image" = "$s1_image" ] || {
+	echo "qualification profiles must pin the same image: ha3=$ha3_image s1=$s1_image" >&2
+	exit 1
+}
+test "$(yq -r "$s1 | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE\") | .value" "$render")" = /run/secrets/bootstrap-user-password-phc
+test "$(yq -r "$s1 | .spec.template.spec.volumes[] | select(.name == \"secrets\") | .secret.secretName" "$render")" = goauthy-qual-s1-secrets
+test "$(yq -r "$s1 | .spec.template.spec.volumes[] | select(.name == \"secrets\") | .secret.items[] | select(.key == \"bootstrap-user-password-phc\") | .key" "$render")" = bootstrap-user-password-phc
+if ! yq -e "$s1 | .spec.template.spec.containers[0].volumeMounts[] | select(.mountPath == \"/run/secrets/bootstrap-user-password-phc\")" "$render" >/dev/null; then
+	echo "standalone1 must mount the bootstrap administrator password file" >&2; exit 1
+fi
 
 # No peer ports on standalone1
 if yq -e 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-s1-0917") | .spec.template.spec.containers[0].ports[] | select(.name == "peer")' "$render" >/dev/null 2>&1; then
