@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,7 +28,11 @@ var (
 	providerIDPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 )
 
-const maxList = 1000 // bounded result; callers receive ErrConflict when exceeded.
+// maxList bounds every list result; callers receive ErrConflict when exceeded.
+// Create methods enforce the same bound so a list can never be defeated by
+// accepted state: creation is refused once the table holds maxList rows, and a
+// bounded list of exactly maxList rows always succeeds.
+const maxList = 1000
 
 type Field struct {
 	Name      string   `json:"name"`
@@ -107,7 +112,10 @@ func (s *Store) CreateDefinition(ctx context.Context, in DefinitionInput, author
 		return Definition{}, ErrInvalid
 	}
 	q := append([]any{in.ID, in.Name, in.AuthMethod, boolInt(in.Enabled), int64(1), gen, string(fields), string(providers), in.ID}, a...)
-	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "auth-collection-definition-create-" + gen, SQL: `INSERT INTO auth_collection_definitions(id,name,auth_method,enabled,revision,generation,fields_json,providers_json) SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM auth_collection_definitions WHERE id=?) AND (` + g + `)`, Args: q})
+	// The capacity predicate is evaluated inside the writing statement, so
+	// concurrent creates cannot push the table past maxList. Soft-deleted
+	// tombstones count toward the bound because they still occupy the table.
+	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "auth-collection-definition-create-" + gen, SQL: `INSERT INTO auth_collection_definitions(id,name,auth_method,enabled,revision,generation,fields_json,providers_json) SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM auth_collection_definitions WHERE id=?) AND (SELECT COUNT(*) FROM auth_collection_definitions) < ` + strconv.Itoa(maxList) + ` AND (` + g + `)`, Args: q})
 	if err != nil {
 		return Definition{}, err
 	}
@@ -227,8 +235,10 @@ func (s *Store) CreateConnection(ctx context.Context, owner, collectionID string
 	if id == "" || gen == "" {
 		return Connection{}, ErrInvalid
 	}
-	q := append([]any{id, collectionID, owner, definitionRevision, string(metadata), gen, collectionID, definitionRevision, owner, s.now().UnixMilli()}, a...)
-	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "auth-collection-connection-create-" + gen, SQL: `INSERT INTO auth_collection_connections(id,collection_id,owner_subject,state,revision,definition_revision,metadata_json,generation) SELECT ?,?,?, 'draft',1,?,?,? WHERE EXISTS(SELECT 1 FROM auth_collection_definitions d WHERE d.id=? AND d.enabled=1 AND d.revision=? ) AND EXISTS(SELECT 1 FROM identity_users u WHERE u.subject=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?)) AND (` + g + `)`, Args: q})
+	q := append([]any{id, collectionID, owner, definitionRevision, string(metadata), gen, collectionID, definitionRevision, owner, s.now().UnixMilli(), owner, collectionID}, a...)
+	// Connections are hard-deleted, so this per-owner-per-collection row count
+	// is exactly the live count the matching ListConnections read returns.
+	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "auth-collection-connection-create-" + gen, SQL: `INSERT INTO auth_collection_connections(id,collection_id,owner_subject,state,revision,definition_revision,metadata_json,generation) SELECT ?,?,?, 'draft',1,?,?,? WHERE EXISTS(SELECT 1 FROM auth_collection_definitions d WHERE d.id=? AND d.enabled=1 AND d.revision=? ) AND EXISTS(SELECT 1 FROM identity_users u WHERE u.subject=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?)) AND (SELECT COUNT(*) FROM auth_collection_connections c WHERE c.owner_subject=? AND c.collection_id=?) < ` + strconv.Itoa(maxList) + ` AND (` + g + `)`, Args: q})
 	if err != nil {
 		return Connection{}, err
 	}

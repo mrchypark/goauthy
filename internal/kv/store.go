@@ -449,18 +449,34 @@ func (s *Store) valueRows(ctx context.Context, a Access, limit int, search strin
 	// Literal substring matching avoids treating key punctuation as SQL patterns.
 	return s.query(ctx, "SELECT v.key,v.encrypted,v.value,n.identity FROM kv_values v JOIN kv_namespaces n ON n.name=v.namespace WHERE v.namespace=? AND instr(v.key,?)>0 AND "+guard+" ORDER BY v.key LIMIT ?", args...)
 }
+func (s *Store) keyRows(ctx context.Context, a Access, limit int, search string) ([][]any, error) {
+	limit, err := listLimit(limit, search)
+	if err != nil || !valid(a.Namespace) {
+		return nil, ErrBadRequest
+	}
+	guard, args := accessGuard(a)
+	args = append([]any{a.Namespace, search}, args...)
+	args = append(args, int64(limit))
+	// Key names alone, like valueRows with the same authority predicate: listing
+	// names must not read or decrypt payloads, which would spend the storage
+	// result budget on data the caller did not ask for.
+	return s.query(ctx, "SELECT v.key FROM kv_values v WHERE v.namespace=? AND instr(v.key,?)>0 AND "+guard+" ORDER BY v.key LIMIT ?", args...)
+}
 func (s *Store) Keys(ctx context.Context, a Access, limit int, search string) ([]string, error) {
-	rows, err := s.valueRows(ctx, a, limit, search)
+	rows, err := s.keyRows(ctx, a, limit, search)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]string, 0, len(rows))
 	for _, row := range rows {
-		v, err := s.decodeValue(row)
-		if err != nil {
-			return nil, err
+		if len(row) != 1 {
+			return nil, ErrCorrupt
 		}
-		out = append(out, v.Key)
+		key, ok := row[0].(string)
+		if !ok || !valid(key) || strings.ContainsRune(key, '\x00') {
+			return nil, ErrCorrupt
+		}
+		out = append(out, key)
 	}
 	return out, nil
 }

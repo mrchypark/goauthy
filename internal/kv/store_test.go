@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -164,5 +165,41 @@ func TestStoreValidationAndCiphertextIsolation(t *testing.T) {
 	}
 	if _, err := s.Get(ctx, Access{Namespace: "xx"}, "record"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Keys must enumerate names without reading or decrypting payloads. Loading
+// the value column spends the engine's aggregate result budget on data the
+// caller did not ask for, and an unreadable payload must not hide its key.
+func TestKeysListsNamesWithoutReadingValues(t *testing.T) {
+	s, _ := newHTTPStore(t)
+	ctx := context.Background()
+	a := Access{Namespace: "default"}
+	// A row that claims encryption but holds no valid envelope is individually
+	// valid state; only payload readers must reject it.
+	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "kv-malformed-value", SQL: `INSERT INTO kv_values(namespace,key,encrypted,value) VALUES(?,?,1,?)`, Args: []any{"default", "000-malformed", []byte(`not-an-envelope`)}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Keys(ctx, a, 0, ""); err != nil || len(got) != 1 || got[0] != "000-malformed" {
+		t.Fatalf("keys with unreadable neighbor=%v err=%v", got, err)
+	}
+	if _, err := s.Values(ctx, a, 0, ""); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("value read with malformed row=%v", err)
+	}
+	// Individually valid near-limit values whose aggregate far exceeds the
+	// storage result budget must still enumerate by name.
+	payload := json.RawMessage(fmt.Sprintf("%q", strings.Repeat("x", 60<<10)))
+	for i := 0; i < 500; i++ {
+		if err := s.Set(ctx, a, Value{"zz-" + strconv.Itoa(i), true, payload}); err != nil {
+			t.Fatalf("fill %d: %v", i, err)
+		}
+	}
+	names, err := s.Keys(ctx, a, 0, "")
+	if err != nil || len(names) != 501 {
+		t.Fatalf("keys beyond budget=%d err=%v", len(names), err)
+	}
+	// Keys are ordered lexicographically, so "zz-99" sorts after "zz-499".
+	if names[0] != "000-malformed" || names[500] != "zz-99" {
+		t.Fatalf("key order=%q..%q", names[0], names[500])
 	}
 }
