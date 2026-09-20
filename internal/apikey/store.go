@@ -8,7 +8,6 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -66,6 +65,7 @@ type Store struct {
 	random          func([]byte) (int, error)
 	beforeMutation  func()
 	beforeAuditRead func()
+	beforeSubmit    func(rhiza.ExecuteRequest)
 	OnAuthFailure   func(keyName, ip string)
 }
 
@@ -240,7 +240,17 @@ func (s *Store) Update(ctx context.Context, p *Principal, name string, req Reque
 	// The authorization read above is followed by this single replicated
 	// transaction; no revoke or competing policy change can interleave its
 	// delete-and-replace sequence.
-	requestID := id("update", name, expectedDigest, fmt.Sprint(req.Exp), fmt.Sprint(req.Access))
+	//
+	// The request ID identifies this prepared mutation, not the configuration
+	// it applies: reverting to an earlier configuration is a new operation and
+	// must not collide with the retained receipt of the update that first set
+	// it. It stays stable across retries of this one mutation because it is
+	// generated once here and storage.Execute replays it verbatim.
+	nonce := make([]byte, 16)
+	if _, err := s.random(nonce); err != nil {
+		return Key{}, err
+	}
+	requestID := id("update", name, expectedDigest, base64.RawURLEncoding.EncodeToString(nonce))
 	stmts := []rhiza.SQLStatement{{SQL: `UPDATE api_keys SET expires_at_unix_ms=? WHERE name=? AND secret_digest=? AND EXISTS (SELECT 1 FROM api_key_mutation_guards WHERE request_id=?)`, Args: []any{millis(req.Exp), name, expectedDigest, requestID}}, {SQL: `DELETE FROM api_key_access WHERE key_name=? AND EXISTS (SELECT 1 FROM api_keys WHERE name=? AND secret_digest=?) AND EXISTS (SELECT 1 FROM api_key_mutation_guards WHERE request_id=?)`, Args: []any{name, name, expectedDigest, requestID}}}
 	for _, a := range normalize(req.Access) {
 		for _, right := range a.AccessRights {
@@ -443,7 +453,11 @@ func (s *Store) runMutation(ctx context.Context, p *Principal, group string, rig
 	guard := s.guardMutation(p, group, right, requestID, grants)
 	statements := append([]rhiza.SQLStatement{guard}, targets...)
 	statements = append(statements, rhiza.SQLStatement{SQL: `DELETE FROM api_key_mutation_guards WHERE request_id=?`, Args: []any{requestID}})
-	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: requestID, Statements: statements})
+	request := rhiza.ExecuteRequest{RequestID: requestID, Statements: statements}
+	if s.beforeSubmit != nil {
+		s.beforeSubmit(request)
+	}
+	response, err := storage.Execute(ctx, s.db, request)
 	if err != nil {
 		return response, false, err
 	}
