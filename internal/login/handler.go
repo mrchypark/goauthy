@@ -45,7 +45,7 @@ const (
 	failureWriteGrace   = 5 * time.Second
 )
 
-var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p>{{.ContinueTo}} {{.ClientID}}</p><form method="post" action="../auth/login"><input type="hidden" name="interaction" value="{{.Interaction}}"><label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label>{{if .CaptchaSiteKey}}<div class="captcha-container" data-sitekey="{{.CaptchaSiteKey}}"></div><input type="hidden" name="captcha_response" id="captcha_response">{{end}}<button type="submit">{{.SignIn}}</button>{{if .PasskeyLogin}}<button type="button" id="passkey-btn">{{.PasskeyButton}}</button><div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div style="margin:1.5em 0;text-align:center;border-top:1px solid #ccc;padding-top:1em"><span style="background:#fff;padding:0 0.5em;color:#666;font-size:0.9em">or</span></div>{{range .Providers}}<a href="/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" style="display:block;margin:0.5em 0;padding:0.75em;border:1px solid #ccc;border-radius:4px;text-align:center;text-decoration:none;color:#333">{{.Name}}</a>{{end}}{{end}}</main>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
+var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p>{{.ContinueTo}} {{.ClientID}}</p><form method="post" action="../auth/login"><input type="hidden" name="interaction" value="{{.Interaction}}"><label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label><button type="submit">{{.SignIn}}</button>{{if .PasskeyLogin}}<button type="button" id="passkey-btn">{{.PasskeyButton}}</button><div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div style="margin:1.5em 0;text-align:center;border-top:1px solid #ccc;padding-top:1em"><span style="background:#fff;padding:0 0.5em;color:#666;font-size:0.9em">or</span></div>{{range .Providers}}<a href="/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" style="display:block;margin:0.5em 0;padding:0.75em;border:1px solid #ccc;border-radius:4px;text-align:center;text-decoration:none;color:#333">{{.Name}}</a>{{end}}{{end}}</main>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
 (function(){
   var btn=document.getElementById('passkey-btn');
   var err=document.getElementById('passkey-error');
@@ -134,7 +134,6 @@ type Handler struct {
 	fedcmForceMFA     bool
 	upstreamProviders func(ctx context.Context) ([]UpstreamProvider, error)
 	lockdown          *loginpolicy.LockdownStore
-	captchaSiteKey    string
 	userValuesPolicy  *identity.UserValuesPolicy
 }
 
@@ -187,9 +186,11 @@ func (h *Handler) SetLockdownStore(store *loginpolicy.LockdownStore) {
 	h.lockdown = store
 }
 
-func (h *Handler) SetCaptchaSiteKey(siteKey string) {
-	h.captchaSiteKey = siteKey
-}
+// SetCaptchaSiteKey is retained for the deployment wiring. The login page no
+// longer renders a CAPTCHA: password login has no challenge verification
+// contract, so a rendered widget could only produce a form the strict login
+// parser rejects. Open registration keeps enforcing CAPTCHA.
+func (h *Handler) SetCaptchaSiteKey(string) {}
 
 // SetOTPHandler attaches the OTP handler for email-based 2FA.
 func (h *Handler) SetOTPHandler(handler *recovery.OTPHandler) {
@@ -394,7 +395,7 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	pageData := loginPageData{ClientID: request.ClientID, Interaction: interaction.Token, ThemeURL: themeURL, CaptchaSiteKey: h.captchaSiteKey, Providers: providers, Messages: messages}
+	pageData := loginPageData{ClientID: request.ClientID, Interaction: interaction.Token, ThemeURL: themeURL, Providers: providers, Messages: messages}
 	if h.passkeys != nil {
 		nonce, err := generateNonce()
 		if err != nil {
@@ -594,7 +595,6 @@ func (h *Handler) fedCMGet(w http.ResponseWriter, r *http.Request) {
 
 type loginPageData struct {
 	ClientID, Interaction, ThemeURL string
-	CaptchaSiteKey                  string
 	Providers                       []UpstreamProvider
 	PasskeyLogin                    bool
 	PasskeyNonce                    string
@@ -842,6 +842,13 @@ checkRateLimit:
 				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 				return identity.Authentication{}, "", time.Time{}, false
 			}
+			// Account-level accounting is part of the failure outcome, so it is
+			// persisted before the punitive delay and before any early return.
+			// A caller that disconnects while the delay runs must not drop it.
+			if _, _, accountErr := h.policy.RecordAccountFailure(r.Context(), accountHash, peerIP, h.now().UTC()); accountErr != nil {
+				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+				return identity.Authentication{}, "", time.Time{}, false
+			}
 			if !status.BlockedUntil.IsZero() {
 				writeBlocked(w, h.now, status.BlockedUntil)
 				return identity.Authentication{}, "", time.Time{}, false
@@ -856,9 +863,6 @@ checkRateLimit:
 			if err := h.wait(r.Context(), delay); err != nil {
 				return identity.Authentication{}, "", time.Time{}, false
 			}
-		}
-		if h.policy != nil {
-			h.policy.RecordAccountFailure(r.Context(), accountHash, peerIP, h.now().UTC())
 		}
 		http.Error(w, "Invalid user credentials", http.StatusUnauthorized)
 		return identity.Authentication{}, "", time.Time{}, false

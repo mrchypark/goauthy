@@ -265,3 +265,70 @@ func TestCheckAccountLockRejectsInvalidInput(t *testing.T) {
 		t.Fatalf("err=%v want=%v", err, ErrInvalid)
 	}
 }
+
+func TestRecordAccountFailureCountsReturningSourcesInLaterWindows(t *testing.T) {
+	db := testDB(t)
+	store := NewStore(db)
+	ctx := context.Background()
+	now := time.UnixMilli(1_700_000_000_000).UTC()
+	account := AccountStuffingDigest("returning-sources")
+	sources := []string{"192.0.2.21", "192.0.2.22", "192.0.2.23", "192.0.2.24"}
+
+	// Four distinct sources in the first window: below the five-source
+	// threshold, and a repeated source is not counted twice.
+	for i, ip := range sources {
+		status, locked, err := store.RecordAccountFailure(ctx, account, ip, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if locked {
+			t.Fatalf("locked after %d sources in the first window", i+1)
+		}
+		if status.DistinctIPs != i+1 {
+			t.Fatalf("first window DistinctIPs=%d want=%d", status.DistinctIPs, i+1)
+		}
+	}
+	if _, locked, err := store.RecordAccountFailure(ctx, account, sources[0], now); err != nil || locked {
+		t.Fatalf("repeated source locked=%v err=%v", locked, err)
+	}
+
+	// The same four sources returning in the next window must still count.
+	next := now.Add(StuffingWindow)
+	for i, ip := range sources {
+		status, locked, err := store.RecordAccountFailure(ctx, account, ip, next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if locked {
+			t.Fatalf("locked after %d returning sources", i+1)
+		}
+		if status.DistinctIPs != i+1 {
+			t.Fatalf("second window DistinctIPs=%d want=%d", status.DistinctIPs, i+1)
+		}
+	}
+
+	// A delayed observation from the earlier window stays attributed to that
+	// window and cannot inflate the current window's distinct-source count.
+	delayed, locked, err := store.RecordAccountFailure(ctx, account, sources[0], now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !delayed.WindowStart.Before(next) {
+		t.Fatalf("delayed observation window start=%v want a window before %v", delayed.WindowStart, next)
+	}
+	if delayed.DistinctIPs != len(sources) {
+		t.Fatalf("delayed observation DistinctIPs=%d want=%d", delayed.DistinctIPs, len(sources))
+	}
+	if locked {
+		t.Fatal("delayed observation locked the account")
+	}
+
+	// A fifth source in the current window reaches the configured threshold.
+	status, locked, err := store.RecordAccountFailure(ctx, account, "192.0.2.25", next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !locked || status.DistinctIPs != StuffingThreshold {
+		t.Fatalf("fifth source locked=%v DistinctIPs=%d want=%d", locked, status.DistinctIPs, StuffingThreshold)
+	}
+}
