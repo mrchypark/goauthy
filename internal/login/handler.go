@@ -752,7 +752,11 @@ func originPort(u *url.URL) string {
 func (h *Handler) authenticatePassword(w http.ResponseWriter, r *http.Request, username, password string) (identity.Authentication, string, time.Time, bool) {
 	if h.lockdown != nil {
 		locked, reason, until, lockdownErr := h.lockdown.IsLockedDown(r.Context())
-		if lockdownErr == nil && locked {
+		if lockdownErr != nil {
+			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+			return identity.Authentication{}, "", time.Time{}, false
+		}
+		if locked {
 			isAdmin, adminErr := h.lockdown.IsAdminByUsername(r.Context(), username)
 			if adminErr == nil && isAdmin {
 				goto checkRateLimit
@@ -801,7 +805,12 @@ checkRateLimit:
 	}
 	accountHash := loginpolicy.AccountStuffingDigest(username)
 	if h.policy != nil {
-		if locked, remaining, lockErr := h.policy.CheckAccountLock(r.Context(), accountHash, h.now().UTC()); lockErr == nil && locked {
+		locked, remaining, lockErr := h.policy.CheckAccountLock(r.Context(), accountHash, h.now().UTC())
+		if lockErr != nil {
+			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+			return identity.Authentication{}, "", time.Time{}, false
+		}
+		if locked {
 			w.Header().Set("Content-Type", "application/json")
 			seconds := int(remaining.Seconds())
 			if seconds < 1 {
@@ -1022,6 +1031,20 @@ func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.
 	if _, err := h.identity.UserBySubject(r.Context(), subject); err != nil {
 		http.Error(w, "Invalid login request", http.StatusUnauthorized)
 		return
+	}
+	if h.lockdown != nil {
+		locked, _, _, lockdownErr := h.lockdown.IsLockedDown(r.Context())
+		if lockdownErr != nil {
+			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+			return
+		}
+		if locked {
+			isAdmin, adminErr := h.lockdown.IsAdmin(r.Context(), subject)
+			if adminErr != nil || !isAdmin {
+				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+				return
+			}
+		}
 	}
 	if onConsumed != nil {
 		if err := onConsumed(); err != nil {
