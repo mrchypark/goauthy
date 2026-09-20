@@ -114,6 +114,11 @@ func TestRunConfigCommandRejectsInvalidRuntimeConfiguration(t *testing.T) {
 	if err := os.WriteFile(phcFile, []byte(phc+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	fedcmFile := writeTestFile(t, credentialDir, "fedcm.json", `{"client_origins":{"rp-client":"https://rp.example.test"},"login_url":"/auth/login"}`)
+	passkeyKeyFile := filepath.Join(credentialDir, "passkey-key")
+	if err := os.WriteFile(passkeyKeyFile, bytes.Repeat([]byte{7}, 32), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	for _, test := range []struct {
 		name    string
 		env     map[string]string
@@ -145,6 +150,14 @@ func TestRunConfigCommandRejectsInvalidRuntimeConfiguration(t *testing.T) {
 		{name: "bootstrap credential structure", env: map[string]string{"GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE": writeTestFile(t, credentialDir, "malformed.phc", "$argon2id$v=19$m=8192")}, wantErr: "bootstrap user password credential"},
 		{name: "recovery without reset key", env: map[string]string{"GOAUTHY_PASSWORD_RECOVERY_ENABLED": "true"}, wantErr: "GOAUTHY_PASSWORD_RESET_KEY_FILE"},
 		{name: "recovery without bootstrap email", env: map[string]string{"GOAUTHY_PASSWORD_RECOVERY_ENABLED": "true", "GOAUTHY_PASSWORD_RESET_KEY_FILE": resetKeyFile, "GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE": phcFile}, wantErr: "GOAUTHY_BOOTSTRAP_USER_EMAIL"},
+		// GA66-CONFIG-002: conditions startup only rejected after Rhiza was
+		// opened and bootstrap mutations had committed.
+		{name: "backchannel endpoint", env: map[string]string{"GOAUTHY_BOOTSTRAP_BACKCHANNEL_LOGOUT_URI": "not-a-url"}, wantErr: "invalid bootstrap back-channel logout endpoint"},
+		{name: "backchannel endpoint without http exception", env: map[string]string{"GOAUTHY_BOOTSTRAP_BACKCHANNEL_LOGOUT_URI": "http://logout.example.test/hook"}, wantErr: "invalid bootstrap back-channel logout endpoint"},
+		{name: "fedcm with forced mfa", env: map[string]string{"GOAUTHY_FEDCM_CONFIG_FILE": fedcmFile, "GOAUTHY_BOOTSTRAP_FORCE_MFA": "true", "GOAUTHY_PASSKEY_RP_ID": "id.example.test", "GOAUTHY_PASSKEY_ORIGINS": "https://id.example.test", "GOAUTHY_PASSKEY_KEY_FILE": passkeyKeyFile}, wantErr: "FedCM cannot be enabled while bootstrap forced-MFA is active"},
+		{name: "generated secrets without api key input", env: map[string]string{"GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_FILE": filepath.Join(credentialDir, "generated-secrets.json"), "GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_TTL_SECONDS": "900"}, wantErr: "generated bootstrap requires API-key bootstrap input"},
+		{name: "bootstrap redirect uri", env: map[string]string{"GOAUTHY_BOOTSTRAP_REDIRECT_URI": "not-a-url"}, wantErr: "invalid bootstrap OAuth redirect URI"},
+		{name: "bootstrap redirect uri without https", env: map[string]string{"GOAUTHY_BOOTSTRAP_REDIRECT_URI": "http://id.example.test/callback"}, wantErr: "invalid bootstrap OAuth redirect URI"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			env := map[string]string{"GOAUTHY_DATA_DIR": dataDir}

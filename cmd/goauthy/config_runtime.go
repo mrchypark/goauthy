@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -22,6 +24,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/goauthy/internal/tlsconfig"
 	"github.com/mrchypark/rhiza"
+	"github.com/ory/fosite"
 )
 
 type applicationConfig struct {
@@ -128,8 +131,14 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 	if _, err := ipBlacklistEnabled(getenv); err != nil {
 		return err
 	}
-	if _, err := generatedBootstrapConfigFromEnv(getenv); err != nil {
+	generatedBootstrap, err := generatedBootstrapConfigFromEnv(getenv)
+	if err != nil {
 		return err
+	}
+	// GA66-CONFIG-002: bootstrapAPIKeys rejects a generated-secret export with
+	// no API-key bootstrap input after Rhiza is open and mutations have committed.
+	if generatedBootstrap.artifact != "" && strings.TrimSpace(getenv("GOAUTHY_API_KEY_BOOTSTRAP_FILE")) == "" {
+		return errors.New("generated bootstrap requires API-key bootstrap input")
 	}
 	registrationToken, err := dcrRegistrationToken(getenv)
 	if err != nil {
@@ -271,6 +280,11 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 		if err := validateFedCMLandingPath(fedcmConfig.LoginURL); err != nil {
 			return err
 		}
+		// GA66-CONFIG-002: the FedCM runtime rejects this combination after
+		// Rhiza is open and bootstrap mutations have committed.
+		if bootstrapForceMFAValue {
+			return errors.New("FedCM cannot be enabled while bootstrap forced-MFA is active without a passkey landing")
+		}
 	}
 
 	if _, err := browserSessionIdleTimeout(getenv); err != nil {
@@ -288,9 +302,16 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 	if _, err := bootstrapPostLogoutRedirectURIs(getenv); err != nil {
 		return err
 	}
-	backchannelURI, _, _, _, err := backchannelSettings(getenv)
+	backchannelURI, allowPrivateBackchannel, allowHTTPBackchannel, _, err := backchannelSettings(getenv)
 	if err != nil {
 		return err
+	}
+	// GA66-CONFIG-002: NewServerWithOIDC applies the same endpoint validator
+	// after Rhiza is open and bootstrap mutations have committed.
+	if backchannelURI != "" {
+		if err := backchannel.ValidateEndpoint(backchannelURI, allowPrivateBackchannel, allowHTTPBackchannel); err != nil {
+			return fmt.Errorf("invalid bootstrap back-channel logout endpoint: %w", err)
+		}
 	}
 	if caFile := getenv("GOAUTHY_BOOTSTRAP_BACKCHANNEL_CA_FILE"); caFile != "" {
 		if backchannelURI == "" {
@@ -299,6 +320,12 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 		if _, err := backchannel.NewRootCAReloader(caFile); err != nil {
 			return err
 		}
+	}
+	// GA66-CONFIG-002: oauth.newServer applies the same redirect-URI validator
+	// after Rhiza is open and bootstrap mutations have committed.
+	redirect, err := url.Parse(envValue(getenv, "GOAUTHY_BOOTSTRAP_REDIRECT_URI", "http://localhost:5555/callback"))
+	if err != nil || !redirect.IsAbs() || redirect.Fragment != "" || !fosite.IsRedirectURISecure(context.Background(), redirect) {
+		return errors.New("invalid bootstrap OAuth redirect URI")
 	}
 	trustedProxies, err := trustedProxiesFromEnv(getenv)
 	if err != nil {
