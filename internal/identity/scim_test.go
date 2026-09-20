@@ -423,6 +423,39 @@ func TestDeleteUserWithGuardRevalidatesAuthorityAtCommit(t *testing.T) {
 	})
 }
 
+// The deletion guard must count only administrators that are still usable, so
+// housekeeping timing cannot decide whether the deployment keeps an
+// administrator: an expired but unswept administrator is not one.
+func TestDeleteUserKeepsExpiredAdministratorOutOfFinalAdminGuard(t *testing.T) {
+	store := scimDeleteStore(t)
+	ctx := context.Background()
+	now := time.UnixMilli(1_700_000_000_000).UTC()
+	store.now = func() time.Time { return now }
+	bootstrapPassword(t, store, "usable-admin", "usable-admin", []byte("CurrentPassword1"))
+	bootstrapPassword(t, store, "expired-admin", "expired-admin", []byte("CurrentPassword1"))
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "identity-delete-expired-admin-seed", Statements: []rhiza.SQLStatement{
+		{SQL: `INSERT INTO rbac_roles (id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('expiry-admin-role','rauthy_admin',1,0,0)`},
+		{SQL: `INSERT INTO rbac_user_roles (subject,role_id,granted_at_unix_ms) VALUES ('usable-admin','expiry-admin-role',0),('expired-admin','expiry-admin-role',0)`},
+		{SQL: `UPDATE identity_users SET user_expires_at_unix_ms=? WHERE subject='expired-admin'`, Args: []any{now.UnixMilli()}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	assertRefused := func(state string) {
+		t.Helper()
+		if err := store.DeleteUser(ctx, "usable-admin"); !errors.Is(err, ErrFinalAdmin) {
+			t.Fatalf("last usable admin deletion (%s)=%v", state, err)
+		}
+		assertCount(t, store, `SELECT COUNT(*) FROM identity_users WHERE subject='usable-admin'`, 1)
+	}
+	assertRefused("expired but unswept")
+	swept, err := store.ExpireUsers(ctx, now, 10)
+	if err != nil || swept != 1 {
+		t.Fatalf("expiry sweep=%d err=%v", swept, err)
+	}
+	assertCount(t, store, `SELECT COUNT(*) FROM identity_users WHERE subject='expired-admin' AND disabled=1`, 1)
+	assertRefused("after housekeeping disabled it")
+}
+
 func TestCleanupSCIMDeletedUsersRequiresExactSucceededDeletes(t *testing.T) {
 	ctx := context.Background()
 	providers := []SCIMTombstoneProvider{{ID: "provider-a", DeletePolicy: scim.UnlinkRemote}}

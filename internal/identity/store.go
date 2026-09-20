@@ -604,9 +604,12 @@ func (s *Store) deleteUser(ctx context.Context, subject, authoritySQL string, au
 	}
 	now := s.now().UTC().Truncate(time.Millisecond).UnixMilli()
 	event := mutationID("delete-user-event", subject, strconv.FormatInt(now, 10))
+	// Expired accounts are not usable for authentication, so an unswept
+	// expired administrator must not count as the remaining administrator that
+	// allows this deletion. The eligibility predicate matches ValidateSubject.
 	guard := `EXISTS (SELECT 1 FROM identity_users WHERE subject = ?) AND NOT (
-		EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.subject = ? AND u.disabled = 0 AND r.name = 'rauthy_admin')
-		AND (SELECT COUNT(DISTINCT u.subject) FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.disabled = 0 AND r.name = 'rauthy_admin') = 1
+		EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.subject = ? AND u.disabled = 0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name = 'rauthy_admin')
+		AND (SELECT COUNT(DISTINCT u.subject) FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.disabled = 0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name = 'rauthy_admin') = 1
 	)`
 	requestID := mutationID("delete-user", subject, generation, strconv.FormatInt(now, 10))
 	guardedMutation := strings.TrimSpace(authoritySQL) != ""
@@ -615,7 +618,7 @@ func (s *Store) deleteUser(ctx context.Context, subject, authoritySQL string, au
 		guard = guard + ` AND ` + guardedMutationSQL
 	}
 	guarded := func(sql string, args ...any) rhiza.SQLStatement {
-		args = append(args, subject, subject)
+		args = append(args, subject, subject, now, now)
 		if guardedMutation {
 			args = append(args, requestID)
 		}
@@ -631,7 +634,7 @@ func (s *Store) deleteUser(ctx context.Context, subject, authoritySQL string, au
 		rhiza.SQLStatement{SQL: `INSERT OR IGNORE INTO scim_user_tombstones (local_external_id,user_name,active,hard_delete,provider_snapshot_complete,generation,deleted_at_unix_ms)
 			SELECT u.subject,u.username,CASE WHEN u.disabled = 0 AND NOT (u.password_phc = '' AND m.mode = 'password') THEN 1 ELSE 0 END,1,1,?,?
 			FROM identity_users u JOIN identity_authentication_modes m ON m.subject = u.subject WHERE u.subject = ? AND ` + guard, Args: func() []any {
-			args := []any{generation, now, subject, subject, subject}
+			args := []any{generation, now, subject, subject, subject, now, now}
 			if guardedMutation {
 				args = append(args, requestID)
 			}
@@ -645,7 +648,7 @@ func (s *Store) deleteUser(ctx context.Context, subject, authoritySQL string, au
 		policy = scim.DeleteRemote
 		statements = append(statements, rhiza.SQLStatement{SQL: `INSERT OR IGNORE INTO scim_user_tombstone_providers (local_external_id,client_id,delete_policy)
 			SELECT ?,?,? WHERE EXISTS (SELECT 1 FROM scim_user_tombstones WHERE local_external_id=?) AND ` + guard, Args: func() []any {
-			args := []any{subject, provider.ID, int64(policy), subject, subject, subject}
+			args := []any{subject, provider.ID, int64(policy), subject, subject, subject, now, now}
 			if guardedMutation {
 				args = append(args, requestID)
 			}

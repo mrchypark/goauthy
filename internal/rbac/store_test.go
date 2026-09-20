@@ -559,6 +559,112 @@ func TestPatchPrincipalFailedGuardUsesNewAttemptIDOnRetry(t *testing.T) {
 	}
 }
 
+// A caller that loses membership admission must not apply anything. Both
+// callers below read the same snapshot, and the frozen clock makes them predict
+// the same next revision/marker, which is exactly the case a state marker alone
+// cannot tell apart.
+func TestPatchPrincipalLostAdmissionRollsBackCompletely(t *testing.T) {
+	ctx, store, db := rbacTestStore(t)
+	store.now = func() time.Time { return time.UnixMilli(1_700_000_000_000).UTC() }
+	for _, subject := range []string{"admin", "backup", "member"} {
+		insertActive(t, db, subject)
+	}
+	for _, admin := range []string{"admin", "backup"} {
+		if _, err := store.EnsureBootstrapPrincipal(ctx, admin, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedPrincipalVersion(t, db, "member")
+	for _, name := range []string{"viewer", "editor", "auditor"} {
+		if _, err := store.CreateRole(ctx, "admin", name, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if seeded, err := store.PatchPrincipal(ctx, "admin", "member", []string{"viewer"}, nil, true, false); err != nil || seeded.Revision != 2 {
+		t.Fatalf("seed principal=%+v err=%v", seeded, err)
+	}
+
+	// A synchronized caller wins admission before this snapshot commits.
+	store.beforeMembershipExecute = func() {
+		store.beforeMembershipExecute = nil
+		if _, err := store.PatchPrincipal(ctx, "backup", "member", []string{"editor"}, nil, true, false); err != nil {
+			t.Errorf("winning membership: %v", err)
+		}
+	}
+	loser, err := store.PatchPrincipal(ctx, "admin", "member", []string{"auditor"}, nil, true, false)
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("lost admission principal=%+v err=%v", loser, err)
+	}
+	current, err := store.ResolvePrincipal(ctx, "member")
+	if err != nil || current.Revision != 3 || !equalNames(current.Roles, []string{"editor"}) {
+		t.Fatalf("lost admission changed principal=%+v err=%v", current, err)
+	}
+
+	// The same caller, now revoked between snapshot and commit, still wins
+	// nothing even though its previous revision/marker prediction matched.
+	store.beforeMembershipExecute = func() {
+		store.beforeMembershipExecute = nil
+		if _, err := store.PatchPrincipal(ctx, "backup", "member", []string{"viewer"}, nil, true, false); err != nil {
+			t.Errorf("winning membership: %v", err)
+		}
+		if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "rbac-revoke-admin-midflight", SQL: `UPDATE identity_users SET disabled=1 WHERE subject='admin'`}); err != nil {
+			t.Errorf("revoke actor: %v", err)
+		}
+	}
+	defer func() { store.beforeMembershipExecute = nil }()
+	loser, err = store.PatchPrincipal(ctx, "admin", "member", []string{"auditor"}, nil, true, false)
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("revoked lost admission principal=%+v err=%v", loser, err)
+	}
+	current, err = store.ResolvePrincipal(ctx, "member")
+	if err != nil || current.Revision != 4 || !equalNames(current.Roles, []string{"viewer"}) {
+		t.Fatalf("revoked lost admission changed principal=%+v err=%v", current, err)
+	}
+}
+
+// The final-administrator guard must use the same current-time eligibility as
+// authentication, so housekeeping timing cannot change its answer.
+func TestLastUsableAdminGuardExcludesExpiredAccounts(t *testing.T) {
+	ctx, store, db := rbacTestStore(t)
+	now := time.UnixMilli(1_700_000_000_000).UTC()
+	store.now = func() time.Time { return now }
+	insertActive(t, db, "admin")
+	insertActive(t, db, "backup")
+	for _, admin := range []string{"admin", "backup"} {
+		if _, err := store.EnsureBootstrapPrincipal(ctx, admin, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "rbac-expire-backup", SQL: `UPDATE identity_users SET user_expires_at_unix_ms=? WHERE subject='backup'`, Args: []any{now.UnixMilli()}}); err != nil {
+		t.Fatal(err)
+	}
+
+	assertSelfDemotionRefused := func(state string) {
+		t.Helper()
+		if _, err := store.PatchPrincipal(ctx, "admin", "admin", []string{}, nil, true, false); !errors.Is(err, ErrConflict) {
+			t.Fatalf("last usable admin self demotion (%s)=%v", state, err)
+		}
+		remaining, err := store.ResolvePrincipal(ctx, "admin")
+		if err != nil || !equalNames(remaining.Roles, []string{AdminRole}) {
+			t.Fatalf("last usable admin changed principal (%s)=%+v err=%v", state, remaining, err)
+		}
+	}
+	assertSelfDemotionRefused("expired but unswept")
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "rbac-sweep-backup", SQL: `UPDATE identity_users SET disabled=1 WHERE subject='backup'`}); err != nil {
+		t.Fatal(err)
+	}
+	assertSelfDemotionRefused("after housekeeping disabled it")
+
+	// Removing an unusable administrator's own role loses no administrative
+	// access, so the guard must not report it as the last administrator.
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "rbac-reenable-backup", SQL: `UPDATE identity_users SET disabled=0 WHERE subject='backup'`}); err != nil {
+		t.Fatal(err)
+	}
+	if demoted, err := store.PatchPrincipal(ctx, "admin", "backup", []string{}, nil, true, false); err != nil || containsName(entityNames(demoted.Roles), AdminRole) {
+		t.Fatalf("expired admin demotion=%+v err=%v", demoted, err)
+	}
+}
+
 func TestDelegatedPatchPreservesUnmanagedGroupsAndEscalationGuards(t *testing.T) {
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
