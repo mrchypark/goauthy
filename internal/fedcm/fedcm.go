@@ -52,6 +52,9 @@ type Account struct {
 	ApprovedClients []string `json:"approved_clients,omitempty"`
 	LoginHints      []string `json:"login_hints,omitempty"`
 	DomainHints     []string `json:"domain_hints,omitempty"`
+	// AuthTime is the authentication event this projection was resolved from.
+	// The assertion signs it as auth_time and it is never sent to the browser.
+	AuthTime time.Time `json:"-"`
 }
 
 // ClientMetadata is the privacy-policy projection for a relying party.
@@ -344,6 +347,9 @@ func (h *Handler) Assertion(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized)
 		return
 	}
+	// The live session is the only source of authentication time. Resolving the
+	// account again by subject must not turn an old session into a fresh login.
+	authTime := current.AuthTime
 	if h.account != nil {
 		resolved, resolveErr := h.account(r.Context(), in.AccountID)
 		if resolveErr != nil || !validAccount(resolved) || resolved.ID != current.ID {
@@ -359,10 +365,16 @@ func (h *Handler) Assertion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := h.now().UTC()
+	if authTime.After(now) {
+		// A session clock ahead of the signing clock is not a freshness claim
+		// this provider can support, so omit auth_time rather than sign a future
+		// authentication event.
+		authTime = time.Time{}
+	}
 	token, err := oidc.SignIDToken(key, oidc.IDTokenClaims{
 		Issuer: h.issuer, Subject: current.ID, Audience: []string{in.ClientID},
 		IssuedAt: now, ExpiresAt: now.Add(assertionLifetime), NotBefore: now,
-		Nonce: in.Nonce, AuthTime: now,
+		Nonce: in.Nonce, AuthTime: authTime,
 		Roles: []string{},
 	})
 	if err != nil {
@@ -569,16 +581,15 @@ func validAssertionRequest(in assertionRequest) bool {
 	return validAccountID(in.AccountID) && validClientID(in.ClientID) && (in.Nonce == "" || validNonce(in.Nonce))
 }
 
+// validAccountID is the bounded opaque-subject contract shared by the account
+// projection and assertion parsing. Subjects are native unpadded base64url
+// values, so '-' and '_' are valid; anything the projection can advertise must
+// parse, and equality to the authenticated account stays exact.
 func validAccountID(value string) bool {
-	if value == "" || len(value) > maxQueryValue {
+	if value == "" || len(value) > maxQueryValue || strings.TrimSpace(value) != value {
 		return false
 	}
-	for _, c := range value {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
-			return false
-		}
-	}
-	return true
+	return !strings.ContainsAny(value, "\r\n")
 }
 
 func validClientID(value string) bool {
@@ -606,7 +617,7 @@ func validNonce(value string) bool {
 }
 
 func validAccount(a Account) bool {
-	return a.ID != "" && len(a.ID) <= maxQueryValue && strings.TrimSpace(a.ID) == a.ID && a.Name != "" && len(a.Name) <= maxQueryValue && a.Email != "" && len(a.Email) <= maxQueryValue
+	return validAccountID(a.ID) && a.Name != "" && len(a.Name) <= maxQueryValue && a.Email != "" && len(a.Email) <= maxQueryValue
 }
 
 func validAccounts(accounts []Account) bool {

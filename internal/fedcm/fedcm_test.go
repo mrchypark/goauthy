@@ -166,3 +166,57 @@ func TestAccountsRejectsRPIdentifiersAndOrigin(t *testing.T) {
 		t.Fatalf("duplicate origin on uncredentialed endpoint status=%d", rec.Code)
 	}
 }
+
+// GA-BR-10: the advertised account ID is the native subject, which is
+// unpadded base64url and therefore contains '-' and '_'. Account selection must
+// accept exactly what the projection advertises while still requiring equality
+// to the authenticated account.
+func TestAssertionAcceptsAdvertisedBase64URLSubject(t *testing.T) {
+	now := time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC)
+	private := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{9}, ed25519.SeedSize))
+	key := oidc.SigningKey{Private: private, PublicJWK: jose.JSONWebKey{Key: private.Public(), KeyID: "test-key", Algorithm: string(jose.EdDSA), Use: "sig"}}
+	const subject = "Acct-1_2"
+	h, err := NewHandler(Config{
+		Issuer: "https://idp.example.test", Enabled: true, ClientID: "client-1", ClientOrigin: "https://rp.example.test",
+		ResolveCurrent: func(context.Context, *http.Request) (Account, error) {
+			return Account{ID: subject, Name: "Ada", Email: "ada@example.test"}, nil
+		},
+		LoadSigningKey: func(context.Context) (oidc.SigningKey, error) { return key, nil }, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validAccount(Account{ID: subject, Name: "Ada", Email: "ada@example.test"}) || !validAccountID(subject) {
+		t.Fatalf("projection and parsing disagree on subject %q", subject)
+	}
+	post := func(accountID string) *httptest.ResponseRecorder {
+		form := url.Values{"account_id": {accountID}, "client_id": {"client-1"}, "nonce": {"nonce-1"}, "disclosure_text_shown": {"true"}}
+		r := httptest.NewRequest(http.MethodPost, AssertionPath, strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.Header.Set("Origin", "https://rp.example.test")
+		r.Header.Set("Sec-Fetch-Dest", "webidentity")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, r)
+		return rec
+	}
+	rec := post(subject)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("advertised subject status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil || response.Token == "" {
+		t.Fatalf("response=%s err=%v", rec.Body.String(), err)
+	}
+	claims, err := oidc.VerifyIDToken(response.Token, jose.JSONWebKeySet{Keys: []jose.JSONWebKey{key.PublicJWK}}, "https://idp.example.test", "client-1", now)
+	if err != nil || claims.Subject != subject {
+		t.Fatalf("claims=%+v err=%v", claims, err)
+	}
+	if other := post("Acct-12"); other.Code != http.StatusUnauthorized {
+		t.Fatalf("different account status=%d body=%s", other.Code, other.Body.String())
+	}
+	if oversized := post(strings.Repeat("a", maxQueryValue+1)); oversized.Code != http.StatusBadRequest {
+		t.Fatalf("oversized account status=%d body=%s", oversized.Code, oversized.Body.String())
+	}
+}

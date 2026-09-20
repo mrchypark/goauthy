@@ -3,18 +3,23 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/fedcm"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -201,6 +206,85 @@ func TestFedCMRuntimeDisabledWhenConfigUnset(t *testing.T) {
 	runtime, err := fedcmRuntimeFromEnv(func(string) string { return "" }, nil, nil, "https://issuer.example.test", nil, nil)
 	if err != nil || runtime != nil {
 		t.Fatalf("runtime=%#v err=%v", runtime, err)
+	}
+}
+
+// GA-BR-11: account resolution authenticates the live session, so the issued
+// assertion must carry the session's authentication event as auth_time while
+// the request time stays iat.
+func TestFedCMAssertionCarriesSessionAuthenticationTime(t *testing.T) {
+	ctx := context.Background()
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "fedcm-auth-time-test", DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := storage.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err := browser.NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasher, err := credential.NewHasher(credential.DefaultPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities, err := identity.NewStoreWithHasher(db, hasher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := identities.BootstrapUser(ctx, "subject-1", "alice@example.test", mustFedCMHash(t, "password")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "fedcm-auth-time-profile", SQL: `INSERT INTO identity_user_profiles (subject,email,email_verified,preferred_username,given_name) VALUES (?,?,?,?,?)`, Args: []any{"subject-1", "profile@example.test", int64(1), "Alice", "Alice"}}); err != nil {
+		t.Fatal(err)
+	}
+	issued, err := sessions.CreateSession(ctx, "subject-1", "pwd", time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC), "198.51.100.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// t0 is the recorded authentication event; t1 is the assertion request time.
+	t0, t1 := issued.CreatedAt, issued.CreatedAt.Add(30*time.Minute)
+	private := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{3}, ed25519.SeedSize))
+	key := oidc.SigningKey{Private: private, PublicJWK: jose.JSONWebKey{Key: private.Public(), KeyID: "fedcm-auth-time", Algorithm: string(jose.EdDSA), Use: "sig"}}
+	h, err := fedcm.NewHandler(fedcm.Config{
+		Issuer: "https://idp.example.test", Enabled: true, ClientID: "client-1", ClientOrigin: "https://rp.example.test",
+		ResolveCurrent: func(ctx context.Context, r *http.Request) (fedcm.Account, error) {
+			return resolveFedCMCurrent(ctx, r, sessions, identities)
+		},
+		ResolveAccount: func(ctx context.Context, subject string) (fedcm.Account, error) {
+			return resolveFedCMSubject(ctx, subject, identities)
+		},
+		LoadSigningKey: func(context.Context) (oidc.SigningKey, error) { return key, nil },
+		Now:            func() time.Time { return t1 },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{"account_id": {"subject-1"}, "client_id": {"client-1"}, "nonce": {"nonce-1"}, "disclosure_text_shown": {"true"}}
+	r := httptest.NewRequest(http.MethodPost, fedcm.AssertionPath, strings.NewReader(form.Encode())).WithContext(browser.ContextWithPeerIP(ctx, "198.51.100.9"))
+	r.AddCookie(&http.Cookie{Name: browser.FedCMSessionCookieName, Value: issued.Token})
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Header.Set("Origin", "https://rp.example.test")
+	r.Header.Set("Sec-Fetch-Dest", "webidentity")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil || response.Token == "" {
+		t.Fatalf("response=%s err=%v", rec.Body.String(), err)
+	}
+	claims, err := oidc.VerifyIDToken(response.Token, jose.JSONWebKeySet{Keys: []jose.JSONWebKey{key.PublicJWK}}, "https://idp.example.test", "client-1", t1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.IssuedAt.Unix() != t1.Unix() || claims.AuthTime.Unix() != t0.Unix() {
+		t.Fatalf("iat=%s auth_time=%s want iat=%s auth_time=%s", claims.IssuedAt, claims.AuthTime, t1, t0)
 	}
 }
 
