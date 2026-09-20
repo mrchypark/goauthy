@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -209,37 +208,42 @@ func keyRemovalStep(ctx context.Context, db *rhiza.DB, keyring *oidc.Keyring) er
 	return removeRetiredMasterKey(ctx, db, keyring, time.Now, storage.AcknowledgeMasterKeyRetirementArchival)
 }
 
-// removeRetiredMasterKey is the single owner of retired-key deletion. It
-// honours the overlap period and then requires a fresh durability
-// acknowledgment of the exact ready barrier: a visible ready state alone can
-// still be missing from the archive, and deleting the key first would make
-// that archived ciphertext permanently unreadable (GA-STOR-002).
+// removeRetiredMasterKey is the single owner of retired-key deletion. It walks
+// every completed generation, honours that generation's own overlap period and
+// then requires a fresh durability acknowledgment of it: a visible ready state
+// alone can still be missing from the archive, and deleting the key first would
+// make that archived ciphertext permanently unreadable (GA-STOR-002). Walking
+// the retained generations instead of the singleton barrier is what keeps a
+// retired key from being orphaned when the next epoch is prepared first
+// (GA66-RETIRE-002). The removal receipt is recorded but not used as a filter,
+// so a member that has not yet dropped its own copy of the key still sees the
+// generation and cleans up.
 func removeRetiredMasterKey(ctx context.Context, db *rhiza.DB, keyring *oidc.Keyring, now func() time.Time, acknowledge func(context.Context, *rhiza.DB, int64) error) error {
 	if db == nil || keyring == nil || now == nil || acknowledge == nil {
 		return fmt.Errorf("key-removal: db, keyring, clock, or acknowledgment is nil")
 	}
-	barrier, err := storage.LoadMasterKeyRetirement(ctx, db)
-	if errors.Is(err, storage.ErrMasterKeyRetirementNotPrepared) {
-		return nil
-	}
+	generations, err := storage.LoadMasterKeyRetirementGenerations(ctx, db)
 	if err != nil {
-		return fmt.Errorf("key-removal: load barrier: %w", err)
+		return fmt.Errorf("key-removal: load retired generations: %w", err)
 	}
-	if barrier.State != storage.MasterKeyRetirementReady {
-		return nil
+	for _, generation := range generations {
+		if !keyring.HasKey(generation.OldKeyID) {
+			continue
+		}
+		when := now().UTC()
+		if when.Sub(generation.ReadyAt) <= retiredKeyOverlapPeriod {
+			continue
+		}
+		if err := acknowledge(ctx, db, generation.Epoch); err != nil {
+			return fmt.Errorf("key-removal: acknowledge archival for epoch %d: %w", generation.Epoch, err)
+		}
+		if err := keyring.RemoveKey(generation.OldKeyID); err != nil {
+			return fmt.Errorf("key-removal: remove key %q: %w", generation.OldKeyID, err)
+		}
+		if err := storage.MarkMasterKeyRetirementGenerationRemoved(ctx, db, generation.Epoch, when); err != nil {
+			return fmt.Errorf("key-removal: record removal of epoch %d: %w", generation.Epoch, err)
+		}
+		slog.Info("removed retired master key", "old_key_id", generation.OldKeyID, "ready_at", generation.ReadyAt, "epoch", generation.Epoch)
 	}
-	if !keyring.HasKey(barrier.OldKeyID) {
-		return nil
-	}
-	if now().UTC().Sub(barrier.ReadyAt) <= retiredKeyOverlapPeriod {
-		return nil
-	}
-	if err := acknowledge(ctx, db, barrier.Epoch); err != nil {
-		return fmt.Errorf("key-removal: acknowledge archival: %w", err)
-	}
-	if err := keyring.RemoveKey(barrier.OldKeyID); err != nil {
-		return fmt.Errorf("key-removal: remove key: %w", err)
-	}
-	slog.Info("removed retired master key", "old_key_id", barrier.OldKeyID, "ready_at", barrier.ReadyAt)
 	return nil
 }

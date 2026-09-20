@@ -268,8 +268,8 @@ func TestMigrationV97ReplayMigrateReadyMaxVersion(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := queryInt64(t, db, "SELECT MAX(version) FROM goauthy_schema_migrations"); got != 103 {
-		t.Fatalf("schema version=%d want=103", got)
+	if got := queryInt64(t, db, "SELECT MAX(version) FROM goauthy_schema_migrations"); got != schemaVersion {
+		t.Fatalf("schema version=%d want=%d", got, schemaVersion)
 	}
 }
 

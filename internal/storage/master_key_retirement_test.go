@@ -151,6 +151,104 @@ func TestMasterKeyRetirementChainsSecondEpochAfterReady(t *testing.T) {
 	}
 }
 
+// GA66-RETIRE-001: a completed generation's old key must not become an
+// accepted writer again when a later epoch replaces the singleton barrier row,
+// in the prepared state, the aborted state, and after the archival
+// acknowledgment that precedes deletion.
+func TestMasterKeyRetirementKeepsRetiredWriterFencedAcrossLaterEpochs(t *testing.T) {
+	ctx := context.Background()
+	db := retirementTestDB(t)
+	now := time.UnixMilli(1_800_000_000_000).UTC()
+	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "retirement-writer-probe-table", SQL: `CREATE TABLE retirement_writer_probe (value TEXT NOT NULL) STRICT`}); err != nil {
+		t.Fatal(err)
+	}
+	complete := func(epoch int64, oldKey, newKey string, at time.Time) {
+		t.Helper()
+		if _, err := PrepareMasterKeyRetirement(ctx, db, MasterKeyRetirementPrepareRequest{Epoch: epoch, OldKeyID: oldKey, ReplacementKeyID: newKey, MemberIDs: []string{"node-0"}, PreparedAt: at}); err != nil {
+			t.Fatalf("prepare epoch %d: %v", epoch, err)
+		}
+		if _, err := FenceMasterKeyRetirement(ctx, db, epoch, at.Add(time.Second)); err != nil {
+			t.Fatalf("fence epoch %d: %v", epoch, err)
+		}
+		if _, err := AttestMasterKeyRetirement(ctx, db, MasterKeyRetirementAttestationRequest{Epoch: epoch, NodeID: "node-0", BootID: "boot-0", ActiveKeyID: newKey, AttestationSequence: 1, AttestedAt: at.Add(2 * time.Second), Status: MasterKeyRetirementStatus{}}); err != nil {
+			t.Fatalf("attest epoch %d: %v", epoch, err)
+		}
+		if _, err := ReadyMasterKeyRetirement(ctx, db, epoch, at.Add(3*time.Second)); err != nil {
+			t.Fatalf("ready epoch %d: %v", epoch, err)
+		}
+	}
+	write := func(keyID, id string) error {
+		t.Helper()
+		_, err := ExecuteEnvelope(ctx, db, keyID, rhiza.ExecuteRequest{RequestID: "retirement-writer-probe-" + id, SQL: `INSERT INTO retirement_writer_probe(value) VALUES (?)`, Args: []any{id}})
+		return err
+	}
+	requireRejected := func(id, keyID string) {
+		t.Helper()
+		if err := write(keyID, id); err == nil {
+			t.Fatalf("writer %q was admitted as %s", keyID, id)
+		}
+	}
+	requireAdmitted := func(id, keyID string) {
+		t.Helper()
+		if err := write(keyID, id); err != nil {
+			t.Fatalf("writer %q was rejected as %s: %v", keyID, id, err)
+		}
+	}
+
+	complete(1, "key-a", "key-b", now)
+	requireRejected("epoch1-ready-a", "key-a")
+	requireAdmitted("epoch1-ready-b", "key-b")
+
+	if _, err := PrepareMasterKeyRetirement(ctx, db, MasterKeyRetirementPrepareRequest{Epoch: 2, OldKeyID: "key-b", ReplacementKeyID: "key-c", MemberIDs: []string{"node-0"}, PreparedAt: now.Add(4 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	requireRejected("epoch2-prepared-a", "key-a")
+	requireAdmitted("epoch2-prepared-b", "key-b")
+	if prohibited, err := MasterKeyRetirementProhibitsWriter(ctx, db, "key-b"); err != nil || prohibited {
+		t.Fatalf("a prepared epoch was treated as completed: prohibited=%v err=%v", prohibited, err)
+	}
+
+	if _, err := AbortMasterKeyRetirement(ctx, db, 2, now.Add(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	requireRejected("epoch2-aborted-a", "key-a")
+	requireAdmitted("epoch2-aborted-b", "key-b")
+
+	if _, err := PrepareMasterKeyRetirement(ctx, db, MasterKeyRetirementPrepareRequest{Epoch: 3, OldKeyID: "key-b", ReplacementKeyID: "key-d", MemberIDs: []string{"node-0"}, PreparedAt: now.Add(6 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	requireRejected("epoch3-prepared-a", "key-a")
+	requireAdmitted("epoch3-prepared-b", "key-b")
+	complete(3, "key-b", "key-d", now.Add(7*time.Second))
+	requireRejected("epoch3-ready-a", "key-a")
+	requireRejected("epoch3-ready-b", "key-b")
+	requireAdmitted("epoch3-ready-d", "key-d")
+
+	// The acknowledgment of an older generation must still work after the
+	// barrier moved on, and must not unretire its key.
+	if err := AcknowledgeMasterKeyRetirementArchival(ctx, db, 1); err != nil {
+		t.Fatalf("acknowledge retained generation: %v", err)
+	}
+	requireRejected("epoch3-acknowledged-a", "key-a")
+
+	generations, err := LoadMasterKeyRetirementGenerations(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(generations) != 2 {
+		t.Fatalf("retained generations=%#v", generations)
+	}
+	if first := generations[0]; first.Epoch != 1 || first.OldKeyID != "key-a" || first.ReplacementKeyID != "key-b" || !first.ReadyAt.Equal(now.Add(3*time.Second)) {
+		t.Fatalf("first generation=%#v", first)
+	}
+	if third := generations[1]; third.Epoch != 3 || third.OldKeyID != "key-b" || third.ReplacementKeyID != "key-d" || !third.ReadyAt.Equal(now.Add(10*time.Second)) {
+		t.Fatalf("third generation=%#v", third)
+	}
+	if result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(*) FROM retirement_writer_probe`, Consistency: rhiza.ConsistencyLinearizable}); err != nil || len(result.Rows) != 1 || result.Rows[0][0] != int64(5) {
+		t.Fatalf("admitted mutations=%#v err=%v", result.Rows, err)
+	}
+}
+
 func TestMasterKeyRetirementRejectsInvalidPreparation(t *testing.T) {
 	db := retirementTestDB(t)
 	now := time.UnixMilli(1_800_000_000_000).UTC()

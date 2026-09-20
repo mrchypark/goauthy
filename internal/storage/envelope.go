@@ -9,7 +9,10 @@ import (
 
 // ExecuteEnvelope executes a mutation with the master-key retirement fence in
 // the same replicated transaction. The old writer is rejected only after the
-// barrier reaches fenced or ready, so all preceding statements roll back.
+// barrier reaches fenced or ready, and a writer whose key retired a completed
+// generation is rejected for good, so it cannot acquire new ciphertext
+// references after a later rotation rewrites the barrier row (GA66-RETIRE-001).
+// All preceding statements roll back with the rejection.
 func ExecuteEnvelope(ctx context.Context, db *rhiza.DB, writerKeyID string, request rhiza.ExecuteRequest) (rhiza.ExecuteResponse, error) {
 	if db == nil {
 		return rhiza.ExecuteResponse{}, errors.New("envelope database is required")
@@ -33,8 +36,8 @@ func ExecuteEnvelope(ctx context.Context, db *rhiza.DB, writerKeyID string, requ
 		statements = append(statements, request.Statements...)
 	}
 	statements = append(statements, rhiza.SQLStatement{
-		SQL:  `UPDATE master_key_retirement_barrier SET epoch=-1 WHERE barrier_id=1 AND state IN ('fenced','ready') AND replacement_key_id<>?`,
-		Args: []any{writerKeyID},
+		SQL:  `UPDATE master_key_retirement_barrier SET epoch=-1 WHERE barrier_id=1 AND ((state IN ('fenced','ready') AND replacement_key_id<>?) OR EXISTS (SELECT 1 FROM master_key_retirement_generations WHERE old_key_id=? AND ready_at_unix_ms IS NOT NULL))`,
+		Args: []any{writerKeyID, writerKeyID},
 	})
 
 	if topLevel {

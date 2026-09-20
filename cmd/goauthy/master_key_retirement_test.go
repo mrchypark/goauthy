@@ -76,6 +76,48 @@ func TestAdmitMasterKeyRuntimeFencesOldAndAllowsReplacement(t *testing.T) {
 	}
 }
 
+// GA66-RETIRE-001: runtime admission keeps rejecting a retired key once the
+// next epoch is prepared or aborted, when the barrier row no longer names it.
+func TestMasterKeyRetirementRuntimeAdmissionRejectsRetiredKeyAfterNextEpoch(t *testing.T) {
+	ctx := context.Background()
+	db := retirementCmdDB(t, true)
+	old, current := retirementCmdKeyring(t, "key-a"), retirementCmdKeyring(t, "key-b")
+	now := time.UnixMilli(1_800_000_000_000).UTC()
+	if _, err := storage.PrepareMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementPrepareRequest{Epoch: 1, OldKeyID: "key-a", ReplacementKeyID: "key-b", MemberIDs: []string{"node-0"}, PreparedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.FenceMasterKeyRetirement(ctx, db, 1, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.AttestMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementAttestationRequest{Epoch: 1, NodeID: "node-0", BootID: "boot-0", ActiveKeyID: "key-b", AttestationSequence: 1, AttestedAt: now.Add(2 * time.Second), Status: storage.MasterKeyRetirementStatus{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.ReadyMasterKeyRetirement(ctx, db, 1, now.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := admitMasterKeyRuntime(ctx, db, current); err != nil {
+		t.Fatalf("replacement rejected while its epoch was ready: %v", err)
+	}
+	if _, err := storage.PrepareMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementPrepareRequest{Epoch: 2, OldKeyID: "key-b", ReplacementKeyID: "key-c", MemberIDs: []string{"node-0"}, PreparedAt: now.Add(4 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := admitMasterKeyRuntime(ctx, db, old); err == nil {
+		t.Fatal("retired key admitted while the next epoch was prepared")
+	}
+	if err := admitMasterKeyRuntime(ctx, db, current); err != nil {
+		t.Fatalf("replacement rejected while the next epoch was prepared: %v", err)
+	}
+	if _, err := storage.AbortMasterKeyRetirement(ctx, db, 2, now.Add(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := admitMasterKeyRuntime(ctx, db, old); err == nil {
+		t.Fatal("retired key admitted after the next epoch was aborted")
+	}
+	if err := admitMasterKeyRuntime(ctx, db, current); err != nil {
+		t.Fatalf("replacement rejected after the next epoch was aborted: %v", err)
+	}
+}
+
 func TestMasterKeyRetirementWorkerSkipsUnsafeAndAttestsWithMonotonicSequence(t *testing.T) {
 	db := retirementCmdDB(t, false)
 	keyring := retirementCmdKeyring(t, "key-b")
@@ -350,7 +392,7 @@ func retirementCmdDB(t *testing.T, migrate bool) *rhiza.DB {
 func retirementCmdKeyring(t *testing.T, active string) *oidc.Keyring {
 	t.Helper()
 	dir := t.TempDir()
-	for _, id := range []string{"key-a", "key-b"} {
+	for _, id := range []string{"key-a", "key-b", "key-c"} {
 		path := filepath.Join(dir, id)
 		value := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{byte(id[len(id)-1])}, 32))
 		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {

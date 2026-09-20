@@ -48,6 +48,16 @@ func admitMasterKeyRuntime(ctx context.Context, db *rhiza.DB, keyring *oidc.Keyr
 	if err != nil {
 		return err
 	}
+	// A completed generation's old key stays prohibited even while a later epoch
+	// is prepared or aborted, because the barrier row no longer names it
+	// (GA66-RETIRE-001).
+	retired, err := storage.MasterKeyRetirementProhibitsWriter(ctx, db, activeID)
+	if err != nil {
+		return fmt.Errorf("load master-key retirement writer prohibition: %w", err)
+	}
+	if retired {
+		return fmt.Errorf("master-key runtime admission denied: key %q retired a completed master-key generation", activeID)
+	}
 	barrier, err := storage.LoadMasterKeyRetirement(ctx, db)
 	if errors.Is(err, storage.ErrMasterKeyRetirementNotPrepared) {
 		return nil
