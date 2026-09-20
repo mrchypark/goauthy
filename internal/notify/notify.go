@@ -21,6 +21,9 @@ const (
 	DefaultBatch = 1
 	DefaultLease = time.Minute
 	MaxBackoff   = 24 * time.Hour
+	// DefaultRetention bounds a delivery snapshot once it is terminal and how
+	// long an undeliverable one is retried before it is aged out.
+	DefaultRetention = 31 * 24 * time.Hour
 )
 
 type Target struct {
@@ -50,7 +53,34 @@ type Runtime struct {
 	Factory SenderFactory
 	Batch   int
 	Lease   time.Duration
-	Now     func() time.Time
+	// Retention overrides DefaultRetention for Maintain.
+	Retention time.Duration
+	Now       func() time.Time
+}
+
+// Maintain ages out delivery snapshots one bounded replicated batch at a time
+// until none is left. Terminal rows, rows below the configured threshold, and
+// rows that stayed undelivered past retention are removed; leased rows and
+// snapshots whose source event is already gone are kept, because a pending
+// delivery must not lose the payload it still owes a destination.
+func (r *Runtime) Maintain(ctx context.Context, now time.Time) error {
+	if r == nil || r.Queue == nil || ctx == nil || now.IsZero() {
+		return errors.New("notifications are not configured")
+	}
+	retention := r.Retention
+	if retention <= 0 {
+		retention = DefaultRetention
+	}
+	for ctx.Err() == nil {
+		removed, err := r.Queue.Cleanup(ctx, now, retention)
+		if err != nil {
+			return err
+		}
+		if removed == 0 {
+			return nil
+		}
+	}
+	return ctx.Err()
 }
 
 func (r *Runtime) Step(ctx context.Context, now time.Time) error {
@@ -87,6 +117,9 @@ func (r *Runtime) Step(ctx context.Context, now time.Time) error {
 			return err
 		}
 		for _, d := range deliveries {
+			// The claim already filters on the persisted threshold; this keeps a
+			// threshold another instance changed after Targets was read from
+			// reaching the destination.
 			if d.Event.Type != eventlog.Test && d.Event.Level.Rank() < target.Level.Rank() {
 				if err := r.Queue.Ack(ctx, target.Name, d.Event.ID, d.Lease, now); err != nil {
 					return err

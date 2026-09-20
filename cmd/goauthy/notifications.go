@@ -81,9 +81,11 @@ func notificationsFromEnv(getenv func(string) string) (notificationsConfig, erro
 }
 
 func newNotificationRuntime(ctx context.Context, db *rhiza.DB, cfg notificationsConfig) (*notify.Runtime, error) {
-	if len(cfg.Targets) == 0 {
+	if db == nil {
 		return nil, nil
 	}
+	// Reconcile even when nothing is configured: retiring the last destination
+	// must disable its persisted rows instead of queueing for it forever.
 	queue, err := notify.NewRhizaQueue(ctx, db, cfg.Targets)
 	if err != nil {
 		return nil, err
@@ -91,16 +93,28 @@ func newNotificationRuntime(ctx context.Context, db *rhiza.DB, cfg notifications
 	return &notify.Runtime{Queue: queue, Factory: cfg.HTTP}, nil
 }
 
+// notificationMaintenanceInterval paces delivery-snapshot retention so the
+// sweep does not add a replicated write to every delivery tick.
+const notificationMaintenanceInterval = time.Hour
+
 func runNotifications(ctx context.Context, runtime *notify.Runtime, now func() time.Time, onError func(error)) {
 	runtime.Now = now
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	var lastMaintenance time.Time
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := runtime.Step(ctx, now()); err != nil && ctx.Err() == nil && onError != nil {
+		at := now()
+		if err := runtime.Step(ctx, at); err != nil && ctx.Err() == nil && onError != nil {
 			onError(err)
+		}
+		if lastMaintenance.IsZero() || at.Before(lastMaintenance) || at.Sub(lastMaintenance) >= notificationMaintenanceInterval {
+			lastMaintenance = at
+			if err := runtime.Maintain(ctx, at); err != nil && ctx.Err() == nil && onError != nil {
+				onError(err)
+			}
 		}
 		select {
 		case <-ctx.Done():

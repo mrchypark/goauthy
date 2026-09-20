@@ -20,6 +20,9 @@ type RhizaQueue struct {
 	allowed map[string]bool
 }
 
+// cleanupBatchSize bounds a single replicated delivery-cleanup mutation.
+const cleanupBatchSize = 1000
+
 func NewRhizaQueue(ctx context.Context, db *rhiza.DB, targets []Target) (*RhizaQueue, error) {
 	if db == nil {
 		return nil, errors.New("notification queue requires database")
@@ -28,8 +31,9 @@ func NewRhizaQueue(ctx context.Context, db *rhiza.DB, targets []Target) (*RhizaQ
 		return nil, errors.New("notification queue requires context")
 	}
 	seen := map[string]bool{}
-	stmts := make([]rhiza.SQLStatement, 0, len(targets)*2)
+	stmts := make([]rhiza.SQLStatement, 0, len(targets)+1)
 	allowed := map[string]bool{}
+	names := make([]any, 0, len(targets))
 	for _, t := range targets {
 		if t.Name == "" || t.Kind == "" || !t.Level.Valid() {
 			return nil, errors.New("invalid notification target")
@@ -39,19 +43,38 @@ func NewRhizaQueue(ctx context.Context, db *rhiza.DB, targets []Target) (*RhizaQ
 		}
 		seen[t.Name] = true
 		allowed[t.Name] = true
+		names = append(names, t.Name)
 		stmts = append(stmts, rhiza.SQLStatement{SQL: `INSERT INTO event_notification_targets(target,level,enabled) VALUES(?,?,1) ON CONFLICT(target) DO UPDATE SET level=excluded.level,enabled=1`, Args: []any{t.Name, int64(t.Level.Rank())}})
 	}
-	if len(stmts) > 0 {
-		token := make([]byte, 16)
-		if _, err := rand.Read(token); err != nil {
-			return nil, err
-		}
-		if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "notify-config/" + base64.RawURLEncoding.EncodeToString(token), Statements: stmts}); err != nil {
-			return nil, err
-		}
+	// A destination dropped from configuration must stop queueing: the enqueue
+	// trigger reads this table, so a still-enabled row keeps replicating
+	// deliveries that no worker can claim.
+	stmts = append(stmts, retireTargets(names))
+	token := make([]byte, 16)
+	if _, err := rand.Read(token); err != nil {
+		return nil, err
+	}
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "notify-config/" + base64.RawURLEncoding.EncodeToString(token), Statements: stmts}); err != nil {
+		return nil, err
 	}
 	return &RhizaQueue{DB: db, allowed: allowed}, nil
 }
+
+// retireTargets disables persisted destinations that are absent from the
+// configured set, including every destination when none is configured. Pending
+// snapshots of a retired destination are left for Cleanup to age out instead of
+// being deleted, so a concurrent pod sharing the destination keeps its work.
+// ponytail: reconciliation is last-writer-wins per startup, so a pod restarting
+// on a superseded configuration can re-enable a retired destination until the
+// current generation restarts; add a configuration generation lease when
+// overlapping generations must be fenced.
+func retireTargets(names []any) rhiza.SQLStatement {
+	if len(names) == 0 {
+		return rhiza.SQLStatement{SQL: `UPDATE event_notification_targets SET enabled=0 WHERE enabled=1`}
+	}
+	return rhiza.SQLStatement{SQL: `UPDATE event_notification_targets SET enabled=0 WHERE enabled=1 AND target NOT IN (` + strings.TrimSuffix(strings.Repeat("?,", len(names)), ",") + `)`, Args: names}
+}
+
 func (q *RhizaQueue) Targets(ctx context.Context) ([]Target, error) {
 	r, err := q.DB.Query(ctx, rhiza.QueryRequest{SQL: `SELECT target,level FROM event_notification_targets WHERE enabled=1 ORDER BY target`, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil {
@@ -82,7 +105,11 @@ func (q *RhizaQueue) Claim(ctx context.Context, target string, now time.Time, li
 	}
 	tok := base64.RawURLEncoding.EncodeToString(token)
 	until := now.Add(lease).UnixMilli()
-	req := rhiza.ExecuteRequest{RequestID: "notify-claim/" + tok, SQL: `UPDATE event_notification_deliveries SET lease_token=?,lease_until_unix_ms=?,attempts=attempts+1 WHERE rowid IN (SELECT rowid FROM event_notification_deliveries WHERE target=? AND delivered_at_unix_ms IS NULL AND next_attempt_at_unix_ms<=? AND (lease_until_unix_ms IS NULL OR lease_until_unix_ms<?) ORDER BY timestamp,event_id LIMIT ?)`, Args: []any{tok, until, target, now.UnixMilli(), now.UnixMilli(), int64(limit)}}
+	// Eligibility is part of the claim so a backlog below the configured
+	// threshold can never delay an event that must be delivered. A changed
+	// threshold affects queued rows through this predicate; explicit Test events
+	// stay deliverable at every threshold.
+	req := rhiza.ExecuteRequest{RequestID: "notify-claim/" + tok, SQL: `UPDATE event_notification_deliveries SET lease_token=?,lease_until_unix_ms=?,attempts=attempts+1 WHERE rowid IN (SELECT d.rowid FROM event_notification_deliveries d WHERE d.target=? AND d.delivered_at_unix_ms IS NULL AND d.next_attempt_at_unix_ms<=? AND (d.lease_until_unix_ms IS NULL OR d.lease_until_unix_ms<?) AND (d.typ='Test' OR d.level>=(SELECT level FROM event_notification_targets WHERE target=d.target)) ORDER BY d.timestamp,d.event_id LIMIT ?)`, Args: []any{tok, until, target, now.UnixMilli(), now.UnixMilli(), int64(limit)}}
 	if _, err := storage.Execute(ctx, q.DB, req); err != nil {
 		return nil, err
 	}
@@ -105,6 +132,41 @@ func (q *RhizaQueue) Ack(ctx context.Context, target, id, lease string, now time
 	_, err := storage.Execute(ctx, q.DB, rhiza.ExecuteRequest{RequestID: "notify-ack/" + shortID(lease+id), SQL: `UPDATE event_notification_deliveries SET delivered_at_unix_ms=?,lease_token=NULL,lease_until_unix_ms=NULL WHERE target=? AND event_id=? AND lease_token=?`, Args: []any{now.UnixMilli(), target, id, lease}})
 	return err
 }
+
+// Cleanup removes one bounded batch of delivery snapshots that are terminal or
+// can no longer be delivered: acknowledged rows past retention, rows below the
+// target threshold, and undelivered rows past retention. The last rule is the
+// failed-delivery aging policy, because a row that keeps failing is never
+// terminal. Leased rows are kept so an in-flight send never loses its payload.
+func (q *RhizaQueue) Cleanup(ctx context.Context, now time.Time, retention time.Duration) (int, error) {
+	if q == nil || q.DB == nil || ctx == nil || now.IsZero() || retention <= 0 {
+		return 0, errors.New("notification cleanup requires queue, context, time, and positive retention")
+	}
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return 0, err
+	}
+	cutoff := now.UTC().Add(-retention).UnixMilli()
+	response, err := storage.Execute(ctx, q.DB, rhiza.ExecuteRequest{
+		RequestID: "notify-cleanup/" + base64.RawURLEncoding.EncodeToString(nonce[:]),
+		SQL: `DELETE FROM event_notification_deliveries WHERE rowid IN (
+			SELECT d.rowid FROM event_notification_deliveries d
+			LEFT JOIN event_notification_targets t ON t.target=d.target
+			WHERE d.lease_token IS NULL AND (
+				(d.delivered_at_unix_ms IS NOT NULL AND d.delivered_at_unix_ms<?)
+				OR (d.delivered_at_unix_ms IS NULL AND d.timestamp<?)
+				OR (d.typ<>'Test' AND (t.target IS NULL OR d.level<t.level))
+			)
+			ORDER BY d.timestamp ASC, d.event_id ASC LIMIT ?
+		)`,
+		Args: []any{cutoff, cutoff, int64(cleanupBatchSize)},
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(response.MutationReceipt.RowsAffected), nil
+}
+
 func (q *RhizaQueue) Fail(ctx context.Context, target, id, lease string, now time.Time, delay time.Duration, last string) error {
 	if len(last) > 256 {
 		last = last[:256]
