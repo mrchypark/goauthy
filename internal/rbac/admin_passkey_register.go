@@ -1,7 +1,6 @@
 package rbac
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/mrchypark/goauthy/internal/apikey"
@@ -62,16 +61,15 @@ func (h *Handler) AdminRegisterPasskey(w http.ResponseWriter, r *http.Request) {
 		h.genericUnauthorized(w)
 		return
 	}
-	user, err := h.identity.UserBySubject(r.Context(), subject)
-	if err != nil {
+	if _, err := h.identity.UserBySubject(r.Context(), subject); err != nil {
 		h.notFound(w)
 		return
 	}
-	credOpts, _, _, err := h.passkeyService.BeginRegistration(r.Context(), subject, user.Username, "admin-provisioned", "")
-	if err != nil {
-		h.error(w, http.StatusServiceUnavailable, "Service Unavailable")
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(credOpts)
+	// GA-ENROLL-ADMIN-001: administrator-initiated enrollment has no bounded
+	// continuation (explicit target, authority, expiry, completion), and the only
+	// session digest this route can supply is the empty string, which
+	// BeginRegistration rejects, so the returned ceremony could never be completed
+	// by the target account. The route stays mounted but reports that its contract
+	// does not exist, instead of failing like a transient outage.
+	h.error(w, http.StatusNotImplemented, "Not Implemented")
 }

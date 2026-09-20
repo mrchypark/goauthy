@@ -564,6 +564,30 @@ func TestPasskeyOnlyDeleteKeepsARegistrationVerifiedCredential(t *testing.T) {
 	}
 }
 
+// TestDeleteRejectedFinalCredentialRetriesAfterEligibilityChanges covers
+// GA-BR-13: a rejected final-key delete commits a zero-row receipt under its
+// request ID, and enrolling another credential does not change this
+// credential's CAS version, so the retry must carry a fresh operation identity
+// instead of replaying the stored rejection.
+func TestDeleteRejectedFinalCredentialRetriesAfterEligibilityChanges(t *testing.T) {
+	s, db, _ := newTestService(t)
+	seedPasskey(t, s, db, "subject", "verified", true)
+	setMode(t, db, "subject", "passkey")
+	if err := s.Delete(context.Background(), "subject", "verified"); err != ErrConflict {
+		t.Fatalf("delete of the final verified credential error=%v, want conflict", err)
+	}
+	// The retained passkey makes the original deletable; the original's
+	// credential_version is untouched by the enrollment.
+	seedPasskey(t, s, db, "subject", "second", true)
+	if err := s.Delete(context.Background(), "subject", "verified"); err != nil {
+		t.Fatalf("delete after eligibility changed error=%v", err)
+	}
+	items, err := s.List(context.Background(), "subject")
+	if err != nil || len(items) != 1 || items[0].Name != "second" {
+		t.Fatalf("remaining credentials=%+v err=%v", items, err)
+	}
+}
+
 func TestModificationProofCeremonyIsEncryptedBoundAndExpiresAtBoundary(t *testing.T) {
 	s, db, now := newTestService(t)
 	seedPasskey(t, s, db, "subject", "primary", true)
