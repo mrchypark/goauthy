@@ -86,7 +86,9 @@ func addFedCMOperations(doc *openapi3.T, features Features) error {
 	for _, field := range []string{"account_id", "client_id", "nonce", "is_auto_selected", "mode", "fields", "disclosure_shown_for"} {
 		form.WithProperty(field, text)
 	}
-	form.WithProperty("account_id", openapi3.NewStringSchema().WithPattern("^[A-Za-z0-9]{1,256}$"))
+	// Accounts are projected with native base64url subjects, so the accepted
+	// contract is the bounded opaque-subject rule the handler enforces.
+	form.WithProperty("account_id", openapi3.NewStringSchema().WithPattern("^[A-Za-z0-9_-]{1,256}$"))
 	form.WithProperty("client_id", openapi3.NewStringSchema().WithMinLength(2).WithMaxLength(256))
 	form.WithProperty("disclosure_text_shown", openapi3.NewStringSchema().WithEnum("1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"))
 	form.Description = "URL-encoded form, at most 8 KiB; each field occurs once with a non-empty, trimmed value. nonce is optional. disclosure_text_shown uses Go strconv.ParseBool text forms. No query parameters."
