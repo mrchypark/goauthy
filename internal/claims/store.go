@@ -86,6 +86,13 @@ func (s *Store) run(ctx context.Context, key *apikey.Principal, group string, ri
 	}
 	_, ok, err := s.apiKeys.RunMutation(ctx, key, group, right, id, guarded)
 	if err != nil {
+		// A rejected precondition means either the catalog CAS was stale (a
+		// conflict) or the authorization guard matched no grant (unauthorized).
+		// Re-check authority so revoked access keeps its 401 contract instead of
+		// being reported to the client as stale application state.
+		if authErr := s.authorize(ctx, "", key, group, right); errors.Is(authErr, ErrUnauthorized) {
+			return ErrUnauthorized
+		}
 		return admissionConflict(err)
 	}
 	if !ok {
@@ -496,7 +503,7 @@ func (s *Store) PutSelfUserValues(ctx context.Context, actor, subject string, ex
 	for _, name := range names {
 		args = append(args, name)
 	}
-	stmts := []rhiza.SQLStatement{{SQL: `UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=updated_at_unix_ms+1 WHERE subject=? AND revision=? AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0) AND ?=? AND EXISTS (SELECT 1 FROM user_attribute_configs WHERE user_editable=1 AND name IN (` + placeholders + `))`, Args: args}}
+	stmts := []rhiza.SQLStatement{{SQL: `UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=updated_at_unix_ms+1 WHERE subject=? AND revision=? AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0) AND ?=? AND EXISTS (SELECT 1 FROM user_attribute_configs WHERE user_editable=1 AND name IN (` + placeholders + `))`, Args: args, ExpectedRowsAffected: &one}}
 	for _, name := range names {
 		if encoded := canon[name]; encoded != "null" {
 			stmts = append(stmts, rhiza.SQLStatement{SQL: `INSERT INTO user_attribute_values (subject,key,value_json,updated_at_unix_ms) SELECT ?,?,?,0 WHERE EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=? AND user_editable=1) AND EXISTS (SELECT 1 FROM rbac_principal_versions WHERE subject=? AND revision=?) ON CONFLICT(subject,key) DO UPDATE SET value_json=excluded.value_json,updated_at_unix_ms=user_attribute_values.updated_at_unix_ms+1`, Args: []any{subject, name, encoded, name, subject, expected + 1}})
@@ -505,7 +512,7 @@ func (s *Store) PutSelfUserValues(ctx context.Context, actor, subject string, ex
 		}
 	}
 	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: requestID("self-values", actor, subject, fmt.Sprint(expected), strings.Join(names, "\x00")), Statements: stmts}); err != nil {
-		return 0, err
+		return 0, admissionConflict(err)
 	}
 	_, revision, err = s.selfUserValues(ctx, actor, subject)
 	if err != nil {
@@ -552,7 +559,7 @@ func (s *Store) putUserValues(ctx context.Context, actor string, key *apikey.Pri
 	if current != expected {
 		return 0, ErrConflict
 	}
-	stmts := []rhiza.SQLStatement{{SQL: `UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=updated_at_unix_ms+1 WHERE subject=? AND revision=? AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0) AND ` + adminGuard(), Args: []any{subject, expected, subject, actor}}}
+	stmts := []rhiza.SQLStatement{{SQL: `UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=updated_at_unix_ms+1 WHERE subject=? AND revision=? AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0) AND ` + adminGuard(), Args: []any{subject, expected, subject, actor}, ExpectedRowsAffected: &one}}
 	for _, n := range names {
 		if c, ok := canon[n]; ok {
 			stmts = append(stmts, rhiza.SQLStatement{SQL: `INSERT INTO user_attribute_values (subject,key,value_json,updated_at_unix_ms) SELECT ?,?,?,0 WHERE EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND EXISTS (SELECT 1 FROM rbac_principal_versions WHERE subject=? AND revision=?) ON CONFLICT(subject,key) DO UPDATE SET value_json=excluded.value_json,updated_at_unix_ms=user_attribute_values.updated_at_unix_ms+1`, Args: []any{subject, n, c, n, subject, expected + 1}})

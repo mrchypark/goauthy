@@ -2,7 +2,9 @@ package tracing
 
 import (
 	"context"
+	"net"
 	"os"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -16,6 +18,12 @@ func Init(ctx context.Context) (shutdown func(context.Context) error, err error)
 	if !Enabled() {
 		return func(context.Context) error { return nil }, nil
 	}
+
+	// The exporter reads these variables as URLs. The previous implementation
+	// accepted a bare host:port through WithEndpoint, so normalise that legacy
+	// form instead of silently exporting to the default destination.
+	normalizeLegacyEndpoint("OTEL_EXPORTER_OTLP_ENDPOINT")
+	normalizeLegacyEndpoint("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
 
 	serviceName := os.Getenv("OTEL_SERVICE_NAME")
 	if serviceName == "" {
@@ -46,6 +54,17 @@ func Init(ctx context.Context) (shutdown func(context.Context) error, err error)
 	otel.SetTracerProvider(tp)
 
 	return tp.Shutdown, nil
+}
+
+// normalizeLegacyEndpoint rewrites a bare host:port value into an http URL.
+func normalizeLegacyEndpoint(name string) {
+	value := os.Getenv(name)
+	if value == "" || strings.Contains(value, "://") {
+		return
+	}
+	if _, _, err := net.SplitHostPort(value); err == nil {
+		_ = os.Setenv(name, "http://"+value)
+	}
 }
 
 func NewTracer(name string) trace.Tracer {

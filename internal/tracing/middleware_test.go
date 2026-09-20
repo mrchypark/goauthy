@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,7 +48,7 @@ func TestMiddlewarePreservesResponseController(t *testing.T) {
 	}
 }
 
-func TestMiddlewareRecordsRequestSpanWithoutQuerySecrets(t *testing.T) {
+func TestMiddlewareRecordsRouteInsteadOfPathCredentials(t *testing.T) {
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
 
 	recorder := tracetest.NewSpanRecorder()
@@ -59,12 +60,15 @@ func TestMiddlewareRecordsRequestSpanWithoutQuerySecrets(t *testing.T) {
 		_ = provider.Shutdown(context.Background())
 	})
 
-	server := httptest.NewServer(Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	const route = "GET /auth/v1/users/{subject}/reset/{token}"
+	mux := http.NewServeMux()
+	mux.HandleFunc(route, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
-	})))
+	})
+	server := httptest.NewServer(Middleware(mux))
 	defer server.Close()
 
-	response, err := server.Client().Get(server.URL + "/oidc/token?code=bearer-secret")
+	response, err := server.Client().Get(server.URL + "/auth/v1/users/alice/reset/super-secret-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,10 +83,54 @@ func TestMiddlewareRecordsRequestSpanWithoutQuerySecrets(t *testing.T) {
 	for _, item := range spans[0].Attributes() {
 		attributes[string(item.Key)] = item.Value.Emit()
 	}
-	if attributes["http.target"] != "/oidc/token" {
-		t.Errorf("http.target = %q, want the path only", attributes["http.target"])
+	if attributes["http.route"] != route {
+		t.Errorf("http.route = %q, want %q", attributes["http.route"], route)
+	}
+	if strings.Contains(spans[0].Name(), "super-secret-token") || strings.Contains(attributes["http.route"], "super-secret-token") {
+		t.Fatalf("span leaked a path credential: name=%q route=%q", spans[0].Name(), attributes["http.route"])
+	}
+	if !strings.Contains(spans[0].Name(), "{token}") {
+		t.Errorf("span name = %q, want the route pattern", spans[0].Name())
 	}
 	if attributes["http.status_code"] != "418" {
 		t.Errorf("http.status_code = %q, want 418", attributes["http.status_code"])
+	}
+}
+
+func TestMiddlewareLabelsUnmatchedRequestsWithoutPath(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previous)
+		_ = provider.Shutdown(context.Background())
+	})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /auth/login", func(w http.ResponseWriter, r *http.Request) {})
+	server := httptest.NewServer(Middleware(mux))
+	defer server.Close()
+
+	response, err := server.Client().Get(server.URL + "/revoke/leaked-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	_, _ = io.Copy(io.Discard, response.Body)
+
+	spans := recorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("recorded %d spans, want 1", len(spans))
+	}
+	for _, item := range spans[0].Attributes() {
+		if strings.Contains(item.Value.Emit(), "leaked-code") {
+			t.Fatalf("attribute %s leaked the request path", item.Key)
+		}
+	}
+	if strings.Contains(spans[0].Name(), "leaked-code") {
+		t.Fatalf("span name leaked the request path: %q", spans[0].Name())
 	}
 }
