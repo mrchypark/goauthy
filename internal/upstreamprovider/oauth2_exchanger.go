@@ -224,11 +224,9 @@ func (e *OAuth2TokenExchanger) exchangeCodeExplicit(ctx context.Context, provide
 		return e.exchangeOAuthUserInfo(ctx, providerID, cfg, tokenResp.AccessToken)
 	}
 
-	// OIDC: try id_token first, fall back to userinfo if available.
+	// OIDC requires an id_token; userinfo-only is only valid for
+	// ProviderKindOAuthUserInfo which explicitly declares that contract.
 	if cfg.NormalizedKind() == ProviderKindOIDC && tokenResp.IDToken == "" {
-		if cfg.UserInfoEndpoint != "" && tokenResp.AccessToken != "" {
-			return e.exchangeOAuthUserInfo(ctx, providerID, cfg, tokenResp.AccessToken)
-		}
 		return nil, errTokenExchange
 	}
 	return &TokenExchangeResult{IDToken: tokenResp.IDToken}, nil
