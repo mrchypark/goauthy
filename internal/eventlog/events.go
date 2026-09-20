@@ -219,11 +219,26 @@ type Query struct {
 	Type  *Type  `json:"typ"`
 }
 
-// MaxPageSize bounds one event page. The returned rows are the page, one
-// look-ahead row and the authorization marker, and event texts are at most 4096
-// bytes, so a full page stays well inside the Rhiza 10,000-row and 16 MiB result
-// budgets instead of failing the whole query.
-const MaxPageSize = 1000
+// maxEncodedEventRowBytes bounds the JSON encoding of one returned event row.
+// Rhiza rejects the whole result once its encoding passes 16 MiB and its encoder
+// escapes a byte like "<" to six bytes, so the raw 4,096-byte text limit is worth
+// 6 * 4096 + 2 = 24,578 here; the schema adds a 43-character id (45), two hashes
+// of the same size (90), the longest type name (24), an address (47), a timestamp
+// and a data value (39), the level and the marker (2) and the array punctuation
+// (11) for 24,836 in total. The margin covers the rest of the envelope.
+const maxEncodedEventRowBytes = 24_900
+
+// MaxPageSize bounds one event page. The query returns the page plus one
+// look-ahead row and the authorization marker, so the page is sized from the
+// worst-case encoded row instead of the raw text limit: 16 MiB allows 673 such
+// rows, and the page keeps one of them for the look-ahead row. Every accepted
+// limit therefore stays inside the Rhiza 10,000-row and 16 MiB result budgets
+// and can still return a page together with its continuation.
+//
+// ponytail: a page of short texts could be larger than this; retry with a
+// smaller page on the encoded-byte error instead if page count ever matters
+// more than the extra round trips and non-deterministic page sizes.
+const MaxPageSize = 16<<20/maxEncodedEventRowBytes - 1
 
 // Cursor is the keyset position of the last row of a page. Pages are ordered by
 // timestamp DESC, id DESC, so this position is stable: an insert that sorts
