@@ -13,8 +13,7 @@ import (
 )
 
 func Init(ctx context.Context) (shutdown func(context.Context) error, err error) {
-	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-	if endpoint == "" {
+	if !Enabled() {
 		return func(context.Context) error { return nil }, nil
 	}
 
@@ -23,10 +22,10 @@ func Init(ctx context.Context) (shutdown func(context.Context) error, err error)
 		serviceName = "goauthy"
 	}
 
-	exporter, err := otlptracehttp.New(ctx,
-		otlptracehttp.WithEndpoint(endpoint),
-		otlptracehttp.WithInsecure(),
-	)
+	// Let the exporter apply standard environment handling. WithEndpoint takes a
+	// bare host:port, so passing a full URL broke it, and WithInsecure forced an
+	// HTTPS collector configuration to plaintext.
+	exporter, err := otlptracehttp.New(ctx)
 	if err != nil {
 		return nil, err
 	}
