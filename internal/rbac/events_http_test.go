@@ -3,6 +3,7 @@ package rbac
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -193,6 +194,84 @@ func TestEventsQueryRejectsCaseAliases(t *testing.T) {
 		h.EventsQuery(w, r)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("case alias status=%d body=%s", w.Code, w.Body)
+		}
+	}
+}
+
+// TestEventsQueryBoundedPageContinuation covers the GA-EVENTS-001 escape: a
+// caller can bound a page and continue from the returned token instead of
+// losing the whole range to a generic unavailable response, and a malformed or
+// oversized page request is still rejected before the query.
+func TestEventsQueryBoundedPageContinuation(t *testing.T) {
+	h, store, _, keys, _ := userCreateHTTPFixture(t)
+	at := time.UnixMilli(1_800_000_000_000).UTC()
+	store.now = func() time.Time { return at }
+	ctx := context.Background()
+	events := []eventlog.Event{
+		eventlog.Creation("events-page-a", "a@example.test", "127.0.0.1", false, at),
+		eventlog.Creation("events-page-b", "b@example.test", "127.0.0.1", false, at),
+		eventlog.Creation("events-page-c", "c@example.test", "127.0.0.1", false, at.Add(-time.Second)),
+	}
+	statements := make([]rhiza.SQLStatement, 0, len(events))
+	for _, event := range events {
+		statement, err := event.Statement("1=1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		statements = append(statements, statement)
+	}
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "events-page-seed", Statements: statements}); err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := keys.Create(ctx, nil, apikey.Request{Name: "events-page", Access: []apikey.Access{{Group: "Events", AccessRights: []apikey.Right{apikey.Read}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/auth/v1/events", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Authorization", "API-Key "+token)
+		w := httptest.NewRecorder()
+		h.EventsQuery(w, r)
+		return w
+	}
+
+	first := query(`{"from":1719784800,"level":"info","limit":2}`)
+	continuation := first.Header().Get("X-Continuation-Token")
+	var page []eventlog.Event
+	if err := json.Unmarshal(first.Body.Bytes(), &page); err != nil || first.Code != http.StatusPartialContent || continuation == "" || len(page) != 2 {
+		t.Fatalf("first page status=%d token=%q rows=%#v err=%v", first.Code, continuation, page, err)
+	}
+	if page[0].Timestamp < page[1].Timestamp || page[0].Timestamp == page[1].Timestamp && page[0].ID < page[1].ID {
+		t.Fatalf("first page is not ordered by timestamp DESC, id DESC: %#v", page)
+	}
+	if page[0].ID == events[2].ID || page[1].ID == events[2].ID || page[0].ID == page[1].ID {
+		t.Fatalf("first page rows=%s,%s", page[0].ID, page[1].ID)
+	}
+	second := query(`{"from":1719784800,"level":"info","limit":2,"continuation_token":"` + continuation + `"}`)
+	page = nil
+	if err := json.Unmarshal(second.Body.Bytes(), &page); err != nil || second.Code != http.StatusOK || second.Header().Get("X-Continuation-Token") != "" || len(page) != 1 || page[0].ID != events[2].ID {
+		t.Fatalf("second page status=%d headers=%v rows=%#v err=%v", second.Code, second.Header(), page, err)
+	}
+	for _, body := range []string{
+		`{"from":1719784800,"level":"info","limit":0}`,
+		`{"from":1719784800,"level":"info","limit":1001}`,
+		`{"from":1719784800,"level":"info","limit":"2"}`,
+		`{"from":1719784800,"level":"info","continuation_token":"bogus"}`,
+	} {
+		if rejected := query(body); rejected.Code != http.StatusBadRequest {
+			t.Fatalf("body=%s status=%d", body, rejected.Code)
+		}
+	}
+	// A null page field is absent, like the nullable range fields.
+	for _, body := range []string{
+		`{"from":1719784800,"level":"info","limit":null}`,
+		`{"from":1719784800,"level":"info","continuation_token":null}`,
+	} {
+		accepted := query(body)
+		page = nil
+		if err := json.Unmarshal(accepted.Body.Bytes(), &page); err != nil || accepted.Code != http.StatusOK || len(page) != 3 {
+			t.Fatalf("body=%s status=%d rows=%#v err=%v", body, accepted.Code, page, err)
 		}
 	}
 }
