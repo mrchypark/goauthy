@@ -74,6 +74,12 @@ func (r Rules) Validate() error {
 		r.MinEntropyBits < 0 || r.MinEntropyBits > 256 {
 		return ErrInvalidPasswordRules
 	}
+	// Lowercase, uppercase, digit and special requirements are disjoint: every
+	// character satisfies at most one of them, so a policy that requires more
+	// such characters than the maximum length can never be met by any password.
+	if r.LowerCase+r.UpperCase+r.Digits+r.Special > r.LengthMax {
+		return ErrInvalidPasswordRules
+	}
 	return nil
 }
 
