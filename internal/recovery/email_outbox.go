@@ -52,9 +52,12 @@ func emailOutboxSchemaStatements() []rhiza.SQLStatement {
 }
 
 // OutboxKeyring seals queued mail bodies. *oidc.Keyring implements it.
+// PurposeEnvelopeKeyID reports the master key embedded in a sealed envelope,
+// so an enqueue can fence its insert on the key that actually sealed it.
 type OutboxKeyring interface {
 	SealEnvelope(purpose string, plaintext []byte) ([]byte, error)
 	OpenEnvelope(purpose string, envelope []byte) ([]byte, error)
+	PurposeEnvelopeKeyID(purpose string, envelope []byte) (string, error)
 }
 
 // EmailOutboxOption configures an outbox without changing existing callers.
@@ -95,22 +98,27 @@ func (o *EmailOutbox) SchemaStatements() []rhiza.SQLStatement {
 }
 
 // Enqueue stores one delivery for retry. Bodies are sealed before the insert, so
-// a missing keyring is an error instead of a plaintext write.
+// a missing keyring is an error instead of a plaintext write. The insert runs
+// through storage.ExecuteEnvelope for the sealing key, so a master-key
+// retirement fence rejects an enqueue that sealed under the retired key.
 func (o *EmailOutbox) Enqueue(ctx context.Context, recipient, mailType, subject, htmlBody, textBody string) error {
 	if o == nil || o.DB == nil {
 		return errors.New("email outbox is not configured")
 	}
 	now := o.Now()
 	id := outboxRequestID(recipient, mailType, now)
-	sealedHTML, err := o.sealPayload(id, "html", htmlBody)
+	sealedHTML, htmlKeyID, err := o.sealPayload(id, "html", htmlBody)
 	if err != nil {
 		return err
 	}
-	sealedText, err := o.sealPayload(id, "text", textBody)
+	sealedText, textKeyID, err := o.sealPayload(id, "text", textBody)
 	if err != nil {
 		return err
 	}
-	_, err = storage.Execute(ctx, o.DB, rhiza.ExecuteRequest{
+	if htmlKeyID != textKeyID {
+		return errors.New("email outbox sealing key changed between payloads")
+	}
+	_, err = storage.ExecuteEnvelope(ctx, o.DB, htmlKeyID, rhiza.ExecuteRequest{
 		RequestID: "email-outbox-enqueue/" + id,
 		SQL:       `INSERT OR IGNORE INTO email_outbox (id, recipient, mail_type, subject, body_html, body_text, status, attempts, last_error, created_at_unix_ms, updated_at_unix_ms, next_retry_at_unix_ms) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, '', ?, ?, ?)`,
 		Args:      []any{id, recipient, mailType, subject, sealedHTML, sealedText, now.UnixMilli(), now.UnixMilli(), now.UnixMilli()},
@@ -270,15 +278,22 @@ func outboxPayloadPurpose(id, field string) string {
 	return "email/outbox/" + base64.RawURLEncoding.EncodeToString(digest[:16])
 }
 
-func (o *EmailOutbox) sealPayload(id, field, body string) (string, error) {
+// sealPayload seals one body and reports the master key that sealed it, so the
+// caller can fence the row insert on that exact key.
+func (o *EmailOutbox) sealPayload(id, field, body string) (string, string, error) {
 	if o.keyring == nil {
-		return "", errors.New("email outbox requires an envelope keyring to protect queued payloads")
+		return "", "", errors.New("email outbox requires an envelope keyring to protect queued payloads")
 	}
-	envelope, err := o.keyring.SealEnvelope(outboxPayloadPurpose(id, field), []byte(body))
+	purpose := outboxPayloadPurpose(id, field)
+	envelope, err := o.keyring.SealEnvelope(purpose, []byte(body))
 	if err != nil {
-		return "", fmt.Errorf("seal email outbox %s payload: %w", field, err)
+		return "", "", fmt.Errorf("seal email outbox %s payload: %w", field, err)
 	}
-	return outboxSealedPrefix + base64.RawStdEncoding.EncodeToString(envelope), nil
+	keyID, err := o.keyring.PurposeEnvelopeKeyID(purpose, envelope)
+	if err != nil {
+		return "", "", fmt.Errorf("identify email outbox %s sealing key: %w", field, err)
+	}
+	return outboxSealedPrefix + base64.RawStdEncoding.EncodeToString(envelope), keyID, nil
 }
 
 func (o *EmailOutbox) openPayload(id, field, stored string) (string, error) {

@@ -2,16 +2,41 @@ package recovery
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
+
+// outboxRetirementBarrier is the production master-key retirement barrier
+// table. The fence appends an epoch update that violates this table's epoch
+// check for an old writer, which is what rolls a fenced enqueue back.
+const outboxRetirementBarrier = `CREATE TABLE IF NOT EXISTS master_key_retirement_barrier (
+	barrier_id INTEGER PRIMARY KEY CHECK (barrier_id = 1),
+	epoch INTEGER NOT NULL UNIQUE CHECK (epoch > 0),
+	old_key_id TEXT NOT NULL CHECK (length(old_key_id) BETWEEN 1 AND 64 AND old_key_id NOT GLOB '*[^A-Za-z0-9._-]*'),
+	replacement_key_id TEXT NOT NULL CHECK (length(replacement_key_id) BETWEEN 1 AND 64 AND replacement_key_id NOT GLOB '*[^A-Za-z0-9._-]*' AND replacement_key_id <> old_key_id),
+	membership_digest TEXT NOT NULL CHECK (length(membership_digest) = 43 AND membership_digest NOT GLOB '*[^A-Za-z0-9_-]*'),
+	state TEXT NOT NULL CHECK (state IN ('prepared', 'fenced', 'ready', 'aborted')),
+	prepared_at_unix_ms INTEGER NOT NULL CHECK (prepared_at_unix_ms >= 0),
+	fenced_at_unix_ms INTEGER CHECK (fenced_at_unix_ms IS NULL OR fenced_at_unix_ms >= prepared_at_unix_ms),
+	ready_at_unix_ms INTEGER CHECK (ready_at_unix_ms IS NULL OR (fenced_at_unix_ms IS NOT NULL AND ready_at_unix_ms >= fenced_at_unix_ms)),
+	aborted_at_unix_ms INTEGER CHECK (aborted_at_unix_ms IS NULL OR aborted_at_unix_ms >= prepared_at_unix_ms),
+	CHECK ((state = 'prepared' AND fenced_at_unix_ms IS NULL AND ready_at_unix_ms IS NULL AND aborted_at_unix_ms IS NULL) OR
+	       (state = 'fenced' AND fenced_at_unix_ms IS NOT NULL AND ready_at_unix_ms IS NULL AND aborted_at_unix_ms IS NULL) OR
+	       (state = 'ready' AND fenced_at_unix_ms IS NOT NULL AND ready_at_unix_ms IS NOT NULL AND aborted_at_unix_ms IS NULL) OR
+	       (state = 'aborted' AND aborted_at_unix_ms IS NOT NULL AND ready_at_unix_ms IS NULL))
+) STRICT`
 
 const outboxTestBody = `text body https://auth.example.test/reset`
 
@@ -198,6 +223,157 @@ func TestEmailOutboxEnqueueRequiresKeyringForSensitivePayloads(t *testing.T) {
 	}
 }
 
+// TestEmailOutboxEnqueueRespectsMasterKeyRetirementFence covers the sealed
+// insert path: an enqueue that seals under the retired key must not commit a
+// row, while an enqueue under the replacement key inserts and delivers.
+func TestEmailOutboxEnqueueRespectsMasterKeyRetirementFence(t *testing.T) {
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	retired, replacement := outboxFenceKeyrings(t)
+	var delivered []string
+	outbox := testEmailOutbox(t, func(_ context.Context, recipient, subject, textBody, htmlBody string) error {
+		delivered = append(delivered, recipient+"|"+subject+"|"+textBody+"|"+htmlBody)
+		return nil
+	}, WithEnvelopeKeyring(retired))
+	outbox.Now = func() time.Time { return now }
+	seedOutboxRetirement(t, outbox, "fenced")
+
+	if err := outbox.Enqueue(t.Context(), "user@example.test", "password reset", "Reset", "<p>html</p>", outboxTestBody); err == nil {
+		t.Fatal("enqueue sealed under the retired key committed a row")
+	}
+	if rows := outboxRowCount(t, outbox); rows != 0 {
+		t.Fatalf("fenced enqueue rows=%d want=0", rows)
+	}
+
+	// The retry lands on a later instant, so it is a new enqueue request rather
+	// than a replay of the rejected one.
+	now = now.Add(time.Second)
+	outbox.keyring = replacement
+	if err := outbox.Enqueue(t.Context(), "user@example.test", "password reset", "Reset", "<p>html</p>", outboxTestBody); err != nil {
+		t.Fatalf("enqueue under the replacement key: %v", err)
+	}
+	id := onlyOutboxID(t, outbox)
+	if err := outbox.Step(t.Context()); err != nil {
+		t.Fatalf("deliver replacement row: %v", err)
+	}
+	if row := readOutboxRow(t, outbox, id); row.status != "sent" {
+		t.Fatalf("replacement row after delivery=%+v", row)
+	}
+	want := "user@example.test|Reset|" + outboxTestBody + "|<p>html</p>"
+	if len(delivered) != 1 || delivered[0] != want {
+		t.Fatalf("delivered=%q want=%q", delivered, want)
+	}
+}
+
+// TestEmailOutboxEnqueueRejectsSealThatOutlivesItsFence pauses an enqueue
+// between sealing its payload and inserting its row, advances retirement past
+// that seal, then resumes it. The fenced state and the post-readiness ready
+// state must both reject the insert.
+func TestEmailOutboxEnqueueRejectsSealThatOutlivesItsFence(t *testing.T) {
+	for _, state := range []string{"fenced", "ready"} {
+		t.Run(state, func(t *testing.T) {
+			retired, _ := outboxFenceKeyrings(t)
+			pausing := &pausingOutboxKeyring{inner: retired, sealed: make(chan struct{}), release: make(chan struct{})}
+			outbox := testEmailOutbox(t, nil, WithEnvelopeKeyring(pausing))
+			seedOutboxRetirement(t, outbox, "prepared")
+
+			enqueued := make(chan error, 1)
+			go func() {
+				enqueued <- outbox.Enqueue(t.Context(), "user@example.test", "password reset", "Reset", "<p>html</p>", outboxTestBody)
+			}()
+			select {
+			case <-pausing.sealed:
+			case <-time.After(30 * time.Second):
+				t.Fatal("enqueue never sealed its payload")
+			}
+			seedOutboxRetirement(t, outbox, state)
+			close(pausing.release)
+
+			if err := <-enqueued; err == nil {
+				t.Fatalf("enqueue sealed before the %s transition committed a row", state)
+			}
+			if rows := outboxRowCount(t, outbox); rows != 0 {
+				t.Fatalf("%s enqueue rows=%d want=0", state, rows)
+			}
+		})
+	}
+}
+
+// pausingOutboxKeyring seals through the real keyring and holds the first seal
+// until the test releases it, which is the window between sealing a payload and
+// inserting its row.
+type pausingOutboxKeyring struct {
+	inner   OutboxKeyring
+	sealed  chan struct{}
+	release chan struct{}
+	held    bool
+}
+
+func (k *pausingOutboxKeyring) SealEnvelope(purpose string, plaintext []byte) ([]byte, error) {
+	envelope, err := k.inner.SealEnvelope(purpose, plaintext)
+	if err != nil || k.held {
+		return envelope, err
+	}
+	k.held = true
+	close(k.sealed)
+	<-k.release
+	return envelope, nil
+}
+
+func (k *pausingOutboxKeyring) OpenEnvelope(purpose string, envelope []byte) ([]byte, error) {
+	return k.inner.OpenEnvelope(purpose, envelope)
+}
+
+func (k *pausingOutboxKeyring) PurposeEnvelopeKeyID(purpose string, envelope []byte) (string, error) {
+	return k.inner.PurposeEnvelopeKeyID(purpose, envelope)
+}
+
+// outboxFenceKeyrings returns keyrings over one master key directory with
+// key-a and key-b active, so a test can fence A->B.
+func outboxFenceKeyrings(t *testing.T) (retired, replacement *oidc.Keyring) {
+	t.Helper()
+	directory := t.TempDir()
+	for _, id := range []string{"key-a", "key-b"} {
+		value := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{id[len(id)-1]}, 32))
+		if err := os.WriteFile(filepath.Join(directory, id), []byte(value), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	retired, err := oidc.LoadKeyring(directory, "key-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err = oidc.LoadKeyring(directory, "key-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return retired, replacement
+}
+
+// seedOutboxRetirement writes the A->B barrier in one state, replacing any
+// earlier state so a test can advance retirement while an enqueue is paused.
+func seedOutboxRetirement(t *testing.T, outbox *EmailOutbox, state string) {
+	t.Helper()
+	preparedAt := int64(1_800_000_000_000)
+	var fencedAt, readyAt any
+	switch state {
+	case "prepared":
+	case "fenced":
+		fencedAt = preparedAt + 1
+	case "ready":
+		fencedAt, readyAt = preparedAt+1, preparedAt+2
+	default:
+		t.Fatalf("unsupported outbox retirement state %q", state)
+	}
+	_, err := storage.Execute(t.Context(), outbox.DB, rhiza.ExecuteRequest{
+		RequestID: "outbox-test-retirement/" + state,
+		SQL:       "INSERT INTO master_key_retirement_barrier (barrier_id, epoch, old_key_id, replacement_key_id, membership_digest, state, prepared_at_unix_ms, fenced_at_unix_ms, ready_at_unix_ms) VALUES (1, 1, 'key-a', 'key-b', ?, ?, ?, ?, ?) ON CONFLICT(barrier_id) DO UPDATE SET state=excluded.state, fenced_at_unix_ms=excluded.fenced_at_unix_ms, ready_at_unix_ms=excluded.ready_at_unix_ms",
+		Args:      []any{strings.Repeat("a", 43), state, preparedAt, fencedAt, readyAt},
+	})
+	if err != nil {
+		t.Fatalf("seed %s retirement: %v", state, err)
+	}
+}
+
 func TestEmailOutboxDeliversLegacyPlaintextRow(t *testing.T) {
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	var delivered []string
@@ -261,6 +437,15 @@ type outboxState struct {
 }
 
 func testEmailOutbox(t *testing.T, sendFn func(context.Context, string, string, string, string) error, options ...EmailOutboxOption) *EmailOutbox {
+	// outboxRetirementGenerations mirrors the v105 durable generation record
+	// that the envelope admission statement consults in every barrier state.
+	const outboxRetirementGenerations = `CREATE TABLE IF NOT EXISTS master_key_retirement_generations (
+		epoch INTEGER PRIMARY KEY CHECK (epoch > 0),
+		old_key_id TEXT NOT NULL CHECK (length(old_key_id) BETWEEN 1 AND 64 AND old_key_id NOT GLOB '*[^A-Za-z0-9._-]*'),
+		replacement_key_id TEXT NOT NULL CHECK (length(replacement_key_id) BETWEEN 1 AND 64 AND replacement_key_id NOT GLOB '*[^A-Za-z0-9._-]*' AND replacement_key_id <> old_key_id),
+		ready_at_unix_ms INTEGER CHECK (ready_at_unix_ms IS NULL OR ready_at_unix_ms >= 0),
+		removed_at_unix_ms INTEGER CHECK (removed_at_unix_ms IS NULL OR (ready_at_unix_ms IS NOT NULL AND removed_at_unix_ms >= ready_at_unix_ms))
+	) STRICT`
 	t.Helper()
 	if sendFn == nil {
 		sendFn = func(context.Context, string, string, string, string) error { return nil }
@@ -270,7 +455,10 @@ func testEmailOutbox(t *testing.T, sendFn func(context.Context, string, string, 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{RequestID: "email-outbox-test-schema", Statements: emailOutboxSchemaStatements()}); err != nil {
+	statements := append(emailOutboxSchemaStatements(),
+		rhiza.SQLStatement{SQL: outboxRetirementBarrier},
+		rhiza.SQLStatement{SQL: outboxRetirementGenerations})
+	if _, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{RequestID: "email-outbox-test-schema", Statements: statements}); err != nil {
 		t.Fatal(err)
 	}
 	outbox, err := NewEmailOutbox(db, sendFn, options...)
