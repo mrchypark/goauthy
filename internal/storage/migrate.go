@@ -9,7 +9,7 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-const schemaVersion = 107
+const schemaVersion = 109
 
 // migrateThroughV97 applies schema versions v1 through v97. It is the
 // unchanged prefix of Migrate, extracted so tests can reach a clean v97
@@ -411,6 +411,12 @@ func Migrate(ctx context.Context, db *rhiza.DB) error {
 	}
 	if err := migrateSchemaV107(ctx, db); err != nil {
 		return fmt.Errorf("migrate schema v107: %w", err)
+	}
+	if err := migrateSchemaV108(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v108: %w", err)
+	}
+	if err := migrateSchemaV109(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v109: %w", err)
 	}
 	return nil
 }
@@ -3740,6 +3746,52 @@ func migrateSchemaV107(ctx context.Context, db *rhiza.DB) error {
 		) STRICT`},
 		{SQL: `INSERT OR IGNORE INTO event_notification_config_generation (config_id, generation) VALUES (1, 1)`},
 		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(107)`},
+	}})
+	return err
+}
+
+// migrateSchemaV109 records the configuration generation on every destination
+// ponytail: placeholder owned by the OTP work (GA66-OTP-*); replace this body
+// with the real v108 migration when it lands. It is empty so the chain compiles
+// while that change is in flight.
+func migrateSchemaV108(ctx context.Context, db *rhiza.DB) error {
+	return nil
+}
+
+// migrateSchemaV109 records the configuration generation on every destination
+// row and rejects, at the database boundary, any write that does not carry the
+// stored generation. The application-side generation claim added in v107 only
+// fences writers that run the new code: a legacy binary's unconditional
+// destination upsert still reaches the table and can re-enable a retired
+// destination or roll its level back. A BEFORE trigger is the only fence a
+// legacy writer cannot route around, because the trigger body is evaluated from
+// the live generation table rather than from the writer's own predicates
+// (GA66-NOTIFY-003). Existing rows are stamped with the stored generation; a row
+// left behind at an older generation is rejected until its generation is
+// claimed, which fails closed for a destination table that no current
+// configuration owns.
+func migrateSchemaV109(ctx context.Context, db *rhiza.DB) error {
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT
+		EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=109),
+		EXISTS(SELECT 1 FROM pragma_table_info('event_notification_targets') WHERE name='generation')`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 2 {
+		return errors.New("invalid schema 109 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	if state.Rows[0][1] == int64(1) {
+		return errors.New("schema 109 has an unrecorded destination generation column")
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v109", Statements: []rhiza.SQLStatement{
+		{SQL: `ALTER TABLE event_notification_targets ADD COLUMN generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0)`},
+		{SQL: `UPDATE event_notification_targets SET generation=(SELECT generation FROM event_notification_config_generation WHERE config_id=1)`},
+		{SQL: `CREATE TRIGGER event_notification_targets_generation_insert BEFORE INSERT ON event_notification_targets WHEN NEW.generation IS NOT (SELECT generation FROM event_notification_config_generation WHERE config_id=1) BEGIN SELECT RAISE(ABORT, 'notification destination write must carry the current configuration generation'); END`},
+		{SQL: `CREATE TRIGGER event_notification_targets_generation_update BEFORE UPDATE ON event_notification_targets WHEN NEW.generation IS NOT (SELECT generation FROM event_notification_config_generation WHERE config_id=1) BEGIN SELECT RAISE(ABORT, 'notification destination write must carry the current configuration generation'); END`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(109)`},
 	}})
 	return err
 }

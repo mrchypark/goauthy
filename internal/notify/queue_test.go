@@ -529,3 +529,44 @@ func TestNotificationQueueRejectsInvalidGeneration(t *testing.T) {
 		}
 	}
 }
+
+// TestNotificationLegacyWriterFence is the DB-boundary half of GA66-NOTIFY-003:
+// the generation gate lives in the new binary, so a legacy pod that restarts
+// after a newer generation was claimed would still re-enable a retired
+// destination and roll a level back with its unconditional upsert. The v109
+// triggers reject any destination write that does not carry the stored
+// generation, which is the only fence a writer without the new predicates
+// cannot route around.
+func TestNotificationLegacyWriterFence(t *testing.T) {
+	db, ctx, _ := queueFixture(t)
+	kept := Identity("slack", "https://hooks.fence-legacy-kept.test/a")
+	retired := Identity("slack", "https://hooks.fence-legacy-retired.test/a")
+	if _, err := NewRhizaQueue(ctx, db, []Target{{Name: kept, Kind: "slack", Level: eventlog.Info}, {Name: retired, Kind: "slack", Level: eventlog.Info}}, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewRhizaQueue(ctx, db, []Target{{Name: kept, Kind: "slack", Level: eventlog.Critical}}, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	// The base binary's exact reconciliation statement, which names neither a
+	// generation nor a gate. Both the re-enable and the level rollback abort.
+	legacy := []rhiza.SQLStatement{
+		{SQL: `INSERT INTO event_notification_targets(target,level,enabled) VALUES(?,?,1) ON CONFLICT(target) DO UPDATE SET level=excluded.level,enabled=1`, Args: []any{retired, int64(eventlog.Info.Rank())}},
+		{SQL: `INSERT INTO event_notification_targets(target,level,enabled) VALUES(?,?,1) ON CONFLICT(target) DO UPDATE SET level=excluded.level,enabled=1`, Args: []any{kept, int64(eventlog.Info.Rank())}},
+	}
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "notify-legacy-writer", Statements: legacy}); err == nil {
+		t.Fatal("legacy reconciliation write was admitted after the generation fence")
+	}
+	if enabled := targetEnabled(t, ctx, db, retired); enabled != 0 {
+		t.Fatalf("legacy writer re-enabled the retired destination: enabled=%d", enabled)
+	}
+	if level := targetColumn(t, ctx, db, kept, "level"); level != int64(eventlog.Critical.Rank()) {
+		t.Fatalf("legacy writer rolled the kept level back to %d", level)
+	}
+
+	// A row stamped by the current configuration keeps working, so the fence
+	// rejects stale writers rather than destination writes in general.
+	if _, err := NewRhizaQueue(ctx, db, []Target{{Name: kept, Kind: "slack", Level: eventlog.Critical}}, 2); err != nil {
+		t.Fatalf("current configuration was rejected: %v", err)
+	}
+}

@@ -61,7 +61,11 @@ func NewRhizaQueue(ctx context.Context, db *rhiza.DB, targets []Target, generati
 		// The gate sits in the SELECT so a superseded generation inserts nothing
 		// and updates nothing: with no candidate row the conflict clause never
 		// runs, which keeps a retired destination disabled and its old level gone.
-		stmts = append(stmts, rhiza.SQLStatement{SQL: `INSERT INTO event_notification_targets(target,level,enabled) SELECT ?,?,1 WHERE ` + currentGenerationSQL + ` ON CONFLICT(target) DO UPDATE SET level=excluded.level,enabled=1 WHERE ` + currentGenerationSQL, Args: []any{t.Name, int64(t.Level.Rank()), generation, generation}})
+		// The row also carries the claimed generation, because v109 rejects at the
+		// database boundary any destination write that does not: a legacy binary's
+		// unconditional upsert cannot name this column, so it aborts instead of
+		// re-enabling a retired destination or rolling a level back.
+		stmts = append(stmts, rhiza.SQLStatement{SQL: `INSERT INTO event_notification_targets(target,level,enabled,generation) SELECT ?,?,1,? WHERE ` + currentGenerationSQL + ` ON CONFLICT(target) DO UPDATE SET level=excluded.level,enabled=1,generation=excluded.generation WHERE ` + currentGenerationSQL, Args: []any{t.Name, int64(t.Level.Rank()), generation, generation, generation}})
 	}
 	// A destination dropped from configuration must stop queueing: the enqueue
 	// trigger reads this table, so a still-enabled row keeps replicating
@@ -98,12 +102,18 @@ func claimGeneration(generation int64) rhiza.SQLStatement {
 // being deleted, so a concurrent pod sharing the destination keeps its work.
 func retireTargets(names []any, generation int64) rhiza.SQLStatement {
 	args := make([]any, 0, len(names)+1)
+	// Retirement stamps the stored generation for the same reason the upsert
+	// above names it: the v109 trigger admits only a destination write that
+	// carries the stored generation, and a retired row still carries the
+	// generation that retired it.
+	const stamp = `,generation=(SELECT generation FROM event_notification_config_generation WHERE config_id=1)`
+	// The gate's placeholder comes first, then the names.
 	args = append(args, generation)
 	args = append(args, names...)
 	if len(names) == 0 {
-		return rhiza.SQLStatement{SQL: `UPDATE event_notification_targets SET enabled=0 WHERE enabled=1 AND ` + currentGenerationSQL, Args: args}
+		return rhiza.SQLStatement{SQL: `UPDATE event_notification_targets SET enabled=0` + stamp + ` WHERE enabled=1 AND ` + currentGenerationSQL, Args: args}
 	}
-	return rhiza.SQLStatement{SQL: `UPDATE event_notification_targets SET enabled=0 WHERE enabled=1 AND ` + currentGenerationSQL + ` AND target NOT IN (` + strings.TrimSuffix(strings.Repeat("?,", len(names)), ",") + `)`, Args: args}
+	return rhiza.SQLStatement{SQL: `UPDATE event_notification_targets SET enabled=0` + stamp + ` WHERE enabled=1 AND ` + currentGenerationSQL + ` AND target NOT IN (` + strings.TrimSuffix(strings.Repeat("?,", len(names)), ",") + `)`, Args: args}
 }
 
 func (q *RhizaQueue) Targets(ctx context.Context) ([]Target, error) {
