@@ -124,6 +124,11 @@ func TestMasterKeyRetirementChainsSecondEpochAfterReady(t *testing.T) {
 	if _, err := PrepareMasterKeyRetirementGuarded(ctx, db, MasterKeyRetirementPrepareRequest{Epoch: 2, OldKeyID: "key-a", ReplacementKeyID: "key-c", MemberIDs: []string{"node-0"}, PreparedAt: now.Add(4 * time.Second)}, auth("create")); !errors.Is(err, ErrMasterKeyRetirementConflict) {
 		t.Fatalf("second epoch restarted from a retired generation: %v", err)
 	}
+	// A completed generation permanently prohibits its old key, so a fence that
+	// named it would reject every writer.
+	if _, err := PrepareMasterKeyRetirementGuarded(ctx, db, MasterKeyRetirementPrepareRequest{Epoch: 2, OldKeyID: "key-b", ReplacementKeyID: "key-a", MemberIDs: []string{"node-0"}, PreparedAt: now.Add(4 * time.Second)}, auth("create")); !errors.Is(err, ErrMasterKeyRetirementConflict) {
+		t.Fatalf("second epoch nominated a permanently prohibited replacement: %v", err)
+	}
 	if _, err := PrepareMasterKeyRetirementGuarded(ctx, db, MasterKeyRetirementPrepareRequest{Epoch: 2, OldKeyID: "key-b", ReplacementKeyID: "key-c", MemberIDs: []string{"node-0"}, PreparedAt: now.Add(4 * time.Second)}, auth("create")); err != nil {
 		t.Fatal("second epoch from the prior replacement: ", err)
 	}

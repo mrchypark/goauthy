@@ -36,6 +36,7 @@ var (
 // and rewrite the barrier from a state the caller never observed.
 const retirementPrepareConflictClause = ` ON CONFLICT(barrier_id) DO UPDATE SET epoch=excluded.epoch, old_key_id=excluded.old_key_id, replacement_key_id=excluded.replacement_key_id, membership_digest=excluded.membership_digest, state='prepared', prepared_at_unix_ms=excluded.prepared_at_unix_ms, fenced_at_unix_ms=NULL, ready_at_unix_ms=NULL, aborted_at_unix_ms=NULL
 			WHERE master_key_retirement_barrier.state IN ('aborted','ready') AND excluded.epoch > master_key_retirement_barrier.epoch
+			  AND NOT EXISTS (SELECT 1 FROM master_key_retirement_generations WHERE old_key_id=excluded.replacement_key_id)
 			  AND (master_key_retirement_barrier.state='aborted' AND master_key_retirement_barrier.old_key_id=excluded.old_key_id
 			       OR master_key_retirement_barrier.state='ready' AND master_key_retirement_barrier.replacement_key_id=excluded.old_key_id)`
 
@@ -200,6 +201,11 @@ func prepareMasterKeyRetirement(ctx context.Context, db *rhiza.DB, req MasterKey
 			condition = `EXISTS (SELECT 1 FROM master_key_retirement_barrier WHERE barrier_id=1 AND state IN ('aborted','ready') AND epoch<? AND (state='aborted' AND old_key_id=? OR state='ready' AND replacement_key_id=?))`
 			conditionArgs = []any{req.Epoch, req.OldKeyID, req.OldKeyID}
 		}
+		// A replacement key that a completed generation already retired can never
+		// be admitted again, so a fence naming it would reject every writer. Keep
+		// the audit stream clean by applying the same prohibition to the event.
+		condition += ` AND NOT EXISTS (SELECT 1 FROM master_key_retirement_generations WHERE old_key_id=?)`
+		conditionArgs = append(conditionArgs, req.ReplacementKeyID)
 		event, eventErr := retirementAuditStatement(*authorization, requestID, "master_key_retirement.prepared", "prepare", req.Epoch, req.PreparedAt, condition, conditionArgs...)
 		if eventErr != nil {
 			return MasterKeyRetirement{}, eventErr
