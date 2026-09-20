@@ -992,7 +992,7 @@ func run() (err error) {
 		if otpErr != nil {
 			return fmt.Errorf("configure email OTP: %w", otpErr)
 		}
-		interactStore := recovery.NewOTPInteractionStore()
+		interactStore := recovery.NewOTPInteractionStore(db)
 		otpHandler = recovery.NewOTPHandler(otpService, loginLocationSender, true, interactStore)
 		loginHandler.SetOTPHandler(otpHandler)
 	}

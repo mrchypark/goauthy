@@ -49,6 +49,59 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html 
 (function(){
   var btn=document.getElementById('passkey-btn');
   var err=document.getElementById('passkey-error');
+  function toBase64URL(buf){return btoa(String.fromCharCode.apply(null,new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
+  function padB64(s){return s+Array((4-s.length%4)%4+1).join('=');}
+  function b64urlToBytes(s){return Uint8Array.from(atob(padB64(s.replace(/-/g,'+').replace(/_/g,'/'))),function(c){return c.charCodeAt(0);});}
+  function submitAssertion(code,data){
+    var form=document.createElement('form');
+    form.method='POST';
+    form.action='../auth/v1/users/webauthn_finish';
+    var codeInput=document.createElement('input');
+    codeInput.type='hidden';
+    codeInput.name='code';
+    codeInput.value=code;
+    form.appendChild(codeInput);
+    var dataInput=document.createElement('input');
+    dataInput.type='hidden';
+    dataInput.name='data';
+    dataInput.value=data;
+    form.appendChild(dataInput);
+    document.body.appendChild(form);
+    form.submit();
+  }
+  async function finishPasskey(startJSON){
+    var rcr=startJSON.rcr;
+    var pk=rcr.publicKey;
+    pk.challenge=b64urlToBytes(pk.challenge);
+    if(pk.allowCredentials){pk.allowCredentials.forEach(function(c){c.id=b64urlToBytes(c.id);});}
+    var assertion=await navigator.credentials.get({publicKey:pk});
+    var uh=assertion.response.userHandle;
+    var response={clientDataJSON:toBase64URL(assertion.response.clientDataJSON),authenticatorData:toBase64URL(assertion.response.authenticatorData),signature:toBase64URL(assertion.response.signature),userHandle:uh?toBase64URL(uh):null};
+    var data=JSON.stringify({id:assertion.id,rawId:toBase64URL(assertion.rawId),type:assertion.type,response:response,clientExtensionResults:assertion.getClientExtensionResults()});
+    submitAssertion(startJSON.code,data);
+  }
+{{if .MFARequired}}
+  // A client that forces MFA answers a successful password step with a WebAuthn
+  // challenge. Continuing it here reuses the shared finish boundary, so the
+  // one-time interaction and session protections stay authoritative and the
+  // browser never lands on the raw challenge JSON.
+  var loginForm=document.querySelector('form[action$="auth/login"]');
+  if(loginForm){loginForm.addEventListener('submit',async function(event){
+    event.preventDefault();
+    var submit=loginForm.querySelector('button[type="submit"]');
+    if(submit)submit.disabled=true;
+    try{
+      // The login boundary accepts only urlencoded form bodies, so the form
+      // must be re-encoded instead of posted as multipart FormData.
+      var loginResponse=await fetch(loginForm.getAttribute('action'),{method:'POST',body:new URLSearchParams(new FormData(loginForm)),credentials:'same-origin'});
+      var loginType=loginResponse.headers.get('Content-Type')||'';
+      var challenge=null;
+      if(loginResponse.ok&&loginType.indexOf('application/json')===0){challenge=await loginResponse.json();}
+      if(challenge&&challenge.rcr){await finishPasskey(challenge);return;}
+      document.open();document.write(await loginResponse.text());document.close();
+    }catch(e){if(err)err.textContent='Passkey login failed';if(submit)submit.disabled=false;}
+  });}
+{{end}}
   if(!btn||!err)return;
   btn.addEventListener('click',async function(){
     var usernameField=document.querySelector('input[name="username"]');
@@ -58,37 +111,18 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html 
     try{
       var startResp=await fetch('../auth/v1/users/webauthn_start',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({purpose:{Login:document.querySelector('input[name="interaction"]').value},username:usernameField.value})});
       if(!startResp.ok){err.textContent='Passkey login failed';btn.disabled=false;return;}
-      var startJSON=await startResp.json();
-      function toBase64URL(buf){return btoa(String.fromCharCode.apply(null,new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
-      function padB64(s){return s+Array((4-s.length%4)%4+1).join('=');}
-      function b64urlToBytes(s){return Uint8Array.from(atob(padB64(s.replace(/-/g,'+').replace(/_/g,'/'))),function(c){return c.charCodeAt(0);});}
-      var rcr=startJSON.rcr;
-      var pk=rcr.publicKey;
-      pk.challenge=b64urlToBytes(pk.challenge);
-      if(pk.allowCredentials){pk.allowCredentials.forEach(function(c){c.id=b64urlToBytes(c.id);});}
-      var assertion=await navigator.credentials.get({publicKey:pk});
-      var uh=assertion.response.userHandle;
-      var response={clientDataJSON:toBase64URL(assertion.response.clientDataJSON),authenticatorData:toBase64URL(assertion.response.authenticatorData),signature:toBase64URL(assertion.response.signature),userHandle:uh?toBase64URL(uh):null};
-      var data=JSON.stringify({id:assertion.id,rawId:toBase64URL(assertion.rawId),type:assertion.type,response:response,clientExtensionResults:assertion.getClientExtensionResults()});
-      var form=document.createElement('form');
-      form.method='POST';
-      form.action='../auth/v1/users/webauthn_finish';
-      var codeInput=document.createElement('input');
-      codeInput.type='hidden';
-      codeInput.name='code';
-      codeInput.value=startJSON.code;
-      form.appendChild(codeInput);
-      var dataInput=document.createElement('input');
-      dataInput.type='hidden';
-      dataInput.name='data';
-      dataInput.value=data;
-      form.appendChild(dataInput);
-      document.body.appendChild(form);
-      form.submit();
+      await finishPasskey(await startResp.json());
     }catch(e){err.textContent='Passkey login failed';btn.disabled=false;}
   });
 })();
 </script>{{end}}</body></html>`))
+
+// otpStepUpPage is the browser continuation for a client that forces MFA when
+// the password step succeeded and the only available second factor is an email
+// OTP. The native form posts the code to the OTP verify boundary, which keeps
+// the one-time authorization interaction and the session protections of the
+// shared completion path authoritative.
+var otpStepUpPage = template.Must(template.New("otp-stepup").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p role="status" aria-live="polite">Enter the one-time code sent to your email.</p><form method="post" action="../auth/v1/users/otp/verify"><label>One-time code <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus></label><button type="submit">{{.SignIn}}</button></form></main></body></html>`))
 
 const fedCMLandingPayload = "goauthy-fedcm-login/v1"
 
@@ -395,7 +429,7 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	pageData := loginPageData{ClientID: request.ClientID, Interaction: interaction.Token, ThemeURL: themeURL, Providers: providers, Messages: messages}
+	pageData := loginPageData{ClientID: request.ClientID, Interaction: interaction.Token, ThemeURL: themeURL, Providers: providers, MFARequired: request.ForceMFA, Messages: messages}
 	if h.passkeys != nil {
 		nonce, err := generateNonce()
 		if err != nil {
@@ -481,8 +515,16 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 			if langHeader := r.Header.Get("Accept-Language"); langHeader != "" {
 				lang = parseAcceptLanguage(langHeader)
 			}
+			// The OTP is keyed by the identity subject but must reach the
+			// subject's mailbox: a subject is an opaque identifier, never an
+			// address. Without a deliverable address forced MFA fails closed.
+			profile, profileErr := h.identity.AccountProfileBySubject(r.Context(), auth.Subject)
+			if profileErr != nil || profile.Email == "" {
+				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+				return
+			}
 			expiresAt := time.Now().UTC().Add(5 * time.Minute)
-			if err := h.otp.SendOTP(r.Context(), auth.Subject, lang, expiresAt); err != nil {
+			if err := h.otp.SendOTPForSubject(r.Context(), auth.Subject, profile.Email, lang, expiresAt); err != nil {
 				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 				return
 			}
@@ -490,8 +532,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(otpStartResponse{ExpiresAt: expiresAt})
+			h.renderOTPStepUp(w, r, request)
 			return
 		}
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
@@ -500,6 +541,25 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	h.completeAuthentication(w, r, sessionToken, form.interaction, auth.Subject, "pwd", func() error {
 		return h.recordSuccessfulAuthentication(r.Context(), peerIP, h.now().Sub(started), nil)
 	})
+}
+
+// renderOTPStepUp answers a successful password step of a forced-MFA client
+// with the OTP continuation page instead of a JSON body no form can consume.
+// The page only collects the code; the OTP verify boundary owns verification,
+// the session binding and the interaction consumption.
+func (h *Handler) renderOTPStepUp(w http.ResponseWriter, r *http.Request, request oauth.AuthorizationRequest) {
+	themeURL, err := h.resolveThemeURL(r.Context(), request.ClientID)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		return
+	}
+	messages := i18n.MessagesFor(strings.Join(r.Header.Values("Accept-Language"), ","))
+	localizedHTMLHeaders(w, messages.Language)
+	// Chromium applies form-action to the code submission and to the callback
+	// redirect that follows it. Use only this already-validated request origin.
+	w.Header().Set("Content-Security-Policy", authorizationFormCSP(request.RedirectURI))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = otpStepUpPage.Execute(w, loginPageData{ThemeURL: themeURL, Messages: messages})
 }
 
 // FedCMLanding serves the same password authentication and browser-session
@@ -597,7 +657,11 @@ type loginPageData struct {
 	ClientID, Interaction, ThemeURL string
 	Providers                       []UpstreamProvider
 	PasskeyLogin                    bool
-	PasskeyNonce                    string
+	// MFARequired marks a client whose successful password step is answered
+	// with a WebAuthn challenge that the page must continue instead of POSTing
+	// the form natively into the raw challenge body.
+	MFARequired  bool
+	PasskeyNonce string
 	i18n.Messages
 }
 
@@ -1380,10 +1444,6 @@ type passkeyStartResponse struct {
 	Exp  time.Time `json:"exp"`
 }
 
-type otpStartResponse struct {
-	ExpiresAt time.Time `json:"expires_at"`
-}
-
 type otpVerifyRequest struct {
 	Code string `json:"code"`
 }
@@ -1416,11 +1476,11 @@ func (h *Handler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var payload otpVerifyRequest
-	if err := decodeStrictJSON(w, r, otpVerifyLimit, &payload); err != nil || payload.Code == "" {
+	if err := decodeOTPVerify(w, r, &payload); err != nil || payload.Code == "" {
 		http.Error(w, "Invalid OTP request", http.StatusBadRequest)
 		return
 	}
-	subject, interactionToken, err := h.otp.ConsumeInteraction(session.ID)
+	subject, interactionToken, err := h.otp.LoadInteraction(r.Context(), session.ID)
 	if err != nil || subject == "" || interactionToken == "" {
 		http.Error(w, "Invalid OTP request", http.StatusUnauthorized)
 		return
@@ -1429,7 +1489,10 @@ func (h *Handler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid login request", http.StatusUnauthorized)
 		return
 	}
-	verified, verifyErr := h.otp.VerifyOTPCode(r.Context(), subject, payload.Code)
+	// Verification consumes the code and the session binding in one replicated
+	// transaction, so a verified password-plus-OTP ceremony can never outlive
+	// the interaction it authorizes.
+	verified, verifyErr := h.otp.VerifyInteraction(r.Context(), session.ID, subject, payload.Code)
 	if verifyErr != nil || !verified {
 		if h.metrics != nil {
 			h.metrics.AuthFailure()
@@ -1438,7 +1501,9 @@ func (h *Handler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	started := h.now()
-	h.completeAuthentication(w, r, sessionToken, interactionToken, subject, "otp", func() error {
+	// The verified password-plus-OTP ceremony is the same "mfa" authentication
+	// method the completion path, the stored session and the amr claim accept.
+	h.completeAuthentication(w, r, sessionToken, interactionToken, subject, "mfa", func() error {
 		return h.recordSuccessfulAuthentication(r.Context(), peerIP, h.now().Sub(started), nil)
 	})
 }
@@ -1504,6 +1569,38 @@ func decodeStrictJSON(w http.ResponseWriter, r *http.Request, limit int64, targe
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return errors.New("trailing JSON")
 	}
+	return nil
+}
+
+// decodeOTPVerify accepts the strict JSON body used by API callers and the
+// native form submission used by the rendered OTP step-up page, mirroring the
+// passkey finish contract.
+func decodeOTPVerify(w http.ResponseWriter, r *http.Request, payload *otpVerifyRequest) error {
+	if len(r.Header.Values("Content-Type")) == 1 {
+		mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if err == nil && mediaType == "application/x-www-form-urlencoded" {
+			return decodeOTPVerifyForm(w, r, payload)
+		}
+	}
+	return decodeStrictJSON(w, r, otpVerifyLimit, payload)
+}
+
+func decodeOTPVerifyForm(w http.ResponseWriter, r *http.Request, payload *otpVerifyRequest) error {
+	r.Body = http.MaxBytesReader(w, r.Body, otpVerifyLimit)
+	if err := r.ParseForm(); err != nil {
+		return err
+	}
+	if len(r.PostForm) != len(r.Form) {
+		return errors.New("query parameters not allowed")
+	}
+	if len(r.PostForm) != 1 || len(r.PostForm["code"]) != 1 {
+		return errors.New("invalid OTP form")
+	}
+	code := r.PostForm.Get("code")
+	if code == "" {
+		return errors.New("missing code")
+	}
+	payload.Code = code
 	return nil
 }
 

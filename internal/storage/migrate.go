@@ -9,7 +9,7 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-const schemaVersion = 105
+const schemaVersion = 106
 
 // migrateThroughV97 applies schema versions v1 through v97. It is the
 // unchanged prefix of Migrate, extracted so tests can reach a clean v97
@@ -405,6 +405,9 @@ func Migrate(ctx context.Context, db *rhiza.DB) error {
 	}
 	if err := migrateSchemaV105(ctx, db); err != nil {
 		return fmt.Errorf("migrate schema v105: %w", err)
+	}
+	if err := migrateSchemaV106(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v106: %w", err)
 	}
 	return nil
 }
@@ -3685,6 +3688,33 @@ func migrateSchemaV104(ctx context.Context, db *rhiza.DB) error {
 // backfill carries forward a barrier that was already fenced or ready when this
 // version landed. It also drops the membership foreign key, because a completed
 // generation's evidence has to outlive the barrier row it was recorded against.
+// migrateSchemaV106 creates the replicated email-OTP interaction table so a
+// password-plus-OTP binding survives a restart and is visible to every replica
+// (GA-BR-16). The DDL mirrors recovery.SchemaStatements, which storage cannot
+// import.
+func migrateSchemaV106(ctx context.Context, db *rhiza.DB) error {
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=106)`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 1 {
+		return errors.New("invalid schema 106 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v106", Statements: []rhiza.SQLStatement{
+		{SQL: `CREATE TABLE IF NOT EXISTS identity_email_otp_interactions (
+			session_digest TEXT PRIMARY KEY NOT NULL CHECK (length(session_digest) = 43),
+			subject TEXT NOT NULL CHECK (length(subject) BETWEEN 1 AND 512),
+			interaction_token TEXT NOT NULL CHECK (length(interaction_token) = 43),
+			expires_at_unix_ms INTEGER NOT NULL CHECK (expires_at_unix_ms >= 0)
+		) STRICT`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(106)`},
+	}})
+	return err
+}
+
 func migrateSchemaV105(ctx context.Context, db *rhiza.DB) error {
 	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=105)`, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil {
