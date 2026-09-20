@@ -229,6 +229,40 @@ func (o *Outbox) EnqueueGroup(ctx context.Context, clientID string, group Group,
 	return o.Enqueue(ctx, clientID, Request{Group: group}, now)
 }
 
+// SupersedeGroupProjection returns the statement that repoints every queued
+// projection of one removed local group at a provider-scoped delete. The job
+// key is unchanged, so the delete supersedes a pending or in-flight sync for
+// the same provider while the row that proves a remote group exists is kept.
+// guard is the caller's local-deletion predicate; it is ANDed into the rewrite
+// so a projection is superseded only when that deletion commits, and guardArgs
+// follows this statement's own arguments in predicate order.
+//
+// A group removal is always DeleteRemote: unlinking a remote group without
+// removing it stays a separate, explicit operation.
+func SupersedeGroupProjection(externalID, displayName, guard string, guardArgs []any, now time.Time) (rhiza.SQLStatement, error) {
+	if !validIdentifier(externalID) || !validIdentifier(displayName) || strings.TrimSpace(guard) == "" || !validOutboxTime(now.UTC()) {
+		return rhiza.SQLStatement{}, ErrOutboxInvalid
+	}
+	encoded, digest, err := encodeRequest(Request{Group: Group{ExternalID: externalID, DisplayName: displayName}, Delete: true, DeletePolicy: DeleteRemote})
+	if err != nil {
+		return rhiza.SQLStatement{}, err
+	}
+	now = now.UTC().Truncate(time.Millisecond)
+	// The release semantics mirror Enqueue: an in-flight attempt keeps its
+	// lease but loses the CAS on the bumped revision, so it returns the row to
+	// pending with the delete instead of acknowledging the superseded sync.
+	sql := `UPDATE scim_user_outbox SET request_json=?,request_digest=?,revision=revision+1,
+		status=CASE WHEN status='processing' THEN 'processing' ELSE 'pending' END,
+		attempts=CASE WHEN status='processing' THEN attempts ELSE 0 END,
+		next_attempt_at_unix_ms=CASE WHEN status='processing' THEN next_attempt_at_unix_ms ELSE ? END,
+		lease_token=CASE WHEN status='processing' THEN lease_token ELSE NULL END,
+		lease_until_unix_ms=CASE WHEN status='processing' THEN lease_until_unix_ms ELSE NULL END,
+		last_error=NULL,completed_at_unix_ms=NULL,updated_at_unix_ms=?
+		WHERE json_type(request_json,'$.group')='object' AND json_extract(request_json,'$.group.externalId')=? AND request_digest<>? AND ` + guard
+	args := append([]any{encoded, digest, now.UnixMilli(), now.UnixMilli(), externalID, digest}, guardArgs...)
+	return rhiza.SQLStatement{SQL: sql, Args: args}, nil
+}
+
 // EnqueueTombstoneDelete admits a delete only while its exact tombstone
 // generation and provider snapshot still exist. The boolean reports admission;
 // a false result means cleanup or replacement won the race.
@@ -352,7 +386,10 @@ func (o *Outbox) Step(ctx context.Context, now time.Time) error {
 
 // Cleanup removes at most limit terminal rows older than Retention. Completed
 // user deletes stay until their tombstone is gone so the tombstone remains the
-// durable record of the associated remote-delete outcome.
+// durable record of the associated remote-delete outcome. A group projection
+// stays while its local group or role exists, because that row is the durable
+// evidence a remote group exists and a later local deletion turns it into a
+// provider-scoped delete.
 func (o *Outbox) Cleanup(ctx context.Context, now time.Time, limit int) (int, error) {
 	if err := o.valid(); err != nil {
 		return 0, err
@@ -380,6 +417,9 @@ func (o *Outbox) Cleanup(ctx context.Context, now time.Time, limit int) (int, er
 		(SELECT job_id FROM scim_user_outbox WHERE status IN ('succeeded','dead') AND completed_at_unix_ms <= ?
 			AND NOT (json_type(request_json,'$.group') IS NULL AND json_extract(request_json,'$.delete')=1
 				AND EXISTS (SELECT 1 FROM scim_user_tombstones WHERE local_external_id=json_extract(request_json,'$.user.externalId')))
+			AND NOT (json_type(request_json,'$.group')='object' AND (
+				EXISTS (SELECT 1 FROM rbac_groups g WHERE json_extract(request_json,'$.group.externalId')='group:'||g.id)
+				OR EXISTS (SELECT 1 FROM rbac_roles r WHERE json_extract(request_json,'$.group.externalId')='role:'||r.id)))
 			ORDER BY completed_at_unix_ms,job_id LIMIT ?)`, Args: []any{cutoff, int64(limit)}})
 	if err != nil {
 		return 0, err
@@ -794,7 +834,15 @@ func encodeRequestWithTombstoneGenerationVersion(request Request, generation str
 		}
 	}
 	b, err := json.Marshal(encodedRequest{Operation: op, User: request.User, Group: group, Delete: request.Delete, DeletePolicy: request.DeletePolicy, TombstoneGeneration: generation})
-	if err != nil || len(b) > 16384 {
+	if err != nil {
+		return "", "", ErrOutboxInvalid
+	}
+	if len(b) > 16384 {
+		if group != nil {
+			// Only a group projection grows with the size of its local
+			// membership, so the oversize request is a group size failure.
+			return "", "", fmt.Errorf("%w: %w", ErrOutboxInvalid, ErrGroupTooLarge)
+		}
 		return "", "", ErrOutboxInvalid
 	}
 	return string(b), digestString(string(b)), nil

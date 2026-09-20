@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -17,6 +18,13 @@ const (
 )
 
 var ErrInvalidGroup = errors.New("scim: invalid group")
+
+// ErrGroupTooLarge marks a group projection above the supported size boundary:
+// more members than maxGroupMembers, or an encoded request above the outbox
+// request limit. It is always reported alongside the validation error of the
+// boundary that rejected it (ErrInvalidGroup or ErrOutboxInvalid) so callers
+// that classify by the older error keep working.
+var ErrGroupTooLarge = errors.New("scim: group exceeds the supported projection size")
 
 // GroupMember.Value is the remote SCIM User id, not the local externalId.
 // Display is optional and is treated as presentation data only.
@@ -333,7 +341,10 @@ func (c *Client) groupLocationID(raw string) (string, error) {
 }
 
 func validateGroup(group Group) error {
-	if group.ID != "" || !validIdentifier(group.ExternalID) || !validIdentifier(group.DisplayName) || len(group.Members) > maxGroupMembers {
+	if len(group.Members) > maxGroupMembers {
+		return fmt.Errorf("%w: %w", ErrInvalidGroup, ErrGroupTooLarge)
+	}
+	if group.ID != "" || !validIdentifier(group.ExternalID) || !validIdentifier(group.DisplayName) {
 		return ErrInvalidGroup
 	}
 	if _, err := canonicalMembersChecked(group.Members); err != nil {
@@ -359,7 +370,7 @@ func canonicalMembers(members []GroupMember) []GroupMember {
 
 func canonicalMembersChecked(members []GroupMember) ([]GroupMember, error) {
 	if len(members) > maxGroupMembers {
-		return nil, ErrInvalidGroup
+		return nil, fmt.Errorf("%w: %w", ErrInvalidGroup, ErrGroupTooLarge)
 	}
 	// Keep an empty desired state as [] rather than null: full replacement
 	// semantics must clear remote membership deterministically.

@@ -1,6 +1,7 @@
 package rbac
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/apikey"
+	"github.com/mrchypark/goauthy/internal/scim"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -753,6 +755,179 @@ func TestDelegatedPatchRevocationInterpositionIsAtomic(t *testing.T) {
 	if err != nil || after.Revision != before.Revision || len(after.Groups) != 0 {
 		t.Fatalf("revoked delegated patch changed state before=%+v after=%+v err=%v", before, after, err)
 	}
+}
+
+// TestDeleteGroupSupersedesQueuedSCIMProjection covers a local group removal
+// that previously left the remote group and its memberships behind: the queued
+// projection is the durable evidence a remote group exists, so the deletion must
+// turn every queued projection of that group into a provider-scoped delete in
+// the same transaction, including a stale queued membership update.
+func TestDeleteGroupSupersedesQueuedSCIMProjection(t *testing.T) {
+	ctx, store, db := rbacTestStore(t)
+	insertActive(t, db, "admin")
+	if _, err := store.EnsureBootstrapPrincipal(ctx, "admin", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	group, err := store.CreateGroup(ctx, "admin", "team/a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalID := "group:" + group.ID
+	projection := time.UnixMilli(1_700_000_000_000).UTC()
+	var delivered []scim.Request
+	queue := scim.NewOutbox(db, func(context.Context, string) (scim.Reconciler, error) {
+		return rbacSCIMReconciler(func(_ context.Context, request scim.Request) (scim.Result, error) {
+			delivered = append(delivered, request)
+			return scim.Result{Action: scim.ActionCreated, RemoteID: "remote-group"}, nil
+		}), nil
+	}, scim.OutboxConfig{Random: bytes.NewReader(bytes.Repeat([]byte{7}, 512))})
+	if _, err := queue.EnqueueGroup(ctx, "provider", scim.Group{ExternalID: externalID, DisplayName: "team/a", Members: []scim.GroupMember{{Value: "remote-a", Display: "alice"}}}, projection); err != nil {
+		t.Fatal(err)
+	}
+	if err := queue.Step(ctx, projection); err != nil {
+		t.Fatal(err)
+	}
+	// The projection row must outlive outbox retention while its group exists:
+	// it is the durable evidence the deletion below turns into a remote delete.
+	if _, err := queue.Cleanup(ctx, projection.Add(48*time.Hour), 128); err != nil {
+		t.Fatal(err)
+	}
+	synced, found, err := queue.LookupGroup(ctx, "provider", externalID)
+	if err != nil || !found || synced.Status != "succeeded" || synced.Request.Delete {
+		t.Fatalf("synced projection=%+v found=%v err=%v", synced, found, err)
+	}
+	// A stale queued membership update must not survive the local deletion, and
+	// every provider that holds a projection of the group must be superseded.
+	clients := []string{"provider", "provider-2"}
+	staleRevisions := make(map[string]int64, len(clients))
+	for _, clientID := range clients {
+		previous := int64(0)
+		if clientID == "provider" {
+			previous = synced.Revision
+		}
+		if _, err := queue.EnqueueGroup(ctx, clientID, scim.Group{ExternalID: externalID, DisplayName: "team/a"}, projection); err != nil {
+			t.Fatal(err)
+		}
+		stale, found, err := queue.LookupGroup(ctx, clientID, externalID)
+		if err != nil || !found || stale.Request.Delete || stale.Revision <= previous {
+			t.Fatalf("stale projection for %s=%+v found=%v err=%v", clientID, stale, found, err)
+		}
+		staleRevisions[clientID] = stale.Revision
+	}
+	if err := store.DeleteGroup(ctx, "admin", group.ID, group.Revision); err != nil {
+		t.Fatal(err)
+	}
+	for _, clientID := range clients {
+		job, found, err := queue.LookupGroup(ctx, clientID, externalID)
+		if err != nil || !found || job.Status != "pending" || !job.Request.Delete || job.Request.DeletePolicy != scim.DeleteRemote || job.Request.Group.ExternalID != externalID || job.Revision != staleRevisions[clientID]+1 {
+			t.Fatalf("superseded projection for %s=%+v found=%v err=%v", clientID, job, found, err)
+		}
+	}
+	// A restarted worker delivers the recorded deletion and nothing stale.
+	delivered = nil
+	worker := scim.NewOutbox(db, func(context.Context, string) (scim.Reconciler, error) {
+		return rbacSCIMReconciler(func(_ context.Context, request scim.Request) (scim.Result, error) {
+			delivered = append(delivered, request)
+			return scim.Result{Action: scim.ActionDeleted, RemoteID: "remote-group"}, nil
+		}), nil
+	}, scim.OutboxConfig{Random: bytes.NewReader(bytes.Repeat([]byte{8}, 256))})
+	for range clients {
+		if err := worker.Step(ctx, projection.Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(delivered) != len(clients) {
+		t.Fatalf("delivered=%+v", delivered)
+	}
+	for _, request := range delivered {
+		if !request.Delete || request.Group.ExternalID != externalID || request.DeletePolicy != scim.DeleteRemote || len(request.Group.Members) != 0 {
+			t.Fatalf("delivered=%+v", request)
+		}
+	}
+	// The retained rows are released once the deletions they recorded succeeded.
+	if _, err := worker.Cleanup(ctx, projection.Add(48*time.Hour), 128); err != nil {
+		t.Fatal(err)
+	}
+	for _, clientID := range clients {
+		if _, found, err := queue.LookupGroup(ctx, clientID, externalID); err != nil || found {
+			t.Fatalf("completed deletion retained for %s found=%v err=%v", clientID, found, err)
+		}
+	}
+	// A group that was never projected has no remote representation to remove.
+	unprojected, err := store.CreateGroup(ctx, "admin", "team/b", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteGroup(ctx, "admin", unprojected.ID, unprojected.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := queue.LookupGroup(ctx, "provider", "group:"+unprojected.ID); err != nil || found {
+		t.Fatalf("unprojected group recorded work found=%v err=%v", found, err)
+	}
+	// Roles project as SCIM groups too, so their removal supersedes the same
+	// kind of queued projection.
+	role, err := store.CreateRole(ctx, "admin", "viewer", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	roleExternalID := "role:" + role.ID
+	if _, err := queue.EnqueueGroup(ctx, "provider", scim.Group{ExternalID: roleExternalID, DisplayName: "viewer"}, projection); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteRole(ctx, "admin", role.ID, role.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if job, found, err := queue.LookupGroup(ctx, "provider", roleExternalID); err != nil || !found || job.Status != "pending" || !job.Request.Delete || job.Request.DeletePolicy != scim.DeleteRemote {
+		t.Fatalf("role projection=%+v found=%v err=%v", job, found, err)
+	}
+}
+
+type rbacSCIMReconciler func(context.Context, scim.Request) (scim.Result, error)
+
+func (f rbacSCIMReconciler) Reconcile(ctx context.Context, request scim.Request) (scim.Result, error) {
+	return f(ctx, request)
+}
+
+// TestDeleteGroupAPIKeySupersedesQueuedSCIMProjection keeps the API-key delete
+// path honest: it rewrites the projection statement with the durable mutation
+// guard, so the guard's argument must stay in its placeholder position.
+func TestDeleteGroupAPIKeySupersedesQueuedSCIMProjection(t *testing.T) {
+	ctx, store, db := rbacTestStore(t)
+	insertActive(t, db, "admin")
+	if _, err := store.EnsureBootstrapPrincipal(ctx, "admin", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := apikey.NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.BindAPIKeys(keys)
+	_, token, err := keys.Create(ctx, nil, apikey.Request{Name: "groups-deleter", Access: []apikey.Access{{Group: "Groups", AccessRights: []apikey.Right{apikey.Delete}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := keys.Authenticate(ctx, "API-Key "+token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	group, err := store.CreateGroup(ctx, "admin", "team/a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalID := "group:" + group.ID
+	queue := scim.NewOutbox(db, nil, scim.OutboxConfig{Random: bytes.NewReader(bytes.Repeat([]byte{9}, 256))})
+	projection := time.UnixMilli(1_700_000_000_000).UTC()
+	if _, err := queue.EnqueueGroup(ctx, "provider", scim.Group{ExternalID: externalID, DisplayName: "team/a"}, projection); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteGroupAPIKey(ctx, key, group.ID, group.Revision); err != nil {
+		t.Fatal(err)
+	}
+	job, found, err := queue.LookupGroup(ctx, "provider", externalID)
+	if err != nil || !found || job.Status != "pending" || !job.Request.Delete || job.Request.DeletePolicy != scim.DeleteRemote {
+		t.Fatalf("api key superseded projection=%+v found=%v err=%v", job, found, err)
+	}
+	count(t, db, `SELECT COUNT(*) FROM rbac_groups WHERE id=?`, group.ID, 0)
 }
 
 func rbacTestStore(t *testing.T) (context.Context, *Store, *rhiza.DB) {

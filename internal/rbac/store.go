@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/apikey"
+	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/scim"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -538,7 +540,21 @@ func (s *Store) delete(ctx context.Context, actor string, key *apikey.Principal,
 	guard := fmt.Sprintf(`EXISTS (SELECT 1 FROM %s WHERE id=? AND revision=?%s) AND %s`, table, reserved, adminGuard())
 	now := s.now().UTC().Truncate(time.Millisecond).UnixMilli()
 	requestID := requestID("rbac-delete", table, actor, id, fmt.Sprint(revision))
-	executeErr := s.run(ctx, key, resource, apikey.Delete, requestID, []rhiza.SQLStatement{{SQL: fmt.Sprintf(`UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=? WHERE subject IN (SELECT subject FROM %s WHERE %s=?) AND %s`, members, column, guard), Args: []any{now, id, id, revision, actor}}, {SQL: fmt.Sprintf(`DELETE FROM %s WHERE %s=? AND %s`, members, column, guard), Args: []any{id, id, revision, actor}}, {SQL: fmt.Sprintf(`DELETE FROM %s WHERE id=? AND revision=?%s AND %s`, table, reserved, adminGuard()), Args: []any{id, revision, actor}}})
+	statements := []rhiza.SQLStatement{{SQL: fmt.Sprintf(`UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=? WHERE subject IN (SELECT subject FROM %s WHERE %s=?) AND %s`, members, column, guard), Args: []any{now, id, id, revision, actor}}, {SQL: fmt.Sprintf(`DELETE FROM %s WHERE %s=? AND %s`, members, column, guard), Args: []any{id, id, revision, actor}}}
+	// Roles and groups both project as SCIM groups, and a queued projection is
+	// the durable evidence that a remote group exists. Superseding it with a
+	// provider-scoped delete in this same transaction is what keeps a local
+	// removal from leaving the remote group and its memberships behind.
+	// The entity row still exists here, so this precedes its delete.
+	projection, err := s.scimProjectionRemoval(ctx, role, id, guard, []any{id, revision, actor}, time.UnixMilli(now).UTC())
+	if err != nil {
+		return err
+	}
+	if projection != nil {
+		statements = append(statements, *projection)
+	}
+	statements = append(statements, rhiza.SQLStatement{SQL: fmt.Sprintf(`DELETE FROM %s WHERE id=? AND revision=?%s AND %s`, table, reserved, adminGuard()), Args: []any{id, revision, actor}})
+	executeErr := s.run(ctx, key, resource, apikey.Delete, requestID, statements)
 	entity, found, loadErr := s.get(ctx, table, id)
 	if loadErr != nil {
 		return loadErr
@@ -553,6 +569,38 @@ func (s *Store) delete(ctx context.Context, actor string, key *apikey.Principal,
 		return executeErr
 	}
 	return ErrConflict
+}
+
+// scimProjectionRemoval returns the statement that supersedes the queued SCIM
+// projection of a removed group or role with a provider-scoped delete. The
+// queued row is the only source of an already accepted display name, and its
+// absence means the entity was never projected to any provider, so there is
+// nothing to remove remotely.
+func (s *Store) scimProjectionRemoval(ctx context.Context, role bool, id, guard string, guardArgs []any, now time.Time) (*rhiza.SQLStatement, error) {
+	kind := "group"
+	if role {
+		kind = "role"
+	}
+	externalID := identity.SCIMGroupExternalID(kind, id)
+	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT json_extract(request_json,'$.group.displayName') FROM scim_user_outbox WHERE json_type(request_json,'$.group')='object' AND json_extract(request_json,'$.group.externalId')=? LIMIT 1`, Args: []any{externalID}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return nil, err
+	}
+	if len(result.Rows) == 0 {
+		return nil, nil
+	}
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
+		return nil, ErrInvalid
+	}
+	displayName, ok := result.Rows[0][0].(string)
+	if !ok {
+		return nil, ErrInvalid
+	}
+	statement, err := scim.SupersedeGroupProjection(externalID, displayName, guard, guardArgs, now)
+	if err != nil {
+		return nil, err
+	}
+	return &statement, nil
 }
 
 func (s *Store) EnsureBootstrapPrincipal(ctx context.Context, subject string, roles, groups []string) (Principal, error) {

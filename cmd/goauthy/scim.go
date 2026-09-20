@@ -11,13 +11,16 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/mrchypark/goauthy/internal/eventlog"
 	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/scim"
+	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
 
@@ -62,6 +65,10 @@ type scimRuntime struct {
 	drainLimit  int
 	wake        chan struct{}
 	configStore *scim.ConfigStore
+	// now is the claim clock. Run installs the scheduler clock so every
+	// drained job takes a fresh reading; a nil clock keeps the caller's pass
+	// time, which keeps callers that supply a fixed time deterministic.
+	now func() time.Time
 	// beforeTombstoneEnqueue is a test seam for the cleanup/recreation fence.
 	beforeTombstoneEnqueue func()
 }
@@ -391,8 +398,9 @@ func trimOneSCIMLineEnding(data []byte) []byte {
 // drainLimit due durable jobs. Tombstones fan out only to their deletion-time
 // provider snapshots that remain configured. Groups are enqueued once all local
 // members can be resolved to each provider's remote SCIM User IDs.
-// The supplied time is used for both enqueue and outbox state transitions,
-// making tests clock-free. Absent mappings and provider 404s use the outbox's
+// The supplied time stamps projection and cleanup; each claim then takes its
+// own reading from the runtime's claim clock, so callers that supply a fixed
+// time stay deterministic. Absent mappings and provider 404s use the outbox's
 // no-op semantics.
 func (r *scimRuntime) Step(ctx context.Context, now time.Time) error {
 	if r == nil || r.identities == nil || r.outbox == nil || ctx == nil || now.IsZero() || len(r.providerIDs) == 0 || r.drainLimit <= 0 {
@@ -470,7 +478,17 @@ func (r *scimRuntime) Step(ctx context.Context, now time.Time) error {
 				continue
 			}
 			if _, err := r.outbox.EnqueueGroup(ctx, providerID, scim.Group{ExternalID: local.ExternalID, DisplayName: local.DisplayName, Members: members}, now); err != nil {
-				return err
+				if !errors.Is(err, scim.ErrGroupTooLarge) {
+					return err
+				}
+				// One group above the supported projection size fails on every
+				// pass. Record it durably and keep projecting everything else:
+				// unrelated providers, and the deletes already queued for them,
+				// must not stall behind it.
+				if err := r.recordGroupProjectionFailure(ctx, providerID, local, err, now); err != nil {
+					return err
+				}
+				continue
 			}
 		}
 	}
@@ -492,7 +510,15 @@ func (r *scimRuntime) Step(ctx context.Context, now time.Time) error {
 		}
 	}
 	for range r.drainLimit {
-		if err := r.outbox.Step(ctx, now); err != nil {
+		// Claims take a fresh reading. One pass may deliver up to drainLimit
+		// jobs, and a lease derived from the timestamp captured before
+		// projection can already be expired by the time a later claim runs,
+		// which would let another replica take over work still in flight.
+		claimNow := now
+		if r.now != nil {
+			claimNow = r.now().UTC()
+		}
+		if err := r.outbox.Step(ctx, claimNow); err != nil {
 			return err
 		}
 	}
@@ -503,6 +529,26 @@ func (r *scimRuntime) Step(ctx context.Context, now time.Time) error {
 		return err
 	}
 	return nil
+}
+
+// recordGroupProjectionFailure writes the durable failure record for a group
+// the projection boundary rejected. The enqueue wrote no row, so this event is
+// the only trace that outlives the pass. It is gated on the event id, which
+// keeps a permanently oversized group from writing one event per pass; the
+// event log's own retention releases that id again.
+func (r *scimRuntime) recordGroupProjectionFailure(ctx context.Context, providerID string, group identity.SCIMGroup, reason error, now time.Time) error {
+	action := `GroupCreateUpdate(` + strconv.Quote(group.ExternalID) + `)`
+	event := eventlog.ScimFailure("scim-projection/"+providerID+"/"+group.ExternalID, providerID, action, 0, now)
+	text := *event.Text + " / " + reason.Error()
+	event.Text = &text
+	statement, err := event.Statement(`NOT EXISTS (SELECT 1 FROM event_log WHERE id=?)`, event.ID)
+	if err != nil {
+		return err
+	}
+	// The request id stays within Rhiza's 64 byte limit and is unique per pass,
+	// while the event id keeps the durable record itself stable.
+	_, err = storage.Execute(ctx, r.outbox.DB, rhiza.ExecuteRequest{RequestID: "sp/" + event.ID + "/" + strconv.FormatInt(now.UnixMilli(), 10), Statements: []rhiza.SQLStatement{statement}})
+	return err
 }
 
 // Wake requests reconciliation after a committed identity creation. A buffered
@@ -526,6 +572,7 @@ func (r *scimRuntime) Run(ctx context.Context, interval time.Duration, now func(
 	if r == nil || r.identities == nil || r.outbox == nil || len(r.providerIDs) == 0 || r.drainLimit <= 0 || ctx == nil || interval <= 0 || now == nil {
 		return errors.New("SCIM runtime scheduler is not configured")
 	}
+	r.now = now
 	step := func() {
 		if err := r.Step(ctx, now().UTC()); err != nil && ctx.Err() == nil && onError != nil {
 			onError(err)

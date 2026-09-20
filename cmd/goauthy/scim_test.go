@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/eventlog"
 	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/scim"
 	"github.com/mrchypark/goauthy/internal/storage"
@@ -771,6 +772,144 @@ func seedRuntimeTombstoneWithGeneration(t *testing.T, db *rhiza.DB, externalID, 
 	}
 	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "cmd-scim-tombstone-" + externalID + "-" + generation, Statements: statements}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestSCIMRuntimeStepClaimsEachJobWithItsOwnLeaseTime covers a long pass that
+// reused one captured timestamp across up to drainLimit deliveries: later
+// claims then received a lease that had already expired, so another replica
+// could take over work this process was still delivering.
+func TestSCIMRuntimeStepClaimsEachJobWithItsOwnLeaseTime(t *testing.T) {
+	ctx := context.Background()
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-fresh-claim", DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := storage.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	store, err := identity.NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "cmd-scim-fresh-claim-seed", Statements: []rhiza.SQLStatement{
+		{SQL: `INSERT INTO identity_users (subject,username,password_phc,disabled,password_changed_at_unix_ms,password_generation) VALUES ('subject-a','alice','phc',0,0,1),('subject-b','bob','phc',0,0,1)`},
+		{SQL: `INSERT INTO identity_authentication_modes (subject,mode,generation,updated_at_unix_ms) VALUES ('subject-a','password',1,0),('subject-b','password',1,0)`},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var leases []int64
+	outbox := scim.NewOutbox(db, func(_ context.Context, id string) (scim.Reconciler, error) {
+		return reconcilerFunc(func(deliveryCtx context.Context, _ scim.Request) (scim.Result, error) {
+			result, err := db.Query(deliveryCtx, rhiza.QueryRequest{SQL: `SELECT lease_until_unix_ms FROM scim_user_outbox WHERE client_id=? AND status='processing'`, Args: []any{id}, Consistency: rhiza.ConsistencyLinearizable})
+			if err != nil || len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
+				t.Fatalf("lease lookup rows=%#v err=%v", result.Rows, err)
+			}
+			lease, ok := result.Rows[0][0].(int64)
+			if !ok {
+				t.Fatalf("lease value=%#v", result.Rows[0][0])
+			}
+			leases = append(leases, lease)
+			return scim.Result{Action: scim.ActionNoop}, nil
+		}), nil
+	}, scim.OutboxConfig{Random: bytes.NewReader(bytes.Repeat([]byte{31}, 512))})
+	runtime := &scimRuntime{identities: store, outbox: outbox, providers: map[string]configuredSCIMProvider{"provider": {}}, providerIDs: []string{"provider"}, drainLimit: 2}
+	started := time.UnixMilli(1_700_000_000_000)
+	readings := 0
+	// Every claim runs after the earlier external requests consumed time.
+	runtime.now = func() time.Time {
+		readings++
+		return started.Add(time.Duration(readings) * 90 * time.Second)
+	}
+	if err := runtime.Step(ctx, started); err != nil {
+		t.Fatal(err)
+	}
+	if readings != 2 || len(leases) != 2 {
+		t.Fatalf("claim readings=%d leases=%v", readings, leases)
+	}
+	for i := range leases {
+		if want := started.Add(time.Duration(i+1) * 90 * time.Second).Add(time.Minute).UnixMilli(); leases[i] != want {
+			t.Fatalf("lease[%d]=%d want=%d: the claim reused a stale timestamp", i, leases[i], want)
+		}
+	}
+}
+
+// TestSCIMRuntimeStepOversizedGroupDoesNotStallUnrelatedWork covers one mapped
+// group above the supported projection size stalling delivery of every other
+// provider's queued deletion: the failure must be recorded durably and the
+// drain must still run, before and after a restart.
+func TestSCIMRuntimeStepOversizedGroupDoesNotStallUnrelatedWork(t *testing.T) {
+	ctx := context.Background()
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-oversized-group", DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := storage.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	store, err := identity.NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The projection limit is 4096 members, and every member of a projected
+	// group must resolve to a remote user id first.
+	const oversizedMembers = 4097
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "cmd-scim-oversized-group-seed", Statements: []rhiza.SQLStatement{
+		{SQL: `INSERT INTO rbac_groups (id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('group-big','Big',NULL,1,0,0)`},
+		{SQL: `WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<?) INSERT INTO rbac_user_groups (subject,group_id,granted_at_unix_ms) SELECT 'member-'||n,'group-big',0 FROM seq`, Args: []any{int64(oversizedMembers + 1)}},
+		{SQL: `WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<?) INSERT INTO scim_user_mappings (client_id,local_external_id,remote_user_id,updated_at_unix_ms) SELECT 'grouped','member-'||n,'remote-'||n,0 FROM seq`, Args: []any{int64(oversizedMembers + 1)}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	seedRuntimeTombstone(t, db, "subject-gone", "gone", false, 1, []identity.SCIMTombstoneProvider{{ID: "cleanup", DeletePolicy: scim.DeleteRemote}})
+	deliveries := 0
+	outbox := scim.NewOutbox(db, func(_ context.Context, id string) (scim.Reconciler, error) {
+		return reconcilerFunc(func(_ context.Context, request scim.Request) (scim.Result, error) {
+			if request.Group.ExternalID != "" {
+				t.Fatalf("provider %s received the oversized group: %+v", id, request)
+			}
+			deliveries++
+			return scim.Result{Action: scim.ActionNoop}, nil
+		}), nil
+	}, scim.OutboxConfig{Random: bytes.NewReader(bytes.Repeat([]byte{41}, 1024))})
+	providers := map[string]configuredSCIMProvider{"grouped": {}, "cleanup": {}}
+	mappings := scim.NewUserMappingStore(db)
+	runtime := &scimRuntime{identities: store, outbox: outbox, mappings: mappings, providers: providers, providerIDs: []string{"grouped", "cleanup"}, drainLimit: 4}
+	if err := runtime.Step(ctx, time.UnixMilli(100_000)); err != nil {
+		t.Fatalf("oversized group stopped the pass: %v", err)
+	}
+	job, found, err := outbox.Lookup(ctx, "cleanup", "subject-gone")
+	if err != nil || !found || job.Status != "succeeded" || !job.Request.Delete || deliveries != 1 {
+		t.Fatalf("unrelated delete job=%+v found=%v deliveries=%d err=%v", job, found, deliveries, err)
+	}
+	if _, found, err := outbox.LookupGroup(ctx, "grouped", "group:group-big"); err != nil || found {
+		t.Fatalf("oversized group queued work found=%v err=%v", found, err)
+	}
+	assertSCIMProjectionFailureEvent(t, db, `grouped / GroupCreateUpdate("group:group-big")`)
+	// Neither a restart nor newly queued work may be stalled by the group that
+	// fails on every pass, and its durable record must not be duplicated.
+	seedRuntimeTombstone(t, db, "subject-later", "later", false, 2, []identity.SCIMTombstoneProvider{{ID: "cleanup", DeletePolicy: scim.DeleteRemote}})
+	restarted := &scimRuntime{identities: store, outbox: outbox, mappings: mappings, providers: providers, providerIDs: []string{"grouped", "cleanup"}, drainLimit: 4}
+	if err := restarted.Step(ctx, time.UnixMilli(200_000)); err != nil {
+		t.Fatalf("oversized group stopped the restarted pass: %v", err)
+	}
+	if job, found, err := outbox.Lookup(ctx, "cleanup", "subject-later"); err != nil || !found || job.Status != "succeeded" || deliveries != 2 {
+		t.Fatalf("post-restart delete job=%+v found=%v deliveries=%d err=%v", job, found, deliveries, err)
+	}
+	assertSCIMProjectionFailureEvent(t, db, `grouped / GroupCreateUpdate("group:group-big")`)
+}
+
+func assertSCIMProjectionFailureEvent(t *testing.T, db *rhiza.DB, wantPrefix string) {
+	t.Helper()
+	result, err := db.Query(context.Background(), rhiza.QueryRequest{SQL: `SELECT text FROM event_log WHERE typ=?`, Args: []any{string(eventlog.ScimTaskFailed)}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
+		t.Fatalf("failure events=%#v err=%v", result.Rows, err)
+	}
+	text, ok := result.Rows[0][0].(string)
+	if !ok || !strings.HasPrefix(text, wantPrefix) || !strings.Contains(text, "exceeds the supported projection size") {
+		t.Fatalf("failure event text=%#v", result.Rows[0][0])
 	}
 }
 
