@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -238,6 +239,87 @@ func targetEnabled(t *testing.T, ctx context.Context, db *rhiza.DB, target strin
 		t.Fatalf("invalid enabled value %T", r.Rows[0][0])
 	}
 	return enabled
+}
+
+// seedCleanupBacklog inserts eligible delivery snapshots using as few
+// replicated mutations as the store's per-statement argument limit allows.
+func seedCleanupBacklog(t *testing.T, ctx context.Context, db *rhiza.DB, target string, at time.Time, rows int) {
+	t.Helper()
+	const perStatement = 999 / 6
+	statements := make([]rhiza.SQLStatement, 0, (rows+perStatement-1)/perStatement)
+	for start := 0; start < rows; start += perStatement {
+		count := min(perStatement, rows-start)
+		sql := strings.Builder{}
+		sql.WriteString("INSERT INTO event_notification_deliveries(target,event_id,timestamp,level,typ,next_attempt_at_unix_ms) VALUES")
+		args := make([]any, 0, count*6)
+		for i := range count {
+			if i > 0 {
+				sql.WriteString(",")
+			}
+			sql.WriteString("(?,?,?,?,?,?)")
+			args = append(args, target, fmt.Sprintf("backlog-%06d", start+i), at.UnixMilli(), int64(eventlog.Info.Rank()), string(eventlog.NewUserRegistered), at.UnixMilli())
+		}
+		statements = append(statements, rhiza.SQLStatement{SQL: sql.String(), Args: args})
+	}
+	// One command per statement: a backlog large enough to exercise the
+	// maintenance budget exceeds the engine's encoded-command limit otherwise.
+	for _, statement := range statements {
+		if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "seed-backlog/" + rand.Text(), Statements: []rhiza.SQLStatement{statement}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func deliveryCount(t *testing.T, ctx context.Context, db *rhiza.DB, target string) int {
+	t.Helper()
+	r, err := db.Query(ctx, rhiza.QueryRequest{SQL: "SELECT COUNT(*) FROM event_notification_deliveries WHERE target=?", Args: []any{target}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(r.Rows) != 1 {
+		t.Fatalf("delivery count for %q=%v err=%v", target, r.Rows, err)
+	}
+	n, ok := r.Rows[0][0].(int64)
+	if !ok {
+		t.Fatalf("invalid delivery count %T", r.Rows[0][0])
+	}
+	return int(n)
+}
+
+// TestNotificationCleanupReleasesExpiredAbandonedLease covers GA66-NOTIFY-001: a
+// lease whose worker died must stop protecting its payload once the lease expires
+// and the payload ages out, while an otherwise identical live lease is kept.
+func TestNotificationCleanupReleasesExpiredAbandonedLease(t *testing.T) {
+	db, ctx, now := queueFixture(t)
+	id := Identity("slack", "https://abandoned-lease.example.test")
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Warning}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	abandoned := eventlog.IPBlacklisted("lease-abandoned", "192.0.2.1", 0, now)
+	putEvent(t, db, abandoned)
+	lost, err := q.Claim(ctx, id, now, 1, time.Minute)
+	if err != nil || len(lost) != 1 || lost[0].Event.ID != abandoned.ID {
+		t.Fatalf("abandoned claim=%v err=%v", lost, err)
+	}
+	// The second delivery is identical apart from a worker that is still holding
+	// its lease, so only the abandoned lease may be released.
+	held := eventlog.IPBlacklisted("lease-held", "192.0.2.2", 0, now)
+	putEvent(t, db, held)
+	live, err := q.Claim(ctx, id, now, 1, 4*time.Hour)
+	if err != nil || len(live) != 1 || live[0].Event.ID != held.ID {
+		t.Fatalf("live claim=%v err=%v", live, err)
+	}
+	// Raising the threshold above the stranded event leaves it owed to nobody.
+	q2, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Critical}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := now.Add(2 * time.Hour) // past the abandoned lease and past retention
+	removed, err := q2.Cleanup(ctx, at, time.Hour)
+	if err != nil || removed != 1 {
+		t.Fatalf("cleanup removed=%d err=%v, want only the abandoned lease", removed, err)
+	}
+	if got := deliveryIDs(t, ctx, db, id); !slices.Equal(got, []string{held.ID}) {
+		t.Fatalf("retained=%v want only the live lease %q", got, held.ID)
+	}
 }
 
 // TestNotificationEligibleDeliveryNotBlockedByIneligibleRows covers

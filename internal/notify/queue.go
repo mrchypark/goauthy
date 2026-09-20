@@ -66,8 +66,10 @@ func NewRhizaQueue(ctx context.Context, db *rhiza.DB, targets []Target) (*RhizaQ
 // being deleted, so a concurrent pod sharing the destination keeps its work.
 // ponytail: reconciliation is last-writer-wins per startup, so a pod restarting
 // on a superseded configuration can re-enable a retired destination until the
-// current generation restarts; add a configuration generation lease when
-// overlapping generations must be fenced.
+// current generation restarts. Fencing that needs a durable per-configuration
+// generation with an atomic stale-reject guard, which the notify tables cannot
+// store today; it belongs in the schema (internal/storage/migrate.go).
+// GA66-NOTIFY-003 stays open until that migration exists.
 func retireTargets(names []any) rhiza.SQLStatement {
 	if len(names) == 0 {
 		return rhiza.SQLStatement{SQL: `UPDATE event_notification_targets SET enabled=0 WHERE enabled=1`}
@@ -137,7 +139,10 @@ func (q *RhizaQueue) Ack(ctx context.Context, target, id, lease string, now time
 // can no longer be delivered: acknowledged rows past retention, rows below the
 // target threshold, and undelivered rows past retention. The last rule is the
 // failed-delivery aging policy, because a row that keeps failing is never
-// terminal. Leased rows are kept so an in-flight send never loses its payload.
+// terminal. A live lease is kept so an in-flight send never loses its payload,
+// while an expired lease is abandoned: a worker that died after claiming holds
+// no work, so its token must not keep a payload no destination can receive
+// (GA66-NOTIFY-001).
 func (q *RhizaQueue) Cleanup(ctx context.Context, now time.Time, retention time.Duration) (int, error) {
 	if q == nil || q.DB == nil || ctx == nil || now.IsZero() || retention <= 0 {
 		return 0, errors.New("notification cleanup requires queue, context, time, and positive retention")
@@ -146,20 +151,21 @@ func (q *RhizaQueue) Cleanup(ctx context.Context, now time.Time, retention time.
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return 0, err
 	}
+	leaseDeadline := now.UTC().UnixMilli()
 	cutoff := now.UTC().Add(-retention).UnixMilli()
 	response, err := storage.Execute(ctx, q.DB, rhiza.ExecuteRequest{
 		RequestID: "notify-cleanup/" + base64.RawURLEncoding.EncodeToString(nonce[:]),
 		SQL: `DELETE FROM event_notification_deliveries WHERE rowid IN (
 			SELECT d.rowid FROM event_notification_deliveries d
 			LEFT JOIN event_notification_targets t ON t.target=d.target
-			WHERE d.lease_token IS NULL AND (
+			WHERE (d.lease_token IS NULL OR d.lease_until_unix_ms<?) AND (
 				(d.delivered_at_unix_ms IS NOT NULL AND d.delivered_at_unix_ms<?)
 				OR (d.delivered_at_unix_ms IS NULL AND d.timestamp<?)
 				OR (d.typ<>'Test' AND (t.target IS NULL OR d.level<t.level))
 			)
 			ORDER BY d.timestamp ASC, d.event_id ASC LIMIT ?
 		)`,
-		Args: []any{cutoff, cutoff, int64(cleanupBatchSize)},
+		Args: []any{leaseDeadline, cutoff, cutoff, int64(cleanupBatchSize)},
 	})
 	if err != nil {
 		return 0, err

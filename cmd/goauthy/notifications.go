@@ -93,8 +93,8 @@ func newNotificationRuntime(ctx context.Context, db *rhiza.DB, cfg notifications
 	return &notify.Runtime{Queue: queue, Factory: cfg.HTTP}, nil
 }
 
-// notificationMaintenanceInterval paces delivery-snapshot retention so the
-// sweep does not add a replicated write to every delivery tick.
+// notificationMaintenanceInterval paces delivery-snapshot retention so a
+// completed sweep does not add a replicated write to every delivery tick.
 const notificationMaintenanceInterval = time.Hour
 
 func runNotifications(ctx context.Context, runtime *notify.Runtime, now func() time.Time, onError func(error)) {
@@ -102,6 +102,9 @@ func runNotifications(ctx context.Context, runtime *notify.Runtime, now func() t
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	var lastMaintenance time.Time
+	// A sweep that filled its batch resumes on the next turn, so one turn of
+	// cleanup can never delay the delivery step that shares this goroutine.
+	resumeMaintenance := false
 	for {
 		if ctx.Err() != nil {
 			return
@@ -110,11 +113,13 @@ func runNotifications(ctx context.Context, runtime *notify.Runtime, now func() t
 		if err := runtime.Step(ctx, at); err != nil && ctx.Err() == nil && onError != nil {
 			onError(err)
 		}
-		if lastMaintenance.IsZero() || at.Before(lastMaintenance) || at.Sub(lastMaintenance) >= notificationMaintenanceInterval {
+		if resumeMaintenance || lastMaintenance.IsZero() || at.Before(lastMaintenance) || at.Sub(lastMaintenance) >= notificationMaintenanceInterval {
 			lastMaintenance = at
-			if err := runtime.Maintain(ctx, at); err != nil && ctx.Err() == nil && onError != nil {
+			more, err := runtime.Maintain(ctx, at)
+			if err != nil && ctx.Err() == nil && onError != nil {
 				onError(err)
 			}
+			resumeMaintenance = more
 		}
 		select {
 		case <-ctx.Done():
