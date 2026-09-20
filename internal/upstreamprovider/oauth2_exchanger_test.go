@@ -824,3 +824,73 @@ func TestOAuthUserInfoProviderAcceptsMissingIDToken(t *testing.T) {
 		t.Errorf("userinfo hits = %d, want 1", userinfoHits)
 	}
 }
+
+func TestExplicitBasicAuthFormEncodesCredentialComponents(t *testing.T) {
+	// RFC 6749 section 2.3.1: client_id and client_secret are
+	// application/x-www-form-urlencoded encoded before Basic construction.
+	const reservedID = "client:id/@"
+	const reservedSecret = "secret+/=&%:@ "
+
+	exchange := func(t *testing.T, clientID, secret string) (string, string, bool) {
+		t.Helper()
+		var user, pass string
+		var ok bool
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user, pass, ok = r.BasicAuth()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id_token":"id"}`))
+		}))
+		t.Cleanup(server.Close)
+		target, err := url.Parse(server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		configs := map[string]Config{"provider": {
+			Issuer:                "https://issuer.example.test",
+			AuthorizationEndpoint: "https://issuer.example.test/auth",
+			TokenEndpoint:         "https://issuer.example.test/token",
+			ClientID:              clientID,
+			Protocol: ProviderProtocol{
+				UsePKCE: boolPtr(false), ClientSecretBasic: boolPtr(true), ClientSecretPost: boolPtr(false),
+			},
+		}}
+		exchanger, err := NewOAuth2TokenExchanger(configs, map[string]string{"provider": secret}, &http.Client{Transport: rewriteTransport{target: target}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := exchanger.ExchangeCode(context.Background(), "provider", "https://app.example.test/callback", "code", "")
+		if err != nil || result == nil || result.IDToken != "id" {
+			t.Fatalf("ExchangeCode() = %#v, %v", result, err)
+		}
+		return user, pass, ok
+	}
+
+	t.Run("reserved characters round-trip through the endpoint", func(t *testing.T) {
+		user, pass, ok := exchange(t, reservedID, reservedSecret)
+		if !ok {
+			t.Fatal("expected Basic Auth header")
+		}
+		if user != url.QueryEscape(reservedID) || pass != url.QueryEscape(reservedSecret) {
+			t.Errorf("Basic auth = %q:%q, want %q:%q", user, pass, url.QueryEscape(reservedID), url.QueryEscape(reservedSecret))
+		}
+		// A conforming endpoint form-decodes each component and recovers the originals.
+		decodedUser, err := url.QueryUnescape(user)
+		if err != nil {
+			t.Fatalf("query-unescape username: %v", err)
+		}
+		decodedPass, err := url.QueryUnescape(pass)
+		if err != nil {
+			t.Fatalf("query-unescape password: %v", err)
+		}
+		if decodedUser != reservedID || decodedPass != reservedSecret {
+			t.Errorf("decoded Basic auth = %q:%q, want %q:%q", decodedUser, decodedPass, reservedID, reservedSecret)
+		}
+	})
+
+	t.Run("unreserved ascii is unchanged", func(t *testing.T) {
+		user, pass, ok := exchange(t, "client", "secret")
+		if !ok || user != "client" || pass != "secret" {
+			t.Errorf("Basic auth = %q:%q (present=%t), want \"client\":\"secret\"", user, pass, ok)
+		}
+	})
+}
