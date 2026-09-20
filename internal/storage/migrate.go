@@ -3750,12 +3750,44 @@ func migrateSchemaV107(ctx context.Context, db *rhiza.DB) error {
 	return err
 }
 
-// migrateSchemaV109 records the configuration generation on every destination
-// ponytail: placeholder owned by the OTP work (GA66-OTP-*); replace this body
-// with the real v108 migration when it lands. It is empty so the chain compiles
-// while that change is in flight.
+// migrateSchemaV108 replaces the v106 password-plus-OTP binding shape with the
+// digest and first-factor credential generations the continuation is bound to.
+// The v106 table stored the raw authorization-continuation token, which must not
+// live in replicated state (GA66-OTP-003), and it stored neither generation, so
+// a password reset could not revoke a pending OTP step-up (GA66-OTP-002). The
+// DDL mirrors recovery.SchemaStatements, which storage cannot import.
+//
+// Every existing row carries the raw legacy token and is bound to a process-local
+// map that no longer exists, so those pending bindings are dropped: they fail
+// closed and the operator re-runs the step-up. That is also why the new digest
+// column can carry its own CHECK - a defaulted empty digest would be rejected by
+// the ADD COLUMN rewrite, and a defaulted digest without the CHECK would leave
+// the store unable to write a conforming row.
 func migrateSchemaV108(ctx context.Context, db *rhiza.DB) error {
-	return nil
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT
+		EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=108),
+		EXISTS(SELECT 1 FROM pragma_table_info('identity_email_otp_interactions') WHERE name='interaction_digest')`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 2 {
+		return errors.New("invalid schema 108 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	if state.Rows[0][1] == int64(1) {
+		return errors.New("schema 108 has an unrecorded OTP interaction digest column")
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v108", Statements: []rhiza.SQLStatement{
+		{SQL: `DELETE FROM identity_email_otp_interactions`},
+		{SQL: `ALTER TABLE identity_email_otp_interactions ADD COLUMN interaction_digest TEXT NOT NULL DEFAULT '' CHECK (length(interaction_digest)=43)`},
+		{SQL: `ALTER TABLE identity_email_otp_interactions ADD COLUMN password_generation INTEGER NOT NULL DEFAULT 0 CHECK (password_generation >= 0)`},
+		{SQL: `ALTER TABLE identity_email_otp_interactions ADD COLUMN authentication_generation INTEGER NOT NULL DEFAULT 0 CHECK (authentication_generation >= 0)`},
+		{SQL: `ALTER TABLE identity_email_otp_interactions DROP COLUMN interaction_token`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(108)`},
+	}})
+	return err
 }
 
 // migrateSchemaV109 records the configuration generation on every destination

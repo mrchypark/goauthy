@@ -1312,6 +1312,11 @@ func (s *Store) ConvertToPasskeyOnly(ctx context.Context, subject string) error 
 		{SQL: `DELETE FROM identity_webauthn_mfa_proofs WHERE subject = ? AND EXISTS (SELECT 1 FROM identity_users WHERE ` + userGuard + `)`, Args: []any{subject, subject, newPasswordGeneration}},
 		{SQL: `DELETE FROM identity_mfa_mod_token_factors WHERE token_digest IN (SELECT token_digest FROM identity_mfa_mod_tokens WHERE subject = ?) AND EXISTS (SELECT 1 FROM identity_users WHERE ` + userGuard + `)`, Args: []any{subject, subject, newPasswordGeneration}},
 		{SQL: `DELETE FROM identity_mfa_mod_tokens WHERE subject = ? AND EXISTS (SELECT 1 FROM identity_users WHERE ` + userGuard + `)`, Args: []any{subject, subject, newPasswordGeneration}},
+		// A pending password-plus-OTP binding is a continuation of the password
+		// proof this conversion just revoked, so it is removed with the other
+		// password-dependent ceremonies (GA66-OTP-002). The table is created by
+		// the schema chain every caller migrates through.
+		{SQL: `DELETE FROM identity_email_otp_interactions WHERE subject = ? AND EXISTS (SELECT 1 FROM identity_users WHERE ` + userGuard + `)`, Args: []any{subject, subject, newPasswordGeneration}},
 		// This CAS follows all password-state writes in the same transaction.
 		{SQL: `UPDATE identity_authentication_modes SET mode = 'passkey', generation = generation + 1, updated_at_unix_ms = ? WHERE subject = ? AND mode = 'password' AND generation = ? AND EXISTS (SELECT 1 FROM identity_users WHERE ` + userGuard + `)`, Args: []any{now.UnixMilli(), subject, modeGeneration, subject, newPasswordGeneration}},
 	}

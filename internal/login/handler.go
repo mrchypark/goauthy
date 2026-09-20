@@ -528,7 +528,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 				return
 			}
-			if err := h.otp.StoreInteraction(session.ID, auth.Subject, form.interaction, expiresAt); err != nil {
+			// The binding carries the first-factor generations the password step just
+			// proved, so a later password or authentication-mode change makes this
+			// continuation ineligible (GA66-OTP-002).
+			if err := h.otp.StoreInteraction(session.ID, auth.Subject, form.interaction, auth.PasswordGeneration, auth.AuthenticationGeneration, expiresAt); err != nil {
 				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 				return
 			}
@@ -1072,12 +1075,27 @@ func (h *Handler) PrepareExternalAuthentication(r *http.Request, rawInteractionT
 // into an authenticated OAuth browser session. Both password and passkey
 // authenticators intentionally use this path.
 func (h *Handler) completeAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, interactionToken, subject, authMethod string, onConsumed func() error) {
+	h.completeAuthenticationInteraction(w, r, sessionToken, subject, authMethod, onConsumed, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+		return h.browser.ConsumeAuthorizationInteraction(ctx, sessionToken, interactionToken)
+	})
+}
+
+// completeAuthenticationByDigest completes a ceremony whose authorization
+// interaction is known only by its canonical persisted digest, so the raw
+// continuation token never enters durable state or the caller (GA66-OTP-003).
+func (h *Handler) completeAuthenticationByDigest(w http.ResponseWriter, r *http.Request, sessionToken, interactionDigest, subject, authMethod string, onConsumed func() error) {
+	h.completeAuthenticationInteraction(w, r, sessionToken, subject, authMethod, onConsumed, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+		return h.browser.ConsumeAuthorizationInteractionByDigest(ctx, sessionToken, interactionDigest)
+	})
+}
+
+func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, onConsumed func() error, consume func(context.Context) (browser.AuthorizationInteraction, error)) {
 	peerIP, peerOK := h.resolvePeerIP(r)
 	if !peerOK {
 		http.Error(w, "Invalid login request", http.StatusBadRequest)
 		return
 	}
-	interaction, err := h.browser.ConsumeAuthorizationInteraction(r.Context(), sessionToken, interactionToken)
+	interaction, err := consume(r.Context())
 	if err != nil {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
@@ -1480,8 +1498,8 @@ func (h *Handler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid OTP request", http.StatusBadRequest)
 		return
 	}
-	subject, interactionToken, err := h.otp.LoadInteraction(r.Context(), session.ID)
-	if err != nil || subject == "" || interactionToken == "" {
+	subject, interactionDigest, err := h.otp.LoadInteraction(r.Context(), session.ID)
+	if err != nil || subject == "" || interactionDigest == "" {
 		http.Error(w, "Invalid OTP request", http.StatusUnauthorized)
 		return
 	}
@@ -1491,8 +1509,11 @@ func (h *Handler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	// Verification consumes the code and the session binding in one replicated
 	// transaction, so a verified password-plus-OTP ceremony can never outlive
-	// the interaction it authorizes.
-	verified, verifyErr := h.otp.VerifyInteraction(r.Context(), session.ID, subject, payload.Code)
+	// the interaction it authorizes. The loaded digest is compared atomically
+	// with the binding, so a password step that replaced the binding after this
+	// read fails this stale verification without spending the code or deleting
+	// the replacement binding (GA66-OTP-001).
+	verified, verifyErr := h.otp.VerifyInteraction(r.Context(), session.ID, subject, interactionDigest, payload.Code)
 	if verifyErr != nil || !verified {
 		if h.metrics != nil {
 			h.metrics.AuthFailure()
@@ -1503,7 +1524,9 @@ func (h *Handler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 	started := h.now()
 	// The verified password-plus-OTP ceremony is the same "mfa" authentication
 	// method the completion path, the stored session and the amr claim accept.
-	h.completeAuthentication(w, r, sessionToken, interactionToken, subject, "mfa", func() error {
+	// Completion reuses the digest the verified binding proved, so no raw
+	// continuation token is needed to consume the interaction.
+	h.completeAuthenticationByDigest(w, r, sessionToken, interactionDigest, subject, "mfa", func() error {
 		return h.recordSuccessfulAuthentication(r.Context(), peerIP, h.now().Sub(started), nil)
 	})
 }

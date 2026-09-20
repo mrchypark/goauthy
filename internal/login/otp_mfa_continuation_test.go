@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/recovery"
 	"github.com/mrchypark/goauthy/internal/storage"
@@ -221,6 +222,83 @@ func TestForcedMFAOTPStepUpCompletesAsMFA(t *testing.T) {
 				t.Fatalf("replay status=%d location=%q body=%q", replay.Code, replay.Header().Get("Location"), replay.Body.String())
 			}
 		})
+	}
+}
+
+// TestForcedMFAOTPStepUpPersistsOnlyTheInteractionDigest proves GA66-OTP-003:
+// the pending password-plus-OTP binding keeps the canonical interaction digest
+// in replicated state instead of the raw continuation token, and completion
+// still works through the digest path.
+func TestForcedMFAOTPStepUpPersistsOnlyTheInteractionDigest(t *testing.T) {
+	h, db := testHandlerWithDB(t, true)
+	service, _ := testOTPStepUp(t, h, db)
+	ctx := context.Background()
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{
+		RequestID: "otp-digest-profile",
+		SQL:       "INSERT OR IGNORE INTO identity_user_profiles (subject,email,email_verified,preferred_username) VALUES (?,?,1,?)",
+		Args:      []any{"user-1", "alice@example.test", "user-1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	page := httptest.NewRecorder()
+	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
+	if page.Code != http.StatusOK {
+		t.Fatalf("authorize status=%d", page.Code)
+	}
+	init := page.Result().Cookies()[0]
+	interaction := interactionToken(t, page.Body.String())
+	interactionDigest, err := browser.CanonicalTokenDigest(interaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionDigest, err := browser.CanonicalTokenDigest(init.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stepUp := httptest.NewRecorder()
+	h.Login(stepUp, postLogin(init, interaction, "alice", "correct password"))
+	if stepUp.Code != http.StatusOK {
+		t.Fatalf("step-up status=%d body=%q", stepUp.Code, stepUp.Body.String())
+	}
+
+	rows, err := db.Query(ctx, rhiza.QueryRequest{
+		SQL:         "SELECT interaction_digest FROM identity_email_otp_interactions WHERE session_digest=?",
+		Args:        []any{sessionDigest},
+		Consistency: rhiza.ConsistencyLinearizable,
+	})
+	if err != nil || len(rows.Rows) != 1 || len(rows.Rows[0]) != 1 {
+		t.Fatalf("binding rows=%#v err=%v", rows.Rows, err)
+	}
+	stored, ok := rows.Rows[0][0].(string)
+	if !ok || stored != interactionDigest {
+		t.Fatalf("stored interaction=%#v, want the canonical digest", rows.Rows[0][0])
+	}
+	if stored == interaction {
+		t.Fatal("the raw continuation token was persisted")
+	}
+	raw, err := db.Query(ctx, rhiza.QueryRequest{
+		SQL:         "SELECT COUNT(*) FROM identity_email_otp_interactions WHERE session_digest=? OR subject=? OR interaction_digest=?",
+		Args:        []any{interaction, interaction, interaction},
+		Consistency: rhiza.ConsistencyLinearizable,
+	})
+	if err != nil || len(raw.Rows) != 1 || raw.Rows[0][0] != int64(0) {
+		t.Fatalf("raw token sentinel found in persisted rows: rows=%#v err=%v", raw.Rows, err)
+	}
+
+	code, err := service.GenerateOTP(ctx, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := httptest.NewRecorder()
+	h.OTPVerify(completed, postOTPForm(init, code))
+	if completed.Code != http.StatusSeeOther || completed.Header().Get("Location") == "" {
+		t.Fatalf("completion status=%d location=%q body=%q", completed.Code, completed.Header().Get("Location"), completed.Body.String())
+	}
+	session, err := h.browser.LoadSession(ctx, completed.Result().Cookies()[0].Value)
+	if err != nil || session.Subject != "user-1" || session.AuthenticationMethod != "mfa" {
+		t.Fatalf("rotated session=%#v err=%v", session, err)
 	}
 }
 
