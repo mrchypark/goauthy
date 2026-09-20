@@ -1104,10 +1104,18 @@ func (s *Store) CreateAccessTokenSession(ctx context.Context, signature string, 
 		cleanupAccessArgs = append(cleanupAccessArgs, guardArgs...)
 		cleanupRequestArgs = append(cleanupRequestArgs, guardArgs...)
 	}
+	// Rhiza sums RowsAffected across a batch, so cleanup DELETEs can mask a
+	// rejected issuance INSERT. The exact success of each intended insert is
+	// therefore a statement precondition rather than an aggregate row count.
+	var exactIssue *int64
+	if clientCredentialsGuarded {
+		one := int64(1)
+		exactIssue = &one
+	}
 	statements := []rhiza.SQLStatement{
 		{SQL: cleanupAccessSQL, Args: cleanupAccessArgs},
 		{SQL: cleanupRequestSQL, Args: cleanupRequestArgs},
-		{SQL: insertSQL, Args: args},
+		{SQL: insertSQL, Args: args, ExpectedRowsAffected: exactIssue},
 	}
 	if tx == nil {
 		if guard, guardArgs := clientCredentialsClaimsGuard(ctx); guard != "" {
@@ -1144,7 +1152,7 @@ func (s *Store) CreateAccessTokenSession(ctx context.Context, signature string, 
 		requestSQL += managedGuard
 		requestArgs = append(requestArgs, managedArgs...)
 	}
-	statements = append(statements, rhiza.SQLStatement{SQL: requestSQL, Args: requestArgs})
+	statements = append(statements, rhiza.SQLStatement{SQL: requestSQL, Args: requestArgs, ExpectedRowsAffected: exactIssue})
 	if (tx == nil && request.GetRequestForm().Get("grant_type") == "client_credentials") || (tx != nil && (tx.kind == "code" || tx.kind == "password")) {
 		lastUsedAt := s.now().UTC().UnixMilli()
 		lastUsedSQL := `UPDATE dynamic_oauth_clients
@@ -1232,12 +1240,19 @@ func (s *Store) CreateAccessTokenSession(ctx context.Context, signature string, 
 
 	}
 	if clientCredentialsGuarded {
-		response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "oauth-access-create/" + signature, Statements: statements})
-		if err != nil {
+		// Rhiza rolls a command back as a unit, so a rejected guarded INSERT would
+		// also undo the cleanup DELETEs batched with it. Cleanup therefore runs as
+		// its own mutation, and the issuance mutation carries the preconditions
+		// that decide whether a token may be returned.
+		cleanup, issuance := statements[:2], statements[2:]
+		if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "oauth-access-cleanup/" + signature, Statements: cleanup}); err != nil {
 			return err
 		}
-		if response.RowsAffected < 2 {
-			return fosite.ErrSerializationFailure
+		if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "oauth-access-create/" + signature, Statements: issuance}); err != nil {
+			if strings.Contains(err.Error(), "error_code="+string(rhiza.MutationErrorCodePreconditionFailed)) {
+				return fosite.ErrSerializationFailure
+			}
+			return err
 		}
 		return nil
 	}
