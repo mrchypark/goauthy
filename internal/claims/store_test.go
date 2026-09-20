@@ -420,3 +420,88 @@ func claimsTestStore(t *testing.T) (context.Context, *Store) {
 	}
 	return ctx, NewStore(db)
 }
+
+func TestCatalogMutationLoserLeavesTablesUnchanged(t *testing.T) {
+	ctx, store := claimsTestStore(t)
+
+	// --- scope variant ---
+	// Advance to revision 1 with an attribute.
+	if _, err := store.CreateAttribute(ctx, "admin", 0, Attribute{Name: "sid"}); err != nil {
+		t.Fatal(err)
+	}
+	// Competitor advances revision from 1 to 2.
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
+		RequestID: "competitor-scope",
+		Statements: []rhiza.SQLStatement{{
+			SQL:  `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=1`,
+			Args: []any{},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Loser tries to create a scope at the stale expected revision 1.
+	_, err := store.CreateScope(ctx, "admin", 1, Scope{Name: "loserscope", AttributeIncludeID: []string{"sid"}})
+	if err == nil {
+		t.Fatal("stale scope creation should have failed")
+	}
+	// Verify the loser's scope was not inserted.
+	exists, err := store.ScopeExists(ctx, "loserscope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatal("loserscope should not exist after losing the race")
+	}
+	// Verify revision is still 2 (only the competitor advanced it).
+	rev, err := store.CatalogRevision(ctx)
+	if err != nil || rev != 2 {
+		t.Fatalf("revision=%d err=%v", rev, err)
+	}
+
+	// --- attribute variant ---
+	// Competitor advances revision from 2 to 3.
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
+		RequestID: "competitor-attr",
+		Statements: []rhiza.SQLStatement{{
+			SQL:  `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=2`,
+			Args: []any{},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Loser tries to create an attribute at stale expected revision 2.
+	_, err = store.CreateAttribute(ctx, "admin", 2, Attribute{Name: "loser-attr"})
+	if err == nil {
+		t.Fatal("stale attribute creation should have failed")
+	}
+	// Verify the loser's attribute was not inserted.
+	if _, err := store.GetAttribute(ctx, "admin", "loser-attr"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("loser-attr should not exist: err=%v", err)
+	}
+	rev, err = store.CatalogRevision(ctx)
+	if err != nil || rev != 3 {
+		t.Fatalf("revision=%d err=%v", rev, err)
+	}
+
+	// --- role revocation variant ---
+	// Revoke admin role.
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
+		RequestID: "revoke-admin",
+		Statements: []rhiza.SQLStatement{{
+			SQL:  `DELETE FROM rbac_user_roles WHERE subject='admin'`,
+			Args: []any{},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Try to create with expected=3 (current rev) — first statement should
+	// affect 0 rows because adminGuard fails AND revision didn't advance.
+	_, err = store.CreateAttribute(ctx, "admin", 3, Attribute{Name: "revoked-attr"})
+	if err == nil {
+		t.Fatal("revoked admin should not mutate catalog")
+	}
+	rev, err = store.CatalogRevision(ctx)
+	if err != nil || rev != 3 {
+		t.Fatalf("after revoke revision=%d err=%v", rev, err)
+	}
+}

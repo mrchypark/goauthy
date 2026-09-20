@@ -21,8 +21,9 @@ import (
 const maxJSON = 8192
 
 var (
-	attributeNamePattern = regexp.MustCompile(`^[A-Za-z0-9-_/]{2,32}$`)
-	scopeNamePattern     = regexp.MustCompile(`^[A-Za-z0-9-_/,:*.]{2,64}$`)
+	attributeNamePattern       = regexp.MustCompile(`^[A-Za-z0-9-_/]{2,32}$`)
+	scopeNamePattern           = regexp.MustCompile(`^[A-Za-z0-9-_/,:*.]{2,64}$`)
+	one                  int64 = 1
 )
 
 type Store struct {
@@ -68,7 +69,7 @@ func (s *Store) authorize(ctx context.Context, actor string, key *apikey.Princip
 func (s *Store) run(ctx context.Context, key *apikey.Principal, group string, right apikey.Right, id string, statements []rhiza.SQLStatement) error {
 	if key == nil {
 		_, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: id, Statements: statements})
-		return err
+		return admissionConflict(err)
 	}
 	if s.apiKeys == nil {
 		return ErrUnauthorized
@@ -85,12 +86,23 @@ func (s *Store) run(ctx context.Context, key *apikey.Principal, group string, ri
 	}
 	_, ok, err := s.apiKeys.RunMutation(ctx, key, group, right, id, guarded)
 	if err != nil {
-		return err
+		return admissionConflict(err)
 	}
 	if !ok {
 		return ErrUnauthorized
 	}
 	return nil
+}
+
+// admissionConflict maps a rejected statement precondition onto ErrConflict.
+// The admission statement is the catalog CAS that every caller already reports
+// as a conflict, so the store keeps that contract instead of leaking the raw
+// rejection text after preconditions replaced the old zero-row fallthrough.
+func admissionConflict(err error) error {
+	if err != nil && strings.Contains(err.Error(), "error_code="+string(rhiza.MutationErrorCodePreconditionFailed)) {
+		return ErrConflict
+	}
+	return err
 }
 
 // EditableAttribute is the public, self-service view of one custom attribute.
@@ -172,7 +184,7 @@ func (s *Store) createAttribute(ctx context.Context, actor string, key *apikey.P
 	def := nullable(value.Default)
 	id := requestID("attr-create", actor, fmt.Sprint(expected), value.Name, jsonKey(def))
 	err := s.run(ctx, key, "UserAttributes", apikey.Create, id, []rhiza.SQLStatement{
-		{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND NOT EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND ` + adminGuard(), Args: []any{expected, value.Name, actor}},
+		{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND NOT EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND ` + adminGuard(), Args: []any{expected, value.Name, actor}, ExpectedRowsAffected: &one},
 		{SQL: `INSERT INTO user_attribute_configs (name,desc,default_value_json,typ,user_editable,revision,created_at_unix_ms,updated_at_unix_ms) SELECT ?,?,?,?,?,1,0,0 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{value.Name, nullableString(value.Description), def, nullableString(value.Type), boolInt(value.UserEditable), expected + 1}},
 	})
 	if err != nil {
@@ -205,7 +217,7 @@ func (s *Store) updateAttribute(ctx context.Context, actor string, key *apikey.P
 	def := nullable(value.Default)
 	id := requestID("attr-update", actor, name, value.Name, fmt.Sprint(expected), jsonKey(def))
 	err := s.run(ctx, key, "UserAttributes", apikey.Update, id, []rhiza.SQLStatement{
-		{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND (?=? OR NOT EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?)) AND ` + adminGuard(), Args: []any{expected, name, name, value.Name, value.Name, actor}},
+		{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND (?=? OR NOT EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?)) AND ` + adminGuard(), Args: []any{expected, name, name, value.Name, value.Name, actor}, ExpectedRowsAffected: &one},
 		{SQL: `UPDATE user_attribute_configs SET name=?,desc=?,default_value_json=?,typ=?,user_editable=?,revision=revision+1,updated_at_unix_ms=0 WHERE name=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{value.Name, nullableString(value.Description), def, nullableString(value.Type), boolInt(value.UserEditable), name, expected + 1}},
 		{SQL: `UPDATE user_attribute_values SET key=? WHERE key=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{value.Name, name, expected + 1}},
 		{SQL: `UPDATE custom_scopes SET attr_include_access_json=coalesce((SELECT json_group_array(CASE WHEN value=? THEN ? ELSE value END) FROM json_each(attr_include_access_json)), '[]'),attr_include_id_json=coalesce((SELECT json_group_array(CASE WHEN value=? THEN ? ELSE value END) FROM json_each(attr_include_id_json)), '[]'),revision=revision+1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?) AND (attr_include_access_json LIKE ? OR attr_include_id_json LIKE ?)`, Args: []any{name, value.Name, name, value.Name, expected + 1, "%\"" + name + "\"%", "%\"" + name + "\"%"}},
@@ -236,7 +248,7 @@ func (s *Store) deleteAttribute(ctx context.Context, actor string, key *apikey.P
 	}
 	id := requestID("attr-delete", actor, name, fmt.Sprint(expected))
 	err := s.run(ctx, key, "UserAttributes", apikey.Delete, id, []rhiza.SQLStatement{
-		{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND ` + adminGuard(), Args: []any{expected, name, actor}},
+		{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND ` + adminGuard(), Args: []any{expected, name, actor}, ExpectedRowsAffected: &one},
 		{SQL: `DELETE FROM user_attribute_values WHERE key=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{name, expected + 1}},
 		{SQL: `DELETE FROM user_attribute_configs WHERE name=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{name, expected + 1}},
 		{SQL: `UPDATE custom_scopes SET attr_include_access_json=coalesce((SELECT json_group_array(value) FROM json_each(attr_include_access_json) WHERE value<>?), '[]'),attr_include_id_json=coalesce((SELECT json_group_array(value) FROM json_each(attr_include_id_json) WHERE value<>?), '[]'),revision=revision+1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?) AND (attr_include_access_json LIKE ? OR attr_include_id_json LIKE ?)`, Args: []any{name, name, expected + 1, "%\"" + name + "\"%", "%\"" + name + "\"%"}},
@@ -287,7 +299,7 @@ func (s *Store) createScope(ctx context.Context, actor string, key *apikey.Princ
 	}
 	a, b := scopeJSON(value)
 	id := requestID("scope-create", actor, fmt.Sprint(expected), value.Name, a, b)
-	err := s.run(ctx, key, "Scopes", apikey.Create, id, []rhiza.SQLStatement{{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND NOT EXISTS (SELECT 1 FROM custom_scopes WHERE name=?) AND ` + adminGuard(), Args: []any{expected, value.Name, actor}}, {SQL: `INSERT INTO custom_scopes (name,attr_include_access_json,attr_include_id_json,claims_at_root,revision) SELECT ?,?,?,?,1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{value.Name, a, b, boolInt(value.ClaimsAtRoot), expected + 1}}})
+	err := s.run(ctx, key, "Scopes", apikey.Create, id, []rhiza.SQLStatement{{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND NOT EXISTS (SELECT 1 FROM custom_scopes WHERE name=?) AND ` + adminGuard(), Args: []any{expected, value.Name, actor}, ExpectedRowsAffected: &one}, {SQL: `INSERT INTO custom_scopes (name,attr_include_access_json,attr_include_id_json,claims_at_root,revision) SELECT ?,?,?,?,1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{value.Name, a, b, boolInt(value.ClaimsAtRoot), expected + 1}}})
 	if err != nil {
 		return Scope{}, err
 	}
@@ -314,7 +326,7 @@ func (s *Store) updateScope(ctx context.Context, actor string, key *apikey.Princ
 	}
 	a, b := scopeJSON(value)
 	id := requestID("scope-update", actor, name, value.Name, fmt.Sprint(expected), a, b)
-	err := s.run(ctx, key, "Scopes", apikey.Update, id, []rhiza.SQLStatement{{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM custom_scopes WHERE name=?) AND (?=? OR NOT EXISTS (SELECT 1 FROM custom_scopes WHERE name=?)) AND ` + adminGuard(), Args: []any{expected, name, name, value.Name, value.Name, actor}}, {SQL: `UPDATE custom_scopes SET name=?,attr_include_access_json=?,attr_include_id_json=?,claims_at_root=?,revision=revision+1 WHERE name=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{value.Name, a, b, boolInt(value.ClaimsAtRoot), name, expected + 1}}, {SQL: `UPDATE bootstrap_client_claim_scopes SET allowed_scopes_json=coalesce((SELECT json_group_array(CASE WHEN value=? THEN ? ELSE value END) FROM json_each(allowed_scopes_json)), '[]'),default_scopes_json=coalesce((SELECT json_group_array(CASE WHEN value=? THEN ? ELSE value END) FROM json_each(default_scopes_json)), '[]'),revision=revision+1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?) AND (allowed_scopes_json LIKE ? OR default_scopes_json LIKE ?)`, Args: []any{name, value.Name, name, value.Name, expected + 1, "%\"" + name + "\"%", "%\"" + name + "\"%"}}})
+	err := s.run(ctx, key, "Scopes", apikey.Update, id, []rhiza.SQLStatement{{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM custom_scopes WHERE name=?) AND (?=? OR NOT EXISTS (SELECT 1 FROM custom_scopes WHERE name=?)) AND ` + adminGuard(), Args: []any{expected, name, name, value.Name, value.Name, actor}, ExpectedRowsAffected: &one}, {SQL: `UPDATE custom_scopes SET name=?,attr_include_access_json=?,attr_include_id_json=?,claims_at_root=?,revision=revision+1 WHERE name=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{value.Name, a, b, boolInt(value.ClaimsAtRoot), name, expected + 1}}, {SQL: `UPDATE bootstrap_client_claim_scopes SET allowed_scopes_json=coalesce((SELECT json_group_array(CASE WHEN value=? THEN ? ELSE value END) FROM json_each(allowed_scopes_json)), '[]'),default_scopes_json=coalesce((SELECT json_group_array(CASE WHEN value=? THEN ? ELSE value END) FROM json_each(default_scopes_json)), '[]'),revision=revision+1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?) AND (allowed_scopes_json LIKE ? OR default_scopes_json LIKE ?)`, Args: []any{name, value.Name, name, value.Name, expected + 1, "%\"" + name + "\"%", "%\"" + name + "\"%"}}})
 	if err != nil {
 		return Scope{}, err
 	}
@@ -340,7 +352,7 @@ func (s *Store) deleteScope(ctx context.Context, actor string, key *apikey.Princ
 		return ErrInvalid
 	}
 	id := requestID("scope-delete", actor, name, fmt.Sprint(expected))
-	err := s.run(ctx, key, "Scopes", apikey.Delete, id, []rhiza.SQLStatement{{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM custom_scopes WHERE name=?) AND ` + adminGuard(), Args: []any{expected, name, actor}}, {SQL: `UPDATE bootstrap_client_claim_scopes SET allowed_scopes_json=coalesce((SELECT json_group_array(value) FROM json_each(allowed_scopes_json) WHERE value<>?), '[]'),default_scopes_json=coalesce((SELECT json_group_array(value) FROM json_each(default_scopes_json) WHERE value<>?), '[]'),revision=revision+1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?) AND (allowed_scopes_json LIKE ? OR default_scopes_json LIKE ?)`, Args: []any{name, name, expected + 1, "%\"" + name + "\"%", "%\"" + name + "\"%"}}, {SQL: `DELETE FROM custom_scopes WHERE name=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{name, expected + 1}}})
+	err := s.run(ctx, key, "Scopes", apikey.Delete, id, []rhiza.SQLStatement{{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM custom_scopes WHERE name=?) AND ` + adminGuard(), Args: []any{expected, name, actor}, ExpectedRowsAffected: &one}, {SQL: `UPDATE bootstrap_client_claim_scopes SET allowed_scopes_json=coalesce((SELECT json_group_array(value) FROM json_each(allowed_scopes_json) WHERE value<>?), '[]'),default_scopes_json=coalesce((SELECT json_group_array(value) FROM json_each(default_scopes_json) WHERE value<>?), '[]'),revision=revision+1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?) AND (allowed_scopes_json LIKE ? OR default_scopes_json LIKE ?)`, Args: []any{name, name, expected + 1, "%\"" + name + "\"%", "%\"" + name + "\"%"}}, {SQL: `DELETE FROM custom_scopes WHERE name=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{name, expected + 1}}})
 	if err != nil {
 		return err
 	}
