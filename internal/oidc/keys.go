@@ -80,7 +80,9 @@ func (keyring *Keyring) RemoveKey(id string) error {
 		return nil
 	}
 	if keyring.directory != "" {
-		if err := os.Remove(filepath.Join(keyring.directory, id)); err != nil {
+		// An already-absent file satisfies disk removal: another process (or an
+		// operator) may have deleted it, and the in-memory entry must still go.
+		if err := os.Remove(filepath.Join(keyring.directory, id)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}

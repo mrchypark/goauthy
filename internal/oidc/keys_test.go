@@ -366,8 +366,16 @@ func TestRemoveKeyRaceAndFileError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Point directory to a non-existent path so os.Remove fails.
-	keyring.directory = filepath.Join(directory, "no-such-dir")
+	// Block the unlink with a non-empty directory at the key path so the failure
+	// is a genuine filesystem error rather than an already-absent file.
+	blocked := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(blocked, "key-old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blocked, "key-old", "keep"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keyring.directory = blocked
 	if err := keyring.RemoveKey("key-old"); err == nil {
 		t.Fatal("expected error from failed unlink")
 	}
@@ -384,6 +392,33 @@ func TestRemoveKeyRaceAndFileError(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(directory, "key-old")); !os.IsNotExist(err) {
 		t.Fatal("key file should be removed from disk")
+	}
+
+	// A second instance loaded from the same directory must still complete its
+	// own in-memory removal after another process deleted the file.
+	shared := t.TempDir()
+	for _, id := range []string{"key-old", "key-active"} {
+		encoded := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32))
+		if err := os.WriteFile(filepath.Join(shared, id), []byte(encoded), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := LoadKeyring(shared, "key-active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := LoadKeyring(shared, "key-active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.RemoveKey("key-old"); err != nil {
+		t.Fatalf("first removal: %v", err)
+	}
+	if err := second.RemoveKey("key-old"); err != nil {
+		t.Fatalf("removal after external unlink: %v", err)
+	}
+	if second.HasKey("key-old") {
+		t.Fatal("second keyring should drop a key whose file is already gone")
 	}
 
 	// (a) Race test: concurrent seal/open with removal of both the same and a
