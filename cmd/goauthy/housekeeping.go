@@ -6,10 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/mrchypark/goauthy/internal/dcr"
-	"github.com/mrchypark/goauthy/internal/eventlog"
 	"github.com/mrchypark/goauthy/internal/housekeeping"
-	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/loginpolicy"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/recovery"
@@ -17,62 +14,20 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
+// buildHousekeepingJobs returns the maintenance tasks owned by the shared
+// scheduler. Event cleanup, account expiry, open-registration cleanup and
+// anonymous-DCR cleanup stay with their dedicated workers in main; registering
+// them here as well made every replica run each of those tasks twice through two
+// immediate-and-periodic loops (GA-RUNTIME-001). Every task therefore has
+// exactly one lifecycle owner.
 func buildHousekeepingJobs(
-	eventStore *eventlog.Store,
-	eventRetention time.Duration,
-	identityStore *identity.Store,
-	userExpiryCfg userExpirySettings,
 	db *rhiza.DB,
-	dcrAnonymous bool,
-	dcrCleanupCfg dcr.AnonymousCleanupConfig,
 	recoveryService *recovery.Service,
 	loginpolicyStore *loginpolicy.Store,
 	keyring *oidc.Keyring,
 	emailOutbox *recovery.EmailOutbox,
 ) []housekeeping.Job {
 	var jobs []housekeeping.Job
-
-	jobs = append(jobs, housekeeping.Job{
-		Name:     "event-cleanup",
-		Interval: time.Hour,
-		Step: func(ctx context.Context) error {
-			return eventCleanupStep(ctx, eventStore, eventRetention)
-		},
-	})
-
-	if recoveryService != nil {
-		jobs = append(jobs, housekeeping.Job{
-			Name:     "open-registration-cleanup",
-			Interval: time.Hour,
-			Step: func(ctx context.Context) error {
-				return openRegistrationCleanupStep(ctx, identityStore)
-			},
-		})
-	}
-
-	if dcrAnonymous {
-		jobs = append(jobs, housekeeping.Job{
-			Name:     "dcr-anonymous-cleanup",
-			Interval: time.Hour,
-			Step: func(ctx context.Context) error {
-				return dcrAnonymousCleanupStep(ctx, db, dcrCleanupCfg)
-			},
-		})
-	}
-
-	if userExpiryCfg.interval > 0 {
-		interval := userExpiryCfg.interval
-		if interval > maxUserExpiryMinutes*time.Minute {
-			interval = maxUserExpiryMinutes * time.Minute
-		}
-		jobs = append(jobs, housekeeping.Job{
-			Name:     "user-expiry",
-			Interval: interval,
-			Step: func(ctx context.Context) error {
-				return userExpiryStep(ctx, identityStore, userExpiryCfg)
-			},
-		})
-	}
 
 	if loginpolicyStore != nil {
 		jobs = append(jobs, housekeeping.Job{
@@ -122,44 +77,6 @@ func buildHousekeepingJobs(
 	}
 
 	return jobs
-}
-
-func eventCleanupStep(ctx context.Context, store *eventlog.Store, retention time.Duration) error {
-	if store == nil {
-		return fmt.Errorf("event store is nil")
-	}
-	at := time.Now()
-	for ctx.Err() == nil {
-		removed, err := store.Cleanup(ctx, at, retention)
-		if err != nil {
-			return fmt.Errorf("event cleanup: %w", err)
-		}
-		if removed == 0 {
-			return nil
-		}
-	}
-	return nil
-}
-
-func openRegistrationCleanupStep(ctx context.Context, store *identity.Store) error {
-	if store == nil {
-		return fmt.Errorf("identity store is nil")
-	}
-	return cleanupOpenRegistrationTick(ctx, store, time.Now())
-}
-
-func dcrAnonymousCleanupStep(ctx context.Context, db *rhiza.DB, config dcr.AnonymousCleanupConfig) error {
-	if db == nil {
-		return fmt.Errorf("database is nil")
-	}
-	return dcr.CleanupAnonymousClients(ctx, db, config, time.Now().UTC())
-}
-
-func userExpiryStep(ctx context.Context, store *identity.Store, settings userExpirySettings) error {
-	if store == nil {
-		return fmt.Errorf("identity store is nil")
-	}
-	return runUserExpiryTick(ctx, store, settings, time.Now().UTC())
 }
 
 func credentialStuffingCleanupStep(ctx context.Context, store *loginpolicy.Store) error {

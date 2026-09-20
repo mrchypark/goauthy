@@ -6,9 +6,35 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/loginpolicy"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
+
+// GA-RUNTIME-001: event cleanup, account expiry, open-registration cleanup and
+// anonymous-DCR cleanup are owned by their dedicated workers in main. The shared
+// scheduler owning one of them as well made every replica run that task twice.
+func TestHousekeepingLeavesDedicatedTasksToTheirOwners(t *testing.T) {
+	db := retirementCmdDB(t, true)
+	jobs := buildHousekeepingJobs(db, nil, loginpolicy.NewStore(db), retirementCmdKeyring(t, "key-c"), nil)
+	owners := map[string]int{}
+	for _, job := range jobs {
+		owners[job.Name]++
+	}
+	if len(owners) == 0 {
+		t.Fatal("expected the scheduler to own maintenance tasks")
+	}
+	for name, count := range owners {
+		if count > 1 {
+			t.Fatalf("task %q has %d lifecycle owners", name, count)
+		}
+	}
+	for _, dedicated := range []string{"event-cleanup", "user-expiry", "open-registration-cleanup", "dcr-anonymous-cleanup"} {
+		if owners[dedicated] != 0 {
+			t.Fatalf("task %q is owned by the scheduler and by its dedicated worker", dedicated)
+		}
+	}
+}
 
 // GA-STOR-002: the retired key is deleted by one cleanup owner, only after the
 // overlap period and only once the exact ready barrier is acknowledged durable.
