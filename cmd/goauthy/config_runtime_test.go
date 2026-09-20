@@ -142,7 +142,7 @@ func TestRunConfigCommandRejectsInvalidRuntimeConfiguration(t *testing.T) {
 		{name: "forced mfa without passkey", env: map[string]string{"GOAUTHY_BOOTSTRAP_FORCE_MFA": "true"}, wantErr: "GOAUTHY_BOOTSTRAP_FORCE_MFA"},
 		{name: "bootstrap roles without credential", env: map[string]string{"GOAUTHY_BOOTSTRAP_USER_ROLES": `["admin"]`}, wantErr: "GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE"},
 		{name: "missing bootstrap credential file", env: map[string]string{"GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE": filepath.Join(credentialDir, "missing.phc")}, wantErr: "bootstrap user password credential"},
-		{name: "bootstrap credential policy", env: map[string]string{"GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE": writeTestFile(t, credentialDir, "other-policy.phc", "$argon2id$v=19$m=8192,t=1,p=8$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAA")}, wantErr: "bootstrap user password credential"},
+		{name: "bootstrap credential structure", env: map[string]string{"GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE": writeTestFile(t, credentialDir, "malformed.phc", "$argon2id$v=19$m=8192")}, wantErr: "bootstrap user password credential"},
 		{name: "recovery without reset key", env: map[string]string{"GOAUTHY_PASSWORD_RECOVERY_ENABLED": "true"}, wantErr: "GOAUTHY_PASSWORD_RESET_KEY_FILE"},
 		{name: "recovery without bootstrap email", env: map[string]string{"GOAUTHY_PASSWORD_RECOVERY_ENABLED": "true", "GOAUTHY_PASSWORD_RESET_KEY_FILE": resetKeyFile, "GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE": phcFile}, wantErr: "GOAUTHY_BOOTSTRAP_USER_EMAIL"},
 	} {
@@ -190,6 +190,17 @@ func TestRunConfigCommandValidatesRuntimeFiles(t *testing.T) {
 	}
 	if out.String() != "configuration valid\n" {
 		t.Fatalf("output = %q", out.String())
+	}
+
+	// GA-CONFIG-001: a credential created under an earlier Argon2 policy must not
+	// block a restart under a stronger one; the identity layer keeps the exact
+	// current-policy check for creation only.
+	storedPHC := writeTestFile(t, dir, "stored-bootstrap.phc", "$argon2id$v=19$m=8192,t=1,p=8$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAA")
+	out.Reset()
+	if err := runConfigCommand([]string{"check"}, applicationConfigTestEnv(t, map[string]string{
+		"GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE": storedPHC,
+	}), &out); err != nil {
+		t.Fatalf("stored bootstrap credential under a stronger policy rejected: %v", err)
 	}
 
 	invalidToken := filepath.Join(dir, "invalid-token")

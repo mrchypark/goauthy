@@ -170,8 +170,7 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 	if err != nil {
 		return err
 	}
-	passwordHasher, err := credential.NewHasher(argonPolicy)
-	if err != nil {
+	if _, err := credential.NewHasher(argonPolicy); err != nil {
 		return fmt.Errorf("configure Argon2 password policy: %w", err)
 	}
 	if _, err := passwordRulesFromEnvWithRecovery(getenv, cfg.RecoveryEnabled); err != nil {
@@ -187,7 +186,12 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 		if err != nil {
 			return fmt.Errorf("read bootstrap user password credential: %w", err)
 		}
-		if err := passwordHasher.ValidateCurrentPHC(strings.TrimSpace(string(encoded))); err != nil {
+		// The mounted credential may have been created under an earlier Argon2
+		// policy: a deployment that restarts under a stronger policy keeps its
+		// existing identity and upgrades it on the next successful login, so the
+		// preflight checks structure only. Exact current-policy enforcement stays
+		// with the identity layer that creates the credential.
+		if err := credential.ValidatePHC(strings.TrimSpace(string(encoded))); err != nil {
 			return fmt.Errorf("bootstrap user password credential: %w", err)
 		}
 	}
