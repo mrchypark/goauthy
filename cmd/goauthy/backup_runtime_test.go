@@ -8,7 +8,9 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -20,7 +22,81 @@ import (
 	"github.com/mrchypark/goauthy/internal/backup"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
+	"github.com/thanos-io/objstore"
 )
+
+// slowArtifactBucket stands in for a healthy artifact whose complete read needs
+// longer than a short deadline: the read fails unless the context still allows
+// the full cost. Metadata operations pass through untouched.
+type slowArtifactBucket struct {
+	objstore.Bucket
+	artifact string
+	read     time.Duration
+	reads    int
+}
+
+func (b *slowArtifactBucket) Get(ctx context.Context, name string) (io.ReadCloser, error) {
+	if name != b.artifact {
+		return b.Bucket.Get(ctx, name)
+	}
+	b.reads++
+	// ponytail: the read cost is compared against the remaining deadline instead
+	// of sleeping for minutes, so the test stays instant; upgrade to a paced
+	// reader only if the deadline arithmetic itself needs coverage.
+	if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) < b.read {
+		return nil, errors.New("artifact read outlasts the deadline")
+	}
+	return b.Bucket.Get(ctx, name)
+}
+
+// TestScheduledBackupRuntimeStartupVerifiesArtifactWithinOperationBudget covers a
+// catalog below capacity with fast metadata and a healthy artifact that takes
+// longer than the fixed 30s startup deadline to read. Recoverability verification
+// must still run, but on the configured backup-operation budget, so startup stays
+// supported.
+func TestScheduledBackupRuntimeStartupVerifiesArtifactWithinOperationBudget(t *testing.T) {
+	for _, policy := range []backup.RetentionPolicy{backup.RetainLatest, backup.ExpireAll} {
+		t.Run(string(policy), func(t *testing.T) {
+			ctx := context.Background()
+			bucket := objstore.NewInMemBucket()
+			defer bucket.Close()
+			public, private, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prefix := "catalog/cluster-a"
+			artifact, err := os.CreateTemp(t.TempDir(), "artifact-*.age")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer artifact.Close()
+			if _, err := artifact.Write(append([]byte("age-encryption.org/v1\n"), bytes.Repeat([]byte{'x'}, 4096)...)); err != nil {
+				t.Fatal(err)
+			}
+			entry, err := backup.Publish(ctx, bucket, prefix, "source/a", artifact, private, time.Now().Add(-time.Minute))
+			if err != nil {
+				t.Fatal(err)
+			}
+			slow := &slowArtifactBucket{Bucket: bucket, artifact: path.Join(prefix, "artifacts", entry.ID+".age"), read: 45 * time.Second}
+			openBackupObjectStore = func(context.Context, rhiza.Config) (objstore.Bucket, error) { return slow, nil }
+			t.Cleanup(func() { openBackupObjectStore = storage.OpenObjectStore })
+			runtime, err := newScheduledBackupRuntime(ctx, &scheduledBackupConfig{
+				work: filepath.Join(t.TempDir(), "work"), catalog: prefix, keepDays: 30, maxEntries: 4096,
+				timeout: 15 * time.Minute, retentionPolicy: policy, trustKeys: []ed25519.PublicKey{public},
+			})
+			if err != nil {
+				t.Fatalf("startup rejected a healthy catalog: %v", err)
+			}
+			defer runtime.Close()
+			if slow.reads == 0 {
+				t.Fatal("startup skipped artifact verification")
+			}
+			if entries, err := backup.ListCompleted(ctx, bucket, prefix, []ed25519.PublicKey{public}, 1); err != nil || len(entries) != 1 {
+				t.Fatalf("entries=%v err=%v", entries, err)
+			}
+		})
+	}
+}
 
 func TestScheduledBackupRuntimeS3(t *testing.T) {
 	endpoint := os.Getenv("GOAUTHY_RECOVERY_S3_ENDPOINT")

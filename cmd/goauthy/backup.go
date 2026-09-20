@@ -147,6 +147,10 @@ type scheduledBackupRuntime struct {
 	source, destination objstore.Bucket
 }
 
+// openBackupObjectStore is the provider factory the runtime opens with, kept as a
+// variable so tests can substitute a bucket without a live provider.
+var openBackupObjectStore = storage.OpenObjectStore
+
 func newScheduledBackupRuntime(ctx context.Context, c *scheduledBackupConfig) (runtime *scheduledBackupRuntime, err error) {
 	if c == nil {
 		return nil, nil
@@ -158,28 +162,34 @@ func newScheduledBackupRuntime(ctx context.Context, c *scheduledBackupConfig) (r
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
 		return nil, errors.New("backup work directory must be private")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+	// Opening the stores is bounded metadata work. The trim below verifies
+	// artifacts by reading them in full, so it runs on the configured
+	// backup-operation budget, with the startup deadline only as a floor for a
+	// configuration that never set one.
+	initCtx, cancelInit := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelInit()
 	r := &scheduledBackupRuntime{config: c}
 	defer func() {
 		if err != nil {
 			_ = r.Close()
 		}
 	}()
-	r.source, err = storage.OpenObjectStore(ctx, c.source)
+	r.source, err = openBackupObjectStore(initCtx, c.source)
 	if err != nil {
 		return nil, errors.New("cannot open backup source")
 	}
 	r.destination = r.source
 	if c.separate {
-		r.destination, err = storage.OpenObjectStore(ctx, c.destination)
+		r.destination, err = openBackupObjectStore(initCtx, c.destination)
 		if err != nil {
 			return nil, errors.New("cannot open backup destination")
 		}
 	}
 	// Recover any catalog left oversized by a publication whose retention pass
 	// failed, so startup validation and every later publication can list it.
-	if _, err = backup.TrimCatalog(ctx, r.destination, c.catalog, c.trustKeys, time.Now(), c.keepDays, c.maxEntries, true, c.retentionPolicy); err != nil {
+	trimCtx, cancelTrim := context.WithTimeout(ctx, max(c.timeout, 30*time.Second))
+	defer cancelTrim()
+	if _, err = backup.TrimCatalog(trimCtx, r.destination, c.catalog, c.trustKeys, time.Now(), c.keepDays, c.maxEntries, true, c.retentionPolicy); err != nil {
 		return nil, errors.New("cannot validate backup destination catalog")
 	}
 	return r, nil
