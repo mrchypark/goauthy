@@ -978,10 +978,7 @@ func (s *Server) authorizationRequestView(ctx context.Context, authorizeRequest 
 	if err != nil {
 		return AuthorizationRequest{}, err
 	}
-	forceMFA, err := s.forceMFA(ctx, authorizeRequest.GetClient().GetID())
-	if err != nil {
-		return AuthorizationRequest{}, err
-	}
+	forceMFA := s.forceMFA(authorizeRequest.GetClient())
 	return AuthorizationRequest{
 		ClientID:           authorizeRequest.GetClient().GetID(),
 		RedirectURI:        authorizeRequest.GetRedirectURI().String(),
@@ -994,19 +991,20 @@ func (s *Server) authorizationRequestView(ctx context.Context, authorizeRequest 
 	}, nil
 }
 
-func (s *Server) forceMFA(ctx context.Context, clientID string) (bool, error) {
-	if clientID == s.store.client.GetID() {
-		return s.oidc != nil && s.oidc.BootstrapForceMFA, nil
+// forceMFA reads the MFA policy from the exact client snapshot Fosite resolved
+// for this request. A separate managed-client lookup could fail on its own and
+// silently downgrade a force-MFA client to "MFA not required"; the snapshot
+// read already fails the whole request when that client cannot be loaded.
+func (s *Server) forceMFA(client fosite.Client) bool {
+	if client.GetID() == s.store.client.GetID() {
+		return s.oidc != nil && s.oidc.BootstrapForceMFA
 	}
-	if s.store.managedClients != nil {
-		c, err := s.store.managedClients.GetWithGuard(ctx, clientID, func() (string, []any) { return "1", nil })
-		if err == nil {
-			return c.ForceMFA, nil
-		}
+	if managed, ok := client.(*clients.Client); ok {
+		return managed.ForceMFA
 	}
 	// Dynamic registration never admits a force_mfa policy. This also ignores
 	// legacy rows written before that public metadata was removed.
-	return false, nil
+	return false
 }
 
 func (s *Server) parseAuthorizationRequest(r *http.Request) (fosite.AuthorizeRequester, error) {
@@ -1282,6 +1280,15 @@ func (s *Server) completeAuthorization(w http.ResponseWriter, r *http.Request, s
 			return
 		}
 		session.Extra = map[string]interface{}{oidcSessionIDExtra: sessionID}
+	}
+	// Enforce the authentication strength against the client snapshot Fosite
+	// just resolved for this issuance, not the view the login layer rendered.
+	// The login layer already refuses session reuse without MFA, but a stale or
+	// unavailable policy read must never let a password-only session mint an
+	// authorization code for a force-MFA client revision.
+	if s.forceMFA(authorizeRequest.GetClient()) && authMethod != oidcAuthMethodMFA {
+		s.provider.WriteAuthorizeError(r.Context(), w, authorizeRequest, fosite.ErrAccessDenied.WithHint("MFA is required."))
+		return
 	}
 	if s.oidc != nil && approved[openidScope] && authorizeRequest.GetRequestedScopes().Has(openidScope) {
 		if authTime.IsZero() || sessionID == "" || !validOIDCAuthMethod(authMethod) {
