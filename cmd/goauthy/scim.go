@@ -478,6 +478,13 @@ func (r *scimRuntime) Step(ctx context.Context, now time.Time) error {
 				continue
 			}
 			if _, err := r.outbox.EnqueueGroup(ctx, providerID, scim.Group{ExternalID: local.ExternalID, DisplayName: local.DisplayName, Members: members}, now); err != nil {
+				// The projection was captured from an earlier snapshot and the
+				// local entity is already gone: the removal owns this row, so
+				// there is nothing to project and nothing to record. Retrying
+				// would only race the same removal again.
+				if errors.Is(err, scim.ErrOutboxStale) {
+					continue
+				}
 				if !errors.Is(err, scim.ErrGroupTooLarge) {
 					return err
 				}

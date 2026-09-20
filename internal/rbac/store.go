@@ -70,6 +70,7 @@ type Store struct {
 	now                           func() time.Time
 	random                        func([]byte) (int, error)
 	beforeMembershipExecute       func()
+	beforeDeleteExecute           func()
 	beforeLoginRestrictionExecute func()
 	apiKeys                       *apikey.Store
 }
@@ -545,15 +546,40 @@ func (s *Store) delete(ctx context.Context, actor string, key *apikey.Principal,
 	// the durable evidence that a remote group exists. Superseding it with a
 	// provider-scoped delete in this same transaction is what keeps a local
 	// removal from leaving the remote group and its memberships behind.
-	// The entity row still exists here, so this precedes its delete.
-	projection, err := s.scimProjectionRemoval(ctx, role, id, guard, []any{id, revision, actor}, time.UnixMilli(now).UTC())
-	if err != nil {
-		return err
+	// The rewrite is unconditional and guarded by the deletion itself: a
+	// projection that arrives after this transaction is refused by the enqueue
+	// fence, so everything present when this commits must be superseded here.
+	// Reading the queue first and omitting the statement when it was empty
+	// would leave a projection admitted between that read and this commit.
+	current, exists, loadErr := s.get(ctx, table, id)
+	if loadErr != nil {
+		return loadErr
 	}
-	if projection != nil {
-		statements = append(statements, *projection)
+	// The entity row still exists here, so the removal statement precedes its
+	// delete. The name only labels the request: the guard binds the statement
+	// to this id and revision, so a name read from a revision that a rename
+	// supersedes cannot commit.
+	// ponytail: the displayName is the live entity name rather than the name in
+	// the queued row. A provider-scoped delete matches on externalId only, so
+	// the two differ only as a label; reading the queued row instead would
+	// reintroduce the read-then-omit window this fix removes. Upgrade path: if a
+	// provider ever needs the projected name, carry it into the delete request
+	// from the row the rewrite already updates.
+	if exists {
+		kind := "group"
+		if role {
+			kind = "role"
+		}
+		projection, err := scim.SupersedeGroupProjection(identity.SCIMGroupExternalID(kind, id), current.Name, guard, []any{id, revision, actor}, time.UnixMilli(now).UTC())
+		if err != nil {
+			return err
+		}
+		statements = append(statements, projection)
 	}
 	statements = append(statements, rhiza.SQLStatement{SQL: fmt.Sprintf(`DELETE FROM %s WHERE id=? AND revision=?%s AND %s`, table, reserved, adminGuard()), Args: []any{id, revision, actor}})
+	if s.beforeDeleteExecute != nil {
+		s.beforeDeleteExecute()
+	}
 	executeErr := s.run(ctx, key, resource, apikey.Delete, requestID, statements)
 	entity, found, loadErr := s.get(ctx, table, id)
 	if loadErr != nil {
@@ -569,38 +595,6 @@ func (s *Store) delete(ctx context.Context, actor string, key *apikey.Principal,
 		return executeErr
 	}
 	return ErrConflict
-}
-
-// scimProjectionRemoval returns the statement that supersedes the queued SCIM
-// projection of a removed group or role with a provider-scoped delete. The
-// queued row is the only source of an already accepted display name, and its
-// absence means the entity was never projected to any provider, so there is
-// nothing to remove remotely.
-func (s *Store) scimProjectionRemoval(ctx context.Context, role bool, id, guard string, guardArgs []any, now time.Time) (*rhiza.SQLStatement, error) {
-	kind := "group"
-	if role {
-		kind = "role"
-	}
-	externalID := identity.SCIMGroupExternalID(kind, id)
-	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT json_extract(request_json,'$.group.displayName') FROM scim_user_outbox WHERE json_type(request_json,'$.group')='object' AND json_extract(request_json,'$.group.externalId')=? LIMIT 1`, Args: []any{externalID}, Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil {
-		return nil, err
-	}
-	if len(result.Rows) == 0 {
-		return nil, nil
-	}
-	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
-		return nil, ErrInvalid
-	}
-	displayName, ok := result.Rows[0][0].(string)
-	if !ok {
-		return nil, ErrInvalid
-	}
-	statement, err := scim.SupersedeGroupProjection(externalID, displayName, guard, guardArgs, now)
-	if err != nil {
-		return nil, err
-	}
-	return &statement, nil
 }
 
 func (s *Store) EnsureBootstrapPrincipal(ctx context.Context, subject string, roles, groups []string) (Principal, error) {

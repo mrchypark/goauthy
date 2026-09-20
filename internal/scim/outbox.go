@@ -44,6 +44,10 @@ const (
 var (
 	ErrOutboxInvalid = errors.New("scim: invalid outbox configuration or request")
 	ErrOutboxLease   = errors.New("scim: outbox lease was lost")
+	// ErrOutboxStale reports a group projection that was refused because the
+	// local RBAC entity it describes no longer exists. The deletion that
+	// removed the entity owns the queued row's outcome.
+	ErrOutboxStale = errors.New("scim: the local entity for this projection no longer exists")
 )
 
 // Reconciler is deliberately narrower than Client: Step only needs one
@@ -156,6 +160,11 @@ func (o *Outbox) defaults() {
 // Enqueue coalesces work by client ID and immutable externalId. A desired
 // update arriving during an in-flight attempt bumps revision; the old attempt
 // then releases the row back to pending instead of acknowledging new data.
+//
+// A group projection is admitted only while the local RBAC entity it describes
+// still exists, so a projection captured before that entity was removed cannot
+// recreate the row or repoint it away from the removal. A refused projection
+// reports ErrOutboxStale and leaves the row exactly as the removal wrote it.
 func (o *Outbox) Enqueue(ctx context.Context, clientID string, request Request, now time.Time) (Job, error) {
 	if err := o.valid(); err != nil || !validOutboxClientID(clientID) || ctx == nil {
 		return Job{}, ErrOutboxInvalid
@@ -194,9 +203,19 @@ func (o *Outbox) Enqueue(ctx context.Context, clientID string, request Request, 
 	}
 	jobID := outboxJobID(clientID, externalID)
 	requestID := o.mutationID("sco/e", jobID, digest, fmt.Sprint(now.UnixMilli()))
+	// A group projection writes its row only from a SELECT that proves the
+	// local entity is still there. The row a deletion leaves behind is then
+	// untouchable, because the same statement is what would repoint it.
+	source := "VALUES (?,?,?,?,?,'pending',0,?,1,?,?)"
+	args := []any{jobID, clientID, externalID, encoded, digest, now.UnixMilli(), now.UnixMilli(), now.UnixMilli()}
+	admission, admissionArgs := groupAdmission(request.Group.ExternalID)
+	if admission != "" {
+		source = "SELECT ?,?,?,?,?,'pending',0,?,1,?,? WHERE " + admission
+		args = append(args, admissionArgs...)
+	}
 	_, writeErr := storage.Execute(ctx, o.DB, rhiza.ExecuteRequest{RequestID: requestID, SQL: `INSERT INTO scim_user_outbox
 		(job_id,client_id,external_id,request_json,request_digest,status,attempts,next_attempt_at_unix_ms,revision,created_at_unix_ms,updated_at_unix_ms)
-		VALUES (?,?,?,?,?,'pending',0,?,1,?,?)
+		` + source + `
 		ON CONFLICT(client_id,external_id) DO UPDATE SET
 			request_json=excluded.request_json, request_digest=excluded.request_digest,
 			revision=scim_user_outbox.revision+1,
@@ -206,7 +225,7 @@ func (o *Outbox) Enqueue(ctx context.Context, clientID string, request Request, 
 			lease_token=CASE WHEN scim_user_outbox.status='processing' THEN scim_user_outbox.lease_token ELSE NULL END,
 			lease_until_unix_ms=CASE WHEN scim_user_outbox.status='processing' THEN scim_user_outbox.lease_until_unix_ms ELSE NULL END,
 			last_error=NULL, completed_at_unix_ms=NULL, updated_at_unix_ms=excluded.updated_at_unix_ms
-			WHERE scim_user_outbox.request_digest <> excluded.request_digest`, Args: []any{jobID, clientID, externalID, encoded, digest, now.UnixMilli(), now.UnixMilli(), now.UnixMilli()}})
+			WHERE scim_user_outbox.request_digest <> excluded.request_digest`, Args: args})
 	if writeErr != nil {
 		return Job{}, writeErr
 	}
@@ -215,7 +234,18 @@ func (o *Outbox) Enqueue(ctx context.Context, clientID string, request Request, 
 		return Job{}, readErr
 	}
 	if !found {
+		if admission != "" {
+			return Job{}, ErrOutboxStale
+		}
 		return Job{}, errors.New("scim outbox enqueue committed without a row")
+	}
+	// A projection whose write did not land now reads a row that is not the one
+	// it offered. That is a refusal only when the row is a deletion: Enqueue
+	// never writes a deletion, so the only other writer of this job key is the
+	// removal that took the local entity away. A concurrent projection of a
+	// live entity is ordinary coalescing and returns the row.
+	if admission != "" && job.requestDigest != digest && job.Request.Delete {
+		return Job{}, ErrOutboxStale
 	}
 	return job, nil
 }
@@ -251,6 +281,11 @@ func SupersedeGroupProjection(externalID, displayName, guard string, guardArgs [
 	// The release semantics mirror Enqueue: an in-flight attempt keeps its
 	// lease but loses the CAS on the bumped revision, so it returns the row to
 	// pending with the delete instead of acknowledging the superseded sync.
+	// ponytail: request_digest<>? skips a queued row whose digest already equals
+	// this delete. A sync and a delete never encode to the same bytes, so the
+	// only collision is a replay of this exact delete, which is already the
+	// desired state. Upgrade path: if a projection could ever encode equal to
+	// its removal, drop the digest clause and rely on the row's own kind.
 	sql := `UPDATE scim_user_outbox SET request_json=?,request_digest=?,revision=revision+1,
 		status=CASE WHEN status='processing' THEN 'processing' ELSE 'pending' END,
 		attempts=CASE WHEN status='processing' THEN attempts ELSE 0 END,
@@ -898,6 +933,19 @@ func requestExternalID(request Request) string {
 		return groupStorageKey(request.Group.ExternalID)
 	}
 	return userStorageKey(request.User.ExternalID)
+}
+
+// groupAdmission returns the predicate and arguments that admit a projection
+// only while the local RBAC entity it describes still exists. Roles project as
+// SCIM groups, so both local kinds are admitted here. An externalId outside the
+// local namespaces names no local entity and returns no predicate.
+func groupAdmission(externalID string) (string, []any) {
+	for _, local := range []struct{ prefix, table string }{{"group:", "rbac_groups"}, {"role:", "rbac_roles"}} {
+		if id, found := strings.CutPrefix(externalID, local.prefix); found {
+			return fmt.Sprintf("EXISTS (SELECT 1 FROM %s e WHERE e.id=?)", local.table), []any{id}
+		}
+	}
+	return "", nil
 }
 
 func userStorageKey(externalID string) string { return storageKey("user:", externalID) }
