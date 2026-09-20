@@ -91,29 +91,56 @@ func TestTokenExchangeRejectsRefreshArtifact(t *testing.T) {
 func TestTokenExchangeCommitCutoffRejectsSourceThatExpiresWhileQueued(t *testing.T) {
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
-	sourceSignature, _ := exchangeSource(t, server)
-	futureExpiry := time.Now().UTC().Add(time.Hour).Truncate(time.Millisecond)
-	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "exchange-source-future-expiry", SQL: `UPDATE oauth_access_tokens SET expires_at_unix_ms = ? WHERE signature = ?`, Args: []any{futureExpiry.UnixMilli(), sourceSignature}}); err != nil {
-		t.Fatal(err)
-	}
-	txCtx, err := server.store.BeginTokenExchangeTX(context.Background(), sourceSignature, futureExpiry)
+	sourceSignature, sourceExpiry := exchangeSource(t, server)
+	txCtx, err := server.store.BeginTokenExchangeTX(context.Background(), sourceSignature, sourceExpiry)
 	if err != nil {
-		t.Fatal(err)
-	}
-	pastExpiry := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
-	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "exchange-source-expire-before-commit", SQL: `UPDATE oauth_access_tokens SET expires_at_unix_ms = ? WHERE signature = ?`, Args: []any{pastExpiry.UnixMilli(), sourceSignature}}); err != nil {
 		t.Fatal(err)
 	}
 	target := "exchange-target-expired-queued"
 	if err := server.store.CreateAccessTokenSession(txCtx, target, exchangeRequest(server.store, target)); err != nil {
 		t.Fatal(err)
 	}
+	// The source row keeps the expiry it was issued with, so only moving the
+	// store clock past it can reject the commit: the rejection then comes from
+	// rebinding the final cutoff, not from a stale snapshot value.
+	server.store.now = func() time.Time { return sourceExpiry.Add(time.Millisecond) }
 	if err := server.store.Commit(txCtx); !errors.Is(err, fosite.ErrSerializationFailure) {
 		t.Fatalf("Commit error=%v", err)
 	}
 	if _, err := server.store.GetAccessTokenSession(context.Background(), target, &fosite.DefaultSession{}); !errors.Is(err, fosite.ErrNotFound) {
 		t.Fatalf("expired source issued target: %v", err)
 	}
+	assertDPoPExchangeNoArtifacts(t, server, target)
+}
+
+func TestTokenExchangeCommitCutoffRejectsActorThatExpiresWhileQueued(t *testing.T) {
+	db := oauthTestDB(t)
+	server := oauthTestServer(t, db, randomSecret(t))
+	sourceSignature, sourceExpiry := exchangeSource(t, server)
+	actorSignature, _ := exchangeSource(t, server)
+	// Pin the actor expiry earlier than the source and hand the transaction that
+	// same value, so the actor row still matches its snapshot and only the actor
+	// cutoff can reject the queued commit.
+	actorExpiry := sourceExpiry.Add(-time.Minute)
+	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "exchange-actor-earlier-expiry", SQL: `UPDATE oauth_access_tokens SET expires_at_unix_ms = ? WHERE signature = ?`, Args: []any{actorExpiry.UnixMilli(), actorSignature}}); err != nil {
+		t.Fatal(err)
+	}
+	txCtx, err := server.store.BeginTokenExchangeActorTX(context.Background(), sourceSignature, sourceExpiry, actorSignature, actorExpiry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "exchange-target-actor-expired-queued"
+	if err := server.store.CreateAccessTokenSession(txCtx, target, exchangeRequest(server.store, target)); err != nil {
+		t.Fatal(err)
+	}
+	server.store.now = func() time.Time { return actorExpiry.Add(time.Millisecond) }
+	if err := server.store.Commit(txCtx); !errors.Is(err, fosite.ErrSerializationFailure) {
+		t.Fatalf("Commit error=%v", err)
+	}
+	if _, err := server.store.GetAccessTokenSession(context.Background(), target, &fosite.DefaultSession{}); !errors.Is(err, fosite.ErrNotFound) {
+		t.Fatalf("expired actor issued target: %v", err)
+	}
+	assertDPoPExchangeNoArtifacts(t, server, target)
 }
 
 func TestTokenExchangeActorRevocationPreventsTargetIssueAtCommit(t *testing.T) {
