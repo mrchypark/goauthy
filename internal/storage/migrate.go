@@ -9,7 +9,7 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-const schemaVersion = 102
+const schemaVersion = 103
 
 // migrateThroughV97 applies schema versions v1 through v97. It is the
 // unchanged prefix of Migrate, extracted so tests can reach a clean v97
@@ -396,6 +396,9 @@ func Migrate(ctx context.Context, db *rhiza.DB) error {
 	}
 	if err := migrateSchemaV102(ctx, db); err != nil {
 		return fmt.Errorf("migrate schema v102: %w", err)
+	}
+	if err := migrateSchemaV103(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v103: %w", err)
 	}
 	return nil
 }
@@ -3604,6 +3607,42 @@ func migrateSchemaV102(ctx context.Context, db *rhiza.DB) error {
 		{SQL: `ALTER TABLE event_log ADD COLUMN prev_hash TEXT NOT NULL DEFAULT ''`},
 		{SQL: `ALTER TABLE event_log ADD COLUMN integrity_hash TEXT NOT NULL DEFAULT ''`},
 		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(102)`},
+	}})
+	return err
+}
+
+// migrateSchemaV103 adds the recovery email outbox. The DDL mirrors
+// recovery.SchemaStatements, which storage cannot import, and every queued
+// body is sealed by the outbox before it reaches this table.
+func migrateSchemaV103(ctx context.Context, db *rhiza.DB) error {
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=103)`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 1 {
+		return errors.New("invalid schema 103 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v103", Statements: []rhiza.SQLStatement{
+		{SQL: `CREATE TABLE IF NOT EXISTS email_outbox (
+			id TEXT PRIMARY KEY NOT NULL,
+			recipient TEXT NOT NULL CHECK (length(recipient) BETWEEN 3 AND 254),
+			mail_type TEXT NOT NULL CHECK (length(mail_type) BETWEEN 1 AND 256),
+			subject TEXT NOT NULL CHECK (length(subject) BETWEEN 1 AND 512),
+			body_html TEXT NOT NULL DEFAULT '',
+			body_text TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL CHECK (status IN ('pending','sent','failed')) DEFAULT 'pending',
+			attempts INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at_unix_ms INTEGER NOT NULL,
+			updated_at_unix_ms INTEGER NOT NULL,
+			next_retry_at_unix_ms INTEGER NOT NULL DEFAULT 0,
+			lease_token TEXT,
+			lease_until_unix_ms INTEGER
+		) STRICT`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(103)`},
 	}})
 	return err
 }

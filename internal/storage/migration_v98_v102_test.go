@@ -101,9 +101,9 @@ func TestMigrationV98V102SchemaVerification(t *testing.T) {
 	assertColumnExists(t, db, "event_log", "prev_hash")
 	assertColumnExists(t, db, "event_log", "integrity_hash")
 
-	// Version marker = 102.
-	if got := queryInt64(t, db, "SELECT MAX(version) FROM goauthy_schema_migrations"); got != 102 {
-		t.Fatalf("schema version=%d want=102", got)
+	// Version marker = 103 (the recovery email outbox).
+	if got := queryInt64(t, db, "SELECT MAX(version) FROM goauthy_schema_migrations"); got != 103 {
+		t.Fatalf("schema version=%d want=103", got)
 	}
 	if err := Ready(ctx, db); err != nil {
 		t.Fatal(err)
@@ -183,9 +183,9 @@ func TestMigrationV98V102UpgradeFromV97PreservesData(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Verify schema version advanced to 102.
-	if got := queryInt64(t, db, "SELECT MAX(version) FROM goauthy_schema_migrations"); got != 102 {
-		t.Fatalf("post-upgrade version=%d want=102", got)
+	// Verify schema version advanced to 103.
+	if got := queryInt64(t, db, "SELECT MAX(version) FROM goauthy_schema_migrations"); got != 103 {
+		t.Fatalf("post-upgrade version=%d want=103", got)
 	}
 
 	// Verify v98-v102 schema additions now exist.
@@ -196,6 +196,7 @@ func TestMigrationV98V102UpgradeFromV97PreservesData(t *testing.T) {
 	assertColumnExists(t, db, "managed_oauth_clients", "force_mfa")
 	assertColumnExists(t, db, "event_log", "prev_hash")
 	assertColumnExists(t, db, "event_log", "integrity_hash")
+	assertTableExists(t, db, "email_outbox")
 
 	// Verify v97 auth_providers data survived.
 	row, err := db.Query(ctx, rhiza.QueryRequest{
@@ -300,8 +301,8 @@ func TestMigrationV98V102UpgradeFromV97PreservesData(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if got := queryInt64(t, db, "SELECT MAX(version) FROM goauthy_schema_migrations"); got != 102 {
-		t.Fatalf("recovery version=%d want=102", got)
+	if got := queryInt64(t, db, "SELECT MAX(version) FROM goauthy_schema_migrations"); got != 103 {
+		t.Fatalf("recovery version=%d want=103", got)
 	}
 
 	// Verify non-default v98-v102 data survived recovery.
@@ -372,8 +373,8 @@ func TestMigrationV98V102ReplayIdempotent(t *testing.T) {
 	if err := Ready(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	if got := queryInt64(t, db, "SELECT MAX(version) FROM goauthy_schema_migrations"); got != 102 {
-		t.Fatalf("schema version=%d want=102", got)
+	if got := queryInt64(t, db, "SELECT MAX(version) FROM goauthy_schema_migrations"); got != 103 {
+		t.Fatalf("schema version=%d want=103", got)
 	}
 }
 

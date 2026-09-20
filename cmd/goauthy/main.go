@@ -305,7 +305,7 @@ func run() (err error) {
 			return senderErr
 		}
 		var outboxErr error
-		emailOutbox, outboxErr = recovery.NewEmailOutbox(db, recovery.SMTPSendFunc(sender))
+		emailOutbox, outboxErr = recovery.NewEmailOutbox(db, recovery.SMTPSendFunc(sender), recovery.WithEnvelopeKeyring(keyring))
 		if outboxErr != nil {
 			return fmt.Errorf("configure email outbox: %w", outboxErr)
 		}

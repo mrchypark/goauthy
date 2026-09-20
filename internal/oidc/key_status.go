@@ -2,8 +2,10 @@ package oidc
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/mrchypark/rhiza"
@@ -34,6 +36,7 @@ type MasterKeyReferenceStatus struct {
 	ManagedClients           MasterKeyReferenceFamily
 	LoginRevoke              MasterKeyReferenceFamily
 	GeneratedAPIKeyBootstrap MasterKeyReferenceFamily
+	EmailOutbox              MasterKeyReferenceFamily
 	Safe                     bool
 }
 
@@ -47,7 +50,7 @@ type MasterKeyReferenceStatus struct {
 // operators must first ensure every pod reports the same active ID and wait
 // past DCR/upstream TTLs and signing-key retirement windows.
 func InspectMasterKeyReferences(ctx context.Context, db *rhiza.DB, keyring *Keyring, issuer string, now time.Time) (MasterKeyReferenceStatus, error) {
-	status := MasterKeyReferenceStatus{SigningKeys: emptyReferenceFamily(), DCRIdempotency: emptyReferenceFamily(), Upstream: emptyReferenceFamily(), ManagedClients: emptyReferenceFamily(), LoginRevoke: emptyReferenceFamily(), GeneratedAPIKeyBootstrap: emptyReferenceFamily()}
+	status := MasterKeyReferenceStatus{SigningKeys: emptyReferenceFamily(), DCRIdempotency: emptyReferenceFamily(), Upstream: emptyReferenceFamily(), ManagedClients: emptyReferenceFamily(), LoginRevoke: emptyReferenceFamily(), GeneratedAPIKeyBootstrap: emptyReferenceFamily(), EmailOutbox: emptyReferenceFamily()}
 	if ctx == nil || db == nil || keyring == nil || now.IsZero() {
 		return status, ErrUnsafeMasterKeyStatus
 	}
@@ -80,7 +83,10 @@ func InspectMasterKeyReferences(ctx context.Context, db *rhiza.DB, keyring *Keyr
 	if err := scanGeneratedAPIKeyBootstrapReferences(ctx, db, keyring, &status.GeneratedAPIKeyBootstrap); err != nil {
 		return unsafeMasterKeyStatus(status)
 	}
-	status.Safe = familyUsesOnly(status.SigningKeys, activeID) && familyUsesOnly(status.DCRIdempotency, activeID) && familyUsesOnly(status.Upstream, activeID) && familyUsesOnly(status.ManagedClients, activeID) && familyUsesOnly(status.LoginRevoke, activeID) && familyUsesOnly(status.GeneratedAPIKeyBootstrap, activeID)
+	if err := scanEmailOutboxReferences(ctx, db, keyring, &status.EmailOutbox); err != nil {
+		return unsafeMasterKeyStatus(status)
+	}
+	status.Safe = familyUsesOnly(status.SigningKeys, activeID) && familyUsesOnly(status.DCRIdempotency, activeID) && familyUsesOnly(status.Upstream, activeID) && familyUsesOnly(status.ManagedClients, activeID) && familyUsesOnly(status.LoginRevoke, activeID) && familyUsesOnly(status.GeneratedAPIKeyBootstrap, activeID) && familyUsesOnly(status.EmailOutbox, activeID)
 	return status, nil
 }
 
@@ -140,6 +146,68 @@ func scanGeneratedAPIKeyBootstrapReferences(ctx context.Context, db *rhiza.DB, k
 		return ErrUnsafeMasterKeyStatus
 	}
 	keyID, err := keyring.PurposeEnvelopeKeyID(GeneratedAPIKeyBootstrapEnvelopePurpose, envelope)
+	if err != nil {
+		return ErrUnsafeMasterKeyStatus
+	}
+	addReference(family, keyID)
+	return nil
+}
+
+// emailOutboxSealedPrefix marks a sealed queued mail body. emailOutboxPayloadPurpose
+// mirrors the recovery outbox binding of one body column of one row; the
+// purpose is not stored with the row, so it is duplicated here. A drift makes
+// the envelope fail authentication, which fails the whole scan closed instead
+// of counting an unauthenticated reference.
+const emailOutboxSealedPrefix = "gaoop-sealed/v1:"
+
+func emailOutboxPayloadPurpose(id, field string) string {
+	digest := sha256.Sum256([]byte(id + "\x00" + field))
+	return "email/outbox/" + base64.RawURLEncoding.EncodeToString(digest[:16])
+}
+
+// scanEmailOutboxReferences reads every queued mail row, including terminal
+// rows still waiting out retention, so a key cannot be declared unused while a
+// queued body remains sealed under it. A body written before payload sealing
+// carries no envelope and references no key.
+func scanEmailOutboxReferences(ctx context.Context, db *rhiza.DB, keyring *Keyring, family *MasterKeyReferenceFamily) error {
+	cursor := ""
+	for {
+		result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT id,body_html,body_text FROM email_outbox WHERE id > ? ORDER BY id LIMIT ?`, Args: []any{cursor, int64(masterKeyStatusScanLimit)}, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil {
+			return err
+		}
+		for _, row := range result.Rows {
+			if len(row) != 3 {
+				return ErrUnsafeMasterKeyStatus
+			}
+			id, idOK := row[0].(string)
+			html, htmlOK := row[1].(string)
+			text, textOK := row[2].(string)
+			if !idOK || !htmlOK || !textOK || id == "" {
+				return ErrUnsafeMasterKeyStatus
+			}
+			for _, column := range []struct{ field, body string }{{"html", html}, {"text", text}} {
+				if err := addEmailOutboxReference(keyring, family, id, column.field, column.body); err != nil {
+					return err
+				}
+			}
+			cursor = id
+		}
+		if len(result.Rows) < masterKeyStatusScanLimit {
+			return nil
+		}
+	}
+}
+
+func addEmailOutboxReference(keyring *Keyring, family *MasterKeyReferenceFamily, id, field, body string) error {
+	if !strings.HasPrefix(body, emailOutboxSealedPrefix) {
+		return nil
+	}
+	envelope, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(body, emailOutboxSealedPrefix))
+	if err != nil || len(envelope) == 0 {
+		return ErrUnsafeMasterKeyStatus
+	}
+	keyID, err := keyring.PurposeEnvelopeKeyID(emailOutboxPayloadPurpose(id, field), envelope)
 	if err != nil {
 		return ErrUnsafeMasterKeyStatus
 	}

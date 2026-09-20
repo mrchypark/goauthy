@@ -113,6 +113,13 @@ func buildHousekeepingJobs(
 				return emailOutbox.Step(ctx)
 			},
 		})
+		jobs = append(jobs, housekeeping.Job{
+			Name:     "email-outbox-cleanup",
+			Interval: time.Hour,
+			Step: func(ctx context.Context) error {
+				return emailOutboxCleanupStep(ctx, emailOutbox)
+			},
+		})
 	}
 
 	return jobs
@@ -170,6 +177,26 @@ func recoveryTokenCleanupStep(ctx context.Context, svc *recovery.Service) error 
 	}
 	_, err := svc.CleanupExpiredTokens(ctx)
 	return err
+}
+
+// emailOutboxCleanupStep drains terminal rows past retention one bounded
+// replicated batch at a time. A non-positive limit selects the outbox
+// package's own batch ceiling, so retention never holds the whole backlog in
+// one transaction.
+func emailOutboxCleanupStep(ctx context.Context, outbox *recovery.EmailOutbox) error {
+	if outbox == nil {
+		return fmt.Errorf("email outbox is nil")
+	}
+	for ctx.Err() == nil {
+		removed, err := outbox.Cleanup(ctx, 0)
+		if err != nil {
+			return fmt.Errorf("email outbox cleanup: %w", err)
+		}
+		if removed == 0 {
+			return nil
+		}
+	}
+	return nil
 }
 
 func housekeepingErrorHandler(job string, err error) {
