@@ -3,6 +3,7 @@ package oidc
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -546,4 +547,71 @@ func mustSignedIDToken(t *testing.T, key SigningKey, payload idTokenPayload) str
 		t.Fatal(err)
 	}
 	return compact
+}
+
+// GA-OAUTH-003: locale is a standard profile claim, so a root custom claim of
+// that name must not be signable and an ordinary locale must stay a profile
+// claim instead of being re-extracted as custom during verification.
+func TestIDTokenLocaleIsReservedAndNotReExtractedAsCustomClaim(t *testing.T) {
+	key := fixedTokenSigningKey()
+	now := time.Unix(1_800_000_000, 0).UTC()
+	locale := "de-DE"
+	base := IDTokenClaims{Issuer: "https://id.example.com", Subject: "user-1", Audience: []string{"client-1"}, IssuedAt: now, ExpiresAt: now.Add(time.Hour), Roles: []string{}, Profile: ProfileClaims{Locale: &locale}}
+
+	for name, value := range map[string]string{"string": `"en"`, "non-string": `7`} {
+		t.Run(name, func(t *testing.T) {
+			claims := base
+			claims.CustomClaims = CustomClaims{Root: map[string]json.RawMessage{"locale": json.RawMessage(value)}}
+			if _, err := SignIDToken(key, claims); err == nil {
+				t.Fatalf("root locale collision %s was signed", value)
+			}
+		})
+	}
+
+	custom := make(map[string]json.RawMessage, maxCustomClaimCount)
+	for i := range maxCustomClaimCount {
+		custom[fmt.Sprintf("custom_%02d", i)] = json.RawMessage(`"value"`)
+	}
+	claims := base
+	claims.CustomClaims = CustomClaims{Nested: custom}
+	compact, err := SignIDToken(key, claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := VerifyIDToken(compact, jose.JSONWebKeySet{Keys: []jose.JSONWebKey{key.PublicJWK}}, base.Issuer, "client-1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Profile.Locale == nil || *got.Profile.Locale != locale {
+		t.Fatalf("locale profile claim lost: %#v", got.Profile)
+	}
+	if len(got.CustomClaims.Values) != maxCustomClaimCount || got.CustomClaims.AtRoot || got.CustomClaims.Nested != nil || len(got.CustomClaims.Root) != 0 {
+		t.Fatalf("custom claims alongside a locale round-tripped as %#v", got.CustomClaims)
+	}
+
+	// Every claim a fully populated standard payload emits must be reserved, so
+	// a future profile claim cannot become a colliding custom claim again.
+	text, verified := "value", true
+	populated := base
+	populated.Profile = ProfileClaims{Email: &text, EmailVerified: &verified, PreferredUsername: &text, GivenName: &text, FamilyName: &text, Birthdate: &text, Address: map[string]string{"street_address": text}, PhoneNumber: &text, PhoneNumberVerified: &verified, Zoneinfo: &text, Locale: &text}
+	populated.Nonce, populated.SessionID, populated.AuthorizedParty, populated.AccessTokenHash = "nonce-1", "session-1", "client-1", AccessTokenHash("access-token")
+	populated.AuthTime, populated.AuthenticationMethods, populated.Groups = now.Add(-time.Minute), []string{"pwd"}, []string{"ops"}
+	compact, err = SignIDToken(key, populated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(compact, ".")
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if len(parts) != 3 || err != nil {
+		t.Fatalf("signed payload %q err=%v", compact, err)
+	}
+	var emitted map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &emitted); err != nil {
+		t.Fatal(err)
+	}
+	for name := range emitted {
+		if _, reserved := reservedIDTokenClaimNames[name]; !reserved {
+			t.Fatalf("standard ID token claim %q is not reserved against custom claims", name)
+		}
+	}
 }

@@ -583,7 +583,12 @@ func (s *Server) TokenHandler() http.Handler {
 				return
 			}
 		}
-		for _, scope := range request.GetRequestedScopes() {
+		granted, err := s.grantedTokenScopes(r.Context(), request)
+		if err != nil {
+			s.writeTokenError(r.Context(), sw, request, err)
+			return
+		}
+		for _, scope := range granted {
 			request.GrantScope(scope)
 		}
 		jkt, err := s.verifyDPoPTokenRequest(r.Context(), r, request)
@@ -778,6 +783,41 @@ func (s *Server) TokenHandler() http.Handler {
 		}
 		s.provider.WriteAccessResponse(r.Context(), sw, request, response)
 	})
+}
+
+// grantedTokenScopes projects the scopes a token request may grant before the
+// claim preflight, which reads GetGrantedScopes. Fosite's authorization-code
+// handler grants the scopes stored with the code only inside
+// PopulateTokenEndpointResponse, after that preflight, and its refresh handler
+// already granted the stored approval. Fosite only ever adds granted scopes, so
+// approving the requested set here would restore scopes the user withheld at
+// consent and carry them into the refresh token.
+func (s *Server) grantedTokenScopes(ctx context.Context, request fosite.AccessRequester) (fosite.Arguments, error) {
+	if request.GetGrantTypes().ExactOne("authorization_code") {
+		if s.authorizeCodes == nil {
+			return nil, fosite.ErrServerError
+		}
+		value, ok := exactlyOne(request.GetRequestForm(), "code")
+		if !ok {
+			return nil, fosite.ErrServerError
+		}
+		stored, err := s.store.GetAuthorizeCodeSession(ctx, s.authorizeCodes.AuthorizeCodeSignature(ctx, value), &fosite.DefaultSession{})
+		if err != nil {
+			// Mirror Fosite's authorization-code handling: a code that expired or
+			// was consumed between the two reads is an invalid grant, not a
+			// server failure.
+			if errors.Is(err, fosite.ErrInvalidatedAuthorizeCode) || errors.Is(err, fosite.ErrNotFound) {
+				return nil, fosite.ErrInvalidGrant
+			}
+			return nil, err
+		}
+		return stored.GetGrantedScopes(), nil
+	}
+	if request.GetGrantTypes().ExactOne("refresh_token") {
+		// The refresh grant handler already projected the stored approval.
+		return nil, nil
+	}
+	return request.GetRequestedScopes(), nil
 }
 
 func resourceAllowList(resources []string) (map[string]struct{}, error) {
