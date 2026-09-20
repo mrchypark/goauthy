@@ -13,8 +13,8 @@ import (
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/passkey"
 	"github.com/mrchypark/goauthy/internal/saas"
-	"github.com/mrchypark/goauthy/internal/upstreamprovider"
 	"github.com/mrchypark/goauthy/internal/storage"
+	"github.com/mrchypark/goauthy/internal/upstreamprovider"
 	"github.com/mrchypark/rhiza"
 )
 
@@ -109,7 +109,10 @@ func (w *masterKeyRetirementWorker) Step(ctx context.Context) error {
 		return err
 	}
 	if barrier.State == storage.MasterKeyRetirementReady {
-		return w.keyring.RemoveKey(barrier.OldKeyID)
+		// Deletion belongs to the housekeeping cleanup owner, which waits out
+		// the retired-key overlap period and requires an acknowledged archival
+		// receipt for this exact epoch (GA-STOR-002).
+		return nil
 	}
 	if barrier.State != storage.MasterKeyRetirementFenced {
 		return nil
@@ -196,6 +199,12 @@ func inspectMasterKeyRetirement(ctx context.Context, db *rhiza.DB, keyring *oidc
 
 func inspectMasterKeyRetirementWithKV(ctx context.Context, db *rhiza.DB, keyring *oidc.Keyring, issuer string, passkeyService *passkey.Service, kvStore *kv.Store, oldID string, now time.Time) (storage.MasterKeyRetirementStatus, error) {
 	status := storage.MasterKeyRetirementStatus{PasskeyEnabled: passkeyService != nil}
+	if passkeyService == nil {
+		if err := requireEmptyDisabledPasskeyFamilies(ctx, db); err != nil {
+			status.TamperReferences = 1
+			return status, err
+		}
+	}
 	oidcStatus, oidcErr := oidc.InspectMasterKeyReferences(ctx, db, keyring, issuer, now)
 	status.OIDCReferences = oidcStatus.SigningKeys.Total - oidcReferenceCount(oidcStatus.SigningKeys, oidcStatus.ActiveMasterKeyID)
 	status.DCRReferences = oidcStatus.DCRIdempotency.Total - oidcReferenceCount(oidcStatus.DCRIdempotency, oidcStatus.ActiveMasterKeyID)
@@ -260,4 +269,30 @@ func oidcReferenceCount(family oidc.MasterKeyReferenceFamily, keyID string) int6
 
 func passkeyReferenceCount(family passkey.EnvelopeReferenceFamily, keyID string) int64 {
 	return family.ByKeyID[keyID]
+}
+
+// requireEmptyDisabledPasskeyFamilies fails closed when passkeys are disabled
+// but retained rows exist (GA-STOR-001). Those rows may still be sealed under
+// the retiring key, and reporting zero passkey references would let retirement
+// remove a key they still need. The three tables are the durable passkey
+// families whose envelope references and rewrap are owned by the optional
+// passkey service configuration.
+func requireEmptyDisabledPasskeyFamilies(ctx context.Context, db *rhiza.DB) error {
+	for _, table := range []string{"identity_webauthn_credentials", "identity_webauthn_ceremonies", "identity_webauthn_mfa_ceremonies"} {
+		result, err := db.Query(ctx, rhiza.QueryRequest{SQL: "SELECT COUNT(*) FROM " + table, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil {
+			return fmt.Errorf("inspect disabled passkey family %s: %w", table, err)
+		}
+		if len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
+			return fmt.Errorf("inspect disabled passkey family %s: unexpected row shape", table)
+		}
+		count, ok := result.Rows[0][0].(int64)
+		if !ok || count < 0 {
+			return fmt.Errorf("inspect disabled passkey family %s: unexpected count", table)
+		}
+		if count != 0 {
+			return fmt.Errorf("passkey feature is disabled but %s retains %d rows that cannot be inspected or rewrapped", table, count)
+		}
+	}
+	return nil
 }

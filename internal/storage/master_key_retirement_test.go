@@ -86,6 +86,71 @@ func TestMasterKeyRetirementRejectsUnsafeAttestationsAndAbortsWithoutDeletion(t 
 	}
 }
 
+// GA-STOR-005: a completed epoch admits a new epoch only when the prior
+// replacement becomes the new old key, so rotations chain A->B->C without
+// deleting the barrier or weakening monotonic fencing.
+func TestMasterKeyRetirementChainsSecondEpochAfterReady(t *testing.T) {
+	ctx := context.Background()
+	db := retirementTestDB(t)
+	now := time.UnixMilli(1_800_000_000_000).UTC()
+	digestBytes := sha256.Sum256([]byte("retirement-chain-key"))
+	digest := base64.RawURLEncoding.EncodeToString(digestBytes[:])
+	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "retirement-chain-key", Statements: []rhiza.SQLStatement{
+		{SQL: `INSERT INTO api_keys(name,secret_digest,created_at_unix_ms) VALUES(?,?,?)`, Args: []any{"ops", digest, now.UnixMilli()}},
+		{SQL: `INSERT INTO api_key_access(key_name,group_name,right_name) VALUES(?,?,?),(?,?,?),(?,?,?)`, Args: []any{"ops", "Secrets", "create", "ops", "Secrets", "update", "ops", "Secrets", "delete"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	auth := func(right string) MasterKeyRetirementAuthorization {
+		return MasterKeyRetirementAuthorization{KeyName: "ops", KeyDigest: digest, Group: "Secrets", Right: right, AuthorizedAt: now}
+	}
+	complete := func(epoch int64, oldKey, newKey string, at time.Time) {
+		t.Helper()
+		if _, err := PrepareMasterKeyRetirementGuarded(ctx, db, MasterKeyRetirementPrepareRequest{Epoch: epoch, OldKeyID: oldKey, ReplacementKeyID: newKey, MemberIDs: []string{"node-0"}, PreparedAt: at}, auth("create")); err != nil {
+			t.Fatalf("prepare epoch %d: %v", epoch, err)
+		}
+		if _, err := FenceMasterKeyRetirementGuarded(ctx, db, epoch, at.Add(time.Second), auth("update")); err != nil {
+			t.Fatalf("fence epoch %d: %v", epoch, err)
+		}
+		if _, err := AttestMasterKeyRetirementGuarded(ctx, db, MasterKeyRetirementAttestationRequest{Epoch: epoch, NodeID: "node-0", BootID: "boot-0", ActiveKeyID: newKey, AttestationSequence: 1, AttestedAt: at.Add(2 * time.Second), Status: MasterKeyRetirementStatus{}}, auth("update")); err != nil {
+			t.Fatalf("attest epoch %d: %v", epoch, err)
+		}
+		ready, err := ReadyMasterKeyRetirementGuarded(ctx, db, epoch, at.Add(3*time.Second), auth("update"))
+		if err != nil || ready.State != MasterKeyRetirementReady || ready.ReplacementKeyID != newKey {
+			t.Fatalf("ready epoch %d: %#v err=%v", epoch, ready, err)
+		}
+	}
+	complete(1, "key-a", "key-b", now)
+	if _, err := PrepareMasterKeyRetirementGuarded(ctx, db, MasterKeyRetirementPrepareRequest{Epoch: 2, OldKeyID: "key-a", ReplacementKeyID: "key-c", MemberIDs: []string{"node-0"}, PreparedAt: now.Add(4 * time.Second)}, auth("create")); !errors.Is(err, ErrMasterKeyRetirementConflict) {
+		t.Fatalf("second epoch restarted from a retired generation: %v", err)
+	}
+	if _, err := PrepareMasterKeyRetirementGuarded(ctx, db, MasterKeyRetirementPrepareRequest{Epoch: 2, OldKeyID: "key-b", ReplacementKeyID: "key-c", MemberIDs: []string{"node-0"}, PreparedAt: now.Add(4 * time.Second)}, auth("create")); err != nil {
+		t.Fatal("second epoch from the prior replacement: ", err)
+	}
+	if _, err := PrepareMasterKeyRetirementGuarded(ctx, db, MasterKeyRetirementPrepareRequest{Epoch: 2, OldKeyID: "key-b", ReplacementKeyID: "key-d", MemberIDs: []string{"node-0"}, PreparedAt: now.Add(5 * time.Second)}, auth("create")); !errors.Is(err, ErrMasterKeyRetirementConflict) {
+		t.Fatalf("prepared epoch was rewritten: %v", err)
+	}
+	complete(2, "key-b", "key-c", now.Add(6*time.Second))
+	loaded, err := LoadMasterKeyRetirement(ctx, db)
+	if err != nil || loaded.Epoch != 2 || loaded.OldKeyID != "key-b" || loaded.ReplacementKeyID != "key-c" || loaded.State != MasterKeyRetirementReady {
+		t.Fatalf("second epoch barrier=%#v err=%v", loaded, err)
+	}
+	// Every epoch is audited exactly once, including the second prepare that
+	// started from the completed barrier; rejected attempts emit nothing.
+	rows, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT event_type,action,target_hash FROM audit_events ORDER BY sequence`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(rows.Rows) != 6 {
+		t.Fatalf("audit rows=%#v err=%v", rows.Rows, err)
+	}
+	wantTypes := []string{"master_key_retirement.prepared", "master_key_retirement.fenced", "master_key_retirement.ready", "master_key_retirement.prepared", "master_key_retirement.fenced", "master_key_retirement.ready"}
+	wantActions := []string{"prepare", "fence", "ready", "prepare", "fence", "ready"}
+	wantEpochs := []string{"epoch:1", "epoch:1", "epoch:1", "epoch:2", "epoch:2", "epoch:2"}
+	for i, row := range rows.Rows {
+		if row[0] != wantTypes[i] || row[1] != wantActions[i] || row[2] != audit.Pseudonym(digest, "target", wantEpochs[i]) {
+			t.Fatalf("audit row %d=%#v", i, row)
+		}
+	}
+}
+
 func TestMasterKeyRetirementRejectsInvalidPreparation(t *testing.T) {
 	db := retirementTestDB(t)
 	now := time.UnixMilli(1_800_000_000_000).UTC()

@@ -179,8 +179,17 @@ func housekeepingErrorHandler(job string, err error) {
 const retiredKeyOverlapPeriod = 24 * time.Hour
 
 func keyRemovalStep(ctx context.Context, db *rhiza.DB, keyring *oidc.Keyring) error {
-	if db == nil || keyring == nil {
-		return fmt.Errorf("key-removal: db or keyring is nil")
+	return removeRetiredMasterKey(ctx, db, keyring, time.Now, storage.AcknowledgeMasterKeyRetirementArchival)
+}
+
+// removeRetiredMasterKey is the single owner of retired-key deletion. It
+// honours the overlap period and then requires a fresh durability
+// acknowledgment of the exact ready barrier: a visible ready state alone can
+// still be missing from the archive, and deleting the key first would make
+// that archived ciphertext permanently unreadable (GA-STOR-002).
+func removeRetiredMasterKey(ctx context.Context, db *rhiza.DB, keyring *oidc.Keyring, now func() time.Time, acknowledge func(context.Context, *rhiza.DB, int64) error) error {
+	if db == nil || keyring == nil || now == nil || acknowledge == nil {
+		return fmt.Errorf("key-removal: db, keyring, clock, or acknowledgment is nil")
 	}
 	barrier, err := storage.LoadMasterKeyRetirement(ctx, db)
 	if errors.Is(err, storage.ErrMasterKeyRetirementNotPrepared) {
@@ -195,8 +204,11 @@ func keyRemovalStep(ctx context.Context, db *rhiza.DB, keyring *oidc.Keyring) er
 	if !keyring.HasKey(barrier.OldKeyID) {
 		return nil
 	}
-	if time.Since(barrier.ReadyAt) <= retiredKeyOverlapPeriod {
+	if now().UTC().Sub(barrier.ReadyAt) <= retiredKeyOverlapPeriod {
 		return nil
+	}
+	if err := acknowledge(ctx, db, barrier.Epoch); err != nil {
+		return fmt.Errorf("key-removal: acknowledge archival: %w", err)
 	}
 	if err := keyring.RemoveKey(barrier.OldKeyID); err != nil {
 		return fmt.Errorf("key-removal: remove key: %w", err)

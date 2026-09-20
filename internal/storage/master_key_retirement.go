@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -98,8 +99,9 @@ type MasterKeyRetirement struct {
 }
 
 // PrepareMasterKeyRetirement creates or replays one exact-one or exact-three
-// membership set. A new epoch is permitted only after an earlier attempt was
-// aborted.
+// membership set. A new epoch is permitted after an earlier attempt was
+// aborted, or after a completed epoch whose replacement key becomes the new
+// old key, so rotations chain as A->B->C without state surgery.
 func PrepareMasterKeyRetirement(ctx context.Context, db *rhiza.DB, req MasterKeyRetirementPrepareRequest) (MasterKeyRetirement, error) {
 	return prepareMasterKeyRetirement(ctx, db, req, nil)
 }
@@ -142,7 +144,18 @@ func prepareMasterKeyRetirement(ctx context.Context, db *rhiza.DB, req MasterKey
 			}
 			return current, nil
 		}
-		if current.State != MasterKeyRetirementAborted || req.Epoch <= current.Epoch {
+		// GA-STOR-005: allow a new epoch from ready state when the prior
+		// replacement becomes the new old key (A→B→C rotation).
+		switch current.State {
+		case MasterKeyRetirementAborted:
+			if req.Epoch <= current.Epoch {
+				return MasterKeyRetirement{}, fmt.Errorf("%w: cannot prepare epoch %d while epoch %d is %s", ErrMasterKeyRetirementConflict, req.Epoch, current.Epoch, current.State)
+			}
+		case MasterKeyRetirementReady:
+			if req.OldKeyID != current.ReplacementKeyID || req.Epoch <= current.Epoch {
+				return MasterKeyRetirement{}, fmt.Errorf("%w: cannot prepare epoch %d while epoch %d is %s", ErrMasterKeyRetirementConflict, req.Epoch, current.Epoch, current.State)
+			}
+		default:
 			return MasterKeyRetirement{}, fmt.Errorf("%w: cannot prepare epoch %d while epoch %d is %s", ErrMasterKeyRetirementConflict, req.Epoch, current.Epoch, current.State)
 		}
 	}
@@ -153,7 +166,7 @@ func prepareMasterKeyRetirement(ctx context.Context, db *rhiza.DB, req MasterKey
 		condition := `NOT EXISTS (SELECT 1 FROM master_key_retirement_barrier WHERE barrier_id=1)`
 		conditionArgs := []any(nil)
 		if err == nil {
-			condition = `EXISTS (SELECT 1 FROM master_key_retirement_barrier WHERE barrier_id=1 AND state='aborted' AND epoch<?)`
+			condition = `EXISTS (SELECT 1 FROM master_key_retirement_barrier WHERE barrier_id=1 AND state IN ('aborted','ready') AND epoch<?)`
 			conditionArgs = []any{req.Epoch}
 		}
 		event, eventErr := retirementAuditStatement(*authorization, requestID, "master_key_retirement.prepared", "prepare", req.Epoch, req.PreparedAt, condition, conditionArgs...)
@@ -163,15 +176,15 @@ func prepareMasterKeyRetirement(ctx context.Context, db *rhiza.DB, req MasterKey
 		statements = append(statements, event)
 	}
 	if err == nil {
-		statements = append(statements, retirementGuardedStatementAt(authorization, rhiza.SQLStatement{SQL: `DELETE FROM master_key_retirement_members WHERE epoch = (SELECT epoch FROM master_key_retirement_barrier WHERE barrier_id = 1 AND state = 'aborted')`}, req.PreparedAt))
+		statements = append(statements, retirementGuardedStatementAt(authorization, rhiza.SQLStatement{SQL: `DELETE FROM master_key_retirement_members WHERE epoch = (SELECT epoch FROM master_key_retirement_barrier WHERE barrier_id = 1 AND state IN ('aborted','ready'))`}, req.PreparedAt))
 	}
 	barrierSQL := `INSERT INTO master_key_retirement_barrier (barrier_id, epoch, old_key_id, replacement_key_id, membership_digest, state, prepared_at_unix_ms) VALUES (1, ?, ?, ?, ?, 'prepared', ?)
 			ON CONFLICT(barrier_id) DO UPDATE SET epoch=excluded.epoch, old_key_id=excluded.old_key_id, replacement_key_id=excluded.replacement_key_id, membership_digest=excluded.membership_digest, state='prepared', prepared_at_unix_ms=excluded.prepared_at_unix_ms, fenced_at_unix_ms=NULL, ready_at_unix_ms=NULL, aborted_at_unix_ms=NULL
-			WHERE master_key_retirement_barrier.state = 'aborted' AND excluded.epoch > master_key_retirement_barrier.epoch`
+			WHERE master_key_retirement_barrier.state IN ('aborted','ready') AND excluded.epoch > master_key_retirement_barrier.epoch`
 	barrierArgs := []any{req.Epoch, req.OldKeyID, req.ReplacementKeyID, digest, req.PreparedAt.UnixMilli()}
 	if authorization != nil {
 		barrierSQL = `INSERT INTO master_key_retirement_barrier (barrier_id, epoch, old_key_id, replacement_key_id, membership_digest, state, prepared_at_unix_ms) SELECT 1, ?, ?, ?, ?, 'prepared', ? WHERE ` + retirementAuthorizationPredicate()
-		barrierSQL += ` ON CONFLICT(barrier_id) DO UPDATE SET epoch=excluded.epoch, old_key_id=excluded.old_key_id, replacement_key_id=excluded.replacement_key_id, membership_digest=excluded.membership_digest, state='prepared', prepared_at_unix_ms=excluded.prepared_at_unix_ms, fenced_at_unix_ms=NULL, ready_at_unix_ms=NULL, aborted_at_unix_ms=NULL WHERE master_key_retirement_barrier.state = 'aborted' AND excluded.epoch > master_key_retirement_barrier.epoch`
+		barrierSQL += ` ON CONFLICT(barrier_id) DO UPDATE SET epoch=excluded.epoch, old_key_id=excluded.old_key_id, replacement_key_id=excluded.replacement_key_id, membership_digest=excluded.membership_digest, state='prepared', prepared_at_unix_ms=excluded.prepared_at_unix_ms, fenced_at_unix_ms=NULL, ready_at_unix_ms=NULL, aborted_at_unix_ms=NULL WHERE master_key_retirement_barrier.state IN ('aborted','ready') AND excluded.epoch > master_key_retirement_barrier.epoch`
 		barrierArgs = append(barrierArgs, retirementAuthorizationArgs(*authorization, req.PreparedAt)...)
 	}
 	statements = append(statements, rhiza.SQLStatement{SQL: barrierSQL, Args: barrierArgs})
@@ -420,6 +433,46 @@ func readyMasterKeyRetirement(ctx context.Context, db *rhiza.DB, epoch int64, no
 		return MasterKeyRetirement{}, ErrMasterKeyRetirementConflict
 	}
 	return result, nil
+}
+
+// AcknowledgeMasterKeyRetirementArchival re-proves that the exact ready
+// barrier crossed Rhiza's before-ack durability boundary. It performs one
+// inert, guarded write with a fresh request ID: a cached receipt would only
+// prove an earlier boundary, while a committed no-op write proves the archive
+// now holds the ready transition and every rewrap mutation that preceded it.
+// A moved barrier or an unavailable archive fails closed.
+func AcknowledgeMasterKeyRetirementArchival(ctx context.Context, db *rhiza.DB, epoch int64) error {
+	if db == nil {
+		return errors.New("master-key retirement database is required")
+	}
+	if epoch <= 0 {
+		return errors.New("invalid master-key retirement epoch")
+	}
+	barrier, err := LoadMasterKeyRetirement(ctx, db)
+	if err != nil {
+		return err
+	}
+	if barrier.Epoch != epoch || barrier.State != MasterKeyRetirementReady {
+		return fmt.Errorf("%w: cannot acknowledge archival for epoch %d while epoch %d is %s", ErrMasterKeyRetirementConflict, epoch, barrier.Epoch, barrier.State)
+	}
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		return fmt.Errorf("generate master-key retirement archival acknowledgment ID: %w", err)
+	}
+	requestID := retirementRequestID("archive", barrier.Epoch, barrier.OldKeyID, barrier.ReplacementKeyID, barrier.MembershipDigest, base64.RawURLEncoding.EncodeToString(nonce))
+	one := int64(1)
+	response, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: requestID, Statements: []rhiza.SQLStatement{{
+		SQL:                  `UPDATE master_key_retirement_barrier SET ready_at_unix_ms=ready_at_unix_ms WHERE barrier_id=1 AND epoch=? AND old_key_id=? AND replacement_key_id=? AND membership_digest=? AND state='ready'`,
+		Args:                 []any{barrier.Epoch, barrier.OldKeyID, barrier.ReplacementKeyID, barrier.MembershipDigest},
+		ExpectedRowsAffected: &one,
+	}}})
+	if err != nil {
+		return fmt.Errorf("acknowledge master-key retirement archival: %w", err)
+	}
+	if response.RowsAffected != 1 {
+		return ErrMasterKeyRetirementConflict
+	}
+	return nil
 }
 
 func AbortMasterKeyRetirement(ctx context.Context, db *rhiza.DB, epoch int64, now time.Time) (MasterKeyRetirement, error) {
