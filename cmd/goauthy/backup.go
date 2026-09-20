@@ -177,7 +177,9 @@ func newScheduledBackupRuntime(ctx context.Context, c *scheduledBackupConfig) (r
 			return nil, errors.New("cannot open backup destination")
 		}
 	}
-	if _, err = backup.ListCompleted(ctx, r.destination, c.catalog, c.trustKeys, c.maxEntries); err != nil {
+	// Recover any catalog left oversized by a publication whose retention pass
+	// failed, so startup validation and every later publication can list it.
+	if _, err = backup.TrimCatalog(ctx, r.destination, c.catalog, c.trustKeys, time.Now(), c.keepDays, c.maxEntries, true, c.retentionPolicy); err != nil {
 		return nil, errors.New("cannot validate backup destination catalog")
 	}
 	return r, nil
@@ -201,13 +203,20 @@ func (r *scheduledBackupRuntime) Run(ctx context.Context, db *rhiza.DB) error {
 	c := r.config
 	stage := "ownership"
 	return c.schedule.Run(ctx, db, c.scope, c.location, c.lease, c.timeout, func(jobCtx context.Context) error {
+		stage = "capacity"
+		// Publication precedes retention, so reserve the slot the next completion
+		// needs before uploading anything; an oversized catalog is already
+		// unlistable and blocks both pruning and startup.
+		if _, err := backup.TrimCatalog(jobCtx, r.destination, c.catalog, c.trustKeys, time.Now(), c.keepDays, backup.RetentionTarget(c.maxEntries, 1), true, c.retentionPolicy); err != nil {
+			return err
+		}
 		stage = "create"
 		_, err := backup.Create(jobCtx, r.source, r.destination, path.Join(c.source.ObjStorePrefix, c.source.ClusterID), c.source.ClusterID, c.catalog, c.recipients, c.signer, c.work, backup.Limits{MaxFiles: 65536, MaxFileBytes: 1 << 30, MaxTotalBytes: 8 << 30})
 		if err != nil {
 			return err
 		}
 		stage = "retention"
-		_, err = backup.PruneWithPolicy(jobCtx, r.destination, c.catalog, c.trustKeys, time.Now(), c.keepDays, c.maxEntries, true, c.retentionPolicy)
+		_, err = backup.TrimCatalog(jobCtx, r.destination, c.catalog, c.trustKeys, time.Now(), c.keepDays, c.maxEntries, true, c.retentionPolicy)
 		if err == nil {
 			stage = "completion"
 		}
@@ -225,6 +234,9 @@ func (r *scheduledBackupRuntime) Run(ctx context.Context, db *rhiza.DB) error {
 				case errors.Is(err, backupschedule.ErrCompletionRead):
 					stage = "completion_read"
 				}
+			}
+			if stage == "capacity" {
+				stage = "capacity_reservation"
 			}
 			slog.Error("scheduled backup attempt failed", "scheduled_at", due.UTC(), "stage", stage, "reason", backup.FailureMessage(err))
 			return
