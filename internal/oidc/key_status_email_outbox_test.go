@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -95,4 +96,74 @@ func insertStatusOutbox(t *testing.T, ctx context.Context, db *rhiza.DB, keyring
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "key-status-outbox-" + id, SQL: `INSERT INTO email_outbox (id, recipient, mail_type, subject, body_html, body_text, status, attempts, last_error, created_at_unix_ms, updated_at_unix_ms, next_retry_at_unix_ms) VALUES (?, 'user@example.test', 'password reset', 'Reset', ?, ?, 'pending', 0, '', ?, ?, 0)`, Args: []any{id, sealed("html"), sealed("text"), at, at}}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestRewrapEmailOutboxBatchMovesSealedBodiesToActiveKey covers the rewrap half
+// of the family: sealed bodies move to the active key, a legacy plaintext body
+// is left alone, and the reference gate returns to safe.
+func TestRewrapEmailOutboxBatchMovesSealedBodiesToActiveKey(t *testing.T) {
+	ctx := context.Background()
+	db := testDB(t)
+	active, old := fixedKeyring("master-b"), fixedKeyring("master-a")
+	insertStatusOutbox(t, ctx, db, old, "queued-row", "recovery body")
+	insertStatusOutbox(t, ctx, db, nil, "legacy-row", "plain body")
+
+	result, err := RewrapEmailOutboxBatch(ctx, db, active, "")
+	if err != nil || result.Rewrapped != 2 || !result.Done {
+		t.Fatalf("rewrap=%+v err=%v", result, err)
+	}
+	html, text := readStatusOutboxBodies(t, ctx, db, "queued-row")
+	for _, column := range []struct{ field, stored string }{{"html", html}, {"text", text}} {
+		envelope, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(column.stored, emailOutboxSealedPrefix))
+		if err != nil {
+			t.Fatalf("%s body is not sealed: %q", column.field, column.stored)
+		}
+		purpose := emailOutboxPayloadPurpose("queued-row", column.field)
+		if keyID, err := active.PurposeEnvelopeKeyID(purpose, envelope); err != nil || keyID != "master-b" {
+			t.Fatalf("%s key=%q err=%v", column.field, keyID, err)
+		}
+		if plain, err := active.OpenEnvelope(purpose, envelope); err != nil || string(plain) != "recovery body" {
+			t.Fatalf("%s plain=%q err=%v", column.field, plain, err)
+		}
+	}
+	if legacy, legacyText := readStatusOutboxBodies(t, ctx, db, "legacy-row"); legacy != "plain body" || legacyText != "plain body" {
+		t.Fatalf("legacy bodies=%q/%q", legacy, legacyText)
+	}
+	if repeated, err := RewrapEmailOutboxBatch(ctx, db, active, ""); err != nil || repeated.Rewrapped != 0 || !repeated.Done {
+		t.Fatalf("second rewrap=%+v err=%v", repeated, err)
+	}
+	status, err := InspectMasterKeyReferences(ctx, db, active, "https://id.example.com", time.Unix(1_900_000_000, 0).UTC())
+	if err != nil || !status.Safe || status.EmailOutbox.Total != 2 || status.EmailOutbox.ByKeyID["master-b"] != 2 {
+		t.Fatalf("status=%+v err=%v", status, err)
+	}
+}
+
+// TestRewrapEmailOutboxBatchHonorsFencedOldWriter keeps the fail-closed fence:
+// a fenced old writer cannot commit and the queued bodies stay untouched.
+func TestRewrapEmailOutboxBatchHonorsFencedOldWriter(t *testing.T) {
+	ctx := context.Background()
+	db := testDB(t)
+	insertStatusOutbox(t, ctx, db, fixedKeyring("master-b"), "fenced-row", "recovery body")
+	beforeHTML, beforeText := readStatusOutboxBodies(t, ctx, db, "fenced-row")
+	fenceOIDCWriter(t, db, "master-a", "master-b", nowForTest())
+	if _, err := RewrapEmailOutboxBatch(ctx, db, fixedKeyring("master-a"), ""); err == nil {
+		t.Fatal("fenced old email outbox writer committed")
+	}
+	if html, text := readStatusOutboxBodies(t, ctx, db, "fenced-row"); html != beforeHTML || text != beforeText {
+		t.Fatalf("fenced bodies changed: %q/%q -> %q/%q", beforeHTML, beforeText, html, text)
+	}
+}
+
+func readStatusOutboxBodies(t *testing.T, ctx context.Context, db *rhiza.DB, id string) (string, string) {
+	t.Helper()
+	result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT body_html,body_text FROM email_outbox WHERE id=?`, Args: []any{id}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(result.Rows) != 1 || len(result.Rows[0]) != 2 {
+		t.Fatalf("outbox row %s=%v err=%v", id, result.Rows, err)
+	}
+	html, htmlOK := result.Rows[0][0].(string)
+	text, textOK := result.Rows[0][1].(string)
+	if !htmlOK || !textOK {
+		t.Fatalf("outbox row %s types=%T/%T", id, result.Rows[0][0], result.Rows[0][1])
+	}
+	return html, text
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/passkey"
+	"github.com/mrchypark/goauthy/internal/recovery"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -200,6 +201,40 @@ func TestInspectMasterKeyRetirementIncludesLoginRevoke(t *testing.T) {
 	status, err = inspectMasterKeyRetirement(ctx, db, active, "http://localhost:8080", nil, "key-a", now)
 	if err != nil || status.OldReferences != 0 || status.NonActiveReferences != 0 || status.TamperReferences != 0 {
 		t.Fatalf("rewrapped login-revoke retirement=%#v err=%v", status, err)
+	}
+}
+
+func TestInspectMasterKeyRetirementIncludesEmailOutbox(t *testing.T) {
+	ctx := context.Background()
+	db := retirementCmdDB(t, true)
+	old, active := retirementCmdKeyring(t, "key-a"), retirementCmdKeyring(t, "key-b")
+	writer, err := recovery.NewEmailOutbox(db, func(context.Context, string, string, string, string) error { return nil }, recovery.WithEnvelopeKeyring(old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Enqueue(ctx, "user@example.test", "password reset", "Reset", "<p>html</p>", "text body"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.UnixMilli(1_800_000_000_000).UTC()
+	status, err := inspectMasterKeyRetirement(ctx, db, active, "http://localhost:8080", nil, "key-a", now)
+	if err != nil || status.OldReferences != 2 || status.NonActiveReferences != 0 {
+		t.Fatalf("old email outbox retirement=%#v err=%v", status, err)
+	}
+
+	worker, err := newMasterKeyRewrapWorker(db, active, "http://localhost:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worker.rewrapEmailOutbox == nil {
+		t.Fatal("email outbox rewrap is not registered in the master-key rewrap worker")
+	}
+	result, err := worker.rewrapEmailOutbox(ctx, "")
+	if err != nil || result.Rewrapped != 2 || !result.Done {
+		t.Fatalf("email outbox rewrap=%#v err=%v", result, err)
+	}
+	status, err = inspectMasterKeyRetirement(ctx, db, active, "http://localhost:8080", nil, "key-a", now)
+	if err != nil || status.OldReferences != 0 || status.NonActiveReferences != 0 || status.TamperReferences != 0 {
+		t.Fatalf("rewrapped email outbox retirement=%#v status=%#v err=%v", result, status, err)
 	}
 }
 

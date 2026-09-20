@@ -209,11 +209,12 @@ func inspectMasterKeyRetirementWithKV(ctx context.Context, db *rhiza.DB, keyring
 	status.OIDCReferences = oidcStatus.SigningKeys.Total - oidcReferenceCount(oidcStatus.SigningKeys, oidcStatus.ActiveMasterKeyID)
 	status.DCRReferences = oidcStatus.DCRIdempotency.Total - oidcReferenceCount(oidcStatus.DCRIdempotency, oidcStatus.ActiveMasterKeyID)
 	status.UpstreamReferences = oidcStatus.Upstream.Total - oidcReferenceCount(oidcStatus.Upstream, oidcStatus.ActiveMasterKeyID)
-	status.OldReferences = oidcReferenceCount(oidcStatus.SigningKeys, oldID) + oidcReferenceCount(oidcStatus.DCRIdempotency, oldID) + oidcReferenceCount(oidcStatus.Upstream, oldID) + oidcReferenceCount(oidcStatus.ManagedClients, oldID) + oidcReferenceCount(oidcStatus.LoginRevoke, oldID) + oidcReferenceCount(oidcStatus.GeneratedAPIKeyBootstrap, oldID)
+	status.OldReferences = oidcReferenceCount(oidcStatus.SigningKeys, oldID) + oidcReferenceCount(oidcStatus.DCRIdempotency, oldID) + oidcReferenceCount(oidcStatus.Upstream, oldID) + oidcReferenceCount(oidcStatus.ManagedClients, oldID) + oidcReferenceCount(oidcStatus.LoginRevoke, oldID) + oidcReferenceCount(oidcStatus.GeneratedAPIKeyBootstrap, oldID) + oidcReferenceCount(oidcStatus.EmailOutbox, oldID)
 	unsafeReferences := status.OIDCReferences + status.DCRReferences + status.UpstreamReferences
 	unsafeReferences += oidcStatus.ManagedClients.Total - oidcReferenceCount(oidcStatus.ManagedClients, oidcStatus.ActiveMasterKeyID)
 	unsafeReferences += oidcStatus.LoginRevoke.Total - oidcReferenceCount(oidcStatus.LoginRevoke, oidcStatus.ActiveMasterKeyID)
 	unsafeReferences += oidcStatus.GeneratedAPIKeyBootstrap.Total - oidcReferenceCount(oidcStatus.GeneratedAPIKeyBootstrap, oidcStatus.ActiveMasterKeyID)
+	unsafeReferences += oidcStatus.EmailOutbox.Total - oidcReferenceCount(oidcStatus.EmailOutbox, oidcStatus.ActiveMasterKeyID)
 
 	var passkeyStatus passkey.EnvelopeReferenceStatus
 	var passkeyErr error

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
 
@@ -213,6 +214,95 @@ func addEmailOutboxReference(keyring *Keyring, family *MasterKeyReferenceFamily,
 	}
 	addReference(family, keyID)
 	return nil
+}
+
+// emailOutboxRewrapBatchSize bounds one rewrap statement batch, matching the
+// other purpose-envelope families.
+const emailOutboxRewrapBatchSize = 32
+
+// RewrapEmailOutboxBatch re-encrypts at most 32 queued mail bodies under the
+// active master key and CASes each original ciphertext, so a concurrent
+// enqueue or delivery is never clobbered. A body written before payload
+// sealing holds plaintext and is left alone; a malformed sealed body fails the
+// batch instead of being silently counted as rewrapped.
+func RewrapEmailOutboxBatch(ctx context.Context, db *rhiza.DB, keyring *Keyring, cursor string) (SigningKeyRewrapBatchResult, error) {
+	if db == nil || keyring == nil {
+		return SigningKeyRewrapBatchResult{}, errors.New("email outbox rewrap is not configured")
+	}
+	active, err := keyring.ActiveMasterKeyID()
+	if err != nil {
+		return SigningKeyRewrapBatchResult{}, err
+	}
+	result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT id,body_html,body_text FROM email_outbox WHERE id > ? ORDER BY id LIMIT ?`, Args: []any{cursor, int64(emailOutboxRewrapBatchSize)}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return SigningKeyRewrapBatchResult{}, err
+	}
+	if len(result.Rows) == 0 {
+		return SigningKeyRewrapBatchResult{Cursor: cursor, Done: true}, nil
+	}
+	last := cursor
+	changed := int64(0)
+	for _, row := range result.Rows {
+		if len(row) != 3 {
+			return SigningKeyRewrapBatchResult{}, errors.New("invalid email outbox envelope row")
+		}
+		id, idOK := row[0].(string)
+		html, htmlOK := row[1].(string)
+		text, textOK := row[2].(string)
+		if !idOK || !htmlOK || !textOK || id == "" {
+			return SigningKeyRewrapBatchResult{}, errors.New("invalid email outbox envelope row")
+		}
+		last = id
+		for _, column := range []struct{ field, body, update string }{
+			{"html", html, `UPDATE email_outbox SET body_html=? WHERE id=? AND body_html=?`},
+			{"text", text, `UPDATE email_outbox SET body_text=? WHERE id=? AND body_text=?`},
+		} {
+			replacement, ok, err := rewrappedEmailOutboxBody(keyring, active, id, column.field, column.body)
+			if err != nil {
+				return SigningKeyRewrapBatchResult{}, err
+			}
+			if !ok {
+				continue
+			}
+			digest := sha256.Sum256(append(append([]byte(id+"\x00"+column.field+"\x00"), column.body...), replacement...))
+			response, err := storage.ExecuteEnvelope(ctx, db, active, rhiza.ExecuteRequest{
+				RequestID: "email-outbox-rewrap/" + base64.RawURLEncoding.EncodeToString(digest[:16]),
+				SQL:       column.update,
+				Args:      []any{replacement, id, column.body},
+			})
+			if err != nil {
+				return SigningKeyRewrapBatchResult{}, err
+			}
+			changed += response.RowsAffected
+		}
+	}
+	return SigningKeyRewrapBatchResult{Cursor: last, Rewrapped: int(changed), Done: len(result.Rows) < emailOutboxRewrapBatchSize}, nil
+}
+
+// rewrappedEmailOutboxBody seals one queued body under the active key. It
+// reports ok=false for a legacy plaintext body and for one already sealed under
+// the active key.
+func rewrappedEmailOutboxBody(keyring *Keyring, active, id, field, body string) (string, bool, error) {
+	if !strings.HasPrefix(body, emailOutboxSealedPrefix) {
+		return "", false, nil
+	}
+	envelope, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(body, emailOutboxSealedPrefix))
+	if err != nil || len(envelope) == 0 {
+		return "", false, ErrUnsafeMasterKeyStatus
+	}
+	purpose := emailOutboxPayloadPurpose(id, field)
+	keyID, err := keyring.PurposeEnvelopeKeyID(purpose, envelope)
+	if err != nil {
+		return "", false, err
+	}
+	if keyID == active {
+		return "", false, nil
+	}
+	replacement, err := keyring.RewrapEnvelope(purpose, envelope)
+	if err != nil {
+		return "", false, err
+	}
+	return emailOutboxSealedPrefix + base64.RawStdEncoding.EncodeToString(replacement), true, nil
 }
 
 func scanManagedClientReferences(ctx context.Context, db *rhiza.DB, keyring *Keyring, family *MasterKeyReferenceFamily) error {

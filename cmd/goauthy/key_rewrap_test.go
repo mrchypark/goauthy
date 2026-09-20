@@ -90,6 +90,28 @@ func TestMasterKeyRewrapStepIncludesLoginRevoke(t *testing.T) {
 	}
 }
 
+func TestMasterKeyRewrapStepIncludesEmailOutbox(t *testing.T) {
+	emailOutboxErr := errors.New("email outbox envelope unavailable")
+	calls := 0
+	worker := &masterKeyRewrapWorker{
+		now: func() time.Time { return time.Unix(1_900_000_000, 0).UTC() },
+		rewrapSigning: func(context.Context, string) (oidc.SigningKeyRewrapBatchResult, error) {
+			return oidc.SigningKeyRewrapBatchResult{Done: true}, nil
+		},
+		rewrapIdempotency: func(context.Context, string) (string, int, error) { return "", 0, nil },
+		rewrapTransactions: func(context.Context, time.Time, string) (string, bool, int64, error) {
+			return "", true, 0, nil
+		},
+		rewrapEmailOutbox: func(context.Context, string) (oidc.SigningKeyRewrapBatchResult, error) {
+			calls++
+			return oidc.SigningKeyRewrapBatchResult{}, emailOutboxErr
+		},
+	}
+	if err := worker.Step(context.Background()); !errors.Is(err, emailOutboxErr) || calls != 1 {
+		t.Fatalf("err=%v calls=%d", err, calls)
+	}
+}
+
 func TestMasterKeyRewrapStepPasskeyDisabledIsNoOp(t *testing.T) {
 	worker := &masterKeyRewrapWorker{
 		now: func() time.Time { return time.Unix(1_900_000_000, 0).UTC() },
@@ -225,12 +247,13 @@ func TestMasterKeyRewrapRunFamilyTimeoutAllowsLaterTickRecovery(t *testing.T) {
 	firstCancel := make(chan context.CancelFunc, 1)
 	reported := make(chan error, 1)
 	starved := make(chan error, 2)
-	callOrder := make(chan string, 12)
+	callOrder := make(chan string, 14)
 	var signingCalls int
 	var contextCalls int
 	var passkeyCalls int
 	var managedCalls int
 	var loginRevokeCalls int
+	var emailOutboxCalls int
 	worker := &masterKeyRewrapWorker{
 		now:     func() time.Time { return time.Unix(1_900_000_000, 0).UTC() },
 		onError: func(err error) { reported <- err },
@@ -313,6 +336,15 @@ func TestMasterKeyRewrapRunFamilyTimeoutAllowsLaterTickRecovery(t *testing.T) {
 			}
 			return oidc.SigningKeyRewrapBatchResult{Done: true}, nil
 		},
+		rewrapEmailOutbox: func(ctx context.Context, _ string) (oidc.SigningKeyRewrapBatchResult, error) {
+			emailOutboxCalls++
+			callOrder <- "email-outbox"
+			if err := ctx.Err(); err != nil {
+				starved <- err
+				return oidc.SigningKeyRewrapBatchResult{}, err
+			}
+			return oidc.SigningKeyRewrapBatchResult{Done: true}, nil
+		},
 	}
 	done := make(chan error, 1)
 	go func() { done <- worker.run(ctx, ticks) }()
@@ -338,12 +370,12 @@ func TestMasterKeyRewrapRunFamilyTimeoutAllowsLaterTickRecovery(t *testing.T) {
 	for i := 0; i < cap(callOrder); i++ {
 		gotOrder = append(gotOrder, <-callOrder)
 	}
-	wantOrder := []string{"signing", "idempotency", "transactions", "passkey", "managed", "login-revoke", "signing", "idempotency", "transactions", "passkey", "managed", "login-revoke"}
+	wantOrder := []string{"signing", "idempotency", "transactions", "passkey", "managed", "login-revoke", "email-outbox", "signing", "idempotency", "transactions", "passkey", "managed", "login-revoke", "email-outbox"}
 	if !equalStrings(gotOrder, wantOrder) {
 		t.Fatalf("family call order=%v want %v", gotOrder, wantOrder)
 	}
-	if signingCalls != 2 || passkeyCalls != 2 || managedCalls != 2 || loginRevokeCalls != 2 || contextCalls != 12 {
-		t.Fatalf("calls signing=%d passkey=%d managed=%d family-context=%d, want 2/2/2/12", signingCalls, passkeyCalls, managedCalls, contextCalls)
+	if signingCalls != 2 || passkeyCalls != 2 || managedCalls != 2 || loginRevokeCalls != 2 || emailOutboxCalls != 2 || contextCalls != 14 {
+		t.Fatalf("calls signing=%d passkey=%d managed=%d email-outbox=%d family-context=%d, want 2/2/2/2/14", signingCalls, passkeyCalls, managedCalls, emailOutboxCalls, contextCalls)
 	}
 }
 
