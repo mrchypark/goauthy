@@ -134,8 +134,10 @@ func (w Worker) stepOrReport(ctx context.Context, now time.Time) {
 	}
 }
 
-// Step claims and delivers at most one due record. A supplied time makes the
-// durable state machine deterministic in tests.
+// Step claims and delivers at most one due record. A supplied time drives the
+// due and expiry predicates; the recorded lease and the attempt budget still
+// come from the worker clock, so a caller observing the lease lifecycle must
+// supply a time in the current time domain.
 func (w Worker) Step(ctx context.Context, now time.Time) error {
 	if err := w.valid(); err != nil {
 		return err

@@ -13,7 +13,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -233,39 +232,77 @@ func TestWorkerDeliveryStates(t *testing.T) {
 }
 
 func TestWorkerConditionalClaimRaceAndLeaseExpiry(t *testing.T) {
-	now := time.Unix(1_800_000_000, 0).UTC()
+	// The due and expiry predicates run on the caller's reconciliation time while
+	// the recorded lease is read from the worker clock, so a concurrency fixture
+	// must sit in that same current time domain.
+	now := time.Now().UTC()
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(http.StatusNoContent) }))
 	defer server.Close()
 	w, db := newTestWorker(t)
 	insertDelivery(t, db, "event-race", "client-1", "sid-1", server.URL, true, true, now)
-	var wg sync.WaitGroup
-	ready := make(chan struct{}, 2)
-	start := make(chan struct{})
-	errs := make(chan error, 2)
-	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ready <- struct{}{}
-			<-start
-			if err := w.Step(context.Background(), now); err != nil {
-				errs <- err
+
+	load := w.LoadSigningKey
+	winnerRead := make(chan struct{})
+	release := make(chan struct{})
+	var holding atomic.Bool
+	w.LoadSigningKey = func(ctx context.Context) (oidc.SigningKey, error) {
+		// Hold the winner directly after its linearizable winner read, so the
+		// competing step below meets a lease that is still live.
+		if holding.CompareAndSwap(false, true) {
+			close(winnerRead)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return oidc.SigningKey{}, ctx.Err()
 			}
-		}()
+		}
+		return load(ctx)
 	}
-	<-ready
-	<-ready
-	close(start)
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		t.Error(err)
+	lease := func() (string, int64) {
+		row, err := db.Query(context.Background(), rhiza.QueryRequest{SQL: `SELECT lease_token, lease_until_unix_ms FROM oidc_backchannel_deliveries WHERE event_id = ? AND client_id = ?`, Args: []any{"event-race", "client-1"}, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil || len(row.Rows) != 1 {
+			t.Fatalf("claim row=%#v err=%v", row.Rows, err)
+		}
+		token, _ := row.Rows[0][0].(string)
+		until, _ := row.Rows[0][1].(int64)
+		return token, until
+	}
+
+	winner := make(chan error, 1)
+	go func() { winner <- w.Step(context.Background(), now) }()
+	select {
+	case <-winnerRead:
+	case <-time.After(30 * time.Second):
+		t.Fatal("no step reached a post-election delivery")
 	}
 	// The local candidate read may be shared or stale; only the conditional
-	// replicated UPDATE may elect a sender.
+	// replicated UPDATE may elect a sender, and its lease must outlive the
+	// reconciliation time of every caller in the same time domain.
+	claimed, leaseUntil := lease()
+	if !strings.HasPrefix(claimed, w.WorkerID+".") || leaseUntil <= now.UnixMilli() {
+		t.Fatalf("winner lease token=%q until=%d reconciliation=%d", claimed, leaseUntil, now.UnixMilli())
+	}
+	// A step that loses the election must neither replace the live lease nor
+	// deliver, and the winner must keep ownership of its own completion.
+	if err := w.Step(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	if token, _ := lease(); token != claimed {
+		t.Fatalf("competing step replaced live lease %q with %q", claimed, token)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("calls=%d, want no delivery while the winner is in flight", calls.Load())
+	}
+	close(release)
+	if err := <-winner; err != nil {
+		t.Fatal(err)
+	}
 	if calls.Load() != 1 {
 		t.Fatalf("calls=%d, want one claim winner", calls.Load())
+	}
+	if attempts, done, failed, _ := deliveryState(t, db, "event-race", "client-1"); attempts != 1 || !done || failed {
+		t.Fatalf("winner state attempts=%d done=%v failed=%v", attempts, done, failed)
 	}
 
 	insertDelivery(t, db, "event-lease", "client-1", "sid-2", server.URL, true, true, now)
