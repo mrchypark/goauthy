@@ -29,7 +29,7 @@ func (s countingSender) Send(context.Context, eventlog.Event) error {
 func TestNotificationRuntimeStep(t *testing.T) {
 	db, ctx, now := queueFixture(t)
 	id := Identity("slack", "https://runtime.example")
-	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Warning}})
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Warning}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestNotificationRuntimeStep(t *testing.T) {
 func TestNotificationRuntimeCompetingAndCancel(t *testing.T) {
 	db, ctx, now := queueFixture(t)
 	id := Identity("slack", "https://runtime2.example")
-	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Info}})
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Info}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestNotificationRuntimeCompetingAndCancel(t *testing.T) {
 func TestNotificationRuntimeRetryBoundary(t *testing.T) {
 	db, ctx, now := queueFixture(t)
 	id := Identity("slack", "https://retry.example.test")
-	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Info}})
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Info}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestNotificationRuntimeRetryBoundary(t *testing.T) {
 func TestNotificationMaintenanceBudgetDoesNotBlockDelivery(t *testing.T) {
 	db, ctx, now := queueFixture(t)
 	id := Identity("slack", "https://maintenance-budget.example.test")
-	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Warning}})
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Warning}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

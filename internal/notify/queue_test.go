@@ -40,7 +40,7 @@ func putEvent(t *testing.T, db *rhiza.DB, e eventlog.Event) {
 func TestNotificationQueueSnapshotLeaseRetryAndRestart(t *testing.T) {
 	db, ctx, now := queueFixture(t)
 	id := Identity("slack", "https://hooks.one.test/a")
-	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Info}})
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Info}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,11 +85,11 @@ func TestNotificationDestinationDoesNotBackfill(t *testing.T) {
 	db, ctx, now := queueFixture(t)
 	old := Identity("slack", "https://hooks.old.test/a")
 	newID := Identity("slack", "https://hooks.new.test/a")
-	if _, err := NewRhizaQueue(ctx, db, []Target{{Name: old, Kind: "slack", Level: eventlog.Info}}); err != nil {
+	if _, err := NewRhizaQueue(ctx, db, []Target{{Name: old, Kind: "slack", Level: eventlog.Info}}, 1); err != nil {
 		t.Fatal(err)
 	}
 	putEvent(t, db, eventlog.TestEvent("old", "", now))
-	q, err := NewRhizaQueue(ctx, db, []Target{{Name: newID, Kind: "slack", Level: eventlog.Info}})
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: newID, Kind: "slack", Level: eventlog.Info}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,11 +125,11 @@ func TestNotificationQueueConcurrentClaimReclaimAndColdRestart(t *testing.T) {
 	now := time.UnixMilli(2_000_000_000_000).UTC()
 	id := Identity("slack", "https://hooks.example.test/restart")
 	targets := []Target{{Name: id, Kind: "slack", Level: eventlog.Info}}
-	q, err := NewRhizaQueue(ctx, db, targets)
+	q, err := NewRhizaQueue(ctx, db, targets, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	q2, err := NewRhizaQueue(ctx, db, targets)
+	q2, err := NewRhizaQueue(ctx, db, targets, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestNotificationQueueConcurrentClaimReclaimAndColdRestart(t *testing.T) {
 	if err := storage.Migrate(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := NewRhizaQueue(ctx, db, targets)
+	restarted, err := NewRhizaQueue(ctx, db, targets, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,15 +230,20 @@ func deliveryIDs(t *testing.T, ctx context.Context, db *rhiza.DB, target string)
 
 func targetEnabled(t *testing.T, ctx context.Context, db *rhiza.DB, target string) int64 {
 	t.Helper()
-	r, err := db.Query(ctx, rhiza.QueryRequest{SQL: "SELECT enabled FROM event_notification_targets WHERE target=?", Args: []any{target}, Consistency: rhiza.ConsistencyLinearizable})
+	return targetColumn(t, ctx, db, target, "enabled")
+}
+
+func targetColumn(t *testing.T, ctx context.Context, db *rhiza.DB, target, column string) int64 {
+	t.Helper()
+	r, err := db.Query(ctx, rhiza.QueryRequest{SQL: "SELECT " + column + " FROM event_notification_targets WHERE target=?", Args: []any{target}, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil || len(r.Rows) != 1 {
-		t.Fatalf("target %q inspection=%v err=%v", target, r.Rows, err)
+		t.Fatalf("target %q %s inspection=%v err=%v", target, column, r.Rows, err)
 	}
-	enabled, ok := r.Rows[0][0].(int64)
+	value, ok := r.Rows[0][0].(int64)
 	if !ok {
-		t.Fatalf("invalid enabled value %T", r.Rows[0][0])
+		t.Fatalf("invalid %s value %T", column, r.Rows[0][0])
 	}
-	return enabled
+	return value
 }
 
 // seedCleanupBacklog inserts eligible delivery snapshots using as few
@@ -289,7 +294,7 @@ func deliveryCount(t *testing.T, ctx context.Context, db *rhiza.DB, target strin
 func TestNotificationCleanupReleasesExpiredAbandonedLease(t *testing.T) {
 	db, ctx, now := queueFixture(t)
 	id := Identity("slack", "https://abandoned-lease.example.test")
-	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Warning}})
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Warning}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +313,7 @@ func TestNotificationCleanupReleasesExpiredAbandonedLease(t *testing.T) {
 		t.Fatalf("live claim=%v err=%v", live, err)
 	}
 	// Raising the threshold above the stranded event leaves it owed to nobody.
-	q2, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Critical}})
+	q2, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Critical}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +333,7 @@ func TestNotificationCleanupReleasesExpiredAbandonedLease(t *testing.T) {
 func TestNotificationEligibleDeliveryNotBlockedByIneligibleRows(t *testing.T) {
 	db, ctx, now := queueFixture(t)
 	id := Identity("slack", "https://filter.example.test")
-	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Warning}})
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Warning}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +360,7 @@ func TestNotificationEligibleDeliveryNotBlockedByIneligibleRows(t *testing.T) {
 func TestNotificationCleanupBoundsSnapshots(t *testing.T) {
 	db, ctx, now := queueFixture(t)
 	id := Identity("slack", "https://cleanup.example.test")
-	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Warning}})
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Warning}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,14 +422,14 @@ func TestNotificationQueueRetiresRemovedDestinations(t *testing.T) {
 	db, ctx, now := queueFixture(t)
 	retired := Identity("slack", "https://hooks.retired.test/a")
 	kept := Identity("slack", "https://hooks.kept.test/a")
-	if _, err := NewRhizaQueue(ctx, db, []Target{{Name: retired, Kind: "slack", Level: eventlog.Info}, {Name: kept, Kind: "slack", Level: eventlog.Info}}); err != nil {
+	if _, err := NewRhizaQueue(ctx, db, []Target{{Name: retired, Kind: "slack", Level: eventlog.Info}, {Name: kept, Kind: "slack", Level: eventlog.Info}}, 1); err != nil {
 		t.Fatal(err)
 	}
 	putEvent(t, db, eventlog.TestEvent("retire-both", "", now))
 	if got := deliveryIDs(t, ctx, db, retired); len(got) != 1 {
 		t.Fatalf("configured destination queued %v, want one row", got)
 	}
-	q, err := NewRhizaQueue(ctx, db, []Target{{Name: kept, Kind: "slack", Level: eventlog.Info}})
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: kept, Kind: "slack", Level: eventlog.Info}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +449,7 @@ func TestNotificationQueueRetiresRemovedDestinations(t *testing.T) {
 	if targets, err := q.Targets(ctx); err != nil || len(targets) != 1 || targets[0].Name != kept {
 		t.Fatalf("targets=%v err=%v", targets, err)
 	}
-	if _, err := NewRhizaQueue(ctx, db, nil); err != nil {
+	if _, err := NewRhizaQueue(ctx, db, nil, 1); err != nil {
 		t.Fatal(err)
 	}
 	if enabled := targetEnabled(t, ctx, db, kept); enabled != 0 {
@@ -453,5 +458,74 @@ func TestNotificationQueueRetiresRemovedDestinations(t *testing.T) {
 	putEvent(t, db, eventlog.TestEvent("retire-disabled", "", now.Add(2*time.Second)))
 	if got := deliveryIDs(t, ctx, db, kept); len(got) != 2 {
 		t.Fatalf("disabled destination queued fresh work: %v", got)
+	}
+}
+
+// TestNotificationQueueFencesSupersededConfiguration covers the rolling-deploy
+// half of GA-NOTIFY-003: a pod that restarts on an older configuration must not
+// re-enable a destination the current generation retired, and must not roll a
+// destination's level back to the old threshold.
+func TestNotificationQueueFencesSupersededConfiguration(t *testing.T) {
+	db, ctx, now := queueFixture(t)
+	retired := Identity("slack", "https://hooks.fence-retired.test/a")
+	kept := Identity("slack", "https://hooks.fence-kept.test/a")
+	if _, err := NewRhizaQueue(ctx, db, []Target{{Name: retired, Kind: "slack", Level: eventlog.Info}, {Name: kept, Kind: "slack", Level: eventlog.Info}}, 1); err != nil {
+		t.Fatal(err)
+	}
+	// Generation 2 drops the retired destination and raises the kept threshold.
+	if _, err := NewRhizaQueue(ctx, db, []Target{{Name: kept, Kind: "slack", Level: eventlog.Critical}}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if enabled := targetEnabled(t, ctx, db, retired); enabled != 0 {
+		t.Fatalf("retired destination enabled=%d after the newer generation, want 0", enabled)
+	}
+	if level := targetColumn(t, ctx, db, kept, "level"); level != int64(eventlog.Critical.Rank()) {
+		t.Fatalf("kept destination level=%d want=%d", level, eventlog.Critical.Rank())
+	}
+
+	// The stale pod restarts on generation 1 and re-applies its old configuration.
+	stale, err := NewRhizaQueue(ctx, db, []Target{{Name: retired, Kind: "slack", Level: eventlog.Info}, {Name: kept, Kind: "slack", Level: eventlog.Info}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled := targetEnabled(t, ctx, db, retired); enabled != 0 {
+		t.Fatalf("superseded pod re-enabled the retired destination: enabled=%d", enabled)
+	}
+	if level := targetColumn(t, ctx, db, kept, "level"); level != int64(eventlog.Critical.Rank()) {
+		t.Fatalf("superseded pod rolled the level back to %d", level)
+	}
+	// It also must not queue fresh work for a destination it believes in.
+	putEvent(t, db, eventlog.TestEvent("fence-stale", "", now))
+	if got := deliveryIDs(t, ctx, db, retired); len(got) != 0 {
+		t.Fatalf("retired destination received queued work: %v", got)
+	}
+	// The superseded pod may still serve the destination the current generation
+	// kept, but only at the persisted level, and never the retired one.
+	if targets, err := stale.Targets(ctx); err != nil || len(targets) != 1 || targets[0].Name != kept || targets[0].Level != eventlog.Critical {
+		t.Fatalf("superseded pod targets=%v err=%v", targets, err)
+	}
+
+	// The current generation restarts unchanged and keeps its own configuration.
+	current, err := NewRhizaQueue(ctx, db, []Target{{Name: kept, Kind: "slack", Level: eventlog.Critical}}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled := targetEnabled(t, ctx, db, kept); enabled != 1 {
+		t.Fatalf("current generation destination enabled=%d, want 1", enabled)
+	}
+	if targets, err := current.Targets(ctx); err != nil || len(targets) != 1 || targets[0].Name != kept {
+		t.Fatalf("current generation targets=%v err=%v", targets, err)
+	}
+}
+
+// TestNotificationQueueRejectsInvalidGeneration keeps a bad generation from
+// reaching the schema, where a persisted value no later configuration could
+// exceed would fence every future deployment.
+func TestNotificationQueueRejectsInvalidGeneration(t *testing.T) {
+	db, ctx, _ := queueFixture(t)
+	for _, generation := range []int64{0, -1} {
+		if _, err := NewRhizaQueue(ctx, db, nil, generation); err == nil {
+			t.Fatalf("generation %d was accepted", generation)
+		}
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-const schemaVersion = 106
+const schemaVersion = 107
 
 // migrateThroughV97 applies schema versions v1 through v97. It is the
 // unchanged prefix of Migrate, extracted so tests can reach a clean v97
@@ -408,6 +408,9 @@ func Migrate(ctx context.Context, db *rhiza.DB) error {
 	}
 	if err := migrateSchemaV106(ctx, db); err != nil {
 		return fmt.Errorf("migrate schema v106: %w", err)
+	}
+	if err := migrateSchemaV107(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v107: %w", err)
 	}
 	return nil
 }
@@ -3711,6 +3714,32 @@ func migrateSchemaV106(ctx context.Context, db *rhiza.DB) error {
 			expires_at_unix_ms INTEGER NOT NULL CHECK (expires_at_unix_ms >= 0)
 		) STRICT`},
 		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(106)`},
+	}})
+	return err
+}
+
+// migrateSchemaV107 stores the newest accepted event-notification configuration
+// generation. Destination reconciliation claims that generation atomically, so a
+// pod restarting on a superseded configuration cannot re-enable a destination
+// the current generation retired (GA66-NOTIFY-003).
+func migrateSchemaV107(ctx context.Context, db *rhiza.DB) error {
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=107)`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 1 {
+		return errors.New("invalid schema 107 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v107", Statements: []rhiza.SQLStatement{
+		{SQL: `CREATE TABLE IF NOT EXISTS event_notification_config_generation (
+			config_id INTEGER PRIMARY KEY CHECK (config_id = 1),
+			generation INTEGER NOT NULL CHECK (generation >= 1)
+		) STRICT`},
+		{SQL: `INSERT OR IGNORE INTO event_notification_config_generation (config_id, generation) VALUES (1, 1)`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(107)`},
 	}})
 	return err
 }

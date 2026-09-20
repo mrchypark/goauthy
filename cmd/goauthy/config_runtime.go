@@ -423,8 +423,9 @@ type effectiveConfig struct {
 		FedCMFile        bool `json:"fedcm_config_file"`
 	} `json:"integrations"`
 	Notifications struct {
-		Enabled bool `json:"enabled"`
-		Count   int  `json:"count"`
+		Enabled    bool  `json:"enabled"`
+		Count      int   `json:"count"`
+		Generation int64 `json:"generation"`
 	} `json:"notifications"`
 }
 
@@ -457,5 +458,6 @@ func effectiveConfigFrom(c applicationConfig, getenv func(string) string) effect
 	out.Integrations.FedCMFile = getenv("GOAUTHY_FEDCM_CONFIG_FILE") != ""
 	out.Notifications.Enabled = len(c.Notifications.Targets) != 0
 	out.Notifications.Count = len(c.Notifications.Targets)
+	out.Notifications.Generation = c.Notifications.Generation
 	return out
 }

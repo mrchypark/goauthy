@@ -125,3 +125,29 @@ func TestNotificationLoopCancellationDoesNotStep(t *testing.T) {
 		t.Fatal("cancelled worker started a step")
 	}
 }
+
+// GA66-NOTIFY-003: the reconciliation generation is the operator's fence for a
+// rolling deployment, so a missing value must keep working and a malformed one
+// must fail at startup instead of persisting a generation no later
+// configuration can exceed.
+func TestNotificationGenerationFromEnv(t *testing.T) {
+	withGeneration := func(raw string) func(string) string {
+		return func(k string) string {
+			if k == "GOAUTHY_EVENT_NOTIFICATION_CONFIG_GENERATION" {
+				return raw
+			}
+			return ""
+		}
+	}
+	if c, err := notificationsFromEnv(withGeneration("7")); err != nil || c.Generation != 7 {
+		t.Fatalf("generation=%d err=%v", c.Generation, err)
+	}
+	if c, err := notificationsFromEnv(withGeneration("")); err != nil || c.Generation != 1 {
+		t.Fatalf("default generation=%d err=%v", c.Generation, err)
+	}
+	for _, raw := range []string{"0", "-1", "1.5", "abc", "9223372036854775808"} {
+		if _, err := notificationsFromEnv(withGeneration(raw)); err == nil {
+			t.Fatalf("generation %q was accepted", raw)
+		}
+	}
+}

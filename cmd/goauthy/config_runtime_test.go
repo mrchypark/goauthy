@@ -132,6 +132,7 @@ func TestRunConfigCommandRejectsInvalidRuntimeConfiguration(t *testing.T) {
 		{name: "scopes", env: map[string]string{"GOAUTHY_DCR_DEFAULT_SCOPES": "openid unknown"}, wantErr: "GOAUTHY_DCR_ALLOWED_SCOPES"},
 		{name: "hosted resource", env: map[string]string{"GOAUTHY_CONNECTIONS_RESOURCE": "https://example.test/connections"}, wantErr: "GOAUTHY_CONNECTIONS_RESOURCE"},
 		{name: "event retention", env: map[string]string{"GOAUTHY_EVENTS_CLEANUP_DAYS": "0"}, wantErr: "GOAUTHY_EVENTS_CLEANUP_DAYS"},
+		{name: "notification generation", env: map[string]string{"GOAUTHY_EVENT_NOTIFICATION_CONFIG_GENERATION": "0"}, wantErr: "GOAUTHY_EVENT_NOTIFICATION_CONFIG_GENERATION"},
 		{name: "token events", env: map[string]string{"GOAUTHY_EVENT_GENERATE_TOKEN_ISSUED": "maybe"}, wantErr: "GOAUTHY_EVENT_GENERATE_TOKEN_ISSUED"},
 		{name: "account expiry", env: map[string]string{"GOAUTHY_USER_EXPIRY_INTERVAL_MINUTES": "0"}, wantErr: "GOAUTHY_USER_EXPIRY_INTERVAL_MINUTES"},
 		{name: "browser id mode", env: map[string]string{"GOAUTHY_BROWSER_ID_COOKIE_MODE": "loose"}, wantErr: "GOAUTHY_BROWSER_ID_COOKIE_MODE"},
