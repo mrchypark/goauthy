@@ -1,10 +1,12 @@
 package rbac
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -217,6 +219,72 @@ func TestAuthCollectionsHTTPBoundaryAndRevisionFailures(t *testing.T) {
 	if w.Code != http.StatusConflict {
 		t.Fatalf("disabled create status=%d", w.Code)
 	}
+}
+
+// A definition whose fields_json exceeds 16 MiB in aggregate used to make the
+// list endpoint fail with 503 even though every row was accepted through this
+// same handler, because Rhiza bounds one query's encoded result.
+func TestAuthCollectionsHTTPListSurvivesOversizedAcceptedState(t *testing.T) {
+	h, store, cookie, csrf := membershipHTTPFixture(t)
+	if err := h.BindAuthCollections(authcollection.NewStore(store.db)); err != nil {
+		t.Fatal(err)
+	}
+	// 64 enum options of 100 '<' each: the largest definition the 8-KiB request
+	// limit admits, which stores as ~38.8 KiB once each '<' becomes \\u003c.
+	options := make([]string, 64)
+	for i := range options {
+		options[i] = strings.Repeat("<", 100) + strconv.Itoa(i)
+	}
+	const rows = 440
+	for i := 0; i < rows; i++ {
+		body := collectionDefinitionBody(t, "large-"+strconv.Itoa(i), options)
+		w := httptest.NewRecorder()
+		h.AuthCollections(w, authCollectionRequest(http.MethodPost, "/auth/v1/auth-collections", body, cookie, csrf))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create %d status=%d body=%s", i, w.Code, w.Body.String())
+		}
+	}
+	w := httptest.NewRecorder()
+	h.AuthCollections(w, authCollectionRequest(http.MethodGet, "/auth/v1/auth-collections", "", cookie, ""))
+	if w.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", w.Code, w.Body.String()[:min(200, w.Body.Len())])
+	}
+	var list []authcollection.Definition
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != rows {
+		t.Fatalf("list rows=%d want %d", len(list), rows)
+	}
+	seen := map[string]bool{}
+	for _, d := range list {
+		if len(d.Fields) != 1 || len(d.Fields[0].Options) != 64 {
+			t.Fatalf("definition %q lost its fields", d.ID)
+		}
+		seen[d.ID] = true
+	}
+	for i := 0; i < rows; i++ {
+		if id := "large-" + strconv.Itoa(i); !seen[id] {
+			t.Fatalf("list omitted %q", id)
+		}
+	}
+}
+
+// collectionDefinitionBody renders a create body with literal '<' characters so
+// the request fits the 8-KiB limit while the stored JSON stays escaped.
+func collectionDefinitionBody(t *testing.T, id string, options []string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	in := authcollection.DefinitionInput{ID: id, Name: id, AuthMethod: "api_key", Enabled: true, Fields: []authcollection.Field{{Name: "tenant", Type: "enum", Options: options}}, ProviderIDs: []string{}}
+	if err := encoder.Encode(in); err != nil {
+		t.Fatal(err)
+	}
+	if buf.Len() > int(adminRequestLimit) {
+		t.Fatalf("fixture body=%d exceeds request limit", buf.Len())
+	}
+	return buf.String()
 }
 
 func memberSession(t *testing.T, store *Store) (*http.Cookie, string) {

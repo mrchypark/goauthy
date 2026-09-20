@@ -34,6 +34,62 @@ var (
 // bounded list of exactly maxList rows always succeeds.
 const maxList = 1000
 
+// maxListPageBytes bounds one list page. Rhiza rejects any single query whose
+// JSON-encoded result exceeds 16 MiB, and maxList accepted rows can total far
+// more than that, so a list reads keyset pages inside this budget instead of
+// asking for every row at once.
+const maxListPageBytes = 8 << 20
+
+// listRows enumerates every row matching fromWhere in id order. Pages are
+// bounded by maxListPageBytes so listing keeps working once accepted rows
+// aggregate past Rhiza's per-query result budget, and the read stops as soon
+// as maxList+1 rows are known so callers can report the documented conflict.
+//
+// ponytail: each page is its own linearizable read, so a concurrent write can
+// move the page boundary and hide a row inserted behind the cursor. Upgrade
+// path: pin every page to one read snapshot when the pinned Rhiza API exposes
+// one.
+func listRows[T any](ctx context.Context, db *rhiza.DB, columns, fromWhere string, args []any, decode func([]any) (T, error)) ([]T, error) {
+	sizes := make([]string, 0, 7)
+	for _, column := range strings.Split(columns, ",") {
+		sizes = append(sizes, "COALESCE(octet_length("+column+"),0)")
+	}
+	// Every stored byte can expand into a 6-byte JSON escape, so this
+	// over-estimates the encoded row; 64 more bytes cover its quotes and
+	// separators. The first row of a page is always kept so a row larger than
+	// the budget cannot stall the enumeration.
+	cost := "((" + strings.Join(sizes, "+") + ")*6+64)"
+	run := "SUM(" + cost + ") OVER (ORDER BY id ROWS UNBOUNDED PRECEDING)"
+	page := "SELECT " + columns + " FROM (SELECT " + columns + ", " + run + " AS run, " + run + "-" + cost + " AS spent FROM (SELECT " + columns + " FROM " + fromWhere + " AND id>? ORDER BY id LIMIT ?)) WHERE spent=0 OR run<=" + strconv.Itoa(maxListPageBytes) + " ORDER BY id"
+	out := []T{}
+	cursor := ""
+	for {
+		pageArgs := append(append([]any{}, args...), cursor, int64(maxList+1-len(out)))
+		r, err := db.Query(ctx, rhiza.QueryRequest{SQL: page, Args: pageArgs, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil {
+			return nil, err
+		}
+		if len(r.Rows) == 0 {
+			return out, nil
+		}
+		for _, row := range r.Rows {
+			item, err := decode(row)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, item)
+		}
+		id, ok := r.Rows[len(r.Rows)-1][0].(string)
+		if !ok {
+			return nil, ErrInvalid
+		}
+		cursor = id
+		if len(out) > maxList {
+			return nil, ErrConflict
+		}
+	}
+}
+
 type Field struct {
 	Name      string   `json:"name"`
 	Type      string   `json:"type"`
@@ -195,22 +251,7 @@ func (s *Store) ListDefinitions(ctx context.Context, authority func() (string, [
 	if g == "0" {
 		return nil, ErrUnauthorized
 	}
-	r, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT id,name,auth_method,enabled,revision,fields_json,providers_json FROM auth_collection_definitions WHERE deleted=0 AND (` + g + `) ORDER BY id LIMIT ?`, Args: append(a, int64(maxList+1)), Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil {
-		return nil, err
-	}
-	if len(r.Rows) > maxList {
-		return nil, ErrConflict
-	}
-	out := make([]Definition, 0, len(r.Rows))
-	for _, row := range r.Rows {
-		d, e := decodeDefinition(row)
-		if e != nil {
-			return nil, e
-		}
-		out = append(out, d)
-	}
-	return out, nil
+	return listRows(ctx, s.db, `id,name,auth_method,enabled,revision,fields_json,providers_json`, `auth_collection_definitions WHERE deleted=0 AND (`+g+`)`, a, decodeDefinition)
 }
 
 func (s *Store) CreateConnection(ctx context.Context, owner, collectionID string, definitionRevision int64, metadata json.RawMessage, authority func() (string, []any)) (Connection, error) {
@@ -304,22 +345,8 @@ func (s *Store) ListConnections(ctx context.Context, owner, collectionID string,
 	if g == "0" {
 		return nil, ErrUnauthorized
 	}
-	r, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT id,collection_id,owner_subject,state,revision,definition_revision,metadata_json FROM auth_collection_connections WHERE owner_subject=? AND collection_id=? AND EXISTS(SELECT 1 FROM identity_users u WHERE u.subject=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?)) AND (` + g + `) ORDER BY id LIMIT ?`, Args: append(append([]any{owner, collectionID, owner, s.now().UnixMilli()}, a...), int64(maxList+1)), Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil {
-		return nil, err
-	}
-	if len(r.Rows) > maxList {
-		return nil, ErrConflict
-	}
-	out := make([]Connection, 0, len(r.Rows))
-	for _, row := range r.Rows {
-		c, e := decodeConnection(row)
-		if e != nil {
-			return nil, e
-		}
-		out = append(out, c)
-	}
-	return out, nil
+	args := append([]any{owner, collectionID, owner, s.now().UnixMilli()}, a...)
+	return listRows(ctx, s.db, `id,collection_id,owner_subject,state,revision,definition_revision,metadata_json`, `auth_collection_connections WHERE owner_subject=? AND collection_id=? AND EXISTS(SELECT 1 FROM identity_users u WHERE u.subject=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?)) AND (`+g+`)`, args, decodeConnection)
 }
 
 func (s *Store) getConnection(ctx context.Context, owner, collectionID, id string, authority func() (string, []any)) (Connection, error) {

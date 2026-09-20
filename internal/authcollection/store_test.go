@@ -380,6 +380,77 @@ func TestDefinitionCapacityBoundIsExclusive(t *testing.T) {
 	}
 }
 
+// seedLargeDefinitions stores rows whose aggregate size exceeds Rhiza's
+// 16-MiB encoded-result budget: each fields_json is the largest definition the
+// 8-KiB HTTP limit can produce once <, > and & expand to six-byte escapes.
+func seedLargeDefinitions(t *testing.T, ctx context.Context, s *Store, n int) int64 {
+	t.Helper()
+	options := make([]string, 64)
+	for i := range options {
+		options[i] = strings.Repeat("<", 100) + strconv.Itoa(i)
+	}
+	payload, err := json.Marshal([]Field{{Name: "tenant", Type: "enum", Options: options}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A 128-KiB encoded-command ceiling caps how many large rows fit in one
+	// statement, so seed in pairs instead of the 111 rows seedDefinitions uses.
+	const perStatement = 2
+	for start, batch := 0, 0; start < n; start, batch = start+perStatement, batch+1 {
+		end := start + perStatement
+		if end > n {
+			end = n
+		}
+		values := make([]string, 0, end-start)
+		args := make([]any, 0, (end-start)*9)
+		for i := start; i < end; i++ {
+			id := "large-" + strconv.Itoa(i)
+			values = append(values, "(?,?,?,?,?,?,?,?,0)")
+			args = append(args, id, id, "api_key", int64(1), int64(1), "generation", string(payload), "[]")
+		}
+		request := rhiza.ExecuteRequest{RequestID: "auth-collection-large-seed-" + strconv.Itoa(batch), SQL: "INSERT INTO auth_collection_definitions(id,name,auth_method,enabled,revision,generation,fields_json,providers_json,deleted) VALUES " + strings.Join(values, ","), Args: args}
+		if _, err := storage.Execute(ctx, s.db, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return int64(len(payload))
+}
+
+// Accepted rows can aggregate past the per-query result budget Rhiza enforces,
+// so listing must page internally instead of failing once the table grows.
+func TestDefinitionListPagesPastResultBudget(t *testing.T) {
+	s, ctx := collectionFixture(t)
+	// Stored escapes re-expand (a stored backslash becomes two bytes), so this
+	// many rows can no longer be returned by a single unpaged query: the same
+	// fixture reproduced "result exceeds 16777216 encoded bytes" before the
+	// store paged internally.
+	const rows = 400
+	seedLargeDefinitions(t, ctx, s, rows)
+	list, err := s.ListDefinitions(ctx, allow())
+	if err != nil {
+		t.Fatalf("list oversized definitions=%v", err)
+	}
+	if len(list) != rows {
+		t.Fatalf("list oversized definitions rows=%d want %d", len(list), rows)
+	}
+	// Rows come back in id order, which is lexicographic here.
+	seen := map[string]bool{}
+	for i, d := range list {
+		if len(d.Fields) != 1 || d.Fields[0].Type != "enum" || len(d.Fields[0].Options) != 64 {
+			t.Fatalf("row %d has wrong fields", i)
+		}
+		if seen[d.ID] {
+			t.Fatalf("row %d repeats %q", i, d.ID)
+		}
+		seen[d.ID] = true
+	}
+	for i := 0; i < rows; i++ {
+		if id := "large-" + strconv.Itoa(i); !seen[id] {
+			t.Fatalf("list omitted %q", id)
+		}
+	}
+}
+
 func TestConnectionCapacityKeepsListEnumerable(t *testing.T) {
 	s, ctx := collectionFixture(t)
 	d, err := s.CreateDefinition(ctx, definition(), allow())

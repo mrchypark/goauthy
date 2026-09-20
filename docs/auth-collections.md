@@ -465,7 +465,9 @@ OAuth credential lifecycle은 별도 `internal/saas` 저장/HTTP 계층이 담�
 현재 세션에서 결정한다. API key나 OAuth bearer로 브라우저 권한을 대체하지 않는다.
 지원 필드는 string/boolean/integer/enum, 최대 32개이며 정수는 int64 범위다.
 본문 전체는 기존 strict JSON 8 KiB 제한을 따른다. 목록은 최대 1,000개를
-초과하면 오류이며 아직 pagination은 없다. 활성 연결 레코드가 있는 정의의
+초과하면 오류이며 아직 pagination은 없다. 저장된 행의 합계가 엔진의 쿼리당
+결과 예산(16 MiB)을 넘어도 목록은 내부적으로 나눠 읽어 1,000개까지 응답한다.
+활성 연결 레코드가 있는 정의의
 인증 방식/필드 변경과 삭제는 충돌로 거절한다. 삭제된 정의 ID는 재사용하지 않는다.
 
 관리자는 `/auth/v1/admin/collections`에서 정의를 만들고 수정·삭제하며,
