@@ -12,6 +12,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/account"
@@ -489,6 +490,39 @@ type dynamicUpstreamDispatcher struct {
 	localHooks      upstreamprovider.LocalLoginHooks
 	linkHooks       upstreamprovider.LinkHooks
 	revoke          func(context.Context, oauth.UpstreamLogout) error
+	// client optionally replaces the JWKS HTTP client. A nil client keeps the
+	// package default, so every managed provider shares one connection pool.
+	client     *http.Client
+	verifierMu sync.Mutex
+	verifiers  map[string]*upstreamprovider.JWKSVerifier
+}
+
+// maxDynamicJWKSVerifiers bounds the per-dispatcher verifier cache. Managed
+// provider versions are unbounded, so the whole working set is dropped at the
+// limit instead of tracking eviction order.
+const maxDynamicJWKSVerifiers = 64
+
+// jwksVerifier returns the shared verifier for an immutable provider
+// configuration. The identity includes the runtime version, so a configuration
+// change selects a fresh cache instead of reusing keys fetched under the old
+// one. Sharing the verifier keeps JWKS cache entries and in-flight fetches
+// across requests from unauthenticated callers.
+func (d *dynamicUpstreamDispatcher) jwksVerifier(providerID string, cfg upstreamprovider.Config) (*upstreamprovider.JWKSVerifier, error) {
+	key := cfg.Issuer + "\x00" + cfg.JWKSURI + "\x00" + cfg.RuntimeVersion
+	d.verifierMu.Lock()
+	defer d.verifierMu.Unlock()
+	if verifier, ok := d.verifiers[key]; ok {
+		return verifier, nil
+	}
+	verifier, err := upstreamprovider.NewJWKSVerifier(map[string]upstreamprovider.Config{providerID: cfg}, d.client)
+	if err != nil {
+		return nil, err
+	}
+	if d.verifiers == nil || len(d.verifiers) >= maxDynamicJWKSVerifiers {
+		d.verifiers = make(map[string]*upstreamprovider.JWKSVerifier, maxDynamicJWKSVerifiers)
+	}
+	d.verifiers[key] = verifier
+	return verifier, nil
 }
 
 func newDynamicUpstreamDispatcher(
@@ -542,7 +576,7 @@ func (d *dynamicUpstreamDispatcher) ServeHTTP(w http.ResponseWriter, r *http.Req
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	verifier, err := upstreamprovider.NewJWKSVerifier(configs, nil)
+	verifier, err := d.jwksVerifier(providerID, cfg)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
@@ -599,7 +633,7 @@ func (d *dynamicUpstreamDispatcher) linkStartHandler() http.Handler {
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 			return
 		}
-		verifier, err := upstreamprovider.NewJWKSVerifier(configs, nil)
+		verifier, err := d.jwksVerifier(providerID, cfg)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 			return

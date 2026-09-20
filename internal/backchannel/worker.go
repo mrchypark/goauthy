@@ -119,8 +119,11 @@ func (w Worker) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case now := <-ticker.C:
-			w.stepOrReport(ctx, now.UTC())
+		case <-ticker.C:
+			// A tick buffered during a slow pass is already old when it is
+			// serviced; attempts and durable timestamps must carry the time the
+			// work actually begins.
+			w.stepOrReport(ctx, time.Now().UTC())
 		}
 	}
 }
@@ -145,7 +148,10 @@ func (w Worker) Step(ctx context.Context, now time.Time) error {
 	}
 	now = now.UTC()
 	claimStarted := time.Now()
-	d, found, err := w.claim(ctx, now)
+	// The recorded lease and the request budget are derived from this one clock
+	// read, so an aged reconciliation time cannot store a lease that ends before
+	// the attempt it authorises.
+	d, found, err := w.claim(ctx, now, claimStarted.Add(w.LeaseDuration))
 	if err != nil || !found {
 		return err
 	}
@@ -212,7 +218,10 @@ func (w Worker) valid() error {
 	return nil
 }
 
-func (w Worker) claim(ctx context.Context, now time.Time) (delivery, bool, error) {
+// claim elects a sender for at most one due record. now is the reconciliation
+// time used by the due and expiry predicates; leaseUntil is the lease recorded
+// for this attempt, read from the worker clock as the attempt begins.
+func (w Worker) claim(ctx context.Context, now, leaseUntil time.Time) (delivery, bool, error) {
 	// A local candidate read intentionally permits a stale empty result: the next
 	// tick retries it. It never grants a lease; the conditional replicated UPDATE
 	// below is the sole winner election, followed by a linearizable winner read.
@@ -245,7 +254,7 @@ func (w Worker) claim(ctx context.Context, now time.Time) (delivery, bool, error
 		SET lease_token = ?, lease_until_unix_ms = ?
 		WHERE event_id = ? AND client_id = ? AND delivered_at_unix_ms IS NULL AND failed_at_unix_ms IS NULL
 			AND next_attempt_at_unix_ms <= ? AND (lease_until_unix_ms IS NULL OR lease_until_unix_ms <= ?)`,
-		Args: []any{lease, now.Add(w.LeaseDuration).UnixMilli(), d.eventID, d.clientID, now.UnixMilli(), now.UnixMilli()}})
+		Args: []any{lease, leaseUntil.UnixMilli(), d.eventID, d.clientID, now.UnixMilli(), now.UnixMilli()}})
 	if err != nil {
 		return delivery{}, false, err
 	}

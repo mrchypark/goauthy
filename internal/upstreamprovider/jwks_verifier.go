@@ -44,6 +44,22 @@ type jwksFetch struct {
 	err  error
 }
 
+// defaultClient is shared by every verifier created without an explicit client
+// so connection pools and TLS sessions are reused across verifiers instead of
+// being rebuilt per dispatch.
+var defaultClient = sync.OnceValue(func() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DisableCompression = true
+	if transport.TLSClientConfig == nil {
+		transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	} else {
+		transport.TLSClientConfig = transport.TLSClientConfig.Clone()
+		transport.TLSClientConfig.MinVersion = tls.VersionTLS12
+	}
+	return &http.Client{Transport: transport, Timeout: jwksTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+})
+
 // JWKSVerifier verifies OIDC ID tokens using configured issuer JWKS endpoints.
 type JWKSVerifier struct {
 	jwksByIssuer map[string]string
@@ -78,16 +94,7 @@ func NewJWKSVerifier(configs map[string]Config, client *http.Client) (*JWKSVerif
 		v.jwksByIssuer[cfg.Issuer] = cfg.JWKSURI
 	}
 	if client == nil {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.Proxy = nil
-		transport.DisableCompression = true
-		if transport.TLSClientConfig == nil {
-			transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-		} else {
-			transport.TLSClientConfig = transport.TLSClientConfig.Clone()
-			transport.TLSClientConfig.MinVersion = tls.VersionTLS12
-		}
-		v.client = &http.Client{Transport: transport, Timeout: jwksTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		v.client = defaultClient()
 	} else {
 		cloned := *client
 		if cloned.Timeout == 0 || cloned.Timeout > jwksTimeout {
@@ -260,7 +267,6 @@ func publicKeyForAlgorithm(key interface{}, algorithm string) bool {
 		return false
 	}
 }
-
 
 func decodeIDTokenClaims(payload []byte) (*IDTokenClaims, error) {
 	var raw struct {

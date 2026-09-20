@@ -376,6 +376,61 @@ func TestWorkerMaxAttempts(t *testing.T) {
 	}
 }
 
+// TestWorkerAgedTickKeepsAttemptWithinRecordedLease covers a tick that was
+// buffered during a slow pass: the lease stored by the claim must cover the
+// attempt's own deadline, so a competing worker cannot reclaim the job while
+// the request is still inside the window that lease authorised.
+func TestWorkerAgedTickKeepsAttemptWithinRecordedLease(t *testing.T) {
+	w, db := newTestWorker(t)
+	competing := w
+	competing.WorkerID = "competing"
+	var competingLoads atomic.Int64
+	competing.LoadSigningKey = func(context.Context) (oidc.SigningKey, error) {
+		competingLoads.Add(1)
+		return oidc.SigningKey{}, context.DeadlineExceeded
+	}
+
+	aged := time.Now().UTC().Add(-2 * time.Minute).Truncate(time.Millisecond)
+	insertDelivery(t, db, "event-aged-tick", "client-1", "sid-aged", "https://8.8.8.8/logout", false, false, aged)
+
+	var recordedLease, attemptDeadline time.Time
+	var deadlineSet bool
+	w.LoadSigningKey = func(ctx context.Context) (oidc.SigningKey, error) {
+		attemptDeadline, deadlineSet = ctx.Deadline()
+		row, err := db.Query(context.Background(), rhiza.QueryRequest{SQL: `SELECT lease_until_unix_ms FROM oidc_backchannel_deliveries WHERE event_id=? AND client_id=?`, Args: []any{"event-aged-tick", "client-1"}, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil || len(row.Rows) != 1 || row.Rows[0][0] == nil {
+			t.Errorf("recorded lease unavailable: rows=%#v err=%v", row.Rows, err)
+			return oidc.SigningKey{}, context.DeadlineExceeded
+		}
+		recordedLease = time.UnixMilli(row.Rows[0][0].(int64))
+		// A competing worker polling while this request is in flight must not take
+		// over a job that is still inside its recorded lease.
+		if err := competing.Step(context.Background(), time.Now().UTC()); err != nil {
+			t.Errorf("competing step: %v", err)
+		}
+		return oidc.SigningKey{}, context.DeadlineExceeded
+	}
+
+	stepStart := time.Now()
+	err := w.Step(context.Background(), aged)
+	if got := competingLoads.Load(); got != 0 {
+		t.Fatalf("competing worker reclaimed the job inside its lease: %d loads", got)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deadlineSet {
+		t.Fatal("attempt context has no deadline")
+	}
+	if !recordedLease.After(stepStart) {
+		t.Fatalf("recorded lease %v does not outlive attempt start %v", recordedLease, stepStart)
+	}
+	// The lease is stored at millisecond resolution, so allow its truncation.
+	if attemptDeadline.After(recordedLease.Add(2 * time.Millisecond)) {
+		t.Fatalf("attempt deadline %v outlives recorded lease %v", attemptDeadline, recordedLease)
+	}
+}
+
 func TestWorkerBoundsKeyLoadToLease(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0).UTC()
 	w, db := newTestWorker(t)
