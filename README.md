@@ -629,10 +629,13 @@ go run ./cmd/goauthy config dump-effective
 ```
 
 `config dump-effective` reports only non-secret values and boolean presence for
-static object-store credentials. This command is intentionally a preflight for
-the configuration already centralized in `applicationConfig`; settings that have
-not yet been moved into that boundary continue to be validated during normal
-startup.
+static object-store credentials. `config check` validates the complete startup
+configuration before Rhiza is opened, bootstrap mutations run, or listeners
+start: the centralised `applicationConfig` slice plus the runtime parsers for
+settings, referenced file contents, and cross-field rules. Genuinely
+store-dependent admission and master-key material at their default paths are
+validated during startup instead, so the documented preflight keeps working
+without mounted secrets.
 
 `goauthy-password` reads one password line from standard input and prints only
 its current-policy Argon2id PHC value. Mount that value as the bootstrap PHC
