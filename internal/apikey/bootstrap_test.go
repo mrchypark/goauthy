@@ -294,3 +294,86 @@ func assertBootstrapCount(t *testing.T, db *rhiza.DB, want int64) {
 		t.Fatalf("api key count=%#v err=%v want=%d", rows.Rows, err, want)
 	}
 }
+
+// GA-CONFIG-001: preflight validation tests for the bootstrap API-key file.
+
+func TestValidateBootstrapFileAcceptsValidPlainFile(t *testing.T) {
+	dir := t.TempDir()
+	valid := "[{\"name\":\"runner\",\"exp\":2000000000,\"secret\":{\"Plain\":\"" + bootstrapTestSecret + "\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]"
+	path := writeBootstrapTestFile(t, dir, "bootstrap.json", valid)
+	if err := ValidateBootstrapFile(path, nil, false); err != nil {
+		t.Fatalf("valid plain file rejected: %v", err)
+	}
+}
+
+func TestValidateBootstrapFileRejectsMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nonexistent.json")
+	err := ValidateBootstrapFile(path, nil, false)
+	if err == nil {
+		t.Fatal("missing file accepted")
+	}
+	if !strings.Contains(err.Error(), "API-key bootstrap file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateBootstrapFileRejectsMalformedJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := writeBootstrapTestFile(t, dir, "bad.json", "not valid json")
+	err := ValidateBootstrapFile(path, nil, false)
+	if err == nil {
+		t.Fatal("malformed JSON accepted")
+	}
+	if !strings.Contains(err.Error(), "invalid") && !strings.Contains(err.Error(), "JSON") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateBootstrapFileRejectsDuplicateNames(t *testing.T) {
+	dir := t.TempDir()
+	dup := "[{\"name\":\"dup\",\"secret\":{\"Plain\":\"" + bootstrapTestSecret + "\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]},{\"name\":\"dup\",\"secret\":{\"Plain\":\"" + bootstrapTestSecret + "\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]"
+	path := writeBootstrapTestFile(t, dir, "dup.json", dup)
+	err := ValidateBootstrapFile(path, nil, false)
+	if err == nil {
+		t.Fatal("duplicate names accepted")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateBootstrapFileAcceptsEncryptedMode(t *testing.T) {
+	dir := t.TempDir()
+	enc := "[{\"name\":\"secret-key\",\"secret\":{\"Encrypted\":\"ciphertext\"}}]"
+	path := writeBootstrapTestFile(t, dir, "encrypted.json", enc)
+	if err := ValidateBootstrapFile(path, nil, false); err != nil {
+		t.Fatalf("encrypted-mode file rejected: %v", err)
+	}
+}
+
+func TestValidateBootstrapFileAcceptsGenerateMode(t *testing.T) {
+	dir := t.TempDir()
+	gen := "[{\"name\":\"gen-key\",\"secret\":\"generate\",\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]"
+	path := writeBootstrapTestFile(t, dir, "generate.json", gen)
+	if err := ValidateBootstrapFile(path, nil, false); err != nil {
+		t.Fatalf("generate-mode file rejected: %v", err)
+	}
+}
+
+func TestValidateBootstrapFileAcceptsEmptyArray(t *testing.T) {
+	dir := t.TempDir()
+	path := writeBootstrapTestFile(t, dir, "empty.json", "[]")
+	if err := ValidateBootstrapFile(path, nil, false); err != nil {
+		t.Fatalf("empty array rejected: %v", err)
+	}
+}
+
+func writeBootstrapTestFile(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}

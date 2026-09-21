@@ -584,8 +584,9 @@ const valueListColumns = "key,encrypted,value,identity"
 // over-estimates the encoded row; 64 more bytes cover its quotes and separators.
 const valueRowCost = "((COALESCE(octet_length(value),0)+octet_length(key)+octet_length(identity))*6+64)"
 
-// The first row of a page is always kept, so a row larger than the budget
-// cannot stall the enumeration.
+// A row is admitted when everything before it already fits the budget, so one
+// oversized row cannot end the page early; valueRows then drops the trailing
+// row whose running total overruns and resumes from it on the next page.
 const valueRowRun = "SUM(" + valueRowCost + ") OVER (ORDER BY key ROWS UNBOUNDED PRECEDING)"
 
 func (s *Store) keyRows(ctx context.Context, a Access, limit int, search, cursor string) ([][]any, error) {

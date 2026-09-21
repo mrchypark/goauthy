@@ -84,25 +84,33 @@ func TestKVOperationsCatalogMatchesAllRoutes(t *testing.T) {
 		}
 	}
 	// Every listing is a keyset page: it accepts a cursor and answers a
-	// continuing page with 206 plus the token that resumes it.
-	for path, operationID := range map[string]string{
-		"/auth/v1/kv/ns":             "GET",
-		"/auth/v1/kv/ns/{ns}/access": "GET",
-		"/auth/v1/kv/ns/{ns}/values": "GET",
-		"/auth/v1/kv/keys":           "GET",
-		"/auth/v1/kv/values":         "GET",
+	// continuing page on 200 with the token that resumes it. Only the key and
+	// value listings filter by a search term; the namespace and access listings
+	// document no search parameter.
+	for path, search := range map[string]bool{
+		"/auth/v1/kv/ns":             false,
+		"/auth/v1/kv/ns/{ns}/access": false,
+		"/auth/v1/kv/ns/{ns}/values": true,
+		"/auth/v1/kv/keys":           true,
+		"/auth/v1/kv/values":         true,
 	} {
-		op := doc.Paths.Value(path).GetOperation(operationID)
-		var cursor bool
+		op := doc.Paths.Value(path).GetOperation("GET")
+		var cursor, documented bool
 		for _, p := range op.Parameters {
 			cursor = cursor || p.Value.Name == "cursor"
+			documented = documented || p.Value.Name == "search"
 		}
 		if !cursor {
 			t.Fatalf("%s must accept a cursor", path)
 		}
-		partial := op.Responses.Value("206")
-		if partial == nil || partial.Value.Headers["x-continuation-token"] == nil {
-			t.Fatalf("%s must document 206 with a continuation token", path)
+		if documented != search {
+			t.Fatalf("%s documents search=%v want %v", path, documented, search)
+		}
+		if op.Responses.Value("206") != nil {
+			t.Fatalf("%s must not document 206", path)
+		}
+		if op.Responses.Value("200").Value.Headers["x-continuation-token"] == nil {
+			t.Fatalf("%s must document a continuation token on 200", path)
 		}
 	}
 }

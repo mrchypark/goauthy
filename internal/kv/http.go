@@ -115,11 +115,11 @@ func jsonw(w http.ResponseWriter, v any) {
 }
 
 // jsonPage writes a list response. A listing that continues on a following page
-// is partial content carrying the token that resumes exactly after this page.
+// stays 200 and carries the token that resumes exactly after this page; 206
+// would require a Content-Range that a keyset cursor does not produce.
 func jsonPage(w http.ResponseWriter, v any, next string) {
 	if next != "" {
 		w.Header().Set("X-Continuation-Token", next)
-		w.WriteHeader(http.StatusPartialContent)
 	}
 	jsonw(w, v)
 }

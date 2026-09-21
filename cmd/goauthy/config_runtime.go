@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/backchannel"
 	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/credential"
@@ -160,6 +161,15 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 	// no API-key bootstrap input after Rhiza is open and mutations have committed.
 	if generatedBootstrap.artifact != "" && strings.TrimSpace(getenv("GOAUTHY_API_KEY_BOOTSTRAP_FILE")) == "" {
 		return errors.New("generated bootstrap requires API-key bootstrap input")
+	}
+	// GA-CONFIG-001: validate the bootstrap API-key file before the secret store
+	// is opened. Encrypted and generate-mode entries are out of scope because they
+	// require the master key or generated artifact that only exists after the store
+	// is opened; those modes are accepted without validation to avoid false failures.
+	if path := getenv("GOAUTHY_API_KEY_BOOTSTRAP_FILE"); path != "" {
+		if err := apikey.ValidateBootstrapFile(path, nil, false); err != nil {
+			return err
+		}
 	}
 	registrationToken, err := dcrRegistrationToken(getenv)
 	if err != nil {

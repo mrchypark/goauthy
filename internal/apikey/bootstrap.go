@@ -224,6 +224,40 @@ func readBootstrapFile(path string) ([]byte, error) {
 	return content, nil
 }
 
+// ValidateBootstrapFile checks the structure and content of a bootstrap
+// API-key file before the secret store is opened. It verifies that the file
+// exists, is readable, contains valid JSON with no duplicate field names or
+// key names, and that every entry has a structurally valid plain secret.
+//
+// Encrypted and generate-mode entries are accepted without validation because
+// they require resources (master key, generated artifact) that only exist
+// after the store is opened. Passing decrypt=nil and allowGenerate=false
+// causes the parser to surface ErrUnsupportedSecret for those modes; this
+// function treats that error as "out of scope" and returns nil.
+//
+// The function is side-effect-free: it does not touch the database, Rhiza,
+// or global state and does not create the key directory or write anything.
+// The caller must not reuse the parsed result; the real bootstrap path reads
+// the file again.
+func ValidateBootstrapFile(path string, decrypt func([]byte) ([]byte, error), allowGenerate bool) error {
+	content, err := readBootstrapFile(path)
+	if err != nil {
+		return err
+	}
+	if len(bytes.TrimSpace(content)) == 0 {
+		return nil
+	}
+	keys, err := parseBootstrapKeysWithDecrypt(content, decrypt, allowGenerate)
+	if err != nil {
+		if errors.Is(err, ErrUnsupportedSecret) {
+			return nil
+		}
+		return err
+	}
+	wipeBootstrapKeys(keys)
+	return nil
+}
+
 func parseBootstrapKeys(content []byte) ([]bootstrapKey, error) {
 	return parseBootstrapKeysWithDecrypt(content, nil, false)
 }
