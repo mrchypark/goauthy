@@ -9,6 +9,7 @@ import (
 
 	"github.com/mrchypark/goauthy/internal/clients"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/loginpolicy"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/handler/oauth2"
 )
@@ -22,11 +23,12 @@ type passwordGrantHandler struct {
 	*oauth2.ResourceOwnerPasswordCredentialsGrantHandler
 	*Store
 	users             *identity.Store
+	locks             *loginpolicy.Store
 	onPasswordExpired func(context.Context, string) error
 }
 
 func newPasswordGrantHandler(store *Store, users *identity.Store, strategy oauth2.CoreStrategy, config *fosite.Config) *passwordGrantHandler {
-	h := &passwordGrantHandler{Store: store, users: users}
+	h := &passwordGrantHandler{Store: store, users: users, locks: loginpolicy.NewStore(store.db)}
 	h.ResourceOwnerPasswordCredentialsGrantHandler = &oauth2.ResourceOwnerPasswordCredentialsGrantHandler{
 		HandleHelper: &oauth2.HandleHelper{AccessTokenStrategy: strategy, AccessTokenStorage: store, Config: config},
 		ResourceOwnerPasswordCredentialsGrantStorage: h, RefreshTokenStrategy: strategy, Config: config,
@@ -36,8 +38,17 @@ func newPasswordGrantHandler(store *Store, users *identity.Store, strategy oauth
 
 func (h *passwordGrantHandler) Authenticate(ctx context.Context, username, password string) (string, error) {
 	snapshot, ok := ctx.Value(passwordAuthenticationKey{}).(*identity.Authentication)
-	if !ok || h.users == nil {
+	if !ok || h.users == nil || h.locks == nil {
 		return "", fosite.ErrServerError
+	}
+	// The browser path refuses an actively locked account before checking
+	// credentials; this grant must not be a way around that lock (GA-OAUTH-006).
+	locked, _, err := h.locks.CheckAccountLock(ctx, loginpolicy.AccountStuffingDigest(username), time.Now().UTC())
+	if err != nil {
+		return "", fosite.ErrServerError
+	}
+	if locked {
+		return "", fosite.ErrAccessDenied.WithHint("Account locked.")
 	}
 	auth, err := h.users.AuthenticatePasswordGrant(ctx, username, []byte(password), h.onPasswordExpired)
 	if errors.Is(err, identity.ErrPasswordExpired) {
@@ -61,6 +72,11 @@ func (h *passwordGrantHandler) HandleTokenEndpointRequest(ctx context.Context, r
 		return fosite.ErrUnknownRequest
 	}
 	if !request.GetClient().GetGrantTypes().Has("password") {
+		return fosite.ErrUnauthorizedClient
+	}
+	// Admission refuses force_mfa together with the password grant; this keeps
+	// rows written before that rule from issuing password-only tokens.
+	if h.forceMFA(request.GetClient()) {
 		return fosite.ErrUnauthorizedClient
 	}
 	form := request.GetRequestForm()

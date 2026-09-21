@@ -7,8 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/clients"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/loginpolicy"
+	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 	"github.com/ory/fosite"
@@ -175,5 +178,120 @@ func testPasswordGrantExpired(t *testing.T, withCallback bool) {
 		if callbackSubject != "expired-subject" {
 			t.Fatalf("callback subject=%q, want 'expired-subject'", callbackSubject)
 		}
+	}
+}
+
+// TestPasswordGrantRejectsForceMFAClient covers finding GA-OAUTH-005. A managed
+// client may not hold force_mfa together with the password grant, and a row that
+// already carries both must not reach password-only issuance.
+func TestPasswordGrantRejectsForceMFAClient(t *testing.T) {
+	db := oauthTestDB(t)
+	s := oauthTestServer(t, db, randomSecret(t))
+	users, err := identity.NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	phc, err := credential.Hash([]byte("correct password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := users.BootstrapUser(t.Context(), "force-mfa-subject", "force-mfa-user", phc); err != nil {
+		t.Fatal(err)
+	}
+
+	guard := func() (string, []any) { return "1", nil }
+	managed := clients.NewStore(db, &oidc.Keyring{})
+	in := clients.NewRequest{ID: "force-mfa-password", RedirectURIs: []string{"https://rp.example.test/callback"}, Scopes: []string{"goauthy.read"}, DefaultScopes: []string{"goauthy.read"}, GrantTypes: []string{"password"}, ForceMFA: true}
+	if _, err := managed.CreateWithGuard(t.Context(), in, guard); !errors.Is(err, clients.ErrInvalid) {
+		t.Fatalf("force_mfa password client admitted: %v", err)
+	}
+	in.ForceMFA = false
+	created, err := managed.CreateWithGuard(t.Context(), in, guard)
+	if err != nil {
+		t.Fatalf("password client without force_mfa rejected: %v", err)
+	}
+	update := clients.UpdateRequest{Confidential: created.Confidential, RedirectURIs: created.RedirectURIs, Enabled: true, Scopes: created.Scopes, DefaultScopes: created.DefaultScopes, GrantTypes: []string{"password"}, ForceMFA: true}
+	if _, err := managed.UpdateWithGuard(t.Context(), created.ID, created.Revision, update, guard); !errors.Is(err, clients.ErrInvalid) {
+		t.Fatalf("force_mfa password client update admitted: %v", err)
+	}
+	update.GrantTypes = []string{"authorization_code"}
+	if _, err := managed.UpdateWithGuard(t.Context(), created.ID, created.Revision, update, guard); err != nil {
+		t.Fatalf("force_mfa authorization_code client rejected: %v", err)
+	}
+
+	client := seedManagedClient(t, db, 1, "force-mfa-password-generation", true)
+	client.GrantTypes = []string{"password"}
+	client.ForceMFA = true
+	h := newPasswordGrantHandler(s.store, users, s.accessTokens.(oauth2.CoreStrategy), &fosite.Config{AccessTokenLifespan: time.Hour, RefreshTokenLifespan: time.Hour})
+	attempt := func() error {
+		r := fosite.NewAccessRequest(&fosite.DefaultSession{})
+		r.GrantTypes = fosite.Arguments{"password"}
+		r.Client = client
+		r.Form = url.Values{"grant_type": {"password"}, "username": {"force-mfa-user"}, "password": {"correct password"}, "scope": {"goauthy.read"}}
+		r.SetRequestedScopes(fosite.Arguments{"goauthy.read"})
+		return h.HandleTokenEndpointRequest(t.Context(), r)
+	}
+	if err := attempt(); !errors.Is(err, fosite.ErrUnauthorizedClient) {
+		t.Fatalf("force_mfa client reached password issuance: %v", err)
+	}
+	client.ForceMFA = false
+	if err := attempt(); err != nil {
+		t.Fatalf("password grant broke without force_mfa: %v", err)
+	}
+}
+
+// TestPasswordGrantRefusesLockedAccount covers finding GA-OAUTH-006. The direct
+// password grant must honor the credential-stuffing account lock that the
+// browser login path already enforces.
+func TestPasswordGrantRefusesLockedAccount(t *testing.T) {
+	db := oauthTestDB(t)
+	s := oauthTestServer(t, db, randomSecret(t))
+	users, err := identity.NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	phc, err := credential.Hash([]byte("correct password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := users.BootstrapUser(t.Context(), "locked-subject", "locked-user", phc); err != nil {
+		t.Fatal(err)
+	}
+	client := seedManagedClient(t, db, 1, "locked-client-generation", true)
+	client.GrantTypes = []string{"password"}
+	h := newPasswordGrantHandler(s.store, users, s.accessTokens.(oauth2.CoreStrategy), &fosite.Config{AccessTokenLifespan: time.Hour, RefreshTokenLifespan: time.Hour})
+
+	stuffing := loginpolicy.NewStore(db)
+	digest := loginpolicy.AccountStuffingDigest("locked-user")
+	lockedAt := time.Now().UTC()
+	for _, ip := range []string{"192.0.2.1", "192.0.2.2", "192.0.2.3", "192.0.2.4", "192.0.2.5"} {
+		if _, _, err := stuffing.RecordAccountFailure(t.Context(), digest, ip, lockedAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if locked, _, err := stuffing.CheckAccountLock(t.Context(), digest, lockedAt); err != nil || !locked {
+		t.Fatalf("lock fixture not established: locked=%t err=%v", locked, err)
+	}
+
+	attempt := func() error {
+		r := fosite.NewAccessRequest(&fosite.DefaultSession{})
+		r.GrantTypes = fosite.Arguments{"password"}
+		r.Client = client
+		r.Form = url.Values{"grant_type": {"password"}, "username": {"locked-user"}, "password": {"correct password"}, "scope": {"goauthy.read"}}
+		r.SetRequestedScopes(fosite.Arguments{"goauthy.read"})
+		return h.HandleTokenEndpointRequest(t.Context(), r)
+	}
+	if err := attempt(); !errors.Is(err, fosite.ErrAccessDenied) {
+		t.Fatalf("locked account authenticated through the password grant: %v", err)
+	}
+	rows, err := db.Query(t.Context(), rhiza.QueryRequest{SQL: `SELECT COUNT(*) FROM oauth_access_tokens`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(rows.Rows) != 1 || rows.Rows[0][0] != int64(0) {
+		t.Fatalf("token issued for a locked account: rows=%#v err=%v", rows.Rows, err)
+	}
+	if err := stuffing.ClearAccountLock(t.Context(), digest); err != nil {
+		t.Fatal(err)
+	}
+	if err := attempt(); err != nil {
+		t.Fatalf("unlocked account refused: %v", err)
 	}
 }
