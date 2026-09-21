@@ -9,6 +9,7 @@ import (
 )
 
 func TestBindConnectionUseAuthorizerRejectsNil(t *testing.T) {
+	t.Parallel()
 	h, _, _, _ := membershipHTTPFixture(t)
 	if err := h.BindConnectionUseAuthorizer(nil); err == nil {
 		t.Fatal("nil authorizer accepted")
@@ -22,6 +23,7 @@ func TestBindConnectionUseAuthorizerRejectsNil(t *testing.T) {
 }
 
 func TestInvokeConnectionGrantHTTPBoundary(t *testing.T) {
+	t.Parallel()
 	h, store, _, _ := membershipHTTPFixture(t)
 	if err := h.BindSaaSCredentials(oauthCredentialHTTPStore(t, store)); err != nil {
 		t.Fatal(err)

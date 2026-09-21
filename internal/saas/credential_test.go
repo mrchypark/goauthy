@@ -30,6 +30,7 @@ func credentialKeys(t *testing.T, active string, ids ...string) *oidc.Keyring {
 }
 
 func TestCredentialEnvelopeBindsIdentityAndTokenVersion(t *testing.T) {
+	t.Parallel()
 	keys := credentialKeys(t, "key-a", "key-a")
 	binding := credentialBinding{"owner", "collection", "connection", "provider", "generation", 1}
 	value := credential{AccessToken: "private-access", RefreshToken: "private-refresh", ExpiresAtUnixMS: 1700000000000, Scopes: []string{"read"}}
@@ -65,6 +66,7 @@ func TestCredentialEnvelopeBindsIdentityAndTokenVersion(t *testing.T) {
 }
 
 func TestCredentialEnvelopeReusesMasterKeyRotation(t *testing.T) {
+	t.Parallel()
 	binding := credentialBinding{"owner", "collection", "connection", "provider", "generation", 1}
 	value := credential{AccessToken: "access"}
 	old := credentialKeys(t, "key-a", "key-a")

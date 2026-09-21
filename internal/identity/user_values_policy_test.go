@@ -6,6 +6,7 @@ import (
 )
 
 func TestUserValuesPolicy(t *testing.T) {
+	t.Parallel()
 	empty, value := "", "Value"
 	for _, tc := range []struct {
 		name          string
@@ -37,6 +38,7 @@ func TestUserValuesPolicy(t *testing.T) {
 }
 
 func TestUserValuesPolicyEveryNestedField(t *testing.T) {
+	t.Parallel()
 	empty, value := "", "Value"
 	for _, field := range []string{"birthdate", "street", "zip", "city", "country", "phone", "tz"} {
 		t.Run(field, func(t *testing.T) {

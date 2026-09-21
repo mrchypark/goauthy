@@ -12,6 +12,7 @@ import (
 )
 
 func TestResponseEnvelopeWritersRespectRetirementFence(t *testing.T) {
+	t.Parallel()
 	ctx, _, db := testStore(t)
 	old, replacement := rewrapKeyrings(t)
 	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)

@@ -11,6 +11,7 @@ import (
 )
 
 func TestUseGrantReviewedConnectorDigest(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b, connector := registeredAPIKeyFixture(t, "review-provider")
 	if _, err := store.PutBoundAPIKey(ctx, b.Owner, b.CollectionID, b.ConnectionID, 0, "bound", connector, connector.Digest(), credentialAuthority()); err != nil {
 		t.Fatal(err)
@@ -45,6 +46,7 @@ func TestUseGrantReviewedConnectorDigest(t *testing.T) {
 }
 
 func TestUseGrantReviewedConnectorDigestProviderFence(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b, connector := registeredAPIKeyFixture(t, "review-fence-provider")
 	if _, err := store.PutBoundAPIKey(ctx, b.Owner, b.CollectionID, b.ConnectionID, 0, "bound", connector, connector.Digest(), credentialAuthority()); err != nil {
 		t.Fatal(err)
@@ -75,6 +77,7 @@ func TestUseGrantReviewedConnectorDigestProviderFence(t *testing.T) {
 }
 
 func TestUseGrantReviewedConnectorDigestOAuth(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	providers, err := NewProviderStore(db, store.keys)
 	if err != nil {

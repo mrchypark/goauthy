@@ -16,6 +16,7 @@ import (
 )
 
 func TestEventsTestCreatesOnlyForCreateAuthority(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, cookie := userCreateHTTPFixture(t)
 	ctx := context.Background()
 	_, createToken, err := keys.Create(ctx, nil, apikey.Request{Name: "events-create", Access: []apikey.Access{{Group: "Events", AccessRights: []apikey.Right{apikey.Create}}}})
@@ -74,6 +75,7 @@ func csrfForTest(t *testing.T, value string) string {
 }
 
 func TestEventsTestGuardRejectsRevokedKeyBeforeInsert(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, _ := userCreateHTTPFixture(t)
 	_, token, err := keys.Create(context.Background(), nil, apikey.Request{Name: "events-hook", Access: []apikey.Access{{Group: "Events", AccessRights: []apikey.Right{apikey.Create}}}})
 	if err != nil {
@@ -102,6 +104,7 @@ func TestEventsTestGuardRejectsRevokedKeyBeforeInsert(t *testing.T) {
 }
 
 func TestEventsTestBrowserCommitRevocation(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, sql string }{
 		{"role", `DELETE FROM rbac_user_roles WHERE subject='admin'`},
 		{"session", `UPDATE browser_sessions SET revoked_at_unix_ms=1700000000000 WHERE subject='admin'`},
@@ -135,6 +138,7 @@ func TestEventsTestBrowserCommitRevocation(t *testing.T) {
 }
 
 func TestEventsTestBrowserAuthAndCSRFFailures(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, cookie := userCreateHTTPFixture(t)
 	_, revoked, err := keys.Create(context.Background(), nil, apikey.Request{Name: "revoked-event-creator", Access: []apikey.Access{{Group: "Events", AccessRights: []apikey.Right{apikey.Create}}}})
 	if err != nil {
@@ -179,6 +183,7 @@ func TestEventsTestBrowserAuthAndCSRFFailures(t *testing.T) {
 }
 
 func TestEventsTestDelegatedGroupAdminIsReadOnly(t *testing.T) {
+	t.Parallel()
 	h, store, _, _, _ := userCreateHTTPFixture(t)
 	ctx := context.Background()
 	insertActive(t, store.db, "delegated-events")

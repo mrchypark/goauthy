@@ -9,6 +9,7 @@ import (
 )
 
 func TestDeleteUserCleansOnlyOwnedUpstreamSessionBindings(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	ctx := t.Context()
 	for _, subject := range []string{"binding-target", "binding-other"} {

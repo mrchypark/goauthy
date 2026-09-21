@@ -7,6 +7,7 @@ import (
 )
 
 func TestPreferredUsernamePolicyDefaultsAndModes(t *testing.T) {
+	t.Parallel()
 	short, boundary := "ab", strings.Repeat("a", 62)
 	tooLong := strings.Repeat("a", 63)
 	for _, tc := range []struct {
@@ -72,6 +73,7 @@ func TestPreferredUsernamePolicyDefaultsAndModes(t *testing.T) {
 }
 
 func TestPreferredUsernamePolicySyntaxAndAdminExemption(t *testing.T) {
+	t.Parallel()
 	reserved := "admin"
 	if err := (*PreferredUsernamePolicy)(nil).ValidateSyntax(&reserved); err != nil {
 		t.Fatalf("syntax should not apply blacklist: %v", err)
@@ -112,6 +114,7 @@ func TestPreferredUsernamePolicySyntaxAndAdminExemption(t *testing.T) {
 }
 
 func TestPreferredUsernamePolicyConfigBoundsAndClone(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, mode, pattern string
 		blacklist           []string
@@ -158,6 +161,7 @@ func TestPreferredUsernamePolicyConfigBoundsAndClone(t *testing.T) {
 func ptr(v string) *string { return &v }
 
 func TestPreferredUsernamePolicyBlacklistCase(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		entry string
 		want  error

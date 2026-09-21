@@ -19,6 +19,7 @@ import (
 )
 
 func TestIdempotencyKeyIsExactlyOneBoundedHTTPToken(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name  string
 		setup func(*http.Request)
@@ -43,6 +44,7 @@ func TestIdempotencyKeyIsExactlyOneBoundedHTTPToken(t *testing.T) {
 }
 
 func TestAnonymousIdempotentCreateRateLimitReplayAndBoundary(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	store.keyring = testEnvelopeKeyring(t)
 	base := time.Date(2026, 9, 4, 12, 0, 30, 0, time.UTC)
@@ -96,6 +98,7 @@ func TestAnonymousIdempotentCreateRateLimitReplayAndBoundary(t *testing.T) {
 }
 
 func TestConcurrentAnonymousCreateConvergesWithoutOrphans(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	keyring := testEnvelopeKeyring(t)
 	store.keyring = keyring
@@ -130,6 +133,7 @@ func TestConcurrentAnonymousCreateConvergesWithoutOrphans(t *testing.T) {
 }
 
 func TestAnonymousCreateRollbackDoesNotReserveOrOrphan(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	store.keyring = testEnvelopeKeyring(t)
 	store.now = func() time.Time { return time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC) }
@@ -162,6 +166,7 @@ func TestAnonymousCreateRollbackDoesNotReserveOrOrphan(t *testing.T) {
 }
 
 func TestEffectiveCreateDigestCanonicalizesSetLikeMetadata(t *testing.T) {
+	t.Parallel()
 	left := validRequest("", TokenEndpointAuthClientBasic)
 	right := validRequest("", TokenEndpointAuthClientBasic)
 	right.RedirectURIs = []string{"https://b.example.test/callback", "https://a.example.test/callback"}
@@ -213,6 +218,7 @@ func TestEffectiveCreateDigestCanonicalizesSetLikeMetadata(t *testing.T) {
 }
 
 func TestIdempotentCreateReplaysEncryptedResponseAndRejectsMismatch(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	store.keyring = testEnvelopeKeyring(t)
 	request := validRequest("", TokenEndpointAuthClientBasic)
@@ -258,6 +264,7 @@ func TestIdempotentCreateReplaysEncryptedResponseAndRejectsMismatch(t *testing.T
 }
 
 func TestIdempotentCreateDoesNotRevealCredentialsBeforeAckDurability(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		anonymous bool
@@ -268,20 +275,11 @@ func TestIdempotentCreateDoesNotRevealCredentialsBeforeAckDurability(t *testing.
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			objectStoreDir := t.TempDir()
-			db, err := rhiza.Open(ctx, rhiza.Config{
-				NodeID:             "dcr-before-ack-" + tc.name,
-				DataDir:            t.TempDir(),
+			db := openTestDBWithConfig(t, "dcr-before-ack-"+tc.name, rhiza.Config{
 				ObjStoreProvider:   rhiza.ObjectStoreProviderFilesystem,
 				ObjStoreDir:        objectStoreDir,
 				ObjStoreDurability: rhiza.ObjectStoreDurabilityBeforeAck,
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = db.Close() })
-			if err := storage.Migrate(ctx, db); err != nil {
-				t.Fatal(err)
-			}
 
 			keyring := testEnvelopeKeyring(t)
 			base := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
@@ -345,6 +343,7 @@ func TestIdempotentCreateDoesNotRevealCredentialsBeforeAckDurability(t *testing.
 }
 
 func TestIdempotentReplaySurvivesActiveMasterKeyChange(t *testing.T) {
+	t.Parallel()
 	ctx, _, db := testStore(t)
 	old, replacement := rewrapKeyrings(t)
 	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
@@ -372,6 +371,7 @@ func TestIdempotentReplaySurvivesActiveMasterKeyChange(t *testing.T) {
 }
 
 func TestRegistrationHTTPIdempotencyReplaysExact201AndRejectsMismatch(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	body := `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"Example RP","contacts":["support@example.test","mailto:z@example.test"]}`
 	first := httptest.NewRecorder()
@@ -405,6 +405,7 @@ func testEnvelopeKeyring(t *testing.T) EnvelopeKeyring {
 }
 
 func TestConcurrentIdempotentCreateConvergesToOneCredentialSet(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	keyring := testEnvelopeKeyring(t)
 	store.keyring = keyring
@@ -447,6 +448,7 @@ func TestConcurrentIdempotentCreateConvergesToOneCredentialSet(t *testing.T) {
 }
 
 func TestExpiredIdempotencyEntryCanBeReused(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	store.keyring = testEnvelopeKeyring(t)
 	base := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
@@ -471,6 +473,7 @@ func TestExpiredIdempotencyEntryCanBeReused(t *testing.T) {
 }
 
 func TestExpiredIdempotencyReuseSurvivesCleanupBacklog(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	store.keyring = testEnvelopeKeyring(t)
 	base := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
@@ -490,6 +493,7 @@ func TestExpiredIdempotencyReuseSurvivesCleanupBacklog(t *testing.T) {
 }
 
 func TestAnonymousExpiredIdempotencyReuseSurvivesCleanupBacklog(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	store.keyring = testEnvelopeKeyring(t)
 	base := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)

@@ -10,6 +10,7 @@ import (
 )
 
 func TestDecodeCredentialRowRejectsWrongTypesAndAcceptsBlob(t *testing.T) {
+	t.Parallel()
 	binding := credentialBinding{"owner", "collection", "connection", "provider", "generation", 1}
 	row := []any{"connection", "owner", "collection", "provider", "generation", int64(1), []byte("envelope")}
 	got, envelope, id, err := decodeCredentialRow(row)
@@ -23,6 +24,7 @@ func TestDecodeCredentialRowRejectsWrongTypesAndAcceptsBlob(t *testing.T) {
 }
 
 func TestCredentialRewrapSQLCarriesFullCASBinding(t *testing.T) {
+	t.Parallel()
 	rows := []credentialRewrapCandidate{{binding: credentialBinding{Owner: "owner", CollectionID: "collection", ConnectionID: "connection", ProviderID: "provider", Generation: "generation", TokenVersion: 2}, connectionID: "connection", state: "refreshing", claim: "claim", oldEnvelope: []byte("old"), newEnvelope: []byte("new")}}
 	sql, args := credentialRewrapSQL(rows)
 	for _, want := range []string{"owner_subject", "collection_id", "provider_id", "generation", "token_version", "refresh_claim", "credential=?"} {
@@ -38,6 +40,7 @@ func TestCredentialRewrapSQLCarriesFullCASBinding(t *testing.T) {
 func contains(s, sub string) bool { return bytes.Contains([]byte(s), []byte(sub)) }
 
 func TestCredentialEnvelopeReferencesAndRewrap(t *testing.T) {
+	t.Parallel()
 	ctx, _, db, _ := credentialStoreFixture(t)
 	oldKeys := credentialKeys(t, "old", "old", "master")
 	rotated := credentialKeys(t, "master", "old", "master")
@@ -79,6 +82,7 @@ func TestCredentialEnvelopeReferencesAndRewrap(t *testing.T) {
 }
 
 func TestCredentialEnvelopeTamperedBatchHasNoPartialWrite(t *testing.T) {
+	t.Parallel()
 	ctx, _, db, _ := credentialStoreFixture(t)
 	oldKeys := credentialKeys(t, "old", "old", "master")
 	rotated := credentialKeys(t, "master", "old", "master")

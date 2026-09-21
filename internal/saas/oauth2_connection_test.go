@@ -16,6 +16,7 @@ import (
 )
 
 func TestOAuth2ConnectionBeginCompletePersistsBoundCredential(t *testing.T) {
+	t.Parallel()
 	ctx, credentials, db, _ := credentialStoreFixture(t)
 	var tokenCalls, identityCalls atomic.Int32
 	var gotVerifier string

@@ -9,6 +9,7 @@ import (
 )
 
 func TestDeleteUserCleansOnlyOwnedLoginLocationsAtomically(t *testing.T) {
+	t.Parallel()
 	store := testConversionStore(t)
 	ctx := t.Context()
 	for _, subject := range []string{"location-target", "location-other"} {

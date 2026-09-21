@@ -10,6 +10,7 @@ import (
 )
 
 func TestAPIKeyStorePutStatusRotateRevoke(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "saas-api-key-method", SQL: `UPDATE auth_collection_definitions SET auth_method='api_key',providers_json='[]' WHERE id=?`, Args: []any{b.CollectionID}}); err != nil {
 		t.Fatal(err)
@@ -50,6 +51,7 @@ func TestAPIKeyStorePutStatusRotateRevoke(t *testing.T) {
 }
 
 func TestAPIKeyStoreRejectsWrongOwnerAndMethodAndKey(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "saas-api-key-method", SQL: `UPDATE auth_collection_definitions SET auth_method='api_key',providers_json='[]' WHERE id=?`, Args: []any{b.CollectionID}}); err != nil {
 		t.Fatal(err)

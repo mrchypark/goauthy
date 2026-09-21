@@ -8,6 +8,7 @@ import (
 )
 
 func TestAPIKeyEncryptedStorageCanDecryptAndRewrap(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"custody", "destination-bound"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, store, db, binding := credentialStoreFixture(t)

@@ -157,6 +157,7 @@ func (h *identityHookRecorder) hooks() LocalLoginHooks {
 // GivenName, FamilyName), the full raw JSON payload, a deep-cloned Config
 // snapshot with runtime version, and the validated SubjectResult.
 func TestVerifiedIdentityOIDCSuccessProfileRawAndRuntimeSnapshot(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -289,6 +290,7 @@ func TestVerifiedIdentityOIDCSuccessProfileRawAndRuntimeSnapshot(t *testing.T) {
 // TestVerifiedIdentityInvalidSignatureNeverInvokesHook proves that an OIDC
 // token signed with a different key never reaches the ResolveVerified hook.
 func TestVerifiedIdentityInvalidSignatureNeverInvokesHook(t *testing.T) {
+	t.Parallel()
 	correctKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	wrongKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	hooks := &identityHookRecorder{
@@ -320,6 +322,7 @@ func TestVerifiedIdentityInvalidSignatureNeverInvokesHook(t *testing.T) {
 // TestVerifiedIdentityNonceMismatchNeverInvokesHook proves that an OIDC
 // token with a wrong nonce never reaches the ResolveVerified hook.
 func TestVerifiedIdentityNonceMismatchNeverInvokesHook(t *testing.T) {
+	t.Parallel()
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	hooks := &identityHookRecorder{
 		session:     testCanonicalTestToken,
@@ -350,6 +353,7 @@ func TestVerifiedIdentityNonceMismatchNeverInvokesHook(t *testing.T) {
 // TestVerifiedIdentityRuntimeVersionMismatchNeverInvokesHook proves that
 // when runtime binding mismatches, the hook is never called.
 func TestVerifiedIdentityRuntimeVersionMismatchNeverInvokesHook(t *testing.T) {
+	t.Parallel()
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	hooks := &identityHookRecorder{
 		session:     testCanonicalTestToken,
@@ -393,6 +397,7 @@ func TestVerifiedIdentityRuntimeVersionMismatchNeverInvokesHook(t *testing.T) {
 // TestVerifiedIdentityResolveFallback proves that when ResolveVerified is
 // nil, the existing Resolve hook is used and the flow completes normally.
 func TestVerifiedIdentityResolveFallback(t *testing.T) {
+	t.Parallel()
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	hooks := &localHookRecorder{
 		session:     testCanonicalTestToken,
@@ -425,6 +430,7 @@ func TestVerifiedIdentityResolveFallback(t *testing.T) {
 // VerifiedIdentity.Config after construction does not affect the handler's
 // internal config, and vice versa.
 func TestVerifiedIdentityDeepCopyIsolation(t *testing.T) {
+	t.Parallel()
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	hooks := &identityHookRecorder{
 		session:     testCanonicalTestToken,
@@ -493,6 +499,7 @@ func TestVerifiedIdentityDeepCopyIsolation(t *testing.T) {
 // TestVerifiedIdentityGitHubNoIDTokenClaims proves that GitHub flow produces
 // a VerifiedIdentity with nil IDTokenClaims.
 func TestVerifiedIdentityGitHubNoIDTokenClaims(t *testing.T) {
+	t.Parallel()
 	upstream := SubjectResult{ProviderID: "github", Subject: "gh-12345"}
 	hooks := &identityHookRecorder{
 		session:     testCanonicalTestToken,
@@ -597,6 +604,7 @@ func localStartGitHub(t *testing.T, h *Handler) (*http.Cookie, string) {
 // TestLocalLoginHandlerAcceptsResolveVerifiedOnly proves that NewLocalLoginHandler
 // accepts ResolveVerified without Resolve being set.
 func TestLocalLoginHandlerAcceptsResolveVerifiedOnly(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	configs := map[string]Config{"google": {
 		Issuer: "https://issuer.example.com", AuthorizationEndpoint: "https://issuer.example.com/auth",
@@ -621,6 +629,7 @@ func TestLocalLoginHandlerAcceptsResolveVerifiedOnly(t *testing.T) {
 // that NewLocalLoginHandler rejects hooks when both Resolve and ResolveVerified
 // are nil.
 func TestLocalLoginHandlerRejectsMissingBothResolveAndResolveVerified(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	configs := map[string]Config{"google": {
 		Issuer: "https://issuer.example.com", AuthorizationEndpoint: "https://issuer.example.com/auth",

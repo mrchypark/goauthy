@@ -11,6 +11,7 @@ import (
 )
 
 func TestManagedClientHTTPDefaultAudienceCRUD(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	managed := managedHTTPStore(t, store)
 	h.BindClients(managed)
@@ -53,6 +54,7 @@ func TestManagedClientHTTPDefaultAudienceCRUD(t *testing.T) {
 }
 
 func TestManagedClientHTTPDefaultAudienceValidation(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	h.BindClients(managedHTTPStore(t, store))
 	for _, body := range []string{

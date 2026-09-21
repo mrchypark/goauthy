@@ -14,6 +14,7 @@ import (
 )
 
 func TestListSessionsStatesNullableAndGuard(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "u1")
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "session-list-seed", SQL: `INSERT INTO browser_sessions(token_digest,subject,auth_method,created_at_unix_ms,expires_at_unix_ms,last_seen_at_unix_ms,revoked_at_unix_ms,peer_ip) VALUES
@@ -64,6 +65,7 @@ func TestListSessionsStatesNullableAndGuard(t *testing.T) {
 }
 
 func TestListSessionsThresholdAndTiedExpiryCursors(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	for i, id := range []string{"a", "b", "c"} {
 		insertActive(t, db, "u"+string(rune('0'+i)))
@@ -105,6 +107,7 @@ func TestListSessionsThresholdAndTiedExpiryCursors(t *testing.T) {
 }
 
 func TestSessionListOptionsStrictCursor(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"page_size=0", "page_size=+1", "page_size=%2B1", "page_size=65536", "backwards=yes", "session_state=Nope", "session_state=Auth&x=1", "page_size=1&page_size=2", "continuation_token=u1.bad", "continuation_token=s1.YQ", "offset=" + strings.Repeat("0", 2049)} {
 		if _, err := parseSessionListOptions(raw); err == nil {
 			t.Fatalf("accepted %q", raw)
@@ -130,6 +133,7 @@ func TestSessionListOptionsStrictCursor(t *testing.T) {
 }
 
 func TestListSessionsDefaultPageSize(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "page-user")
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "session-list-many", SQL: `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<21) INSERT INTO browser_sessions(token_digest,subject,auth_method,created_at_unix_ms,expires_at_unix_ms,last_seen_at_unix_ms) SELECT printf('page-%02d',x),'page-user','pwd',1,?,1 FROM n`, Args: []any{4102444800000}}); err != nil {

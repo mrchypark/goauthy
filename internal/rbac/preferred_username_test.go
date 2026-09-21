@@ -43,6 +43,7 @@ func seedPreferred(t *testing.T, store *Store, subject, email, value string) {
 }
 
 func TestUpdatePreferredUsernameSelfImmutableAndMutable(t *testing.T) {
+	t.Parallel()
 	h, store, _, _, _ := userCreateHTTPFixture(t)
 	insertActive(t, store.db, "self")
 	seedPreferred(t, store, "self", "self@example.test", "old")
@@ -80,6 +81,7 @@ func TestUpdatePreferredUsernameSelfImmutableAndMutable(t *testing.T) {
 }
 
 func TestUpdatePreferredUsernameAdminKeyPolicyAndDuplicate(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, cookie := userCreateHTTPFixture(t)
 	seedPreferred(t, store, "admin", "admin@example.test", "old")
 	insertActive(t, store.db, "other")
@@ -129,6 +131,7 @@ func TestUpdatePreferredUsernameAdminKeyPolicyAndDuplicate(t *testing.T) {
 }
 
 func TestUpdatePreferredUsernameStrictAndHookSnapshot(t *testing.T) {
+	t.Parallel()
 	h, store, _, _, cookie := userCreateHTTPFixture(t)
 	seedPreferred(t, store, "admin", "admin@example.test", "old")
 	for _, body := range []string{`{"preferred_username":"new","unknown":1}`, `{"preferred_username":"new","preferred_username":"x"}`, `null`, `[]`, `true`, `{"Preferred_Username":"new"}`, `{"preferred_username":5}`, `{"force_overwrite":"true"}`, `{"preferred_username":""}`, `{}` + `{}`, `{"preferred_username":"` + strings.Repeat("a", 8192) + `"}`} {
@@ -154,6 +157,7 @@ func TestUpdatePreferredUsernameStrictAndHookSnapshot(t *testing.T) {
 }
 
 func TestUpdatePreferredUsernameDelegatedScopeAndRequestGates(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, adminCookie := userCreateHTTPFixture(t)
 	if err := h.SetUserValuesPolicy(identity.UserValuesPolicy{PreferredUsername: (*identity.PreferredUsernamePolicy)(nil).WithImmutable(false)}); err != nil {
 		t.Fatal(err)
@@ -216,6 +220,7 @@ func TestUpdatePreferredUsernameDelegatedScopeAndRequestGates(t *testing.T) {
 }
 
 func TestUpdatePreferredUsernameHTTPGatesAndHook(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, cookie := userCreateHTTPFixture(t)
 	seedPreferred(t, store, "admin", "admin@example.test", "old")
 	for name, mutate := range map[string]func(*http.Request){
@@ -267,6 +272,7 @@ func TestUpdatePreferredUsernameHTTPGatesAndHook(t *testing.T) {
 }
 
 func TestUpdatePreferredUsernameCapturedGuard(t *testing.T) {
+	t.Parallel()
 	t.Run("session revoked", func(t *testing.T) {
 		h, store, _, _, cookie := userCreateHTTPFixture(t)
 		insertActive(t, store.db, "session-target")
@@ -386,6 +392,7 @@ func TestUpdatePreferredUsernameCapturedGuard(t *testing.T) {
 func strptr(value string) *string { return &value }
 
 func TestUpdatePreferredUsernameMissingProfileAndWriteFailure(t *testing.T) {
+	t.Parallel()
 	h, store, _, _, cookie := userCreateHTTPFixture(t)
 	ctx := context.Background()
 	insertActive(t, store.db, "legacy")

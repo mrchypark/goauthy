@@ -8,6 +8,7 @@ import (
 )
 
 func TestBackchannelLogoutURIHTTPBoundary(t *testing.T) {
+	t.Parallel()
 	base := `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"Logout RP"}`
 
 	t.Run("null accepted", func(t *testing.T) {

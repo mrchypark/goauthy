@@ -14,6 +14,7 @@ import (
 )
 
 func TestVerifyLogoutToken(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -88,6 +89,7 @@ func TestVerifyLogoutToken(t *testing.T) {
 }
 
 func TestDecodeIDTokenPreservesUpstreamSID(t *testing.T) {
+	t.Parallel()
 	claims, err := decodeIDTokenClaims([]byte(`{"iss":"issuer","aud":"client","sub":"subject","sid":"upstream-session"}`))
 	if err != nil || claims.SessionID != "upstream-session" {
 		t.Fatalf("sid discarded: %+v, %v", claims, err)
@@ -95,6 +97,7 @@ func TestDecodeIDTokenPreservesUpstreamSID(t *testing.T) {
 }
 
 func TestLogoutTokenRejectsUnauthenticatedAndBoundaryInputs(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)

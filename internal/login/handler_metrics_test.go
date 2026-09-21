@@ -13,6 +13,7 @@ import (
 )
 
 func TestLoginMetricsAuthSuccessAndFailure(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	reg := metrics.NewRegistry()
 	h.SetMetrics(reg)
@@ -54,6 +55,7 @@ func TestLoginMetricsAuthSuccessAndFailure(t *testing.T) {
 }
 
 func TestLoginMetricsNoDoubleCountOnWrongThenCorrect(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	reg := metrics.NewRegistry()
 	h.SetMetrics(reg)
@@ -87,6 +89,7 @@ func TestLoginMetricsNoDoubleCountOnWrongThenCorrect(t *testing.T) {
 }
 
 func TestLoginMetricsConcurrentWrongPasswords(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	h.policy = nil
 	reg := metrics.NewRegistry()
@@ -154,6 +157,7 @@ func TestLoginMetricsConcurrentWrongPasswords(t *testing.T) {
 }
 
 func TestLoginMetricsAuthFailureCountsNewlyBlocking(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	reg := metrics.NewRegistry()
 	h.SetMetrics(reg)
@@ -195,6 +199,7 @@ func TestLoginMetricsAuthFailureCountsNewlyBlocking(t *testing.T) {
 }
 
 func TestLoginMetricsNilRegistryNoPanic(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	// No SetMetrics call — metrics is nil.
 	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
@@ -219,6 +224,7 @@ func TestLoginMetricsNilRegistryNoPanic(t *testing.T) {
 }
 
 func TestLoginMetricsAuthorizedSessionSkipsCounters(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	reg := metrics.NewRegistry()
 	h.SetMetrics(reg)

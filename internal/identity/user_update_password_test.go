@@ -11,6 +11,7 @@ import (
 )
 
 func TestUpdateUserPasswordPolicyVerificationAndHistory(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	store.now = func() time.Time { return time.UnixMilli(1_800_000_000_123) }
 	seedDeterministicRandom(store)
@@ -71,6 +72,7 @@ func TestUpdateUserPasswordPolicyVerificationAndHistory(t *testing.T) {
 }
 
 func TestUpdateUserPendingPasswordNewClearsSetupAndEnablesAdmission(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	now := time.UnixMilli(1_800_000_001_000)
 	store.now = func() time.Time { return now }
@@ -93,6 +95,7 @@ func TestUpdateUserPendingPasswordNewClearsSetupAndEnablesAdmission(t *testing.T
 }
 
 func TestUpdateUserPasskeyOnlyAssignmentRestoresPasswordWithoutHistory(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, credential.DefaultRules())
 	store.now = func() time.Time { return time.UnixMilli(1_800_000_002_000) }
 	seedDeterministicRandom(store)

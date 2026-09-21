@@ -15,6 +15,7 @@ import (
 )
 
 func TestCreateConfidentialNeverPersistsPlaintextCredentials(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	registration, err := store.Create(ctx, validRequest("confidential-client", TokenEndpointAuthClientBasic))
 	if err != nil {
@@ -51,6 +52,7 @@ func TestCreateConfidentialNeverPersistsPlaintextCredentials(t *testing.T) {
 }
 
 func TestCreatePublicAndConfidentialClients(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	public, err := store.Create(ctx, validRequest("public-client", TokenEndpointAuthNone))
 	if err != nil {
@@ -77,6 +79,7 @@ func TestCreatePublicAndConfidentialClients(t *testing.T) {
 }
 
 func TestAuthenticateUsesOneSnapshotAcrossTokenRotation(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	created, err := store.Create(ctx, validRequest("snapshot-auth", TokenEndpointAuthNone))
 	if err != nil {
@@ -106,6 +109,7 @@ func TestAuthenticateUsesOneSnapshotAcrossTokenRotation(t *testing.T) {
 }
 
 func TestLoadRejectsMalformedPersistedCredentialInvariant(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name   string
 		method string
@@ -173,6 +177,7 @@ func malformedCredentialStore(t *testing.T, method string, secretHash any) (cont
 }
 
 func TestCreateDeviceOnlyClientPersistsDeviceGrantWithoutRedirects(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	request := validRequest("device-only-client", TokenEndpointAuthNone)
 	request.RedirectURIs = nil
@@ -196,6 +201,7 @@ func TestCreateDeviceOnlyClientPersistsDeviceGrantWithoutRedirects(t *testing.T)
 }
 
 func TestCreatePersistsCanonicalContactsAndLoadsThem(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	request := validRequest("contacts-client", TokenEndpointAuthNone)
 	request.Contacts = []string{"support@example.test", "mailto:z@example.test"}
@@ -217,6 +223,7 @@ func TestCreatePersistsCanonicalContactsAndLoadsThem(t *testing.T) {
 }
 
 func TestScopePolicyRejectsInvalidDefaults(t *testing.T) {
+	t.Parallel()
 	if _, err := NewScopePolicy([]string{"openid"}, []string{"profile"}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("non-subset default err=%v", err)
 	}
@@ -226,6 +233,7 @@ func TestScopePolicyRejectsInvalidDefaults(t *testing.T) {
 }
 
 func TestRegistrationJSONPersistsEmptyDefaultsAsJSONArray(t *testing.T) {
+	t.Parallel()
 	_, _, defaults, _, _, _, err := registrationJSON(Registration{})
 	if err != nil || defaults != "[]" {
 		t.Fatalf("defaults=%q err=%v", defaults, err)
@@ -233,6 +241,7 @@ func TestRegistrationJSONPersistsEmptyDefaultsAsJSONArray(t *testing.T) {
 }
 
 func TestCreatePersistsDefaultScopesAndUpdatePreservesPolicy(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	request := validRequest("scope-policy", TokenEndpointAuthNone)
 	request.Scopes = []string{"openid", "tenant"}
@@ -257,6 +266,7 @@ func TestCreatePersistsDefaultScopesAndUpdatePreservesPolicy(t *testing.T) {
 }
 
 func TestDynamicStoreForceMFAIsAlwaysFalse(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	request := validRequest("force-mfa", TokenEndpointAuthClientBasic)
 	request.ForceMFA = true
@@ -284,6 +294,7 @@ func TestDynamicStoreForceMFAIsAlwaysFalse(t *testing.T) {
 }
 
 func TestCreateDuplicateAndCrossStoreRead(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	request := validRequest("shared-client", TokenEndpointAuthClientBasic)
 	registration, err := store.Create(ctx, request)
@@ -307,6 +318,7 @@ func TestCreateDuplicateAndCrossStoreRead(t *testing.T) {
 }
 
 func TestCreateRejectsReservedClientIDBeforePersistence(t *testing.T) {
+	t.Parallel()
 	ctx, _, db := testStore(t)
 	store := NewStore(db, Config{ReservedClientIDs: []string{"bootstrap-client"}})
 	if _, err := store.Create(ctx, validRequest("bootstrap-client", TokenEndpointAuthClientBasic)); !errors.Is(err, ErrReservedClientID) {
@@ -323,6 +335,7 @@ func TestCreateRejectsReservedClientIDBeforePersistence(t *testing.T) {
 }
 
 func TestConcurrentCreateRejectsReservedClientIDWithoutArtifacts(t *testing.T) {
+	t.Parallel()
 	ctx, _, db := testStore(t)
 	store := NewStore(db, Config{ReservedClientIDs: []string{"bootstrap-client"}})
 	errs := make(chan error, 2)
@@ -348,6 +361,7 @@ func TestConcurrentCreateRejectsReservedClientIDWithoutArtifacts(t *testing.T) {
 }
 
 func TestCreateFailsClosedOnInvalidInvariant(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	request := validRequest("invalid", TokenEndpointAuthClientBasic)
 	request.RedirectURIs = []string{"http://rp.example.test/callback"}
@@ -362,6 +376,7 @@ func TestCreateFailsClosedOnInvalidInvariant(t *testing.T) {
 }
 
 func TestDeleteRegistrationRemovesOnlyAuthenticatedClient(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	created, err := store.Create(ctx, validRequest("delete-client", TokenEndpointAuthClientBasic))
 	if err != nil {
@@ -382,6 +397,7 @@ func TestDeleteRegistrationRemovesOnlyAuthenticatedClient(t *testing.T) {
 }
 
 func TestDeleteRegistrationRejectsWrongOrUnknownTokenWithoutMutation(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	created, err := store.Create(ctx, validRequest("delete-deny", TokenEndpointAuthNone))
 	if err != nil {
@@ -403,6 +419,7 @@ func TestDeleteRegistrationRejectsWrongOrUnknownTokenWithoutMutation(t *testing.
 }
 
 func TestDeleteRegistrationRejectsStaleTokenAfterRotation(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	created, err := store.Create(ctx, validRequest("delete-stale", TokenEndpointAuthNone))
 	if err != nil {
@@ -421,6 +438,7 @@ func TestDeleteRegistrationRejectsStaleTokenAfterRotation(t *testing.T) {
 }
 
 func TestDeleteRegistrationAndUpdateHaveExactlyOneWinner(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	created, err := store.Create(ctx, validRequest("delete-update-race", TokenEndpointAuthNone))
 	if err != nil {
@@ -466,6 +484,7 @@ func TestDeleteRegistrationAndUpdateHaveExactlyOneWinner(t *testing.T) {
 }
 
 func TestUpdateRotatesConfidentialCredentialsAcrossStores(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	created, err := store.Create(ctx, validRequest("update-client", TokenEndpointAuthClientBasic))
 	if err != nil {
@@ -516,6 +535,7 @@ func TestUpdateRotatesConfidentialCredentialsAcrossStores(t *testing.T) {
 }
 
 func TestUpdateRotatesOnlyRegistrationTokenForPublicClient(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	created, err := store.Create(ctx, validRequest("public-update", TokenEndpointAuthNone))
 	if err != nil {
@@ -539,6 +559,7 @@ func TestUpdateRotatesOnlyRegistrationTokenForPublicClient(t *testing.T) {
 }
 
 func TestUpdateRejectsWrongTokenAndAuthenticationMethodChange(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	created, err := store.Create(ctx, validRequest("update-deny", TokenEndpointAuthClientBasic))
 	if err != nil {
@@ -564,6 +585,7 @@ func TestUpdateRejectsWrongTokenAndAuthenticationMethodChange(t *testing.T) {
 }
 
 func TestUpdateMarksLastUsedAtFromStoreClock(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	fixed := time.Date(2026, time.January, 2, 3, 4, 5, 987000000, time.FixedZone("KST", 9*60*60))
 	store.now = func() time.Time { return fixed }
@@ -588,6 +610,7 @@ func TestUpdateMarksLastUsedAtFromStoreClock(t *testing.T) {
 }
 
 func TestFailedAndStaleUpdateDoNotTouchLastUsedAt(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	fixed := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	store.now = func() time.Time { return fixed }
@@ -619,6 +642,7 @@ func TestFailedAndStaleUpdateDoNotTouchLastUsedAt(t *testing.T) {
 }
 
 func TestUpdateLastUsedAtIsMonotonic(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	late := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	early := late.Add(-time.Hour)
@@ -646,6 +670,7 @@ func TestUpdateLastUsedAtIsMonotonic(t *testing.T) {
 }
 
 func TestUpdateWithGeneratedClientAndEmptyAudience(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	request := CreateRequest{RedirectURIs: []string{"https://rp.example.test/callback"}, Scopes: []string{"openid", "goauthy.read"}, GrantTypes: []string{"authorization_code"}, ResponseTypes: []string{"code"}, TokenEndpointAuthMethod: TokenEndpointAuthClientBasic, Name: "Before Update"}
 	created, err := store.Create(ctx, request)
@@ -660,6 +685,7 @@ func TestUpdateWithGeneratedClientAndEmptyAudience(t *testing.T) {
 }
 
 func TestUpdateConcurrentChangesYieldOneWinnerAndOneConflict(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	created, err := store.Create(ctx, validRequest("update-race", TokenEndpointAuthClientBasic))
 	if err != nil {
@@ -734,6 +760,7 @@ func TestUpdateConcurrentChangesYieldOneWinnerAndOneConflict(t *testing.T) {
 }
 
 func TestUpdateSerializedRotationRejectsOldToken(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	created, err := store.Create(ctx, validRequest("update-serialized-rotation", TokenEndpointAuthNone))
 	if err != nil {
@@ -782,6 +809,7 @@ func TestUpdateSerializedRotationRejectsOldToken(t *testing.T) {
 }
 
 func TestUpdateConcurrentDynamicClientsYieldExactlyOneWinner(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	created, err := store.Create(ctx, validRequest("force-mfa-race", TokenEndpointAuthNone))
 	if err != nil {
@@ -827,6 +855,7 @@ func TestUpdateConcurrentDynamicClientsYieldExactlyOneWinner(t *testing.T) {
 }
 
 func TestCreateReturnsInsertFailureWhenReconciliationFindsNoRow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "dcr-insert-failure", DataDir: t.TempDir()})
 	if err != nil {
@@ -859,14 +888,7 @@ func TestCreateReturnsInsertFailureWhenReconciliationFindsNoRow(t *testing.T) {
 func testStore(t *testing.T) (context.Context, *Store, *rhiza.DB) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "dcr-test", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "dcr-test")
 	return ctx, NewStore(db), db
 }
 
@@ -879,6 +901,7 @@ func bcryptCompare(hash []byte, secret string) error {
 }
 
 func TestCreatePasswordClientWithoutRedirects(t *testing.T) {
+	t.Parallel()
 	for _, method := range []string{TokenEndpointAuthNone, TokenEndpointAuthClientBasic, TokenEndpointAuthClientPost} {
 		t.Run(method, func(t *testing.T) {
 			ctx, store, _ := testStore(t)
@@ -905,6 +928,7 @@ func TestCreatePasswordClientWithoutRedirects(t *testing.T) {
 }
 
 func TestBackchannelLogoutURIRoundTripAndRotation(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	request := validRequest("backchannel-uri", TokenEndpointAuthClientBasic)
 	request.BackchannelLogoutURI = "https://rp.example.test/logout"

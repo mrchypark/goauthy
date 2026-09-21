@@ -8,6 +8,7 @@ import (
 )
 
 func TestPasswordResetDestinationPreservesProofOnStaleAddress(t *testing.T) {
+	t.Parallel()
 	s, _ := userUpdateFixture(t)
 	ctx := context.Background()
 	if raw, _, err := s.IssuePasswordResetForEmail(ctx, "target", "old@example.test", time.Hour); err != nil || raw == "" {
@@ -23,6 +24,7 @@ func TestPasswordResetDestinationPreservesProofOnStaleAddress(t *testing.T) {
 }
 
 func TestPasswordResetDestinationRechecksEmailAtIssueCommit(t *testing.T) {
+	t.Parallel()
 	s, input := userUpdateFixture(t)
 	ctx := context.Background()
 	oldToken, _, err := s.IssuePasswordResetForEmail(ctx, "target", input.Email, time.Hour)

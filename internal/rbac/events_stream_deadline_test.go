@@ -83,6 +83,7 @@ func deadlineEventFixture(t *testing.T, count int) (*Handler, string) {
 }
 
 func TestEventsStreamInitialWriteDeadlineErrorReleasesCapacity(t *testing.T) {
+	t.Parallel()
 	h, token := deadlineEventFixture(t, 1)
 	w := &eventDeadlineWriter{ResponseRecorder: httptest.NewRecorder(), setDeadlineErr: errors.New("deadline unsupported")}
 	r := httptest.NewRequest(http.MethodGet, "/auth/v1/events/stream?latest=1", nil)
@@ -97,6 +98,7 @@ func TestEventsStreamInitialWriteDeadlineErrorReleasesCapacity(t *testing.T) {
 }
 
 func TestEventsStreamWriteErrorClosesWithoutLaterData(t *testing.T) {
+	t.Parallel()
 	h, token := deadlineEventFixture(t, 2)
 	w := &eventDeadlineWriter{ResponseRecorder: httptest.NewRecorder(), writeErr: errors.New("write failed")}
 	r := httptest.NewRequest(http.MethodGet, "/auth/v1/events/stream?latest=2", nil)
@@ -108,6 +110,7 @@ func TestEventsStreamWriteErrorClosesWithoutLaterData(t *testing.T) {
 }
 
 func TestEventsStreamFlushErrorStopsAfterFirstData(t *testing.T) {
+	t.Parallel()
 	h, token := deadlineEventFixture(t, 2)
 	w := &eventDeadlineWriter{ResponseRecorder: httptest.NewRecorder(), flushErrAt: 2}
 	r := httptest.NewRequest(http.MethodGet, "/auth/v1/events/stream?latest=2", nil)
@@ -119,6 +122,7 @@ func TestEventsStreamFlushErrorStopsAfterFirstData(t *testing.T) {
 }
 
 func TestEventsStreamSuccessfulFlushClearsDeadline(t *testing.T) {
+	t.Parallel()
 	h, token := deadlineEventFixture(t, 1)
 	w := &eventDeadlineWriter{ResponseRecorder: httptest.NewRecorder()}
 	rctx, requestCancel := context.WithCancel(context.Background())

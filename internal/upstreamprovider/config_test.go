@@ -3,6 +3,7 @@ package upstreamprovider
 import "testing"
 
 func TestProviderKindAndGitHubConfig(t *testing.T) {
+	t.Parallel()
 	oidc := Config{Issuer: "https://issuer.example.test", AuthorizationEndpoint: "https://issuer.example.test/auth", TokenEndpoint: "https://issuer.example.test/token", ClientID: "client"}
 	if got := oidc.NormalizedKind(); got != ProviderKindOIDC {
 		t.Fatalf("zero kind = %q, want %q", got, ProviderKindOIDC)

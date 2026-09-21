@@ -11,6 +11,7 @@ import (
 )
 
 func TestManagedClientHTTPAudienceCRUD(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	h.BindClients(managedHTTPStore(t, store))
 	createBody := `{"id":"audience-http-client","name":"Audience","confidential":true,"redirect_uris":["https://app.example/cb"],"audience":["https://api.example.test"]}`
@@ -50,6 +51,7 @@ func TestManagedClientHTTPAudienceCRUD(t *testing.T) {
 }
 
 func TestManagedClientHTTPAudienceValidationAndGuards(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	h.BindClients(managedHTTPStore(t, store))
 	for _, body := range []string{

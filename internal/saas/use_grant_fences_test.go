@@ -9,6 +9,7 @@ import (
 )
 
 func TestUseGrantOAuthRefreshAndPolicyFences(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"provider", "consumer", "connection", "authority", "expiry"} {
 		t.Run(change, func(t *testing.T) {
 			ctx, s, db, b := credentialStoreFixture(t)

@@ -22,6 +22,7 @@ func (r testResolver) LookupNetIP(context.Context, string, string) ([]netip.Addr
 }
 
 func TestRestrictedTransportPinsApprovedIPAndPreservesTLSHost(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Host != "example.com" {
 			t.Errorf("Host = %q", r.Host)
@@ -62,6 +63,7 @@ func TestRestrictedTransportPinsApprovedIPAndPreservesTLSHost(t *testing.T) {
 }
 
 func TestRestrictedTransportRejectsUnsafeResolvedAddresses(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"127.0.0.1", "10.0.0.1", "100.64.0.1", "169.254.1.1", "192.0.2.1", "::1", "fc00::1", "fe80::1", "100:0:0:1::1", "2001:db8::1", "64:ff9b::7f00:1"} {
 		ip := netip.MustParseAddr(raw)
 		tr := &restrictedTransport{resolver: testResolver{addrs: []netip.Addr{ip}}}
@@ -76,6 +78,7 @@ func TestRestrictedTransportRejectsUnsafeResolvedAddresses(t *testing.T) {
 }
 
 func TestAllowedOutboundIPAcceptsGlobalAddress(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"8.8.8.8", "2001:4860:4860::8888"} {
 		if !allowedOutboundIP(netip.MustParseAddr(raw)) {
 			t.Errorf("%s rejected", raw)

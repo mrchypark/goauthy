@@ -15,6 +15,7 @@ import (
 )
 
 func TestUseGrantInvokeRegisteredAPIKeySequence(t *testing.T) {
+	t.Parallel()
 	ctx, store, _, b, grant, calls, server := useGrantInvokeFixture(t, nil)
 	defer server.Close()
 
@@ -40,6 +41,7 @@ func TestUseGrantInvokeRegisteredAPIKeySequence(t *testing.T) {
 }
 
 func TestUseGrantInvokeRejectsInvalidGrantsBeforeProvider(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		consumer string
@@ -89,6 +91,7 @@ func TestUseGrantInvokeRejectsInvalidGrantsBeforeProvider(t *testing.T) {
 }
 
 func TestUseGrantInvokeRevokedDuringProviderDiscardsResponse(t *testing.T) {
+	t.Parallel()
 	var store *CredentialStore
 	var grant UseGrant
 	var during func()
@@ -119,6 +122,7 @@ func TestUseGrantInvokeRevokedDuringProviderDiscardsResponse(t *testing.T) {
 }
 
 func TestUseGrantInvokeProviderPolicyChangesBetweenAuthorizeAndCredentialRead(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"disable", "rotation"} {
 		t.Run(change, func(t *testing.T) {
 			ctx, store, db, b, grant, calls, server := useGrantInvokeFixture(t, nil)

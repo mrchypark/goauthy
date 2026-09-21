@@ -10,6 +10,7 @@ import (
 )
 
 func TestDeviceLoginHandoffRotatesSessionAndRedirects(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	get := httptest.NewRequest(http.MethodGet, "/oidc/device/login?user_code=ab12-cd34", nil)
 	get.RemoteAddr = "203.0.113.8:1234"
@@ -53,6 +54,7 @@ func TestDeviceLoginHandoffRotatesSessionAndRedirects(t *testing.T) {
 }
 
 func TestDeviceLoginRejectsCSRFAndForcedPasswordDowngrade(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	get := httptest.NewRequest(http.MethodGet, "/oidc/device/login?user_code=AB12CD34", nil)
 	get.RemoteAddr = "203.0.113.8:1234"
@@ -101,6 +103,7 @@ func TestDeviceLoginRejectsCSRFAndForcedPasswordDowngrade(t *testing.T) {
 }
 
 func TestDeviceLoginRejectsMalformedOrDuplicateQueries(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	for _, raw := range []string{"user_code=AB12&user_code=CD34", "user_code=AB12&extra=1", "user_code=%ZZ", "user_code=AB%2F12"} {
 		r := httptest.NewRequest(http.MethodGet, "/oidc/device/login?"+raw, nil)
@@ -114,6 +117,7 @@ func TestDeviceLoginRejectsMalformedOrDuplicateQueries(t *testing.T) {
 }
 
 func TestDeviceLoginFormActionDropsGETQueryAndBlankCodeRedirectsWithoutApproval(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	get := httptest.NewRequest(http.MethodGet, "/oidc/device/login", nil)
 	get.RemoteAddr = "203.0.113.8:1234"

@@ -38,6 +38,7 @@ func oauth2DeliveryFixture(t *testing.T) (ctx context.Context, s *CredentialStor
 }
 
 func TestDeliverOAuth2DTOAndRedaction(t *testing.T) {
+	t.Parallel()
 	ctx, s, b, consumer, grant := oauth2DeliveryFixture(t)
 	got, err := s.DeliverOAuth2(ctx, b.Owner, consumer.ID, grant.ID, grant.Resource, credentialAuthority())
 	if err != nil || got.Kind != "oauth2" || got.AccessToken != "access-token" || got.TokenType != "Bearer" || got.GrantID != grant.ID || got.ProviderID != "provider" || got.ConnectionGeneration != b.Generation || got.CredentialVersion != 1 || got.AccountID != "account-1" || len(got.Scopes) != 1 || got.TokenExpiresAtUnixMS <= s.now() || got.ConsentExpiresAtUnixMS != grant.ExpiresAt {
@@ -53,6 +54,7 @@ func TestDeliverOAuth2DTOAndRedaction(t *testing.T) {
 }
 
 func TestDeliverOAuth2RejectsInvalidConsentAndExpiry(t *testing.T) {
+	t.Parallel()
 	ctx, s, b, consumer, grant := oauth2DeliveryFixture(t)
 	for _, tc := range []struct {
 		name, owner, client string
@@ -74,6 +76,7 @@ func TestDeliverOAuth2RejectsInvalidConsentAndExpiry(t *testing.T) {
 }
 
 func TestDeliverOAuth2RequiresKnownFutureTokenExpiry(t *testing.T) {
+	t.Parallel()
 	ctx, s, b, consumer, grant := oauth2DeliveryFixture(t)
 	base := int64(1_800_000_000_000)
 	for _, tc := range []struct {
@@ -103,6 +106,7 @@ func TestDeliverOAuth2RequiresKnownFutureTokenExpiry(t *testing.T) {
 }
 
 func TestDeliverOAuth2ProxyAndReconnectAreDenied(t *testing.T) {
+	t.Parallel()
 	ctx, s, b, consumer, grant := oauth2DeliveryFixture(t)
 	proxy, err := s.CreateUseGrant(ctx, b.Owner, b.CollectionID, b.ConnectionID, "https://consumer.example/resource", UseGrantInput{ConsumerClientID: consumer.ID, Mode: "proxy", Purpose: "proxy", ExpiresAt: s.now() + 120000}, credentialAuthority())
 	if err != nil {
@@ -123,6 +127,7 @@ func TestDeliverOAuth2ProxyAndReconnectAreDenied(t *testing.T) {
 }
 
 func TestDeliverOAuth2RefreshVersionAndPostDecryptRecheck(t *testing.T) {
+	t.Parallel()
 	ctx, s, b, consumer, grant := oauth2DeliveryFixture(t)
 	claim, err := s.ClaimRefresh(ctx, b, credentialAuthority())
 	if err != nil {
@@ -156,6 +161,7 @@ func TestDeliverOAuth2RefreshVersionAndPostDecryptRecheck(t *testing.T) {
 }
 
 func TestDeliverOAuth2FinalTokenExpiryAndVersionFence(t *testing.T) {
+	t.Parallel()
 	for _, mutation := range []string{"expiry", "refresh", "public consumer"} {
 		t.Run(mutation, func(t *testing.T) {
 			ctx, s, b, consumer, grant := oauth2DeliveryFixture(t)

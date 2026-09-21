@@ -22,6 +22,7 @@ func seedProfile(t *testing.T, s *Store, subject, email, preferredUsername strin
 }
 
 func TestNeedsProfileUpdateDisabledReturnsFalse(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 	policy := UserValuesPolicy{RevalidateDuringLogin: false}
@@ -32,6 +33,7 @@ func TestNeedsProfileUpdateDisabledReturnsFalse(t *testing.T) {
 }
 
 func TestNeedsProfileUpdateRauthyClientExempt(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 	policy := UserValuesPolicy{RevalidateDuringLogin: true, GivenName: "required"}
@@ -42,6 +44,7 @@ func TestNeedsProfileUpdateRauthyClientExempt(t *testing.T) {
 }
 
 func TestNeedsProfileUpdateValidProfileReturnsFalse(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 	bootstrapPassword(t, s, "valid-sub", "valid-user", []byte("Password1"))
@@ -58,6 +61,7 @@ func TestNeedsProfileUpdateValidProfileReturnsFalse(t *testing.T) {
 }
 
 func TestNeedsProfileUpdateMissingRequiredGivenName(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 	bootstrapPassword(t, s, "name-sub", "name-user", []byte("Password1"))
@@ -73,6 +77,7 @@ func TestNeedsProfileUpdateMissingRequiredGivenName(t *testing.T) {
 }
 
 func TestNeedsProfileUpdateMissingRequiredFamilyName(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 	bootstrapPassword(t, s, "fam-sub", "fam-user", []byte("Password1"))
@@ -88,6 +93,7 @@ func TestNeedsProfileUpdateMissingRequiredFamilyName(t *testing.T) {
 }
 
 func TestNeedsProfileUpdateMissingNestedBirthdate(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 	bootstrapPassword(t, s, "nest-sub", "nest-user", []byte("Password1"))
@@ -104,6 +110,7 @@ func TestNeedsProfileUpdateMissingNestedBirthdate(t *testing.T) {
 }
 
 func TestNeedsProfileUpdateInvalidPreferredUsername(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 	bootstrapPassword(t, s, "pu-sub", "pu-user", []byte("Password1"))
@@ -122,6 +129,7 @@ func TestNeedsProfileUpdateInvalidPreferredUsername(t *testing.T) {
 }
 
 func TestNeedsProfileUpdateInactiveSubjectReturnsError(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 	policy := UserValuesPolicy{RevalidateDuringLogin: true, GivenName: "required"}
@@ -132,6 +140,7 @@ func TestNeedsProfileUpdateInactiveSubjectReturnsError(t *testing.T) {
 }
 
 func TestNeedsProfileUpdateInvalidPolicyReturnsError(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 	bootstrapPassword(t, s, "policy-sub", "policy-user", []byte("Password1"))
@@ -143,6 +152,7 @@ func TestNeedsProfileUpdateInvalidPolicyReturnsError(t *testing.T) {
 }
 
 func TestNeedsProfileUpdateReadErrorReturnsError(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "read-error-test", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)

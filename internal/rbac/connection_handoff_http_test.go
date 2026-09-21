@@ -8,6 +8,7 @@ import (
 )
 
 func TestBindConnectionHandoffAuthorizerRejectsNil(t *testing.T) {
+	t.Parallel()
 	h, _, _, _ := membershipHTTPFixture(t)
 	if err := h.BindConnectionHandoffAuthorizer(nil); err == nil {
 		t.Fatal("nil authorizer accepted")
@@ -38,6 +39,7 @@ func handoffHTTPFixture(t *testing.T) (*Handler, *http.Cookie, string) {
 }
 
 func TestCreateConnectionHandoffHTTPBoundary(t *testing.T) {
+	t.Parallel()
 	h, _, _ := handoffHTTPFixture(t)
 	valid := `{"collection_id":"c","connection_id":"g","consumer_client_id":"client","mode":"proxy","purpose":"use","expires_at_unix_ms":4102444800000,"return_uri":"https://client.example/callback","state":"abcdefghijklmnopqrstuvwxyzABCDEFGHIJ12"}`
 	for name, alter := range map[string]func(*http.Request){
@@ -95,6 +97,7 @@ func TestCreateConnectionHandoffHTTPBoundary(t *testing.T) {
 }
 
 func TestOwnerConnectionHandoffHTTPAuthenticationBoundary(t *testing.T) {
+	t.Parallel()
 	h, cookie, csrf := handoffHTTPFixture(t)
 	path := "/auth/v1/account/connection-handoffs/missing"
 	for name, alter := range map[string]func(*http.Request){
@@ -127,6 +130,7 @@ func TestOwnerConnectionHandoffHTTPAuthenticationBoundary(t *testing.T) {
 }
 
 func TestOwnerConnectionHandoffDigestInput(t *testing.T) {
+	t.Parallel()
 	h, cookie, csrf := handoffHTTPFixture(t)
 	path := "/auth/v1/account/connection-handoffs/missing"
 	for name, body := range map[string]string{

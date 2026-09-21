@@ -14,6 +14,7 @@ import (
 )
 
 func TestUserCreationMetadataPreservesOriginalTime(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(2))
 	ctx := context.Background()
 	created := time.UnixMilli(1_700_000_000_123)
@@ -41,6 +42,7 @@ func TestUserCreationMetadataPreservesOriginalTime(t *testing.T) {
 }
 
 func TestRecordLoginForSessionUsesDurableMonotonicTime(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 	now := time.UnixMilli(1_700_000_010_987)
@@ -121,6 +123,7 @@ func assertUserMetadata(t *testing.T, store *Store, subject string, created int6
 }
 
 func TestRecordPasswordLoginFencesCredentials(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(2))
 	bootstrapPassword(t, store, "alice", "alice", []byte("CurrentPassword1"))
 	auth, err := store.Authenticate(t.Context(), "alice", []byte("CurrentPassword1"))
@@ -163,6 +166,7 @@ func TestRecordPasswordLoginFencesCredentials(t *testing.T) {
 }
 
 func TestRecordPasswordLoginRejectsInactiveAuthentication(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, sql string }{
 		{"disabled", `UPDATE identity_users SET disabled=1 WHERE subject='alice'`},
 		{"expiry boundary", `UPDATE identity_users SET user_expires_at_unix_ms=1900000000000 WHERE subject='alice'`},
@@ -192,6 +196,7 @@ func TestRecordPasswordLoginRejectsInactiveAuthentication(t *testing.T) {
 }
 
 func TestFailureMetadataUserResponse(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(2))
 	bootstrapPassword(t, store, "alice", "alice", []byte("CurrentPassword1"))
 	if _, err := storage.Execute(t.Context(), store.db, rhiza.ExecuteRequest{RequestID: "failure-response", SQL: `UPDATE identity_users SET last_failed_login_at_unix_ms=1900000000123,failed_login_attempts=3 WHERE subject='alice'`}); err != nil {
@@ -209,6 +214,7 @@ func TestFailureMetadataUserResponse(t *testing.T) {
 }
 
 func TestPasswordGrantFailureCountAndCredentialFence(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(2))
 	bootstrapPassword(t, store, "alice", "alice", []byte("CurrentPassword1"))
 	auth, err := store.Authenticate(t.Context(), "alice", []byte("CurrentPassword1"))
@@ -236,6 +242,7 @@ func TestPasswordGrantFailureCountAndCredentialFence(t *testing.T) {
 }
 
 func TestPasswordFailureAccountBoundaries(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, sql, password string
 		wantCount           any
@@ -268,6 +275,7 @@ func TestPasswordFailureAccountBoundaries(t *testing.T) {
 }
 
 func TestConcurrentPasswordFailuresDoNotLoseIncrements(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(2))
 	bootstrapPassword(t, store, "alice", "alice", []byte("CurrentPassword1"))
 	auth, err := store.Authenticate(t.Context(), "alice", []byte("CurrentPassword1"))
@@ -295,6 +303,7 @@ func TestConcurrentPasswordFailuresDoNotLoseIncrements(t *testing.T) {
 }
 
 func TestPasswordExpiredRecoveryPrecedesFailureRecord(t *testing.T) {
+	t.Parallel()
 	for _, fail := range []bool{false, true} {
 		name := "success"
 		if fail {

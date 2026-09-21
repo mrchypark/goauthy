@@ -38,6 +38,7 @@ func (w *revokeAfterFirstEventWriter) Write(p []byte) (int, error) {
 }
 
 func TestEventStreamQueryBoundaries(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"", "?latest=0", "?latest=1&level=warning", "?latest=1000"} {
 		r := httptest.NewRequest(http.MethodGet, "/auth/v1/events/stream"+raw, nil)
 		if _, _, err := eventStreamQuery(r); err != nil {
@@ -53,6 +54,7 @@ func TestEventStreamQueryBoundaries(t *testing.T) {
 }
 
 func TestEventsStreamKeySendsHistoryAndCancels(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, _ := userCreateHTTPFixture(t)
 	at := time.UnixMilli(1_800_000_000_000).UTC()
 	store.now = func() time.Time { return at }
@@ -109,6 +111,7 @@ func TestEventsStreamKeySendsHistoryAndCancels(t *testing.T) {
 }
 
 func TestEventsStreamRevokedBeforeInitialReadAndCapacity(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, _ := userCreateHTTPFixture(t)
 	_, token, err := keys.Create(context.Background(), nil, apikey.Request{Name: "stream-revoke", Access: []apikey.Access{{Group: "Events", AccessRights: []apikey.Right{apikey.Read}}}})
 	if err != nil {
@@ -142,6 +145,7 @@ func TestEventsStreamRevokedBeforeInitialReadAndCapacity(t *testing.T) {
 }
 
 func TestEventsStreamRevokesBetweenBufferedHistoryFrames(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, _ := userCreateHTTPFixture(t)
 	at := time.UnixMilli(1_800_000_000_000).UTC()
 	store.now = func() time.Time { return at }

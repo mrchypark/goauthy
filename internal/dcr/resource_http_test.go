@@ -10,6 +10,7 @@ import (
 )
 
 func TestRegistrationHTTPAudienceMetadata(t *testing.T) {
+	t.Parallel()
 	h := testHandlerWithHandlerConfig(t, testGlobalToken, Config{}, HandlerConfig{AllowedResources: []string{"https://api.example.test"}})
 	body := `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"Audience RP","audience":["https://api.example.test"]}`
 	first := httptest.NewRecorder()
@@ -40,6 +41,7 @@ func TestRegistrationHTTPAudienceMetadata(t *testing.T) {
 }
 
 func TestRegistrationHTTPAudiencePolicy(t *testing.T) {
+	t.Parallel()
 	h := testHandlerWithHandlerConfig(t, testGlobalToken, Config{}, HandlerConfig{AllowedResources: []string{"https://api.example.test"}})
 	body := `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"Audience RP","audience":["https://api.example.test"]}`
 	response := httptest.NewRecorder()
@@ -58,6 +60,7 @@ func TestRegistrationHTTPAudiencePolicy(t *testing.T) {
 }
 
 func TestAnonymousRegistrationRejectsAudienceField(t *testing.T) {
+	t.Parallel()
 	h := testAnonymousHandler(t, time.Minute)
 	for i, value := range []string{`"audience":null`, `"audience":[]`, `"audience":["https://api.example.test"]`} {
 		body := `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"Anonymous RP",` + value + `}`

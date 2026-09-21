@@ -1,7 +1,6 @@
 package dcr
 
 import (
-	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
@@ -14,8 +13,6 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
-	"github.com/mrchypark/goauthy/internal/storage"
-	"github.com/mrchypark/rhiza"
 )
 
 func testSoftwareStatement(t *testing.T, claims map[string]any) (string, jose.JSONWebKey) {
@@ -38,6 +35,7 @@ func testSoftwareStatement(t *testing.T, claims map[string]any) (string, jose.JS
 }
 
 func TestSoftwareStatementVerifyAndMerge(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
 	token, key := testSoftwareStatement(t, map[string]any{
 		"iss": "https://publisher.example.test", "aud": "https://id.example.test/oidc/register",
@@ -58,6 +56,7 @@ func TestSoftwareStatementVerifyAndMerge(t *testing.T) {
 }
 
 func TestSoftwareStatementOptionalAudience(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
 	token, key := testSoftwareStatement(t, map[string]any{
 		"iss": "https://publisher.example.test", "exp": now.Add(time.Hour).Unix(), "client_name": "Attested",
@@ -83,6 +82,7 @@ func TestSoftwareStatementOptionalAudience(t *testing.T) {
 }
 
 func TestSoftwareStatementCanonicalDigestIgnoresOrdering(t *testing.T) {
+	t.Parallel()
 	_, first := testSoftwareStatement(t, map[string]any{"iss": "https://publisher.example.test"})
 	_, second := testSoftwareStatement(t, map[string]any{"iss": "https://publisher.example.test"})
 	first.KeyID, second.KeyID = "b", "a"
@@ -102,6 +102,7 @@ func TestSoftwareStatementCanonicalDigestIgnoresOrdering(t *testing.T) {
 }
 
 func TestSoftwareStatementRejectsUnapprovedAndInvalid(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
 	token, key := testSoftwareStatement(t, map[string]any{"iss": "https://publisher.example.test", "exp": now.Add(time.Hour).Unix()})
 	policy, err := newSoftwareStatementPolicy(SoftwareStatementConfig{Now: func() time.Time { return now }, Issuers: []SoftwareStatementIssuer{{Issuer: "https://publisher.example.test", Audience: "https://id.example.test/oidc/register", JWKS: jose.JSONWebKeySet{Keys: []jose.JSONWebKey{key}}}}})
@@ -129,6 +130,7 @@ func testSoftwareStatementWithIssuer(t *testing.T, issuer string, now time.Time)
 }
 
 func TestLoadSoftwareStatementConfigStrict(t *testing.T) {
+	t.Parallel()
 	path := t.TempDir() + "/trust.json"
 	key := jose.JSONWebKey{Key: ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize)).Public(), KeyID: "k", Algorithm: string(jose.EdDSA), Use: "sig"}
 	body, err := json.Marshal(SoftwareStatementConfig{Issuers: []SoftwareStatementIssuer{{Issuer: "https://publisher.example.test", Audience: "https://id.example.test/oidc/register", JWKS: jose.JSONWebKeySet{Keys: []jose.JSONWebKey{key}}}}})
@@ -167,17 +169,11 @@ func TestLoadSoftwareStatementConfigStrict(t *testing.T) {
 }
 
 func TestSoftwareStatementHTTPResponseAndIdempotency(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
 	token, key := testSoftwareStatement(t, map[string]any{"iss": "https://publisher.example.test", "aud": "https://id.example.test/oidc/register", "exp": now.Add(time.Hour).Unix(), "client_name": "Attested", "redirect_uris": []string{"https://attested.example.test/callback"}, "grant_types": []string{"authorization_code"}, "response_types": []string{"code"}, "token_endpoint_auth_method": "none"})
 	config := SoftwareStatementConfig{Now: func() time.Time { return now }, Issuers: []SoftwareStatementIssuer{{Issuer: "https://publisher.example.test", Audience: "https://id.example.test/oidc/register", JWKS: jose.JSONWebKeySet{Keys: []jose.JSONWebKey{key}}}}}
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "dcr-statement-http-test", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "dcr-statement-http-test")
 	h, err := NewHandler(NewStore(db, Config{Keyring: testEnvelopeKeyring(t), Now: func() time.Time { return now }}), "https://id.example.test", testGlobalToken, HandlerConfig{SoftwareStatements: config})
 	if err != nil {
 		t.Fatal(err)

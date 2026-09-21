@@ -12,6 +12,7 @@ import (
 )
 
 func TestCompleteUpstreamAuthenticationCreatesBoundReplacementSession(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, false)
 	init, _, interactionDigest := externalAuthorization(t, h)
 	initial, err := h.browser.LoadSession(context.Background(), init.Value)
@@ -49,6 +50,7 @@ func TestCompleteUpstreamAuthenticationCreatesBoundReplacementSession(t *testing
 }
 
 func TestCompleteUpstreamAuthenticationBindingFailurePublishesNothing(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	init, _, interactionDigest := externalAuthorization(t, h)
 	response := httptest.NewRecorder()
@@ -62,6 +64,7 @@ func TestCompleteUpstreamAuthenticationBindingFailurePublishesNothing(t *testing
 }
 
 func TestCompleteUpstreamAuthenticationMFAPassedSatisfiesForceMFA(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, true) // ForceMFA=true
 	init, _, interactionDigest := externalAuthorization(t, h)
 	binding := browser.UpstreamSessionBinding{
@@ -95,6 +98,7 @@ func TestCompleteUpstreamAuthenticationMFAPassedSatisfiesForceMFA(t *testing.T) 
 }
 
 func TestCompleteUpstreamAuthenticationMFAPassedFalseRejectsForceMFA(t *testing.T) {
+	t.Parallel()
 	h := testHandlerWithForceMFA(t)
 	init, _, interactionDigest := externalAuthorization(t, h)
 	response := httptest.NewRecorder()
@@ -111,6 +115,7 @@ func TestCompleteUpstreamAuthenticationMFAPassedFalseRejectsForceMFA(t *testing.
 }
 
 func TestCompleteUpstreamAuthenticationNilBindingRejectsForceMFA(t *testing.T) {
+	t.Parallel()
 	h := testHandlerWithForceMFA(t)
 	init, _, interactionDigest := externalAuthorization(t, h)
 	response := httptest.NewRecorder()

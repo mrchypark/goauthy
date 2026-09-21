@@ -13,6 +13,7 @@ import (
 )
 
 func TestAccountDevicesHTTPBrowserBoundary(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	if err := h.BindDeviceSessions(device.NewStore(store.db)); err != nil {
 		t.Fatal(err)

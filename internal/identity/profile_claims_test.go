@@ -10,6 +10,7 @@ import (
 )
 
 func TestProfileClaimsBySubjectReadsCurrentValuesAndRejectsInactive(t *testing.T) {
+	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
 	bootstrapPassword(t, s, "profile-subject", "profile@example.test", []byte("CurrentPassword1"))

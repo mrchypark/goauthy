@@ -16,6 +16,7 @@ func userUpdateRequest(body, query, contentType string) *http.Request {
 }
 
 func TestDecodeUserUpdateBoundaries(t *testing.T) {
+	t.Parallel()
 	base := func() map[string]any {
 		return map[string]any{"email": "x@example.test", "roles": []string{}, "enabled": false, "email_verified": false}
 	}
@@ -88,6 +89,7 @@ func TestDecodeUserUpdateBoundaries(t *testing.T) {
 }
 
 func TestDecodeUserUpdate(t *testing.T) {
+	t.Parallel()
 	valid := `{"email":"New@Example.TEST","given_name":"José Name","language":"en","password":"päss","roles":["viewer"],"groups":["team/a"],"enabled":false,"email_verified":true,"user_expires":1719784800,"user_values":{"birthdate":"2000-01-02","phone":"+821012345678","street":"1 Main-Street","zip":"12345","city":"Seoul","country":"Korea","tz":"Asia/Seoul"}}`
 	tests := []struct {
 		name    string

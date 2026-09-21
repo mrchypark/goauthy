@@ -40,15 +40,7 @@ func testKeyringDir(t *testing.T, activeID string, keyIDs ...string) (dir string
 
 func testRewrapDB(t *testing.T) *rhiza.DB {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "provider-rewrap-test", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
-	return db
+	return openTestDB(t, "provider-rewrap-test")
 }
 
 func insertAuthProvSecret(t *testing.T, db *rhiza.DB, id string, secret []byte) {
@@ -174,6 +166,7 @@ func (k *wrongActiveKey) ActiveMasterKeyID() (string, error) {
 // --- tests ---
 
 func TestInspectNilArgs(t *testing.T) {
+	t.Parallel()
 	_, keyring := testKeyringDir(t, "master-active", "master-old", "master-active")
 	_, err := InspectAuthProviderSecretReferences(nil, nil, keyring)
 	if err == nil {
@@ -182,6 +175,7 @@ func TestInspectNilArgs(t *testing.T) {
 }
 
 func TestInspectNullActiveOldTamper(t *testing.T) {
+	t.Parallel()
 	db := testRewrapDB(t)
 	ctx := context.Background()
 	dir, keyring := testKeyringDir(t, "master-active", "master-old", "master-active")
@@ -214,6 +208,7 @@ func TestInspectNullActiveOldTamper(t *testing.T) {
 }
 
 func TestInspectInventoryDistribution(t *testing.T) {
+	t.Parallel()
 	db := testRewrapDB(t)
 	ctx := context.Background()
 	dir, keyring := testKeyringDir(t, "master-active", "master-old", "master-active")
@@ -252,6 +247,7 @@ func TestInspectInventoryDistribution(t *testing.T) {
 }
 
 func TestInspectProviderPurposeReplay(t *testing.T) {
+	t.Parallel()
 	db := testRewrapDB(t)
 	ctx := context.Background()
 	_, keyring := testKeyringDir(t, "master-active", "master-old", "master-active")
@@ -269,6 +265,7 @@ func TestInspectProviderPurposeReplay(t *testing.T) {
 }
 
 func TestRewrapOldToActiveRetainsPlaintext(t *testing.T) {
+	t.Parallel()
 	db := testRewrapDB(t)
 	ctx := context.Background()
 	dir, keyring := testKeyringDir(t, "master-active", "master-old", "master-active")
@@ -313,6 +310,7 @@ func TestRewrapOldToActiveRetainsPlaintext(t *testing.T) {
 }
 
 func TestRewrapAllActiveSkips(t *testing.T) {
+	t.Parallel()
 	db := testRewrapDB(t)
 	ctx := context.Background()
 	_, keyring := testKeyringDir(t, "master-active", "master-old", "master-active")
@@ -336,6 +334,7 @@ func TestRewrapAllActiveSkips(t *testing.T) {
 }
 
 func TestRewrapCursorSkipsNothing(t *testing.T) {
+	t.Parallel()
 	db := testRewrapDB(t)
 	ctx := context.Background()
 	dir, keyring := testKeyringDir(t, "master-active", "master-old", "master-active")
@@ -390,6 +389,7 @@ func TestRewrapCursorSkipsNothing(t *testing.T) {
 }
 
 func TestRewrapCASInterposition(t *testing.T) {
+	t.Parallel()
 	db := testRewrapDB(t)
 	ctx := context.Background()
 	dir, keyring := testKeyringDir(t, "master-active", "master-old", "master-active")
@@ -486,6 +486,7 @@ func TestRewrapCASInterposition(t *testing.T) {
 }
 
 func TestRewrapMismatchOutputKeyFail(t *testing.T) {
+	t.Parallel()
 	db := testRewrapDB(t)
 	ctx := context.Background()
 	dir, keyring := testKeyringDir(t, "master-active", "master-old", "master-active")
@@ -510,6 +511,7 @@ func TestRewrapMismatchOutputKeyFail(t *testing.T) {
 }
 
 func TestRewrapFencedOldWriterRollback(t *testing.T) {
+	t.Parallel()
 	db := testRewrapDB(t)
 	ctx := context.Background()
 	dir, _ := testKeyringDir(t, "master-wrong", "master-old", "master-active", "master-wrong")
@@ -549,6 +551,7 @@ func TestRewrapFencedOldWriterRollback(t *testing.T) {
 }
 
 func TestProviderSecretRewrapRequestIDContentAware(t *testing.T) {
+	t.Parallel()
 	rows1 := []providerSecretRewrapRow{
 		{id: "a", secret: []byte("old1"), newEnvelope: []byte("new1")},
 	}

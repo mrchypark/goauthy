@@ -18,6 +18,7 @@ import (
 )
 
 func TestRewrapTransactionBatchEligibility(t *testing.T) {
+	t.Parallel()
 	ctx, db, oldStore, newStore := testRotatingRhizaStore(t)
 	now := time.Unix(1_900_000_000, 123_000_000).UTC()
 
@@ -84,6 +85,7 @@ func TestRewrapTransactionBatchEligibility(t *testing.T) {
 }
 
 func TestRewrapTransactionBatchFencedOldWriterRollsBackAndReplacementIsAllowed(t *testing.T) {
+	t.Parallel()
 	ctx, db, oldStore, newStore := testRotatingRhizaStore(t)
 	now := time.Unix(1_900_000_000, 0).UTC()
 	oldEnvelopeTx := testRhizaTransaction()
@@ -116,6 +118,7 @@ func TestRewrapTransactionBatchFencedOldWriterRollsBackAndReplacementIsAllowed(t
 }
 
 func TestRewrapTransactionBatchTamperDoesNotPartiallyWrite(t *testing.T) {
+	t.Parallel()
 	ctx, db, oldStore, newStore := testRotatingRhizaStore(t)
 	now := time.Unix(1_900_000_000, 0).UTC()
 	first, second := testRhizaTransaction(), testRhizaTransaction()
@@ -142,6 +145,7 @@ func TestRewrapTransactionBatchTamperDoesNotPartiallyWrite(t *testing.T) {
 }
 
 func TestRewrapTransactionBatchPreservesConsume(t *testing.T) {
+	t.Parallel()
 	ctx, _, oldStore, newStore := testRotatingRhizaStore(t)
 	tx := testRhizaTransaction()
 	if err := oldStore.Save(ctx, tx); err != nil {
@@ -160,6 +164,7 @@ func TestRewrapTransactionBatchPreservesConsume(t *testing.T) {
 }
 
 func TestRewrapTransactionBatchRespectsUpdateBoundAndCursor(t *testing.T) {
+	t.Parallel()
 	ctx, db, oldStore, newStore := testRotatingRhizaStore(t)
 	now := time.Unix(1_900_000_000, 0).UTC()
 	stateDigests := make([]string, 33)
@@ -196,6 +201,7 @@ func TestRewrapTransactionBatchRespectsUpdateBoundAndCursor(t *testing.T) {
 }
 
 func TestRewrapTransactionBatchAdvancesPastActiveScan(t *testing.T) {
+	t.Parallel()
 	ctx, db, oldStore, newStore := testRotatingRhizaStore(t)
 	now := time.Unix(1_900_000_000, 0).UTC()
 	stateDigests := make([]string, 130)
@@ -240,6 +246,7 @@ func TestRewrapTransactionBatchAdvancesPastActiveScan(t *testing.T) {
 }
 
 func TestRewrapTransactionBatchConcurrentCASHasOneMultiRowWinner(t *testing.T) {
+	t.Parallel()
 	ctx, db, oldStore, newStore := testRotatingRhizaStore(t)
 	now := time.Unix(1_900_000_000, 0).UTC()
 	stateDigests := make([]string, 3)
@@ -295,6 +302,7 @@ func TestRewrapTransactionBatchConcurrentCASHasOneMultiRowWinner(t *testing.T) {
 }
 
 func TestTransactionRewrapMutationIsAllOrZero(t *testing.T) {
+	t.Parallel()
 	ctx, db, oldStore, newStore := testRotatingRhizaStore(t)
 	now := time.Unix(1_900_000_000, 0).UTC()
 	transactions := make([]Transaction, 2)
@@ -334,6 +342,7 @@ func TestTransactionRewrapMutationIsAllOrZero(t *testing.T) {
 }
 
 func TestTransactionRewrapRequestIDDeterministic(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(1_900_000_000, 0).UTC()
 	row := transactionRewrapRow{stateDigest: DigestSHA256("state"), envelopeText: "old", expiresAtUnix: now.Add(time.Hour).UnixMilli(), newEnvelopeText: "new"}
 	if first, second := transactionRewrapRequestID("master-new", now, []transactionRewrapRow{row}), transactionRewrapRequestID("master-new", now, []transactionRewrapRow{row}); first != second {
@@ -347,14 +356,7 @@ func TestTransactionRewrapRequestIDDeterministic(t *testing.T) {
 func testRotatingRhizaStore(t *testing.T) (context.Context, *rhiza.DB, *RhizaStore, *RhizaStore) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "upstream-rewrap-test", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "upstream-rewrap-test")
 	dir := t.TempDir()
 	for name, value := range map[string]byte{"master-old": 0x11, "master-new": 0x22} {
 		key := bytes.Repeat([]byte{value}, 32)

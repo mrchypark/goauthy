@@ -3,6 +3,7 @@ package saas
 import "testing"
 
 func TestOAuth2ProviderRechecksAuthorityAtUse(t *testing.T) {
+	t.Parallel()
 	ctx, credentials, db, _ := credentialStoreFixture(t)
 	providers, err := NewProviderStore(db, credentials.keys)
 	if err != nil {

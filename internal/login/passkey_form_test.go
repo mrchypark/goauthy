@@ -13,6 +13,7 @@ import (
 )
 
 func TestDecodePasskeyFinish(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		ct       string
@@ -112,6 +113,7 @@ func TestDecodePasskeyFinish(t *testing.T) {
 }
 
 func TestDecodePasskeyFinish_JSON_actualdecoder(t *testing.T) {
+	t.Parallel()
 	payload := passkeyFinishRequest{Code: "c", Data: "d"}
 	raw, _ := json.Marshal(payload)
 	r := httptest.NewRequest(http.MethodPost, "/passkey/finish", bytes.NewReader(raw))
@@ -127,6 +129,7 @@ func TestDecodePasskeyFinish_JSON_actualdecoder(t *testing.T) {
 }
 
 func TestDecodePasskeyFinish_CT_values(t *testing.T) {
+	t.Parallel()
 	mediaType, _, _ := mime.ParseMediaType("application/x-www-form-urlencoded; charset=utf-8")
 	if mediaType != "application/x-www-form-urlencoded" {
 		t.Fatalf("mime parse failed: %q", mediaType)
