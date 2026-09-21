@@ -29,6 +29,7 @@ func handoffLoginPage(t *testing.T, h *Handler, rawQuery string) (*httptest.Resp
 }
 
 func TestConnectionHandoffLoginAuthenticatesAndRedirectsWithoutApproval(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	page, cookie, interaction, csrf := handoffLoginPage(t, h, "handoff_id="+testHandoffID)
 	if page.Header().Get("Cache-Control") != "no-store" || page.Header().Get("Referrer-Policy") != "no-referrer" {
@@ -70,6 +71,7 @@ func TestConnectionHandoffLoginAuthenticatesAndRedirectsWithoutApproval(t *testi
 }
 
 func TestConnectionHandoffLoginRejectsBadQueriesCSRFAndForcedMFA(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	for _, raw := range []string{"handoff_id=" + testHandoffID + "&handoff_id=" + testHandoffID, "handoff_id=" + testHandoffID + "&extra=1", "handoff_id=AAAA", "handoff_id=" + testHandoffID + "="} {
 		r := httptest.NewRequest(http.MethodGet, "/account/connection-login?"+raw, nil)
@@ -129,6 +131,7 @@ func TestConnectionHandoffLoginRejectsBadQueriesCSRFAndForcedMFA(t *testing.T) {
 }
 
 func TestConnectionHandoffLoginRejectsDeviceInteractionPurpose(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	get := httptest.NewRequest(http.MethodGet, "/oidc/device/login?user_code=AB12CD34", nil)
 	get.RemoteAddr = "203.0.113.8:1234"

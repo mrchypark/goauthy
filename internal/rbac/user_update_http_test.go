@@ -30,6 +30,7 @@ func userUpdateHTTPReq(cookie *http.Cookie, subject, body string) *http.Request 
 }
 
 func TestUpdateUserHTTPUpdateOnlyKeyReturnsCommittedUser(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, cookie := userCreateHTTPFixture(t)
 	create := userCreateRequest(cookie, `{"email":"target@example.test","language":"en","roles":["viewer"],"given_name":"Target"}`)
 	w := httptest.NewRecorder()
@@ -66,6 +67,7 @@ func TestUpdateUserHTTPUpdateOnlyKeyReturnsCommittedUser(t *testing.T) {
 }
 
 func TestUpdateUserHTTPRevokedAtBarrierDoesNotWrite(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, cookie := userCreateHTTPFixture(t)
 	create := userCreateRequest(cookie, `{"email":"barrier@example.test","language":"en","roles":["viewer"],"given_name":"Barrier"}`)
 	w := httptest.NewRecorder()
@@ -99,6 +101,7 @@ func TestUpdateUserHTTPRevokedAtBarrierDoesNotWrite(t *testing.T) {
 }
 
 func TestUpdateUserHTTPSelfEmailReturnsSnapshotAndNoticesAfterCommit(t *testing.T) {
+	t.Parallel()
 	h, store, sender, _, cookie := userCreateHTTPFixture(t)
 	ctx := context.Background()
 	if err := h.userCreation.BindEmail(ctx, "admin", "old-admin@example.test"); err != nil {
@@ -140,6 +143,7 @@ func TestUpdateUserHTTPSelfEmailReturnsSnapshotAndNoticesAfterCommit(t *testing.
 }
 
 func TestUpdateUserHTTPDelegatedLastGroupAndTargetBoundary(t *testing.T) {
+	t.Parallel()
 	h, store, _, _, admin := userCreateHTTPFixture(t)
 	ctx := context.Background()
 	insertActive(t, store.db, "delegated")
@@ -179,6 +183,7 @@ func TestUpdateUserHTTPDelegatedLastGroupAndTargetBoundary(t *testing.T) {
 }
 
 func TestUpdateUserHTTPInvalidRequestsHaveNoEffects(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, cookie := userCreateHTTPFixture(t)
 	insertActive(t, store.db, "ordinary")
 	ordinary := detailSession(t, h, "ordinary")
@@ -216,6 +221,7 @@ func TestUpdateUserHTTPInvalidRequestsHaveNoEffects(t *testing.T) {
 }
 
 func TestUpdateUserHTTPUserValuesPolicy(t *testing.T) {
+	t.Parallel()
 	t.Run("default given name required", func(t *testing.T) {
 		for _, given := range []string{``, `,"given_name":null`, `,"given_name":""`} {
 			h, store, _, _, cookie := userCreateHTTPFixture(t)
@@ -277,6 +283,7 @@ func TestUpdateUserHTTPUserValuesPolicy(t *testing.T) {
 }
 
 func TestCreateUserHTTPExemptsRequiredUserValuesPolicy(t *testing.T) {
+	t.Parallel()
 	h, store, _, _, cookie := userCreateHTTPFixture(t)
 	if err := h.SetUserValuesPolicy(identity.UserValuesPolicy{GivenName: "required", FamilyName: "required"}); err != nil {
 		t.Fatal(err)

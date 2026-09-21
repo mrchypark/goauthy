@@ -31,6 +31,7 @@ func deliveryFixture(t *testing.T) (context.Context, *CredentialStore, *rhiza.DB
 }
 
 func TestDeliverAPIKeyExactDTOAndRedaction(t *testing.T) {
+	t.Parallel()
 	ctx, s, _, b, connector, consumer, grant := deliveryFixture(t)
 	got, err := s.DeliverAPIKey(ctx, b.Owner, consumer.ID, grant.ID, grant.Resource, credentialAuthority())
 	if err != nil {
@@ -52,6 +53,7 @@ func TestDeliverAPIKeyExactDTOAndRedaction(t *testing.T) {
 }
 
 func TestDeliverAPIKeyRejectsInvalidConsentAndConsumers(t *testing.T) {
+	t.Parallel()
 	ctx, s, _, b, _, consumer, grant := deliveryFixture(t)
 	for _, tc := range []struct{ name, owner, cid, resource string }{{"owner", "wrong-owner", consumer.ID, grant.Resource}, {"consumer", b.Owner, "other", grant.Resource}, {"resource", b.Owner, consumer.ID, "https://wrong.example"}} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -72,6 +74,7 @@ func TestDeliverAPIKeyRejectsInvalidConsentAndConsumers(t *testing.T) {
 // Trigger real store mutations at the authorization callbacks, without sleeps
 // or scheduler races. Callback six is the final check after key decryption.
 func TestDeliverAPIKeyRechecksBeforeReturningSecret(t *testing.T) {
+	t.Parallel()
 	for _, phase := range []int{2, 6} {
 		for _, change := range []string{"revoke", "rotate"} {
 			t.Run(fmt.Sprintf("%s/check-%d", change, phase), func(t *testing.T) {
@@ -102,6 +105,7 @@ func TestDeliverAPIKeyRechecksBeforeReturningSecret(t *testing.T) {
 }
 
 func TestDeliverAPIKeyProxyConsentCannotExport(t *testing.T) {
+	t.Parallel()
 	ctx, s, _, b, _, consumer, _ := deliveryFixture(t)
 	grant, err := s.CreateUseGrant(ctx, b.Owner, b.CollectionID, b.ConnectionID, "https://consumer.example/resource", UseGrantInput{ConsumerClientID: consumer.ID, Mode: "proxy", Purpose: "proxy only", ExpiresAt: s.now() + 60000}, credentialAuthority())
 	if err != nil {
@@ -114,6 +118,7 @@ func TestDeliverAPIKeyProxyConsentCannotExport(t *testing.T) {
 }
 
 func TestDeliverAPIKeyProviderAndGenerationFences(t *testing.T) {
+	t.Parallel()
 	ctx, s, db, b, _, consumer, grant := deliveryFixture(t)
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "delivery-provider-disable", SQL: `UPDATE saas_providers SET enabled=0 WHERE id=?`, Args: []any{grant.ProviderID}}); err != nil {
 		t.Fatal(err)
@@ -131,6 +136,7 @@ func TestDeliverAPIKeyProviderAndGenerationFences(t *testing.T) {
 }
 
 func TestDeliverAPIKeyExpiryAndPublicConsumer(t *testing.T) {
+	t.Parallel()
 	ctx, s, db, b, _, consumer, grant := deliveryFixture(t)
 	s.now = func() int64 { return grant.ExpiresAt }
 	if got, err := s.DeliverAPIKey(ctx, b.Owner, consumer.ID, grant.ID, grant.Resource, credentialAuthority()); err == nil || got.APIKey != "" {

@@ -25,6 +25,7 @@ func deleteSessionSID(t *testing.T, n byte) string {
 }
 
 func TestDeleteSessionScopesSessionBoundState(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "target")
 	insertActive(t, db, "other")
@@ -94,6 +95,7 @@ func TestDeleteSessionScopesSessionBoundState(t *testing.T) {
 }
 
 func TestDeleteSessionGuardsAndRollback(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "target")
 	sid := deleteSessionSID(t, 4)

@@ -12,6 +12,7 @@ import (
 )
 
 func TestRecordBrowserLoginLocationSameBrowserIPChange(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	store.now = func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	ctx := context.Background()
@@ -37,6 +38,7 @@ func TestRecordBrowserLoginLocationSameBrowserIPChange(t *testing.T) {
 }
 
 func TestRecordBrowserLoginLocationNewBrowserSameIPIsNew(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	ctx := context.Background()
 	bootstrapPassword(t, store, "browser-location-2", "browser-location-2", []byte("Password1"))
@@ -57,6 +59,7 @@ func TestRecordBrowserLoginLocationNewBrowserSameIPIsNew(t *testing.T) {
 }
 
 func TestRecordBrowserLoginLocationWithoutBrowserUsesIP(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	ctx := context.Background()
 	bootstrapPassword(t, store, "browser-location-3", "browser-location-3", []byte("Password1"))
@@ -77,6 +80,7 @@ func TestRecordBrowserLoginLocationWithoutBrowserUsesIP(t *testing.T) {
 }
 
 func TestRecordBrowserLoginLocationConcurrentOneWinner(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	ctx := context.Background()
 	bootstrapPassword(t, store, "browser-location-4", "browser-location-4", []byte("Password1"))
@@ -122,6 +126,7 @@ func TestRecordBrowserLoginLocationConcurrentOneWinner(t *testing.T) {
 }
 
 func TestRecordBrowserLoginLocationInvalidInput(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	ctx := context.Background()
 	bootstrapPassword(t, store, "browser-location-5", "browser-location-5", []byte("Password1"))
@@ -150,6 +155,7 @@ func TestRecordBrowserLoginLocationInvalidInput(t *testing.T) {
 }
 
 func TestRecordBrowserLoginLocationCanonicalIPFamily(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	ctx := t.Context()
 	const subject = "location-ip-family"
@@ -174,6 +180,7 @@ func TestRecordBrowserLoginLocationCanonicalIPFamily(t *testing.T) {
 }
 
 func TestBrowserLocationEarlierRequestTimeDoesNotRegressLastSeen(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	ctx := t.Context()
 	bootstrapPassword(t, store, "reordered-location", "reordered-location", []byte("Password1"))

@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -18,6 +21,7 @@ import (
 )
 
 func TestAPIKeyRoleMutationUsesCurrentRightAndGuard(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	keys, err := apikey.NewStore(db)
 	if err != nil {
@@ -46,6 +50,7 @@ func TestAPIKeyRoleMutationUsesCurrentRightAndGuard(t *testing.T) {
 }
 
 func TestAPIKeyUserMembershipMutationUsesCurrentRightAndGuard(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "member")
 	keys, err := apikey.NewStore(db)
@@ -74,6 +79,7 @@ func TestAPIKeyUserMembershipMutationUsesCurrentRightAndGuard(t *testing.T) {
 }
 
 func TestCRUDUsesCurrentAdminAndCanonicalMetadata(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	if _, err := store.EnsureBootstrapPrincipal(ctx, "admin", []string{AdminRole}, nil); err != nil {
@@ -106,6 +112,7 @@ func TestCRUDUsesCurrentAdminAndCanonicalMetadata(t *testing.T) {
 }
 
 func TestGroupNameUsesCanonicalASCIIGrammar(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"team/a", "ops:blue", "a*"} {
 		if err := ValidateGroupName(name); err != nil {
 			t.Fatalf("valid group %q: %v", name, err)
@@ -119,6 +126,7 @@ func TestGroupNameUsesCanonicalASCIIGrammar(t *testing.T) {
 }
 
 func TestBootstrapClientLoginRestrictionCASAndAdminGuard(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	if _, err := store.EnsureBootstrapPrincipal(ctx, "admin", nil, nil); err != nil {
@@ -155,6 +163,7 @@ func TestBootstrapClientLoginRestrictionCASAndAdminGuard(t *testing.T) {
 }
 
 func TestAPIKeyBootstrapClientLoginRestrictionMutation(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	keys, err := apikey.NewStore(db)
 	if err != nil {
@@ -177,6 +186,7 @@ func TestAPIKeyBootstrapClientLoginRestrictionMutation(t *testing.T) {
 }
 
 func TestLoginRestrictionFailedGuardUsesNewAttemptIDOnRetry(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	if _, err := store.EnsureBootstrapPrincipal(ctx, "admin", nil, nil); err != nil {
@@ -205,6 +215,7 @@ func TestLoginRestrictionFailedGuardUsesNewAttemptIDOnRetry(t *testing.T) {
 }
 
 func TestValidateGroupPrefixUsesUpstreamGrammarWithoutTrimming(t *testing.T) {
+	t.Parallel()
 	for _, prefix := range []string{"team/a", " team", "team\tblue", "a*"} {
 		if err := ValidateGroupPrefix(prefix); err != nil {
 			t.Fatalf("valid prefix %q: %v", prefix, err)
@@ -218,6 +229,7 @@ func TestValidateGroupPrefixUsesUpstreamGrammarWithoutTrimming(t *testing.T) {
 }
 
 func TestRenameAndDeleteBumpAffectedPrincipalVersions(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	insertActive(t, db, "member")
@@ -252,6 +264,7 @@ func TestRenameAndDeleteBumpAffectedPrincipalVersions(t *testing.T) {
 }
 
 func TestMutationRechecksActorAndDeleteCascades(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	insertActive(t, db, "other")
@@ -286,6 +299,7 @@ func TestMutationRechecksActorAndDeleteCascades(t *testing.T) {
 }
 
 func TestRevokedAdminCannotMutate(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	if _, err := store.EnsureBootstrapPrincipal(ctx, "admin", nil, nil); err != nil {
@@ -313,6 +327,7 @@ func TestRevokedAdminCannotMutate(t *testing.T) {
 }
 
 func TestGuardedReadsHideEntitiesAfterAdminRevocation(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	if _, err := store.EnsureBootstrapPrincipal(ctx, "admin", nil, nil); err != nil {
@@ -337,6 +352,7 @@ func TestGuardedReadsHideEntitiesAfterAdminRevocation(t *testing.T) {
 }
 
 func TestBootstrapInactiveLeavesNoStateAndConcurrentSeedReconciles(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	if _, err := store.EnsureBootstrapPrincipal(ctx, "missing", []string{"viewer"}, []string{"team/a"}); !errors.Is(err, ErrInactiveSubject) {
 		t.Fatalf("inactive=%v", err)
@@ -379,6 +395,7 @@ func TestBootstrapInactiveLeavesNoStateAndConcurrentSeedReconciles(t *testing.T)
 }
 
 func TestResolveFailsClosedAtMembershipBound(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	if _, err := store.EnsureBootstrapPrincipal(ctx, "admin", nil, nil); err != nil {
@@ -397,6 +414,7 @@ func TestResolveFailsClosedAtMembershipBound(t *testing.T) {
 }
 
 func TestPatchPrincipalReplacesMembershipsAndOnlyBumpsOnChange(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	insertActive(t, db, "member")
@@ -434,6 +452,7 @@ func TestPatchPrincipalReplacesMembershipsAndOnlyBumpsOnChange(t *testing.T) {
 }
 
 func TestPatchPrincipalFailsClosedForAdminTargetRevisionAndEntities(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	insertActive(t, db, "member")
@@ -480,6 +499,7 @@ func TestPatchPrincipalFailsClosedForAdminTargetRevisionAndEntities(t *testing.T
 }
 
 func TestPatchPrincipalSelfDemotionAndRevocationInterpositionAreAtomic(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	insertActive(t, db, "backup")
@@ -532,6 +552,7 @@ func TestPatchPrincipalSelfDemotionAndRevocationInterpositionAreAtomic(t *testin
 }
 
 func TestPatchPrincipalFailedGuardUsesNewAttemptIDOnRetry(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	insertActive(t, db, "member")
@@ -566,6 +587,7 @@ func TestPatchPrincipalFailedGuardUsesNewAttemptIDOnRetry(t *testing.T) {
 // the same next revision/marker, which is exactly the case a state marker alone
 // cannot tell apart.
 func TestPatchPrincipalLostAdmissionRollsBackCompletely(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	store.now = func() time.Time { return time.UnixMilli(1_700_000_000_000).UTC() }
 	for _, subject := range []string{"admin", "backup", "member"} {
@@ -627,6 +649,7 @@ func TestPatchPrincipalLostAdmissionRollsBackCompletely(t *testing.T) {
 // The final-administrator guard must use the same current-time eligibility as
 // authentication, so housekeeping timing cannot change its answer.
 func TestLastUsableAdminGuardExcludesExpiredAccounts(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	store.now = func() time.Time { return now }
@@ -668,6 +691,7 @@ func TestLastUsableAdminGuardExcludesExpiredAccounts(t *testing.T) {
 }
 
 func TestDelegatedPatchPreservesUnmanagedGroupsAndEscalationGuards(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	insertActive(t, db, "delegated")
@@ -716,6 +740,7 @@ func TestDelegatedPatchPreservesUnmanagedGroupsAndEscalationGuards(t *testing.T)
 }
 
 func TestDelegatedPatchRevocationInterpositionIsAtomic(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	insertActive(t, db, "delegated")
@@ -763,6 +788,7 @@ func TestDelegatedPatchRevocationInterpositionIsAtomic(t *testing.T) {
 // turn every queued projection of that group into a provider-scoped delete in
 // the same transaction, including a stale queued membership update.
 func TestDeleteGroupSupersedesQueuedSCIMProjection(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	if _, err := store.EnsureBootstrapPrincipal(ctx, "admin", nil, nil); err != nil {
@@ -892,6 +918,7 @@ func (f rbacSCIMReconciler) Reconcile(ctx context.Context, request scim.Request)
 // path honest: it rewrites the projection statement with the durable mutation
 // guard, so the guard's argument must stay in its placeholder position.
 func TestDeleteGroupAPIKeySupersedesQueuedSCIMProjection(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	if _, err := store.EnsureBootstrapPrincipal(ctx, "admin", nil, nil); err != nil {
@@ -930,17 +957,82 @@ func TestDeleteGroupAPIKeySupersedesQueuedSCIMProjection(t *testing.T) {
 	count(t, db, `SELECT COUNT(*) FROM rbac_groups WHERE id=?`, group.ID, 0)
 }
 
+var (
+	rbacTemplateOnce      sync.Once
+	rbacTemplateDirectory string
+	rbacTemplateErr       error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if rbacTemplateDirectory != "" {
+		_ = os.RemoveAll(rbacTemplateDirectory)
+	}
+	os.Exit(code)
+}
+
+func rbacMigratedTemplate(t *testing.T) string {
+	t.Helper()
+	rbacTemplateOnce.Do(func() {
+		directory, err := os.MkdirTemp("", "goauthy-rbac-template-")
+		if err != nil {
+			rbacTemplateErr = err
+			return
+		}
+		db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "rbac-store-test", DataDir: directory})
+		if err != nil {
+			rbacTemplateErr = fmt.Errorf("open test template: %w", err)
+			return
+		}
+		if err := storage.Migrate(context.Background(), db); err != nil {
+			_ = db.Close()
+			rbacTemplateErr = fmt.Errorf("migrate test template: %w", err)
+			return
+		}
+		if err := db.Close(); err != nil {
+			rbacTemplateErr = fmt.Errorf("close test template: %w", err)
+			return
+		}
+		rbacTemplateDirectory = directory
+	})
+	if rbacTemplateErr != nil {
+		t.Fatal(rbacTemplateErr)
+	}
+	return rbacTemplateDirectory
+}
+
+func copyDirTree(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		c2, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, c2, 0o644)
+	})
+}
 func rbacTestStore(t *testing.T) (context.Context, *Store, *rhiza.DB) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "rbac-store-test", DataDir: t.TempDir()})
+	directory := t.TempDir()
+	if err := copyDirTree(rbacMigratedTemplate(t), directory); err != nil {
+		t.Fatal(err)
+	}
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "rbac-store-test", DataDir: directory})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
 	store := NewStore(db)
 	store.now = func() time.Time { return time.UnixMilli(1_700_000_000_000).UTC() }
 	var randomMu sync.Mutex

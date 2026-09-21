@@ -3,6 +3,7 @@ package upstreamprovider
 import "testing"
 
 func TestProtocolEffectiveDefaults(t *testing.T) {
+	t.Parallel()
 	// Nil protocol fields yield legacy defaults.
 	cfg := Config{}
 	ep := cfg.EffectiveProtocol()
@@ -28,6 +29,7 @@ func TestProtocolEffectiveDefaults(t *testing.T) {
 }
 
 func TestProtocolIsZero(t *testing.T) {
+	t.Parallel()
 	if !(ProviderProtocol{}).isZero() {
 		t.Fatal("zero protocol reports non-zero")
 	}

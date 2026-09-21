@@ -8,6 +8,7 @@ import (
 )
 
 func TestOAuth2StatusAndRevoke(t *testing.T) {
+	t.Parallel()
 	ctx, store, _, b := credentialStoreFixture(t)
 	status, err := store.OAuth2Status(ctx, b.Owner, b.CollectionID, b.ConnectionID, credentialAuthority())
 	if err != nil || status.Connected || status.State != "draft" || status.Version != 0 || status.Scopes == nil {
@@ -33,6 +34,7 @@ func TestOAuth2StatusAndRevoke(t *testing.T) {
 }
 
 func TestOAuth2RevokeBlocksOlderPendingAuthorization(t *testing.T) {
+	t.Parallel()
 	ctx, store, _, b := credentialStoreFixture(t)
 	req, state, session, provider, _ := verifierRequestWithSeed(b, "pending-before-install")
 	if err := store.CreateAuthorization(ctx, req, credentialAuthority()); err != nil {
@@ -53,6 +55,7 @@ func TestOAuth2RevokeBlocksOlderPendingAuthorization(t *testing.T) {
 }
 
 func TestOAuth2RevokePreventsRefreshResurrection(t *testing.T) {
+	t.Parallel()
 	for _, uncertain := range []bool{false, true} {
 		t.Run(map[bool]string{false: "refreshing", true: "uncertain"}[uncertain], func(t *testing.T) {
 			ctx, store, db, b := credentialStoreFixture(t)
@@ -93,6 +96,7 @@ func TestOAuth2RevokePreventsRefreshResurrection(t *testing.T) {
 }
 
 func TestOAuth2RevokeRejectsChangedGenerationAndAuthority(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	if err := store.Install(ctx, b, testCredential(), credentialAuthority()); err != nil {
 		t.Fatal(err)
@@ -118,6 +122,7 @@ func TestOAuth2RevokeRejectsChangedGenerationAndAuthority(t *testing.T) {
 }
 
 func TestOAuth2LifecycleGuards(t *testing.T) {
+	t.Parallel()
 	ctx, store, _, b := credentialStoreFixture(t)
 	if _, err := store.OAuth2Status(ctx, "wrong", b.CollectionID, b.ConnectionID, credentialAuthority()); !errors.Is(err, ErrCredentialNotFound) {
 		t.Fatalf("wrong owner=%v", err)

@@ -117,6 +117,7 @@ func newRefreshFixture(t *testing.T, account string) *refreshFixture {
 // Channels hold the provider response after it receives the refresh token. The
 // timeout is only a deadlock watchdog, never the ordering mechanism.
 func TestRefreshOAuth2InFlightFences(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"competing-refresh", "canceled-after-send", "provider-revised"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newRefreshFixture(t, "account-1")
@@ -190,6 +191,7 @@ func TestRefreshOAuth2InFlightFences(t *testing.T) {
 }
 
 func TestRefreshOAuth2RegisteredTLSSuccessAndFences(t *testing.T) {
+	t.Parallel()
 	f := newRefreshFixture(t, "account-1")
 	t.Cleanup(f.server.Close)
 	status, err := f.s.refreshOAuth2(f.ctx, f.o, f.b, f.guard)
@@ -203,6 +205,7 @@ func TestRefreshOAuth2RegisteredTLSSuccessAndFences(t *testing.T) {
 }
 
 func TestRefreshOAuth2RetainsOmittedRefreshAndRejectsMissingOrStale(t *testing.T) {
+	t.Parallel()
 	f := newRefreshFixture(t, "")
 	t.Cleanup(f.server.Close)
 	if _, err := f.s.refreshOAuth2(f.ctx, f.o, f.b, f.guard); !errors.Is(err, ErrCredentialNotFound) || f.tokenCalls.Load() != 0 {
@@ -225,6 +228,7 @@ func TestRefreshOAuth2RetainsOmittedRefreshAndRejectsMissingOrStale(t *testing.T
 }
 
 func TestRefreshOAuth2ExternalFailuresBecomeUncertainWithoutRetry(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"scope-expansion", "identity-mismatch", "identity-failure", "http-failure", "revoke-at-identity"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newRefreshFixture(t, "account-1")
@@ -248,6 +252,7 @@ func TestRefreshOAuth2ExternalFailuresBecomeUncertainWithoutRetry(t *testing.T) 
 }
 
 func TestRefreshOAuth2UnknownExpiryCannotBeDelivered(t *testing.T) {
+	t.Parallel()
 	f := newRefreshFixture(t, "account-1")
 	f.mode.Store("unknown-expiry")
 	if _, err := f.s.refreshOAuth2(f.ctx, f.o, f.b, f.guard); err != nil {

@@ -16,6 +16,7 @@ import (
 )
 
 func TestPasswordLoginMissingProfileYieldsProfileContinuation(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, false)
 	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "profile-recovery-email", SQL: `INSERT INTO identity_recovery_emails(subject,email) VALUES('user-1','alice@example.test')`}); err != nil {
 		t.Fatal(err)
@@ -97,6 +98,7 @@ func TestPasswordLoginMissingProfileYieldsProfileContinuation(t *testing.T) {
 }
 
 func TestAuthenticatedSessionRetainedAfterProfileSubmission(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, false)
 	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "profile-recovery-email", SQL: `INSERT INTO identity_recovery_emails(subject,email) VALUES('user-1','alice@example.test')`}); err != nil {
 		t.Fatal(err)
@@ -168,6 +170,7 @@ func TestAuthenticatedSessionRetainedAfterProfileSubmission(t *testing.T) {
 }
 
 func TestRepeatedProfilePOSTRefusesAndNoMutation(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, false)
 	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "profile-recovery-email", SQL: `INSERT INTO identity_recovery_emails(subject,email) VALUES('user-1','alice@example.test')`}); err != nil {
 		t.Fatal(err)
@@ -314,6 +317,7 @@ func profilePOST(t *testing.T, h *Handler, profileCookie *http.Cookie, interacti
 }
 
 func TestProfilePOSTWrongCSRFReturns403(t *testing.T) {
+	t.Parallel()
 	h, _, profileCookie, location := profileSetup(t)
 	_, interactionToken, _ := profileGETFields(t, h, profileCookie, location)
 
@@ -329,6 +333,7 @@ func TestProfilePOSTWrongCSRFReturns403(t *testing.T) {
 }
 
 func TestProfilePOSTDuplicateBodyFieldReturns400(t *testing.T) {
+	t.Parallel()
 	h, _, profileCookie, location := profileSetup(t)
 	csrf, interactionToken, _ := profileGETFields(t, h, profileCookie, location)
 
@@ -348,6 +353,7 @@ func TestProfilePOSTDuplicateBodyFieldReturns400(t *testing.T) {
 }
 
 func TestProfilePOSTOversizedBodyReturns400(t *testing.T) {
+	t.Parallel()
 	h, _, profileCookie, location := profileSetup(t)
 	csrf, interactionToken, _ := profileGETFields(t, h, profileCookie, location)
 
@@ -368,6 +374,7 @@ func TestProfilePOSTOversizedBodyReturns400(t *testing.T) {
 }
 
 func TestProfilePOSTDuplicateQueryInteractionReturns400(t *testing.T) {
+	t.Parallel()
 	h, _, profileCookie, location := profileSetup(t)
 	csrf, interactionToken, _ := profileGETFields(t, h, profileCookie, location)
 
@@ -389,6 +396,7 @@ func TestProfilePOSTDuplicateQueryInteractionReturns400(t *testing.T) {
 }
 
 func TestProfilePOSTFromOtherAuthenticatedSessionDenied(t *testing.T) {
+	t.Parallel()
 	h, _, profileCookie, location := profileSetup(t)
 	_, itok, _ := profileGETFields(t, h, profileCookie, location)
 
@@ -420,6 +428,7 @@ func TestProfilePOSTFromOtherAuthenticatedSessionDenied(t *testing.T) {
 }
 
 func TestProfilePOSTValidRetryAfterRejectedStillCompletes(t *testing.T) {
+	t.Parallel()
 	h, _, profileCookie, location := profileSetup(t)
 	csrf, interactionToken, _ := profileGETFields(t, h, profileCookie, location)
 
@@ -453,6 +462,7 @@ func TestProfilePOSTValidRetryAfterRejectedStillCompletes(t *testing.T) {
 }
 
 func TestProfilePOSTPromptNoneIncompleteProfileYieldsInteractionRequired(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, false)
 	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "profile-recovery-email", SQL: `INSERT INTO identity_recovery_emails(subject,email) VALUES('user-1','alice@example.test')`}); err != nil {
 		t.Fatal(err)
@@ -488,6 +498,7 @@ func TestProfilePOSTPromptNoneIncompleteProfileYieldsInteractionRequired(t *test
 }
 
 func TestProfileMaxAgeZeroFreshLoginPreservesSessionAndCompletes(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, false)
 	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "profile-recovery-email", SQL: `INSERT INTO identity_recovery_emails(subject,email) VALUES('user-1','alice@example.test')`}); err != nil {
 		t.Fatal(err)
@@ -555,6 +566,7 @@ func TestProfileMaxAgeZeroFreshLoginPreservesSessionAndCompletes(t *testing.T) {
 }
 
 func TestProfileConcurrentPOSTExactlyOneCodeCallback(t *testing.T) {
+	t.Parallel()
 	h, _, profileCookie, location := profileSetup(t)
 	csrf, interactionToken, _ := profileGETFields(t, h, profileCookie, location)
 
@@ -586,6 +598,7 @@ func TestProfileConcurrentPOSTExactlyOneCodeCallback(t *testing.T) {
 }
 
 func TestProfileConcurrentReplayIssuesNoAdditionalCode(t *testing.T) {
+	t.Parallel()
 	h, _, profileCookie, location := profileSetup(t)
 	csrf, interactionToken, _ := profileGETFields(t, h, profileCookie, location)
 
@@ -614,6 +627,7 @@ func TestProfileConcurrentReplayIssuesNoAdditionalCode(t *testing.T) {
 }
 
 func TestProfileDisabledWhenRevalidateDuringLoginFalse(t *testing.T) {
+	t.Parallel()
 	h, _, profileCookie, location := profileSetup(t)
 
 	// Get valid CSRF and interaction tokens while policy is still enabled
@@ -667,6 +681,7 @@ func TestProfileDisabledWhenRevalidateDuringLoginFalse(t *testing.T) {
 }
 
 func TestProfileMaxAgeZeroDeterministicDelayPreservesSession(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, false)
 	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "profile-recovery-email", SQL: `INSERT INTO identity_recovery_emails(subject,email) VALUES('user-1','alice@example.test')`}); err != nil {
 		t.Fatal(err)

@@ -12,6 +12,7 @@ import (
 )
 
 func TestFederatedProfileGuardStaleProvider(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	seedExistingUser(t, store, "staleprov@example.test")
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -44,6 +45,7 @@ func TestFederatedProfileGuardStaleProvider(t *testing.T) {
 }
 
 func TestFederatedProfileGuardUnlink(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	seedExistingUser(t, store, "unlink@example.test")
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -74,6 +76,7 @@ func TestFederatedProfileGuardUnlink(t *testing.T) {
 }
 
 func TestFederatedProfileGuardProfileUpdate(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	subject := seedExistingUser(t, store, "profileupdate@example.test")
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -107,6 +110,7 @@ func TestFederatedProfileGuardProfileUpdate(t *testing.T) {
 }
 
 func TestFederatedProfileGuardLastOtherAdminRemoved(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	subject := seedExistingUser(t, store, "lastother@example.test")
 	seedAdminRole(t, store, subject)
@@ -165,6 +169,7 @@ func TestFederatedProfileGuardLastOtherAdminRemoved(t *testing.T) {
 }
 
 func TestFederatedProfileExpiredRejected(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	subject := seedExistingUser(t, store, "expired@example.test")
 	storage.Execute(context.Background(), store.db, rhiza.ExecuteRequest{
@@ -183,6 +188,7 @@ func TestFederatedProfileExpiredRejected(t *testing.T) {
 }
 
 func TestFederatedProfileRNGFailure(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	seedExistingUser(t, store, "rngfail@example.test")
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -198,6 +204,7 @@ func TestFederatedProfileRNGFailure(t *testing.T) {
 }
 
 func TestFederatedProfileMissingRole(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	seedExistingUser(t, store, "norole@example.test")
 	storage.Execute(context.Background(), store.db, rhiza.ExecuteRequest{

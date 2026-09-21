@@ -9,6 +9,7 @@ import (
 )
 
 func TestDeleteRegistrationCleansClientThemeAtomically(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	created, err := store.Create(ctx, validRequest("delete-theme", TokenEndpointAuthNone))
 	if err != nil {

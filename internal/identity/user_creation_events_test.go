@@ -12,6 +12,7 @@ import (
 )
 
 func TestUserCreationLifecycleEventsAreAtomicAndClassified(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, credential.DefaultRules())
 	now := time.Unix(2_000_000_000, 123000000).UTC()
 	store.now = func() time.Time { return now }
@@ -55,6 +56,7 @@ func TestUserCreationLifecycleEventsAreAtomicAndClassified(t *testing.T) {
 }
 
 func TestPublicDuplicateAndFailedCreationEmitNoExtraEvents(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, credential.DefaultRules())
 	store.now = func() time.Time { return time.Unix(2_000_000_000, 0).UTC() }
 	ctx := context.Background()

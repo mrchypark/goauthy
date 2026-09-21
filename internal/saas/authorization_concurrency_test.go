@@ -6,6 +6,7 @@ import (
 )
 
 func TestAuthorizationConcurrentConsumersHaveOneWinner(t *testing.T) {
+	t.Parallel()
 	ctx, store, _, binding := credentialStoreFixture(t)
 	request := authorizationTestRequest(store, binding)
 	if err := store.CreateAuthorization(ctx, request, credentialAuthority()); err != nil {

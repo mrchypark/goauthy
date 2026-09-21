@@ -26,6 +26,7 @@ func credentialDeliveryHTTPFixture(t *testing.T) *Handler {
 }
 
 func TestDeliverConnectionCredentialHTTPBoundary(t *testing.T) {
+	t.Parallel()
 	h := credentialDeliveryHTTPFixture(t)
 	path := "/auth/v1/connection-grants/grant/credential"
 	for name, alter := range map[string]func(*http.Request){
@@ -82,6 +83,7 @@ func TestDeliverConnectionCredentialHTTPBoundary(t *testing.T) {
 }
 
 func TestDeliverConnectionCredentialRequiresHTTPSAndConfig(t *testing.T) {
+	t.Parallel()
 	h := credentialDeliveryHTTPFixture(t)
 	h.issuer = "http://issuer.example.test"
 	w := httptest.NewRecorder()
@@ -98,6 +100,7 @@ func TestDeliverConnectionCredentialRequiresHTTPSAndConfig(t *testing.T) {
 }
 
 func TestDeliverConnectionCredentialAuthorizerFailure(t *testing.T) {
+	t.Parallel()
 	h := credentialDeliveryHTTPFixture(t)
 	h.connectionUseAuthorizer = func(*http.Request) (string, string, func() (string, []any), error) {
 		return "", "", nil, errors.New("invalid bearer")

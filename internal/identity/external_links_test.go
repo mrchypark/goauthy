@@ -13,6 +13,7 @@ import (
 )
 
 func TestLinkExternalRetryAndFind(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(1))
 	ctx := context.Background()
 	bootstrapPassword(t, store, "subject-1", "alice", []byte("CurrentPassword1"))
@@ -32,6 +33,7 @@ func TestLinkExternalRetryAndFind(t *testing.T) {
 }
 
 func TestLinkExternalConflictsByExternalAndLocalProvider(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(1))
 	ctx := context.Background()
 	bootstrapPassword(t, store, "subject-1", "alice", []byte("CurrentPassword1"))
@@ -51,6 +53,7 @@ func TestLinkExternalConflictsByExternalAndLocalProvider(t *testing.T) {
 }
 
 func TestLinkExternalRejectsMissingAndDisabledIdentity(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(1))
 	ctx := context.Background()
 	external := upstreamprovider.SubjectResult{ProviderID: "google", Subject: "missing"}
@@ -67,6 +70,7 @@ func TestLinkExternalRejectsMissingAndDisabledIdentity(t *testing.T) {
 }
 
 func TestConcurrentExternalLinksConvergeToOneMapping(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(1))
 	ctx := context.Background()
 	bootstrapPassword(t, store, "subject-1", "alice", []byte("CurrentPassword1"))
@@ -107,6 +111,7 @@ func TestConcurrentExternalLinksConvergeToOneMapping(t *testing.T) {
 }
 
 func TestUnlinkExternalRelinkAndPendingCleanup(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(1))
 	ctx := context.Background()
 	bootstrapPassword(t, store, "subject-1", "alice", []byte("CurrentPassword1"))
@@ -162,6 +167,7 @@ func TestUnlinkExternalRelinkAndPendingCleanup(t *testing.T) {
 }
 
 func TestUnlinkExternalDoesNotDeleteDisabledSubjectLink(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(1))
 	ctx := context.Background()
 	bootstrapPassword(t, store, "subject-1", "alice", []byte("CurrentPassword1"))
@@ -183,6 +189,7 @@ func TestUnlinkExternalDoesNotDeleteDisabledSubjectLink(t *testing.T) {
 }
 
 func TestExpiredPasswordNewTokenDoesNotDeleteCompletedExternalLink(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(1))
 	ctx := context.Background()
 	bootstrapPassword(t, store, "subject-1", "alice", []byte("CurrentPassword1"))

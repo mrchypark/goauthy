@@ -76,6 +76,7 @@ func seedAdminRole(t *testing.T, store *Store, subject string) {
 }
 
 func TestFederatedProfileUpdateBasic(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	subject := seedExistingUser(t, store, "basic@example.test")
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -100,6 +101,7 @@ func TestFederatedProfileUpdateBasic(t *testing.T) {
 }
 
 func TestFederatedProfileUpdateEmailChange(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	subject := seedExistingUser(t, store, "old@example.test")
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -125,6 +127,7 @@ func TestFederatedProfileUpdateEmailChange(t *testing.T) {
 }
 
 func TestFederatedProfileUpdateDuplicateEmailConflict(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	seedExistingUser(t, store, "first@example.test")
 	ctx := context.Background()
@@ -153,6 +156,7 @@ func TestFederatedProfileUpdateDuplicateEmailConflict(t *testing.T) {
 }
 
 func TestFederatedProfileUpdateAdminGrant(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	subject := seedExistingUser(t, store, "admgrant@example.test")
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -175,6 +179,7 @@ func TestFederatedProfileUpdateAdminGrant(t *testing.T) {
 }
 
 func TestFederatedProfileUpdateAdminRevoke(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	subject := seedExistingUser(t, store, "admrevoke@example.test")
 	seedAdminRole(t, store, subject)
@@ -215,6 +220,7 @@ func TestFederatedProfileUpdateAdminRevoke(t *testing.T) {
 }
 
 func TestFederatedProfileUpdateLastAdminProtection(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	subject := seedExistingUser(t, store, "lastadmin@example.test")
 	seedAdminRole(t, store, subject)
@@ -234,6 +240,7 @@ func TestFederatedProfileUpdateLastAdminProtection(t *testing.T) {
 }
 
 func TestFederatedProfileUpdateAdminNilNoChange(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	subject := seedExistingUser(t, store, "niladmin@example.test")
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -254,6 +261,7 @@ func TestFederatedProfileUpdateAdminNilNoChange(t *testing.T) {
 }
 
 func TestFederatedProfileUpdateProviderChangedRejected(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	seedExistingUser(t, store, "provchange@example.test")
 	ctx := context.Background()
@@ -276,6 +284,7 @@ func TestFederatedProfileUpdateProviderChangedRejected(t *testing.T) {
 }
 
 func TestFederatedProfileUpdateNotFound(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
 	_, err := store.UpdateFederatedProfile(context.Background(), FederatedProfileUpdateInput{
@@ -290,6 +299,7 @@ func TestFederatedProfileUpdateNotFound(t *testing.T) {
 }
 
 func TestFederatedProfileUpdatePreservesPasswordAndMode(t *testing.T) {
+	t.Parallel()
 	store := testFederatedProfileStore(t)
 	subject := seedExistingUser(t, store, "preserve@example.test")
 	ctx := context.Background()

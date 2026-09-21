@@ -24,6 +24,7 @@ func authorizationTestRequest(store *CredentialStore, b credentialBinding) autho
 }
 
 func TestAuthorizationStoreCreateConsumeAndReplay(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	req := authorizationTestRequest(store, b)
 	if err := store.CreateAuthorization(ctx, req, credentialAuthority()); err != nil {
@@ -47,6 +48,7 @@ func TestAuthorizationStoreCreateConsumeAndReplay(t *testing.T) {
 }
 
 func TestAuthorizationStoreWrongProofDoesNotConsume(t *testing.T) {
+	t.Parallel()
 	for name, mutate := range map[string]func(*authorizationRequest){
 		"verifier": func(r *authorizationRequest) { r.VerifierDigest = authorizationTestDigest("wrong") },
 		"session":  func(r *authorizationRequest) { r.SessionDigest = authorizationTestDigest("wrong") },
@@ -71,6 +73,7 @@ func TestAuthorizationStoreWrongProofDoesNotConsume(t *testing.T) {
 }
 
 func TestAuthorizationStoreExpiryAndProviderRemoval(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	now := store.now()
 	store.now = func() int64 { return now }

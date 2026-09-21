@@ -50,6 +50,7 @@ func signedTokenWithClaims(t *testing.T, key *rsa.PrivateKey, kid string, extra 
 }
 
 func TestProfileClaimsPreservedFromSignedJWT(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +87,7 @@ func TestProfileClaimsPreservedFromSignedJWT(t *testing.T) {
 }
 
 func TestProfileClaimsAbsentWhenOmitted(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +119,7 @@ func TestProfileClaimsAbsentWhenOmitted(t *testing.T) {
 }
 
 func TestEmailVerifiedFalseDistinctFromAbsent(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -153,6 +156,7 @@ func TestEmailVerifiedFalseDistinctFromAbsent(t *testing.T) {
 }
 
 func TestProfileClaimsRejectMalformedEmailVerified(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -172,6 +176,7 @@ func TestProfileClaimsRejectMalformedEmailVerified(t *testing.T) {
 }
 
 func TestProfileClaimsRejectInvalidSignature(t *testing.T) {
+	t.Parallel()
 	correctKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)

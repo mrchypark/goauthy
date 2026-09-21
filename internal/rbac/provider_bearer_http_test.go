@@ -10,6 +10,7 @@ import (
 )
 
 func TestProviderBearerBoundaryScopesAndAuthShape(t *testing.T) {
+	t.Parallel()
 	h, store, adminCookie, _ := membershipHTTPFixture(t)
 	if err := h.BindSaaSProviderStore(providerHTTPStore(t, store)); err != nil {
 		t.Fatal(err)
@@ -79,6 +80,7 @@ func TestProviderBearerBoundaryScopesAndAuthShape(t *testing.T) {
 }
 
 func TestProviderBearerGuardRechecksAdminAtMutation(t *testing.T) {
+	t.Parallel()
 	h, store, _, _ := membershipHTTPFixture(t)
 	if err := h.BindSaaSProviderStore(providerHTTPStore(t, store)); err != nil {
 		t.Fatal(err)

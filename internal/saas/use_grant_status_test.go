@@ -10,6 +10,7 @@ import (
 )
 
 func TestUseGrantStatusReturnsStoredStateAndCurrentConnectionGeneration(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	providers, err := NewProviderStore(db, store.keys)
 	if err != nil {

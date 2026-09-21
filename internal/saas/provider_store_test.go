@@ -9,6 +9,7 @@ import (
 )
 
 func TestProviderValidationSeparatesKinds(t *testing.T) {
+	t.Parallel()
 	oauth := ProviderInput{ID: "github", Name: "GitHub", Kind: "oauth2", ClientID: "client", ClientSecret: "0123456789012345", CallbackURI: "https://auth.example/callback", AuthorizationURL: "https://github.example/authorize", TokenURL: "https://github.example/token", Scopes: []string{"read:user"}, AuthStyle: "header"}
 	if _, err := validateProviderInput(oauth, true); err != nil {
 		t.Fatal(err)
@@ -35,6 +36,7 @@ func providerInputForTest(secret string) ProviderInput {
 }
 
 func TestProviderStoreCRUDRetentionCASAndReferenceGuard(t *testing.T) {
+	t.Parallel()
 	ctx, credentials, db, _ := credentialStoreFixture(t)
 	store, err := NewProviderStore(db, credentials.keys)
 	if err != nil {

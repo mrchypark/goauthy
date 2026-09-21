@@ -110,15 +110,7 @@ func min(a, b int) int {
 // and a fakeEnvelopeKeyring, matching the pattern used by testRhizaStore.
 func testRegistryStore(t *testing.T) (*RegistryStore, *rhiza.DB) {
 	t.Helper()
-	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "registry-store-test", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "registry-store-test")
 	store, err := NewRegistryStore(db, &fakeEnvelopeKeyring{})
 	if err != nil {
 		t.Fatal(err)
@@ -141,6 +133,7 @@ func insertAuthProvider(t *testing.T, ctx context.Context, db *rhiza.DB, row []a
 // TestRegistryStoreGetNullableFields inserts a row with all nullable fields
 // populated and verifies Get returns the correct *string pointers.
 func TestRegistryStoreGetNullableFields(t *testing.T) {
+	t.Parallel()
 	store, db := testRegistryStore(t)
 	ctx := context.Background()
 
@@ -186,6 +179,7 @@ func TestRegistryStoreGetNullableFields(t *testing.T) {
 // TestRegistryStoreGetCiphertextOnly inserts a row with a ciphertext secret
 // and no nullable fields, then verifies Get returns the opaque bytes.
 func TestRegistryStoreGetCiphertextOnly(t *testing.T) {
+	t.Parallel()
 	store, db := testRegistryStore(t)
 	ctx := context.Background()
 
@@ -215,6 +209,7 @@ func TestRegistryStoreGetCiphertextOnly(t *testing.T) {
 // TestRegistryStoreListReturnsMultiple verifies List returns all inserted
 // providers ordered by name,id.
 func TestRegistryStoreListReturnsMultiple(t *testing.T) {
+	t.Parallel()
 	store, db := testRegistryStore(t)
 	ctx := context.Background()
 
@@ -245,6 +240,7 @@ func TestRegistryStoreListReturnsMultiple(t *testing.T) {
 // TestRegistryStoreSecretCleartextPurposeBound verifies that SecretCleartext
 // decrypts with the correct provider purpose and rejects cross-provider replay.
 func TestRegistryStoreSecretCleartextPurposeBound(t *testing.T) {
+	t.Parallel()
 	keyring := &fakeEnvelopeKeyring{}
 	s := &RegistryStore{db: nil, keyring: keyring}
 
@@ -275,6 +271,7 @@ func TestRegistryStoreSecretCleartextPurposeBound(t *testing.T) {
 // --- decodeProviderDocument tests ---
 
 func TestDecodeProviderDocumentExact21Columns(t *testing.T) {
+	t.Parallel()
 	row := testRegistryRow(
 		"prov-1", true, "Google OIDC", "google",
 		"https://accounts.google.com", "https://accounts.google.com/o/oauth2/auth",
@@ -311,6 +308,7 @@ func TestDecodeProviderDocumentExact21Columns(t *testing.T) {
 }
 
 func TestDecodeProviderDocumentWrongColumnCount(t *testing.T) {
+	t.Parallel()
 	row := make([]any, 20)
 	_, err := decodeProviderDocument(row)
 	if !errors.Is(err, ErrInvalidProviderRow) {
@@ -324,6 +322,7 @@ func TestDecodeProviderDocumentWrongColumnCount(t *testing.T) {
 }
 
 func TestDecodeProviderDocumentEmptyID(t *testing.T) {
+	t.Parallel()
 	row := testRegistryRow("", true, "p", "oidc", "i", "a", "t", "u", "c", nil, "s", "", "", "", "", "", true, false, false, false, false)
 	row[0] = ""
 	_, err := decodeProviderDocument(row)
@@ -338,6 +337,7 @@ func TestDecodeProviderDocumentEmptyID(t *testing.T) {
 }
 
 func TestDecodeProviderDocumentInvalidType(t *testing.T) {
+	t.Parallel()
 	row := testRegistryRow("p", true, "name", "oidc", "i", "a", "t", "u", "c", nil, "s", "", "", "", "", "", true, false, false, false, false)
 	row[3] = "bogus"
 	_, err := decodeProviderDocument(row)
@@ -347,6 +347,7 @@ func TestDecodeProviderDocumentInvalidType(t *testing.T) {
 }
 
 func TestDecodeProviderDocumentNilOptionals(t *testing.T) {
+	t.Parallel()
 	// All optional fields (admin*, mfa*, jwks) are nil/empty.
 	row := testRegistryRow(
 		"prov-nil", false, "Minimal", "custom",
@@ -367,6 +368,7 @@ func TestDecodeProviderDocumentNilOptionals(t *testing.T) {
 }
 
 func TestDecodeProviderDocumentCiphertextOnly(t *testing.T) {
+	t.Parallel()
 	ciphertext := []byte{0x01, 0x02, 0x03, 0xff}
 	row := testRegistryRow(
 		"prov-ct", true, "Ciphertext Only", "oidc",
@@ -388,6 +390,7 @@ func TestDecodeProviderDocumentCiphertextOnly(t *testing.T) {
 }
 
 func TestProviderBoolRejectsNonInt64(t *testing.T) {
+	t.Parallel()
 	if _, ok := providerBool("not-an-int"); ok {
 		t.Fatal("string should not be accepted as bool")
 	}
@@ -397,12 +400,14 @@ func TestProviderBoolRejectsNonInt64(t *testing.T) {
 }
 
 func TestProviderNullableStringRejectsNonString(t *testing.T) {
+	t.Parallel()
 	if _, ok := providerNullableString(123); ok {
 		t.Fatal("non-string should not be accepted")
 	}
 }
 
 func TestProviderNullableBytesRejectsNonBytes(t *testing.T) {
+	t.Parallel()
 	if _, ok := providerNullableBytes("string"); ok {
 		t.Fatal("string should not be accepted as bytes")
 	}
@@ -411,6 +416,7 @@ func TestProviderNullableBytesRejectsNonBytes(t *testing.T) {
 // --- ProviderSecretPurpose tests ---
 
 func TestProviderSecretPurposeBinding(t *testing.T) {
+	t.Parallel()
 	p1 := ProviderSecretPurpose("google")
 	p2 := ProviderSecretPurpose("github")
 	if p1 == p2 {
@@ -425,6 +431,7 @@ func TestProviderSecretPurposeBinding(t *testing.T) {
 }
 
 func TestValidProviderSecretPurpose(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		purpose string
 		valid   bool
@@ -447,6 +454,7 @@ func TestValidProviderSecretPurpose(t *testing.T) {
 // --- SecretCleartext tests ---
 
 func TestSecretCleartextNilSecret(t *testing.T) {
+	t.Parallel()
 	s := &RegistryStore{db: nil, keyring: &fakeEnvelopeKeyring{}}
 	doc := ProviderDocument{ID: "prov-nil", Secret: nil}
 	got, err := s.SecretCleartext(doc)
@@ -459,6 +467,7 @@ func TestSecretCleartextNilSecret(t *testing.T) {
 }
 
 func TestSecretCleartextPurposeBinding(t *testing.T) {
+	t.Parallel()
 	keyring := &fakeEnvelopeKeyring{}
 	s := &RegistryStore{db: nil, keyring: keyring}
 
@@ -488,6 +497,7 @@ func TestSecretCleartextPurposeBinding(t *testing.T) {
 }
 
 func TestSecretCleartextNilStoreOrKeyring(t *testing.T) {
+	t.Parallel()
 	doc := ProviderDocument{ID: "p", Secret: []byte("x")}
 	// nil store
 	var nilStore *RegistryStore
@@ -504,6 +514,7 @@ func TestSecretCleartextNilStoreOrKeyring(t *testing.T) {
 }
 
 func TestSecretCleartextOpenError(t *testing.T) {
+	t.Parallel()
 	keyring := &fakeEnvelopeKeyring{openErr: errors.New("key missing")}
 	s := &RegistryStore{db: nil, keyring: keyring}
 	doc := ProviderDocument{ID: "p", Secret: []byte("x")}
@@ -516,6 +527,7 @@ func TestSecretCleartextOpenError(t *testing.T) {
 // --- RegistryStore constructor tests ---
 
 func TestNewRegistryStoreRejectsNilDB(t *testing.T) {
+	t.Parallel()
 	_, err := NewRegistryStore(nil, &fakeEnvelopeKeyring{})
 	if !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("nil db: err=%v", err)
@@ -523,6 +535,7 @@ func TestNewRegistryStoreRejectsNilDB(t *testing.T) {
 }
 
 func TestNewRegistryStoreRejectsNilKeyring(t *testing.T) {
+	t.Parallel()
 	_, err := NewRegistryStore(&rhiza.DB{}, nil)
 	if !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("nil keyring: err=%v", err)
@@ -532,6 +545,7 @@ func TestNewRegistryStoreRejectsNilKeyring(t *testing.T) {
 // --- Get / List nil-guard tests (no live DB needed) ---
 
 func TestRegistryStoreGetRejectsNilAndEmptyID(t *testing.T) {
+	t.Parallel()
 	s := &RegistryStore{db: nil, keyring: &fakeEnvelopeKeyring{}}
 	_, err := s.Get(context.Background(), "")
 	if !errors.Is(err, ErrInvalidConfig) {
@@ -545,6 +559,7 @@ func TestRegistryStoreGetRejectsNilAndEmptyID(t *testing.T) {
 }
 
 func TestRegistryStoreListRejectsNilDB(t *testing.T) {
+	t.Parallel()
 	s := &RegistryStore{db: nil, keyring: &fakeEnvelopeKeyring{}}
 	_, err := s.List(context.Background())
 	if !errors.Is(err, ErrInvalidConfig) {
@@ -560,6 +575,7 @@ func TestRegistryStoreListRejectsNilDB(t *testing.T) {
 // --- decodeProviderDocument with all bools set ---
 
 func TestDecodeProviderDocumentAllBoolsFalse(t *testing.T) {
+	t.Parallel()
 	row := testRegistryRow(
 		"prov-false", false, "Disabled", "custom",
 		"https://example.com", "https://example.com/auth", "https://example.com/token", "https://example.com/userinfo",
@@ -578,6 +594,7 @@ func TestDecodeProviderDocumentAllBoolsFalse(t *testing.T) {
 // --- decodeProviderDocument with invalid bool values ---
 
 func TestDecodeProviderDocumentRejectsInvalidBool(t *testing.T) {
+	t.Parallel()
 	row := testRegistryRow(
 		"p", true, "n", "oidc", "i", "a", "t", "u", "c", nil, "s", "", "", "", "", "", true, false, false, false, false,
 	)
@@ -592,6 +609,7 @@ func TestDecodeProviderDocumentRejectsInvalidBool(t *testing.T) {
 // --- decodeProviderDocument with non-string in string fields ---
 
 func TestDecodeProviderDocumentRejectsNonStringInStringField(t *testing.T) {
+	t.Parallel()
 	row := testRegistryRow(
 		"p", true, "n", "oidc", "i", "a", "t", "u", "c", nil, "s", "", "", "", "", "", true, false, false, false, false,
 	)
@@ -606,6 +624,7 @@ func TestDecodeProviderDocumentRejectsNonStringInStringField(t *testing.T) {
 // --- Round-trip: ToDocument + decode ---
 
 func TestProviderDocumentToDocumentAndDecode(t *testing.T) {
+	t.Parallel()
 	req := validProviderRequest()
 	secret := []byte("encrypted-blob")
 	doc, err := req.ToDocument("rt-1", secret)

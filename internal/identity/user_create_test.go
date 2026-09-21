@@ -12,6 +12,7 @@ import (
 )
 
 func TestCreateUserWithGuardCreatesCompletePendingIdentity(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, credential.DefaultRules())
 	ctx := context.Background()
 	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "create-user-entities", Statements: []rhiza.SQLStatement{
@@ -40,6 +41,7 @@ func TestCreateUserWithGuardCreatesCompletePendingIdentity(t *testing.T) {
 }
 
 func TestCreateUserWithGuardConstraintFailureRollsBackEverything(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, credential.DefaultRules())
 	if _, err := storage.Execute(context.Background(), store.db, rhiza.ExecuteRequest{RequestID: "create-rollback-role", SQL: `INSERT INTO rbac_roles(id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) VALUES('role-1','reviewer',NULL,1,0,0)`}); err != nil {
 		t.Fatal(err)
@@ -53,6 +55,7 @@ func TestCreateUserWithGuardConstraintFailureRollsBackEverything(t *testing.T) {
 }
 
 func TestCreateUserWithGuardRejectsRevokedAuthorityWithoutWrites(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, credential.DefaultRules())
 	created, err := store.CreateUserWithGuard(context.Background(), UserCreation{OpenRegistration: OpenRegistration{Email: "blocked@example.test", TTL: time.Hour}}, "0=1", nil)
 	if err != ErrCreateUnauthorized || created.Created {
@@ -63,6 +66,7 @@ func TestCreateUserWithGuardRejectsRevokedAuthorityWithoutWrites(t *testing.T) {
 }
 
 func TestCreateUserWithGuardDuplicateEmailLeavesExistingRowsUnchanged(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, credential.DefaultRules())
 	pending, err := store.RegisterOpenUser(context.Background(), OpenRegistration{Email: "duplicate@example.test", TTL: time.Hour})
 	if err != nil {

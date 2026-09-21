@@ -15,6 +15,7 @@ import (
 )
 
 func TestExpireUsersBoundariesBatchAndIdempotence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	now := time.UnixMilli(10_000).UTC()
 	s := scimDeleteStore(t)
@@ -71,6 +72,7 @@ func TestExpireUsersBoundariesBatchAndIdempotence(t *testing.T) {
 }
 
 func TestExpireUsersConcurrentWorkersExactlyOne(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := scimDeleteStore(t)
 	now := time.UnixMilli(20_000).UTC()
@@ -125,6 +127,7 @@ func TestExpireUsersConcurrentWorkersExactlyOne(t *testing.T) {
 }
 
 func TestDeleteExpiredUsersStrictRetentionBoundary(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := scimDeleteStore(t)
 	now := time.UnixMilli(3 * 24 * 60 * 60 * 1000).UTC()
@@ -150,6 +153,7 @@ func TestDeleteExpiredUsersStrictRetentionBoundary(t *testing.T) {
 }
 
 func TestExpireUsersRevokesSessionsAndOAuthArtifacts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := scimDeleteStore(t)
 	now := time.UnixMilli(40_000).UTC()
@@ -283,6 +287,7 @@ func TestExpireUsersRevokesSessionsAndOAuthArtifacts(t *testing.T) {
 }
 
 func TestExpireUsersRollsBackAllEffectsOnFinalDisableFailure(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := scimDeleteStore(t)
 	now := time.UnixMilli(50_000).UTC()
@@ -328,6 +333,7 @@ func TestExpireUsersRollsBackAllEffectsOnFinalDisableFailure(t *testing.T) {
 }
 
 func TestAccountRemovalSkipsEmptyBackchannelURI(t *testing.T) {
+	t.Parallel()
 	for _, deleting := range []bool{false, true} {
 		name := "expire"
 		if deleting {

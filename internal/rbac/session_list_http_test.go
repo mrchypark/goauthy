@@ -16,6 +16,7 @@ import (
 )
 
 func TestSessionsHandlerAPIKeyPaginationHeaders(t *testing.T) {
+	t.Parallel()
 	h, store, _, _ := membershipHTTPFixture(t)
 	if err := h.SetUserListThreshold(1); err != nil {
 		t.Fatal(err)
@@ -49,6 +50,7 @@ func TestSessionsHandlerAPIKeyPaginationHeaders(t *testing.T) {
 }
 
 func TestSessionsHandlerBrowserAdminAndDeniedUser(t *testing.T) {
+	t.Parallel()
 	h, _, adminCookie, _ := membershipHTTPFixture(t)
 	if err := h.SetUserListThreshold(100); err != nil {
 		t.Fatal(err)
@@ -83,6 +85,7 @@ func TestSessionsHandlerBrowserAdminAndDeniedUser(t *testing.T) {
 }
 
 func TestSessionsHandlerDelegatedAdminSeesAllSessions(t *testing.T) {
+	t.Parallel()
 	h, store, _, _ := membershipHTTPFixture(t)
 	ctx := context.Background()
 	role, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/*", nil)
@@ -123,6 +126,7 @@ func TestSessionsHandlerDelegatedAdminSeesAllSessions(t *testing.T) {
 }
 
 func TestSessionsHandlerWrongAPIKeyRightDenied(t *testing.T) {
+	t.Parallel()
 	h, store, _, _ := membershipHTTPFixture(t)
 	keys, err := apikey.NewStore(store.db)
 	if err != nil {
@@ -143,6 +147,7 @@ func TestSessionsHandlerWrongAPIKeyRightDenied(t *testing.T) {
 }
 
 func TestSessionsHandlerAdminRejectsQueryBodyAndCrossSite(t *testing.T) {
+	t.Parallel()
 	h, _, adminCookie, _ := membershipHTTPFixture(t)
 	for _, tc := range []struct {
 		name, suffix, body, site string

@@ -15,6 +15,7 @@ import (
 )
 
 func TestVerifiedClaimPayloadRetained(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -96,6 +97,7 @@ func TestVerifiedClaimPayloadRetained(t *testing.T) {
 }
 
 func TestVerifiedClaimPayloadInvalidSignatureReturnsNil(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -123,6 +125,7 @@ func TestVerifiedClaimPayloadInvalidSignatureReturnsNil(t *testing.T) {
 // copies the payload bytes into rawClaims rather than aliasing the caller
 // slice. Mutating rawClaims must not affect the original payload.
 func TestDecodeIDTokenClaimsCopiesInputBytes(t *testing.T) {
+	t.Parallel()
 	payload := []byte(`{"iss":"https://issuer.example.test","sub":"sub1","aud":"aud1","exp":9999999999,"iat":9999999998}`)
 	claims, err := decodeIDTokenClaims(payload)
 	if err != nil {
@@ -148,6 +151,7 @@ func TestDecodeIDTokenClaimsCopiesInputBytes(t *testing.T) {
 // TestRawClaimsAccessorReturnsIndependentCopy proves that successive RawClaims
 // calls each return an independent copy.
 func TestRawClaimsAccessorReturnsIndependentCopy(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)

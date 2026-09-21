@@ -13,6 +13,7 @@ import (
 )
 
 func TestLoginLocationObserverKeepsBrowserID(t *testing.T) {
+	t.Parallel()
 	h := &Handler{issuer: "https://issuer.example.test"}
 	var ids []string
 	h.SetLoginLocationObserver(func(observed *http.Request, subject, id, ip, ua string) error {
@@ -42,6 +43,7 @@ func TestLoginLocationObserverKeepsBrowserID(t *testing.T) {
 }
 
 func TestPasswordLocationNotifiesBeforeMFACompletion(t *testing.T) {
+	t.Parallel()
 	for _, forceMFA := range []bool{false, true} {
 		t.Run(fmt.Sprint("forceMFA=", forceMFA), func(t *testing.T) {
 			h := testHandlerWithForce(t, forceMFA)
@@ -87,6 +89,7 @@ func TestPasswordLocationNotifiesBeforeMFACompletion(t *testing.T) {
 }
 
 func TestPasskeyLocationRequiresUserAgentBeforeSession(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, false)
 	h.SetLoginLocationObserver(func(*http.Request, string, string, string, string) error { t.Fatal("invalid UA notified"); return nil })
 	for _, method := range []string{"webauthn", "mfa"} {
@@ -107,6 +110,7 @@ func TestPasskeyLocationRequiresUserAgentBeforeSession(t *testing.T) {
 }
 
 func TestLoginLocationFailureStopsPasswordResponse(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	const private = "private-location-error"
 	h.SetLoginLocationObserver(func(*http.Request, string, string, string, string) error { return errors.New(private) })
@@ -122,6 +126,7 @@ func TestLoginLocationFailureStopsPasswordResponse(t *testing.T) {
 }
 
 func TestLoginLocationUsesConfiguredBrowserCookie(t *testing.T) {
+	t.Parallel()
 	h := &Handler{issuer: "https://issuer.test"}
 	policy, err := browser.NewBrowserIDPolicy(browser.BrowserIDSecure, true)
 	if err != nil {

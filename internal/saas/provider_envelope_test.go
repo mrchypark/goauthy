@@ -3,6 +3,7 @@ package saas
 import "testing"
 
 func TestProviderSecretPurposeBindsIDAndGeneration(t *testing.T) {
+	t.Parallel()
 	a := providerSecretPurpose("github", "generation-a")
 	if a == providerSecretPurpose("github", "generation-b") || a == providerSecretPurpose("other", "generation-a") {
 		t.Fatal("provider secret purpose is not bound")
@@ -13,6 +14,7 @@ func TestProviderSecretPurposeBindsIDAndGeneration(t *testing.T) {
 }
 
 func TestProviderEnvelopeInspectionAndRewrap(t *testing.T) {
+	t.Parallel()
 	ctx, credentials, db, _ := credentialStoreFixture(t)
 	store, err := NewProviderStore(db, credentials.keys)
 	if err != nil {
@@ -35,6 +37,7 @@ func TestProviderEnvelopeInspectionAndRewrap(t *testing.T) {
 }
 
 func TestProviderEnvelopeTwoRotationsAndAPIKeyHasNoSecret(t *testing.T) {
+	t.Parallel()
 	ctx, _, db, _ := credentialStoreFixture(t)
 	keys := credentialKeys(t, "key-a", "key-a", "key-b", "key-c")
 	store, err := NewProviderStore(db, keys)

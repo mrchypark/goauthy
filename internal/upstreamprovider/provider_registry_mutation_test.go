@@ -37,14 +37,7 @@ type mutationFixture struct {
 func newMutationFixture(t *testing.T) *mutationFixture {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "mutation-test", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "mutation-test")
 	dir := t.TempDir()
 	key := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x07}, 32))
 	if err := os.WriteFile(filepath.Join(dir, "test-key"), []byte(key), 0o600); err != nil {
@@ -124,6 +117,7 @@ func (f *mutationFixture) readProvider(id string) []any {
 // --- tests ---
 
 func TestProviderCreateAuthorizedWithSecret(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	secret := "my-client-secret"
 	req := validProviderMutationRequest()
@@ -163,6 +157,7 @@ func TestProviderCreateAuthorizedWithSecret(t *testing.T) {
 }
 
 func TestProviderCreateAuthorizedNoSecret(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	req := validProviderMutationRequest()
 	req.ClientSecret = nil
@@ -181,6 +176,7 @@ func TestProviderCreateAuthorizedNoSecret(t *testing.T) {
 }
 
 func TestProviderCreateAuthorizedRejectsDuplicate(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	f.seedProvider("prov-dup")
 	req := validProviderMutationRequest()
@@ -192,6 +188,7 @@ func TestProviderCreateAuthorizedRejectsDuplicate(t *testing.T) {
 }
 
 func TestProviderCreateAuthorizedRejectsInvalidDTO(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	req := validProviderMutationRequest()
 	req.Name = "" // empty name fails validation
@@ -203,6 +200,7 @@ func TestProviderCreateAuthorizedRejectsInvalidDTO(t *testing.T) {
 }
 
 func TestProviderCreateAuthorizedScopeNormalized(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	req := validProviderMutationRequest()
 	req.Scope = "openid  profile   email" // double spaces
@@ -218,6 +216,7 @@ func TestProviderCreateAuthorizedScopeNormalized(t *testing.T) {
 }
 
 func TestProviderUpdateAuthorizedWithSecret(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	f.seedProvider("prov-upd")
 	req := validProviderMutationRequest()
@@ -243,6 +242,7 @@ func TestProviderUpdateAuthorizedWithSecret(t *testing.T) {
 }
 
 func TestProviderUpdateAuthorizedNullClear(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	f.seedProvider("prov-null")
 	req := validProviderMutationRequest()
@@ -262,6 +262,7 @@ func TestProviderUpdateAuthorizedNullClear(t *testing.T) {
 }
 
 func TestProviderUpdateAuthorizedExactFields(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	f.seedProvider("prov-exact")
 	req := ProviderRequest{
@@ -331,6 +332,7 @@ func TestProviderUpdateAuthorizedExactFields(t *testing.T) {
 }
 
 func TestProviderUpdateAuthorizedRejectsNonExistent(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	req := validProviderMutationRequest()
 
@@ -341,6 +343,7 @@ func TestProviderUpdateAuthorizedRejectsNonExistent(t *testing.T) {
 }
 
 func TestProviderCreateAuthorizedRevokedGuard(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	req := validProviderMutationRequest()
 	req.ClientSecret = nil
@@ -369,6 +372,7 @@ func TestProviderCreateAuthorizedRevokedGuard(t *testing.T) {
 }
 
 func TestProviderCreateAuthorizedOldWriterFence(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	req := validProviderMutationRequest()
 	secret := "fenced-secret"
@@ -530,6 +534,7 @@ func TestProviderCreateAuthorizedOldWriterFence(t *testing.T) {
 }
 
 func TestProviderCreateAuthorizedCrossProviderSecretBinding(t *testing.T) {
+	t.Parallel()
 	keyring := &fakeEnvelopeKeyring{}
 
 	// Seal for provider A.
@@ -561,6 +566,7 @@ func TestProviderCreateAuthorizedCrossProviderSecretBinding(t *testing.T) {
 
 
 func TestProviderCreateScopeOpenidProfile(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	req := validProviderMutationRequest()
 	req.Scope = "openid profile"
@@ -581,6 +587,7 @@ func TestProviderCreateScopeOpenidProfile(t *testing.T) {
 }
 
 func TestProviderUpdateScopeOpenidProfile(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	f.seedProvider("prov-scope-upd")
 	req := validProviderMutationRequest()
@@ -602,6 +609,7 @@ func TestProviderUpdateScopeOpenidProfile(t *testing.T) {
 }
 
 func TestProviderCreateInvalidRequestLeavesDBUnchanged(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	req := validProviderMutationRequest()
 	req.Name = "" // invalid: empty name
@@ -625,6 +633,7 @@ func TestProviderCreateInvalidRequestLeavesDBUnchanged(t *testing.T) {
 }
 
 func TestProviderUpdateInvalidRequestLeavesDBUnchanged(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	f.seedProvider("prov-invalid-upd")
 

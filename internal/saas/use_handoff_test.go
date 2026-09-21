@@ -58,6 +58,7 @@ func handoffCreate(t *testing.T) (context.Context, *CredentialStore, *rhiza.DB, 
 }
 
 func TestUseHandoffCreateReviewComplete(t *testing.T) {
+	t.Parallel()
 	ctx, s, db, b, c, _, _, id := handoffCreate(t)
 	review, err := s.ReviewUseHandoff(ctx, b.Owner, id, credentialAuthority())
 	if err != nil || review.Grant.ConnectorDigest != c.Digest() || review.Grant.Resource != handoffResource {
@@ -74,6 +75,7 @@ func TestUseHandoffCreateReviewComplete(t *testing.T) {
 }
 
 func TestUseHandoffRejectsBadInputsAndReplay(t *testing.T) {
+	t.Parallel()
 	ctx, s, _, b, c, requester, consumer, id := handoffCreate(t)
 	for name, mutate := range map[string]func(*UseHandoffInput){"uri": func(in *UseHandoffInput) { in.ReturnURI = "http://bad" }, "state": func(in *UseHandoffInput) { in.State = "short" }, "mode": func(in *UseHandoffInput) { in.Mode = "invalid" }} {
 		t.Run(name, func(t *testing.T) {
@@ -102,6 +104,7 @@ func TestUseHandoffRejectsBadInputsAndReplay(t *testing.T) {
 }
 
 func TestUseHandoffDenyAndReplay(t *testing.T) {
+	t.Parallel()
 	ctx, s, db, b, _, _, _, id := handoffCreate(t)
 	redirect, err := s.CompleteUseHandoff(ctx, b.Owner, id, false, "", credentialAuthority())
 	if err != nil || !strings.Contains(redirect, "error=access_denied") {
@@ -117,6 +120,7 @@ func TestUseHandoffDenyAndReplay(t *testing.T) {
 }
 
 func TestUseHandoffConcurrentApprovalCreatesOneGrant(t *testing.T) {
+	t.Parallel()
 	ctx, s, db, b, c, _, _, id := handoffCreate(t)
 	start := make(chan struct{})
 	var wg sync.WaitGroup
@@ -151,6 +155,7 @@ func TestUseHandoffConcurrentApprovalCreatesOneGrant(t *testing.T) {
 }
 
 func TestUseHandoffExpiryAndProviderFence(t *testing.T) {
+	t.Parallel()
 	ctx, s, db, b, _, requester, consumer, id := handoffCreate(t)
 	now := s.now()
 	s.now = func() int64 { return now + 301_000 }
@@ -168,6 +173,7 @@ func TestUseHandoffExpiryAndProviderFence(t *testing.T) {
 }
 
 func TestUseHandoffClientAndAuthorityFences(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		uri     string
@@ -218,6 +224,7 @@ func TestUseHandoffClientAndAuthorityFences(t *testing.T) {
 }
 
 func TestUseHandoffQuotaCleansExpired(t *testing.T) {
+	t.Parallel()
 	ctx, s, _, b, _, requester, consumer := handoffFixture(t)
 	now := s.now()
 	s.now = func() int64 { return now }

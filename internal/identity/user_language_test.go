@@ -7,6 +7,7 @@ import (
 )
 
 func TestRegisterOpenUserLanguage(t *testing.T) {
+	t.Parallel()
 	s := testResetStore(t, testRules(2))
 	s.now = func() time.Time { return time.Unix(1700000000, 0) }
 	ctx := context.Background()

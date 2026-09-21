@@ -8,6 +8,7 @@ import (
 )
 
 func TestAuthorizationProofUsesPKCEAndRedacts(t *testing.T) {
+	t.Parallel()
 	proof := newAuthorizationProof()
 	if !validState(proof.state) || !validVerifier(proof.verifier) || len(proof.state) != 43 {
 		t.Fatal("invalid generated authorization proof")

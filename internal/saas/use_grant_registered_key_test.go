@@ -10,6 +10,7 @@ import (
 )
 
 func TestUseGrantRegisteredAPIKeyPolicy(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"disable", "revision", "remove"} {
 		t.Run(change, func(t *testing.T) {
 			ctx, s, db, b := credentialStoreFixture(t)

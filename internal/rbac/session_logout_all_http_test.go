@@ -17,6 +17,7 @@ import (
 )
 
 func TestLogoutAllSessionsHTTPAdminAndGates(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	ctx := context.Background()
 	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "logout-all-seed", SQL: `INSERT INTO browser_sessions(token_digest,subject,auth_method,created_at_unix_ms,expires_at_unix_ms,last_seen_at_unix_ms) VALUES('logout-a','member','pwd',1,4102444800000,1),('logout-b','member','pwd',1,4102444800000,1)`}); err != nil {
@@ -47,6 +48,7 @@ func TestLogoutAllSessionsHTTPAdminAndGates(t *testing.T) {
 }
 
 func TestLogoutAllSessionsHTTPFreshGates(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, method, suffix, body string
 		csrf, site                 string
@@ -76,6 +78,7 @@ func TestLogoutAllSessionsHTTPFreshGates(t *testing.T) {
 }
 
 func TestLogoutAllSessionsHTTPKeyAndNoFallback(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	keys, err := apikey.NewStore(store.db)
 	if err != nil {
@@ -120,6 +123,7 @@ func TestLogoutAllSessionsHTTPKeyAndNoFallback(t *testing.T) {
 }
 
 func TestLogoutAllSessionsHTTPDelegatedAndReaderDenied(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	ctx := context.Background()
 	role, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/*", nil)
@@ -167,6 +171,7 @@ func TestLogoutAllSessionsHTTPDelegatedAndReaderDenied(t *testing.T) {
 }
 
 func TestLogoutAllSessionsHTTPEntropyFailurePreservesState(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	store.random = func([]byte) (int, error) { return 0, errors.New("entropy unavailable") }
 	r := httptest.NewRequest(http.MethodDelete, "/auth/v1/sessions", nil)

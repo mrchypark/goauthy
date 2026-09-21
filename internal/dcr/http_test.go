@@ -11,13 +11,12 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/browser"
-	"github.com/mrchypark/goauthy/internal/storage"
-	"github.com/mrchypark/rhiza"
 )
 
 const testGlobalToken = "0123456789abcdef0123456789abcdef"
 
 func TestRegistrationHTTPCreateAndGet(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	body := `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"client_secret_post","client_name":"Example RP","client_uri":"https://rp.example.test"}`
 	post := request(http.MethodPost, "/oidc/register", body, testGlobalToken)
@@ -59,6 +58,7 @@ func TestRegistrationHTTPCreateAndGet(t *testing.T) {
 }
 
 func TestRegistrationHTTPContactsCanonicalAndReplacementSemantics(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	body := `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"Contacts RP","contacts":["support@example.test","mailto:z@example.test"]}`
 	created := registerClientWithKey(t, h, body, "contacts-create")
@@ -123,6 +123,7 @@ func TestRegistrationHTTPContactsCanonicalAndReplacementSemantics(t *testing.T) 
 }
 
 func TestRegistrationHTTPURIMetadataCanonicalAndReplacementSemantics(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	body := `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"URI RP","logo_uri":"https://rp.example.test/logo.svg","tos_uri":"https://rp.example.test/terms","policy_uri":"https://rp.example.test/privacy"}`
 	created := registerClientWithKey(t, h, body, "uri-create")
@@ -180,6 +181,7 @@ func TestRegistrationHTTPURIMetadataCanonicalAndReplacementSemantics(t *testing.
 }
 
 func TestRegistrationHTTPDeviceGrantMetadata(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	for _, test := range []struct {
 		name, body                   string
@@ -230,6 +232,7 @@ func TestRegistrationHTTPDeviceGrantMetadata(t *testing.T) {
 }
 
 func TestRegistrationHTTPDeviceGrantUpdateUsesSameMetadataRules(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	created := registerClient(t, h, `{"redirect_uris":[],"grant_types":["urn:ietf:params:oauth:grant-type:device_code"],"response_types":[],"token_endpoint_auth_method":"none","client_name":"Device RP"}`)
 	updatedBody := `{"client_id":"` + created.ClientID + `","redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code","urn:ietf:params:oauth:grant-type:device_code"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"Hybrid RP"}`
@@ -258,6 +261,7 @@ func TestRegistrationHTTPDeviceGrantUpdateUsesSameMetadataRules(t *testing.T) {
 }
 
 func TestRegistrationHTTPDelete(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	created := registerClient(t, h, `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"client_secret_basic","client_name":"Delete me"}`)
 	path := registrationPath + "/" + created.ClientID
@@ -322,6 +326,7 @@ func TestRegistrationHTTPDelete(t *testing.T) {
 }
 
 func TestRegistrationHTTPRejectsForceMFA(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	base := `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"Example RP"}`
 	created := registerClient(t, h, base)
@@ -346,6 +351,7 @@ func TestRegistrationHTTPRejectsForceMFA(t *testing.T) {
 }
 
 func TestRegistrationHTTPRejectsUntrustedInput(t *testing.T) {
+	t.Parallel()
 	valid := `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"Example RP"}`
 	for _, test := range []struct {
 		name, method, path, contentType, token, body string
@@ -410,6 +416,7 @@ func TestRegistrationHTTPRejectsUntrustedInput(t *testing.T) {
 }
 
 func TestClientURIValidationIsStrictAndBounded(t *testing.T) {
+	t.Parallel()
 	store := NewStore(nil)
 	base := validRequest("client-uri", TokenEndpointAuthClientBasic)
 	for _, uri := range []string{
@@ -434,6 +441,7 @@ func TestClientURIValidationIsStrictAndBounded(t *testing.T) {
 }
 
 func TestRegistrationHTTPPublicClientDoesNotReceiveSecret(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	response := httptest.NewRecorder()
 	h.ServeHTTP(response, request(http.MethodPost, "/oidc/register", `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"Public RP"}`, testGlobalToken))
@@ -444,6 +452,7 @@ func TestRegistrationHTTPPublicClientDoesNotReceiveSecret(t *testing.T) {
 }
 
 func TestRegistrationHTTPAnonymousCreate(t *testing.T) {
+	t.Parallel()
 	h := testAnonymousHandler(t, time.Minute)
 	body := `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"Anonymous RP"}`
 	metadataBody := strings.Replace(body, `}`, `,"logo_uri":"https://rp.example.test/logo.svg"}`, 1)
@@ -517,6 +526,7 @@ func TestRegistrationHTTPAnonymousCreate(t *testing.T) {
 }
 
 func TestRegistrationHTTPPublicUpdateRotatesOnlyAccessToken(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	body := `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"Public RP"}`
 	created := registerClient(t, h, body)
@@ -535,6 +545,7 @@ func TestRegistrationHTTPPublicUpdateRotatesOnlyAccessToken(t *testing.T) {
 }
 
 func TestRegistrationHTTPUpdate(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	created := registerClient(t, h, `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"client_secret_basic","client_name":"Before Update","client_uri":"https://rp.example.test"}`)
 	updatedBody := `{"client_id":"` + created.ClientID + `","redirect_uris":["https://rp.example.test/updated"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"client_secret_basic","client_name":"After Update","client_uri":"https://updated.example.test"}`
@@ -600,6 +611,7 @@ func TestRegistrationHTTPUpdate(t *testing.T) {
 }
 
 func TestRegistrationHTTPLoopbackRedirectOptIn(t *testing.T) {
+	t.Parallel()
 	valid := `{"redirect_uris":["http://127.0.0.1/callback"],"grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"Native app"}`
 	for _, test := range []struct {
 		name    string
@@ -641,6 +653,7 @@ func TestRegistrationHTTPLoopbackRedirectOptIn(t *testing.T) {
 }
 
 func TestRegistrationHTTPUpdateErrorStatus(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name string
 		err  error
@@ -661,6 +674,7 @@ func TestRegistrationHTTPUpdateErrorStatus(t *testing.T) {
 }
 
 func TestLoadRegistrationToken(t *testing.T) {
+	t.Parallel()
 	path := t.TempDir() + "/dcr-token"
 	if err := os.WriteFile(path, []byte("\n"+testGlobalToken+"\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -691,14 +705,7 @@ func testHandlerWithHandlerConfig(t *testing.T, token string, config Config, han
 	if config.Keyring == nil {
 		config.Keyring = testEnvelopeKeyring(t)
 	}
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "dcr-http-test", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "dcr-http-test")
 	h, err := NewHandler(NewStore(db, config), "https://id.example.test", token, handlerConfig)
 	if err != nil {
 		t.Fatal(err)
@@ -708,14 +715,7 @@ func testHandlerWithHandlerConfig(t *testing.T, token string, config Config, han
 
 func testAnonymousHandler(t *testing.T, window time.Duration) http.Handler {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "dcr-anonymous-http-test", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "dcr-anonymous-http-test")
 	h, err := NewHandler(NewStore(db, Config{Keyring: testEnvelopeKeyring(t), Now: func() time.Time {
 		return time.Date(2026, 9, 4, 12, 0, 30, 0, time.UTC)
 	}}), "https://id.example.test", "", HandlerConfig{Anonymous: true, AnonymousRateLimitWindow: window})
@@ -764,6 +764,7 @@ func registerClientWithKey(t *testing.T, h http.Handler, body, key string) regis
 }
 
 func TestRegistrationUsesConfiguredScopePolicy(t *testing.T) {
+	t.Parallel()
 	policy, err := NewScopePolicy([]string{"openid", "custom"}, []string{"openid"})
 	if err != nil {
 		t.Fatal(err)
@@ -776,6 +777,7 @@ func TestRegistrationUsesConfiguredScopePolicy(t *testing.T) {
 }
 
 func TestRegistrationHTTPBackchannelReplacement(t *testing.T) {
+	t.Parallel()
 	for _, clear := range []string{`,"backchannel_logout_uri":null`, ""} {
 		t.Run(clear, func(t *testing.T) {
 			h := testHandler(t, testGlobalToken)
@@ -822,6 +824,7 @@ func TestRegistrationHTTPBackchannelReplacement(t *testing.T) {
 }
 
 func TestBackchannelURIMetadataMatchesPinnedPattern(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		value string
 		valid bool

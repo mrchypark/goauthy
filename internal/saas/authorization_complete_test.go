@@ -9,6 +9,7 @@ import (
 )
 
 func TestAuthorizationCompletionRequiresConsumedCurrentConsent(t *testing.T) {
+	t.Parallel()
 	for _, invalidated := range []bool{false, true} {
 		t.Run(map[bool]string{false: "current", true: "removed-and-readded"}[invalidated], func(t *testing.T) {
 			ctx, store, db, binding := credentialStoreFixture(t)

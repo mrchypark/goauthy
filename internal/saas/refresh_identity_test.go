@@ -22,6 +22,7 @@ func credentialSnapshot(t *testing.T, ctx context.Context, s *CredentialStore, b
 }
 
 func TestCompleteRefreshRejectsIdentityChangesWithoutReplacingCredential(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, oldAccount, newAccount string }{
 		{"nonempty-to-different", "account-1", "account-2"},
 		{"nonempty-to-empty", "account-1", ""},
@@ -49,6 +50,7 @@ func TestCompleteRefreshRejectsIdentityChangesWithoutReplacingCredential(t *test
 }
 
 func TestCompleteRefreshAcceptsMatchingIdentity(t *testing.T) {
+	t.Parallel()
 	ctx, s, _, b := credentialStoreFixture(t)
 	if err := s.Install(ctx, b, credential{AccountID: "account-1", AccessToken: "old", RefreshToken: "refresh", ExpiresAtUnixMS: s.now() + 60000}, credentialAuthority()); err != nil {
 		t.Fatal(err)
@@ -67,6 +69,7 @@ func TestCompleteRefreshAcceptsMatchingIdentity(t *testing.T) {
 }
 
 func TestRefreshCredentialIdentityMismatchMarksUncertainWithoutRetry(t *testing.T) {
+	t.Parallel()
 	ctx, s, _, b := credentialStoreFixture(t)
 	if err := s.Install(ctx, b, credential{AccountID: "account-1", AccessToken: "old", RefreshToken: "refresh", ExpiresAtUnixMS: s.now() + 60000}, credentialAuthority()); err != nil {
 		t.Fatal(err)

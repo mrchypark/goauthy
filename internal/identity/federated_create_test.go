@@ -60,6 +60,7 @@ func testFederatedSubject(namespace string) upstreamprovider.SubjectResult {
 }
 
 func TestFederatedCreateVerifiedProfile(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -87,6 +88,7 @@ func TestFederatedCreateVerifiedProfile(t *testing.T) {
 }
 
 func TestFederatedCreateUnverifiedProfile(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -106,6 +108,7 @@ func TestFederatedCreateUnverifiedProfile(t *testing.T) {
 }
 
 func TestFederatedCreateNoResetEnrollmentPasswordLogin(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -127,6 +130,7 @@ func TestFederatedCreateNoResetEnrollmentPasswordLogin(t *testing.T) {
 }
 
 func TestFederatedCreateAutoOnboardingFalseRejected(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -144,6 +148,7 @@ func TestFederatedCreateAutoOnboardingFalseRejected(t *testing.T) {
 }
 
 func TestFederatedCreateVersionChangedRejected(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -167,6 +172,7 @@ func TestFederatedCreateVersionChangedRejected(t *testing.T) {
 }
 
 func TestFederatedCreateDisabledProviderRejected(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -190,6 +196,7 @@ func TestFederatedCreateDisabledProviderRejected(t *testing.T) {
 }
 
 func TestFederatedCreateDuplicateEmailNoOrphanRows(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -222,6 +229,7 @@ func TestFederatedCreateDuplicateEmailNoOrphanRows(t *testing.T) {
 }
 
 func TestFederatedCreateDuplicateExternalKeyNoOrphanRows(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
@@ -251,6 +259,7 @@ func TestFederatedCreateDuplicateExternalKeyNoOrphanRows(t *testing.T) {
 }
 
 func TestFederatedCreateRejectsMissingEmail(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	result, err := store.CreateFederatedIdentity(context.Background(), FederatedCreationInput{
 		Subject: testFederatedSubject(testFederatedNamespace),
@@ -263,6 +272,7 @@ func TestFederatedCreateRejectsMissingEmail(t *testing.T) {
 }
 
 func TestFederatedCreateRejectsInvalidEmail(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	result, err := store.CreateFederatedIdentity(context.Background(), FederatedCreationInput{
 		Subject: testFederatedSubject(testFederatedNamespace),
@@ -275,6 +285,7 @@ func TestFederatedCreateRejectsInvalidEmail(t *testing.T) {
 }
 
 func TestFederatedCreateRejectsUnverifiedNamespace(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	result, err := store.CreateFederatedIdentity(context.Background(), FederatedCreationInput{
 		Subject: upstreamprovider.SubjectResult{ProviderID: testFederatedProviderID, Subject: "s"},
@@ -299,6 +310,7 @@ func seedRauthyAdminRole(t *testing.T, store *Store) {
 }
 
 func TestFederatedCreateAdminMappingTrue(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(3_000_000).UTC() }
@@ -334,6 +346,7 @@ func TestFederatedCreateAdminMappingTrue(t *testing.T) {
 }
 
 func TestFederatedCreateAdminMappingFalse(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(3_000_001).UTC() }
@@ -366,6 +379,7 @@ func TestFederatedCreateAdminMappingFalse(t *testing.T) {
 }
 
 func TestFederatedCreateAdminMappingNil(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(3_000_002).UTC() }
@@ -398,6 +412,7 @@ func TestFederatedCreateAdminMappingNil(t *testing.T) {
 }
 
 func TestFederatedCreateAdminMissingRoleRollback(t *testing.T) {
+	t.Parallel()
 	store := testFederatedStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(3_000_003).UTC() }

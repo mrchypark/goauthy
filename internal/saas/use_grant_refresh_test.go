@@ -34,6 +34,7 @@ func useRefreshFixture(t *testing.T) (*refreshFixture, clients.Client, UseGrant)
 }
 
 func TestUseGrantRefreshSuccessAndExpiredAccessToken(t *testing.T) {
+	t.Parallel()
 	f, consumer, grant := useRefreshFixture(t)
 	// Refresh is based on the durable refresh token, not the current access expiry.
 	expired := sealCredentialForTest(t, f, credentialBinding{Owner: f.b.Owner, CollectionID: f.b.CollectionID, ConnectionID: f.b.ConnectionID, ProviderID: f.b.ProviderID, Generation: f.b.Generation, TokenVersion: 1}, credential{AccountID: "account-1", AccessToken: "expired", RefreshToken: "refresh-old", ExpiresAtUnixMS: f.s.now() - 1, RefreshExpiresAtUnixMS: f.s.now() + 60000, Scopes: []string{"openid", "profile"}})
@@ -51,6 +52,7 @@ func TestUseGrantRefreshSuccessAndExpiredAccessToken(t *testing.T) {
 }
 
 func TestUseGrantRefreshRejectsOptInAndBoundaryCases(t *testing.T) {
+	t.Parallel()
 	f, consumer, grant := useRefreshFixture(t)
 	defaultGrant, err := f.s.CreateUseGrant(f.ctx, f.b.Owner, f.b.CollectionID, f.b.ConnectionID, grant.Resource, UseGrantInput{ConsumerClientID: consumer.ID, Mode: "credential_delivery", Purpose: "default", ExpiresAt: f.s.now() + 60000}, credentialAuthority())
 	if err != nil {
@@ -93,6 +95,7 @@ func TestUseGrantRefreshRejectsOptInAndBoundaryCases(t *testing.T) {
 }
 
 func TestUseGrantRefreshGrantAndCredentialRevocationAreUncertain(t *testing.T) {
+	t.Parallel()
 	for _, revokeCredential := range []bool{false, true} {
 		t.Run(map[bool]string{false: "grant", true: "credential"}[revokeCredential], func(t *testing.T) {
 			f, consumer, grant := useRefreshFixture(t)
@@ -136,6 +139,7 @@ func TestUseGrantRefreshGrantAndCredentialRevocationAreUncertain(t *testing.T) {
 }
 
 func TestUseGrantRefreshConcurrentClaimOneProviderCall(t *testing.T) {
+	t.Parallel()
 	f, consumer, grant := useRefreshFixture(t)
 	var wg sync.WaitGroup
 	var mu sync.Mutex

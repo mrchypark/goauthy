@@ -7,6 +7,7 @@ import (
 )
 
 func TestRecordLoginLocationNewLocation(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	store.now = func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	ctx := context.Background()
@@ -34,6 +35,7 @@ func TestRecordLoginLocationNewLocation(t *testing.T) {
 }
 
 func TestRecordLoginLocationExistingLocation(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	store.now = func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	ctx := context.Background()
@@ -61,6 +63,7 @@ func TestRecordLoginLocationExistingLocation(t *testing.T) {
 }
 
 func TestRecordLoginLocationMultipleLocations(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	store.now = func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	ctx := context.Background()
@@ -88,6 +91,7 @@ func TestRecordLoginLocationMultipleLocations(t *testing.T) {
 }
 
 func TestIsNewLoginLocation(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	store.now = func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	ctx := context.Background()
@@ -120,6 +124,7 @@ func TestIsNewLoginLocation(t *testing.T) {
 }
 
 func TestGetLoginLocations(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	store.now = func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	ctx := context.Background()
@@ -148,6 +153,7 @@ func TestGetLoginLocations(t *testing.T) {
 }
 
 func TestRecordLoginLocationInvalidIP(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	store.now = func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	ctx := context.Background()
@@ -168,6 +174,7 @@ func TestRecordLoginLocationInvalidIP(t *testing.T) {
 }
 
 func TestRecordLoginLocationIPv6(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	store.now = func() time.Time { return time.UnixMilli(1_800_000_000_000) }
 	ctx := context.Background()

@@ -21,6 +21,7 @@ func verifierRequestWithSeed(b credentialBinding, seed string) (authorizationReq
 }
 
 func TestAuthorizationVerifierEncryptedLoadConsumeAndGuards(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	req, state, session, provider, verifier := verifierRequest(b)
 	if err := store.CreateAuthorization(ctx, req, credentialAuthority()); err != nil {
@@ -53,6 +54,7 @@ func TestAuthorizationVerifierEncryptedLoadConsumeAndGuards(t *testing.T) {
 }
 
 func TestAuthorizationVerifierTamperAndExpiry(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	req, state, session, provider, _ := verifierRequest(b)
 	if err := store.CreateAuthorization(ctx, req, credentialAuthority()); err != nil {
@@ -77,6 +79,7 @@ func TestAuthorizationVerifierTamperAndExpiry(t *testing.T) {
 }
 
 func TestAuthorizationVerifierRejectsAuthenticatedMetadataSwap(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	req, state, session, provider, _ := verifierRequestWithSeed(b, "metadata-state")
 	if err := store.CreateAuthorization(ctx, req, credentialAuthority()); err != nil {
@@ -93,6 +96,7 @@ func TestAuthorizationVerifierRejectsAuthenticatedMetadataSwap(t *testing.T) {
 }
 
 func TestAuthorizationWithoutVerifierStoresNullEnvelope(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	req, state, _, _, _ := verifierRequestWithSeed(b, "legacy-state")
 	req.Verifier = ""
@@ -106,6 +110,7 @@ func TestAuthorizationWithoutVerifierStoresNullEnvelope(t *testing.T) {
 }
 
 func TestAuthorizationVerifierTwoRotationsPreserveProof(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	store.keys = credentialKeys(t, "key-a", "key-a", "key-b", "key-c")
 	req, state, session, provider, verifier := verifierRequestWithSeed(b, "rotated")

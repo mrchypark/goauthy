@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -31,6 +33,7 @@ import (
 )
 
 func TestLoginCompletesAuthorizationAndRotatesSession(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
 	page := httptest.NewRecorder()
@@ -82,6 +85,7 @@ func TestLoginCompletesAuthorizationAndRotatesSession(t *testing.T) {
 }
 
 func TestAuthorizeRendersSelectedLanguageAndMalformedFallback(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name, language, want string
 	}{
@@ -109,6 +113,7 @@ func TestAuthorizeRendersSelectedLanguageAndMalformedFallback(t *testing.T) {
 }
 
 func TestEnableFedCMIsHTTPSOnlyAndUsesSeparateCookie(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	if err := h.EnableFedCM(true); err == nil {
 		t.Fatal("HTTP issuer enabled FedCM")
@@ -133,6 +138,7 @@ func TestEnableFedCMIsHTTPSOnlyAndUsesSeparateCookie(t *testing.T) {
 }
 
 func TestCompleteExternalAuthenticationCompletesAndRejectsOldInit(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	init, _, digest := externalAuthorization(t, h)
 	response := httptest.NewRecorder()
@@ -158,6 +164,7 @@ func TestCompleteExternalAuthenticationCompletesAndRejectsOldInit(t *testing.T) 
 }
 
 func TestPrepareExternalAuthenticationBindsCurrentInitSession(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	init, interaction, wantInteractionDigest := externalAuthorization(t, h)
 	req := httptest.NewRequest(http.MethodGet, "/upstream/start", nil)
@@ -172,6 +179,7 @@ func TestPrepareExternalAuthenticationBindsCurrentInitSession(t *testing.T) {
 }
 
 func TestPrepareExternalAuthenticationRejectsInvalidBindings(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	for _, tc := range []struct {
 		name   string
@@ -223,6 +231,7 @@ func TestPrepareExternalAuthenticationRejectsInvalidBindings(t *testing.T) {
 }
 
 func TestCompleteExternalAuthenticationRejectsPreflightFailuresWithoutConsuming(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	for _, tc := range []struct {
 		name    string
@@ -258,6 +267,7 @@ func TestCompleteExternalAuthenticationRejectsPreflightFailuresWithoutConsuming(
 }
 
 func TestCompleteExternalAuthenticationForceMFAAndReplay(t *testing.T) {
+	t.Parallel()
 	force := testHandlerWithForceMFA(t)
 	init, _, digest := externalAuthorization(t, force)
 	blocked := httptest.NewRecorder()
@@ -303,6 +313,7 @@ func TestCompleteExternalAuthenticationForceMFAAndReplay(t *testing.T) {
 }
 
 func TestAuthorizeResourceFailureRedirectsOnlyToRegisteredCallback(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 
 	registered := authorizeValues()
@@ -334,6 +345,7 @@ func TestAuthorizeResourceFailureRedirectsOnlyToRegisteredCallback(t *testing.T)
 }
 
 func TestLoginFailureDoesNotRevealOrConsumeInteraction(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	for _, tc := range []struct {
 		name, username, password string
@@ -367,6 +379,7 @@ func TestLoginFailureDoesNotRevealOrConsumeInteraction(t *testing.T) {
 }
 
 func TestExpiredPasswordRecoveryIsExactOnceAndDoesNotConsumeInteraction(t *testing.T) {
+	t.Parallel()
 	var calls []string
 	h := testHandler(t)
 	h.onPasswordExpired = func(_ context.Context, subject string) error {
@@ -389,6 +402,7 @@ func TestExpiredPasswordRecoveryIsExactOnceAndDoesNotConsumeInteraction(t *testi
 }
 
 func TestExpiredPasswordRecoveryUnavailableIs503(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		callback func(context.Context, string) error
@@ -412,6 +426,7 @@ func TestExpiredPasswordRecoveryUnavailableIs503(t *testing.T) {
 }
 
 func TestExpiredRecoveryDoesNotRunForWrongPassword(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	calls := 0
 	h.onPasswordExpired = func(context.Context, string) error { calls++; return nil }
@@ -425,6 +440,7 @@ func TestExpiredRecoveryDoesNotRunForWrongPassword(t *testing.T) {
 }
 
 func TestLoginPolicyBlocksWithoutConsumingInteraction(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	ip := "198.51.100.40"
 	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
@@ -463,6 +479,7 @@ func TestLoginPolicyBlocksWithoutConsumingInteraction(t *testing.T) {
 }
 
 func TestUnexpectedAuthenticationErrorDoesNotResetLoginPolicy(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	ip := "198.51.100.41"
 	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
@@ -494,6 +511,7 @@ func TestUnexpectedAuthenticationErrorDoesNotResetLoginPolicy(t *testing.T) {
 }
 
 func TestLoginFailureExtendsWriteDeadlineForEveryDelayTier(t *testing.T) {
+	t.Parallel()
 	seed := time.Date(2026, time.August, 31, 0, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
 		failures int
@@ -541,6 +559,7 @@ func TestLoginFailureExtendsWriteDeadlineForEveryDelayTier(t *testing.T) {
 }
 
 func TestCancelledLoginKeepsAccountFailureAccounting(t *testing.T) {
+	t.Parallel()
 	t.Run("delay", func(t *testing.T) {
 		h, db := testHandlerWithDB(t, false)
 		request := postLoginViaAuthorize(t, h, "alice", "wrong password")
@@ -622,6 +641,7 @@ func accountFailureCount(t *testing.T, db *rhiza.DB, accountHash string) int64 {
 }
 
 func TestLoginPageOmitsUnverifiableCaptchaField(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	h.SetCaptchaSiteKey("captcha-site-key")
 	page := httptest.NewRecorder()
@@ -643,6 +663,7 @@ func TestLoginPageOmitsUnverifiableCaptchaField(t *testing.T) {
 }
 
 func TestAuthorizePromptNoneAndRejectsCrossSiteOrAmbiguousForms(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	values := authorizeValues()
 	values.Set("prompt", "none")
@@ -671,6 +692,7 @@ func TestAuthorizePromptNoneAndRejectsCrossSiteOrAmbiguousForms(t *testing.T) {
 }
 
 func TestParseLoginFormPasswordBoundary(t *testing.T) {
+	t.Parallel()
 	valid := strings.Repeat("🙂", 256)
 	for _, tc := range []struct {
 		name string
@@ -695,6 +717,7 @@ func TestParseLoginFormPasswordBoundary(t *testing.T) {
 }
 
 func TestAuthorizeAuthenticatedSessionPromptAndMaxAgePolicy(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	cookie := authenticatedCookie(t, h)
 	for _, tc := range []struct {
@@ -747,6 +770,7 @@ func TestAuthorizeAuthenticatedSessionPromptAndMaxAgePolicy(t *testing.T) {
 }
 
 func TestAuthorizeLegacySessionDoesNotIssueFedCMSessionCookie(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	h.issuer = "https://issuer.example.test"
 	if err := h.EnableFedCM(true); err != nil {
@@ -768,6 +792,7 @@ func TestAuthorizeLegacySessionDoesNotIssueFedCMSessionCookie(t *testing.T) {
 }
 
 func TestForceMFARejectsPasswordSessionAndPromptNoneButAllowsMFASession(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, true)
 	for _, tc := range []struct {
 		name, subject, method, prompt string
@@ -830,6 +855,7 @@ func TestForceMFARejectsPasswordSessionAndPromptNoneButAllowsMFASession(t *testi
 }
 
 func TestForceMFANoCredentialDoesNotConsumeInteraction(t *testing.T) {
+	t.Parallel()
 	h := testHandlerWithForceMFA(t)
 	page := httptest.NewRecorder()
 	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
@@ -847,6 +873,7 @@ func TestForceMFANoCredentialDoesNotConsumeInteraction(t *testing.T) {
 }
 
 func TestWebAuthnStartRejectsInvalidBrowserAndPasswordlessCookies(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	page := httptest.NewRecorder()
 	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
@@ -907,6 +934,7 @@ func TestWebAuthnStartRejectsInvalidBrowserAndPasswordlessCookies(t *testing.T) 
 }
 
 func TestWebAuthnFinishStrictInputAndFailurePreservesInteraction(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	for _, tc := range []struct {
 		name, contentType, body string
@@ -953,6 +981,7 @@ func TestWebAuthnFinishStrictInputAndFailurePreservesInteraction(t *testing.T) {
 }
 
 func TestPasswordlessCookieUsesHostPrefixOnlyForHTTPS(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	for _, tc := range []struct {
 		issuer, wantName string
@@ -972,6 +1001,7 @@ func TestPasswordlessCookieUsesHostPrefixOnlyForHTTPS(t *testing.T) {
 }
 
 func TestConstructorStoresNormalizedIssuerForCookies(t *testing.T) {
+	t.Parallel()
 	base := testHandler(t)
 	h, err := NewWithRecovery("HTTPS://ISSUER.EXAMPLE.TEST/", base.browser, base.identity, base.oauth, nil)
 	if err != nil {
@@ -981,6 +1011,105 @@ func TestConstructorStoresNormalizedIssuerForCookies(t *testing.T) {
 	if err != nil || h.issuer != "https://issuer.example.test" || cookie.Name != "__Host-goauthy-passkey" || !cookie.Secure {
 		t.Fatalf("issuer=%q cookie=%#v err=%v", h.issuer, cookie, err)
 	}
+}
+
+// Rhiza applies every migration statement through replicated consensus,
+// which costs ~8s for a fresh database under -race. The migrated schema is
+// built once per NodeID and each test opens a private copy.
+
+type loginTemplateEntry struct {
+	once sync.Once
+	dir  string
+	err  error
+}
+
+var loginTemplates = map[string]*loginTemplateEntry{
+	"login-test":       {},
+	"login-proxy-test": {},
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	for _, entry := range loginTemplates {
+		if entry.dir != "" {
+			_ = os.RemoveAll(entry.dir)
+		}
+	}
+	os.Exit(code)
+}
+
+func loginMigratedTemplate(t *testing.T, nodeID string) string {
+	t.Helper()
+	entry := loginTemplates[nodeID]
+	if entry == nil {
+		t.Fatalf("unknown login template node ID: %s", nodeID)
+	}
+	entry.once.Do(func() {
+		directory, err := os.MkdirTemp("", "goauthy-login-"+nodeID+"-template-")
+		if err != nil {
+			entry.err = err
+			return
+		}
+		db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: nodeID, DataDir: directory})
+		if err != nil {
+			_ = os.RemoveAll(directory)
+			entry.err = fmt.Errorf("open %s test template: %w", nodeID, err)
+			return
+		}
+		if err := storage.Migrate(context.Background(), db); err != nil {
+			_ = db.Close()
+			_ = os.RemoveAll(directory)
+			entry.err = fmt.Errorf("migrate %s test template: %w", nodeID, err)
+			return
+		}
+		if err := db.Close(); err != nil {
+			_ = os.RemoveAll(directory)
+			entry.err = fmt.Errorf("close %s test template: %w", nodeID, err)
+			return
+		}
+		entry.dir = directory
+	})
+	if entry.err != nil {
+		t.Fatal(entry.err)
+	}
+	return entry.dir
+}
+
+func copyDirTree(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, content, 0o644)
+	})
+}
+
+// testHash hashes a password using a test hasher with high concurrency to
+// avoid the ErrWorkLimit that occurs when many parallel tests hash simultaneously.
+var testHasherOnce sync.Once
+var testHasherInstance *credential.Hasher
+
+func testHash(ctx context.Context, password []byte) (string, error) {
+	testHasherOnce.Do(func() {
+		var err error
+		testHasherInstance, err = credential.NewHasher(credential.Policy{MemoryKiB: 19 * 1024, Iterations: 2, Parallelism: 1, MaxConcurrency: 8, WaitTimeout: 5 * time.Second})
+		if err != nil {
+			panic(err)
+		}
+	})
+	return testHasherInstance.Hash(ctx, password)
 }
 
 func testHandler(t *testing.T) *Handler {
@@ -999,23 +1128,28 @@ func testHandlerWithForce(t *testing.T, forceMFA bool) *Handler {
 func testHandlerWithDB(t *testing.T, forceMFA bool) (*Handler, *rhiza.DB) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "login-test", DataDir: t.TempDir()})
+	directory := t.TempDir()
+	if err := copyDirTree(loginMigratedTemplate(t, "login-test"), directory); err != nil {
+		t.Fatal(err)
+	}
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "login-test", DataDir: directory})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
 	browserStore, err := browser.NewStore(db)
 	if err != nil {
 		t.Fatal(err)
 	}
-	identityStore, err := identity.NewStore(db)
+	hasher, err := credential.NewHasher(credential.Policy{MemoryKiB: 19 * 1024, Iterations: 2, Parallelism: 1, MaxConcurrency: 8, WaitTimeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
-	password, err := credential.Hash([]byte("correct password"))
+	identityStore, err := identity.NewStoreWithHasher(db, hasher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	password, err := hasher.Hash(ctx, []byte("correct password"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1099,6 +1233,7 @@ var interactionPattern = regexp.MustCompile(`name="interaction" value="([A-Za-z0
 var fedCMCSRFPattern = regexp.MustCompile(`name="csrf_token" value="([A-Za-z0-9_-]{43})"`)
 
 func TestFedCMLandingUsesSharedPasswordTransitionAndOneTimeClaim(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	h.issuer = "https://issuer.example.test"
 	if err := h.EnableFedCM(true); err != nil {
@@ -1156,6 +1291,7 @@ func TestFedCMLandingUsesSharedPasswordTransitionAndOneTimeClaim(t *testing.T) {
 }
 
 func TestFedCMExistingSessionRendersLocalizedSuccess(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	h.issuer = "https://issuer.example.test"
 	if err := h.EnableFedCM(true); err != nil {
@@ -1181,6 +1317,7 @@ func TestFedCMExistingSessionRendersLocalizedSuccess(t *testing.T) {
 }
 
 func TestFedCMLandingConcurrentPostsHaveOneWinner(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	h.issuer = "https://issuer.example.test"
 	if err := h.EnableFedCM(true); err != nil {
@@ -1230,6 +1367,7 @@ func TestFedCMLandingConcurrentPostsHaveOneWinner(t *testing.T) {
 }
 
 func TestFedCMLandingRejectsCrossSiteAndCSRFWithoutConsuming(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	h.issuer = "https://issuer.example.test"
 	if err := h.EnableFedCM(true); err != nil {
@@ -1270,6 +1408,7 @@ func TestFedCMLandingRejectsCrossSiteAndCSRFWithoutConsuming(t *testing.T) {
 }
 
 func TestFedCMLandingNeverDowngradesForcedMFAToPassword(t *testing.T) {
+	t.Parallel()
 	h := testHandlerWithForceMFA(t)
 	h.issuer = "https://issuer.example.test"
 	h.SetFedCMForceMFA(true)
@@ -1360,23 +1499,28 @@ func authenticatedCookie(t *testing.T, h *Handler) *http.Cookie {
 func testHandlerWithTrustedProxies(t *testing.T) *Handler {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "login-proxy-test", DataDir: t.TempDir()})
+	directory := t.TempDir()
+	if err := copyDirTree(loginMigratedTemplate(t, "login-proxy-test"), directory); err != nil {
+		t.Fatal(err)
+	}
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "login-proxy-test", DataDir: directory})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
 	browserStore, err := browser.NewStore(db)
 	if err != nil {
 		t.Fatal(err)
 	}
-	identityStore, err := identity.NewStore(db)
+	hasher, err := credential.NewHasher(credential.Policy{MemoryKiB: 19 * 1024, Iterations: 2, Parallelism: 1, MaxConcurrency: 8, WaitTimeout: 5 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}
-	password, err := credential.Hash([]byte("correct password"))
+	identityStore, err := identity.NewStoreWithHasher(db, hasher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	password, err := hasher.Hash(ctx, []byte("correct password"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1400,6 +1544,7 @@ func testHandlerWithTrustedProxies(t *testing.T) *Handler {
 }
 
 func TestAuthorizeRejectsMalformedForwardedHeaderFromTrustedProxy(t *testing.T) {
+	t.Parallel()
 	h := testHandlerWithTrustedProxies(t)
 	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
 	get.RemoteAddr = "10.0.0.1:443"
@@ -1412,6 +1557,7 @@ func TestAuthorizeRejectsMalformedForwardedHeaderFromTrustedProxy(t *testing.T) 
 }
 
 func TestAuthorizeRejectsAmbiguousForwardedHeaderFromTrustedProxy(t *testing.T) {
+	t.Parallel()
 	h := testHandlerWithTrustedProxies(t)
 	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
 	get.RemoteAddr = "10.0.0.1:443"
@@ -1424,6 +1570,7 @@ func TestAuthorizeRejectsAmbiguousForwardedHeaderFromTrustedProxy(t *testing.T) 
 }
 
 func TestAuthorizeAcceptsValidForwardedFromTrustedProxy(t *testing.T) {
+	t.Parallel()
 	h := testHandlerWithTrustedProxies(t)
 	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
 	get.RemoteAddr = "10.0.0.1:443"
@@ -1436,6 +1583,7 @@ func TestAuthorizeAcceptsValidForwardedFromTrustedProxy(t *testing.T) {
 }
 
 func TestAuthorizeIgnoresForwardedFromUntrustedPeer(t *testing.T) {
+	t.Parallel()
 	h := testHandlerWithTrustedProxies(t)
 	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
 	get.RemoteAddr = "198.51.100.1:443"
@@ -1448,6 +1596,7 @@ func TestAuthorizeIgnoresForwardedFromUntrustedPeer(t *testing.T) {
 }
 
 func TestSessionIPBindingRejectsMismatchedPeer(t *testing.T) {
+	t.Parallel()
 	h := testHandlerWithTrustedProxies(t)
 	ctx := context.Background()
 	now := time.Date(2030, time.January, 1, 0, 0, 0, 0, time.UTC)
@@ -1481,6 +1630,7 @@ func TestSessionIPBindingRejectsMismatchedPeer(t *testing.T) {
 }
 
 func TestSessionIPBindingAcceptsMatchingPeer(t *testing.T) {
+	t.Parallel()
 	h := testHandlerWithTrustedProxies(t)
 	ctx := context.Background()
 	now := time.Date(2030, time.January, 1, 0, 0, 0, 0, time.UTC)
@@ -1515,6 +1665,7 @@ func TestSessionIPBindingAcceptsMatchingPeer(t *testing.T) {
 }
 
 func TestSessionIPBindingDirectModeRejectsMismatchedPeer(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	ctx := context.Background()
 	now := time.Date(2030, time.January, 1, 0, 0, 0, 0, time.UTC)

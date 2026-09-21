@@ -15,6 +15,7 @@ import (
 )
 
 func TestConnectionUseGrantHTTPCRUDAndOwnerBoundary(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	cookie, csrf = memberSession(t, store)
 	credentials := oauthCredentialHTTPStore(t, store)
@@ -114,6 +115,7 @@ func TestConnectionUseGrantHTTPCRUDAndOwnerBoundary(t *testing.T) {
 }
 
 func TestConnectionUseGrantHTTPStrictJSONAndResourceGuard(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	if err := h.BindSaaSCredentials(oauthCredentialHTTPStore(t, store)); err != nil {
 		t.Fatal(err)

@@ -8,6 +8,7 @@ import (
 )
 
 func TestRefreshConnectionCredentialHTTPBoundary(t *testing.T) {
+	t.Parallel()
 	h, cookie, csrf := oauth2RefreshHTTPFixture(t)
 	h.issuer = "https://issuer.example.test"
 	if err := h.BindConnectionUseResource("https://resource.example.test"); err != nil {

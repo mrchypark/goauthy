@@ -6,9 +6,13 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -24,10 +28,95 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
+// copyDirTree copies the directory tree rooted at source into destination.
+func copyDirTree(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, content, 0o644)
+	})
+}
+
+type logoutTemplateResult struct {
+	dir string
+	err error
+}
+
+var (
+	logoutTemplateDirs sync.Map
+	logoutTemplateOnce sync.Map
+)
+
+func logoutMigratedTemplate(t *testing.T, nodeID string) string {
+	t.Helper()
+	once, _ := logoutTemplateOnce.LoadOrStore(nodeID, &sync.Once{})
+	once.(*sync.Once).Do(func() {
+		directory, err := os.MkdirTemp("", "goauthy-logout-template-"+nodeID+"-")
+		if err != nil {
+			logoutTemplateDirs.Store(nodeID, logoutTemplateResult{err: err})
+			return
+		}
+		db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: nodeID, DataDir: directory})
+		if err != nil {
+			os.RemoveAll(directory)
+			logoutTemplateDirs.Store(nodeID, logoutTemplateResult{err: fmt.Errorf("open template for %s: %w", nodeID, err)})
+			return
+		}
+		if err := storage.Migrate(context.Background(), db); err != nil {
+			db.Close()
+			os.RemoveAll(directory)
+			logoutTemplateDirs.Store(nodeID, logoutTemplateResult{err: fmt.Errorf("migrate template for %s: %w", nodeID, err)})
+			return
+		}
+		db.Close()
+		logoutTemplateDirs.Store(nodeID, logoutTemplateResult{dir: directory})
+	})
+	result, ok := logoutTemplateDirs.Load(nodeID)
+	if !ok {
+		t.Fatalf("template for %s not in cache", nodeID)
+	}
+	r := result.(logoutTemplateResult)
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	return r.dir
+}
+
+func logoutOpenTestDB(t *testing.T, nodeID string) *rhiza.DB {
+	t.Helper()
+	directory := t.TempDir()
+	if err := copyDirTree(logoutMigratedTemplate(t, nodeID), directory); err != nil {
+		t.Fatal(err)
+	}
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: nodeID, DataDir: directory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := storage.Migrate(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
 // This test crosses the public HTTP boundary, remote JWKS verification, and
 // the replicated session/outbox transaction.  Unit tests cover malformed
 // input; this ensures a verified upstream token reaches that transaction.
 func TestBackchannelLogoutHTTPRevokesOnlyExactUpstreamSession(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -50,14 +139,7 @@ func TestBackchannelLogoutHTTPRevokesOnlyExactUpstreamSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "upstream-logout-http", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := logoutOpenTestDB(t, "upstream-logout-http")
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "upstream-logout-http-user", SQL: `INSERT INTO identity_users(subject,username,password_phc) VALUES('external-user','external-user','phc')`}); err != nil {
 		t.Fatal(err)
 	}

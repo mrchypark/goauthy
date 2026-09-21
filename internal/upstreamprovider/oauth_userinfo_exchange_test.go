@@ -164,6 +164,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 // ===================== Integration tests =====================
 
 func TestOAuthUserInfoExchangePositiveNoIDNoJWKS(t *testing.T) {
+	t.Parallel()
 	const sub = "user-123"
 	var userinfoHits atomic.Int32
 	s := newSrvPair(t,
@@ -197,6 +198,7 @@ func TestOAuthUserInfoExchangePositiveNoIDNoJWKS(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeGarbageIDTokenIgnored(t *testing.T) {
+	t.Parallel()
 	const (
 		sub       = "user-456"
 		at        = "access-token-garbage-idtest"
@@ -226,6 +228,7 @@ func TestOAuthUserInfoExchangeGarbageIDTokenIgnored(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeRejectsMissingToken(t *testing.T) {
+	t.Parallel()
 	s := newSrvPair(t,
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]string{"token_type": "Bearer"})
@@ -241,6 +244,7 @@ func TestOAuthUserInfoExchangeRejectsMissingToken(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeRejectsInvalidTokenType(t *testing.T) {
+	t.Parallel()
 	s := newSrvPair(t,
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]string{"access_token": "at", "token_type": "mac"})
@@ -256,6 +260,7 @@ func TestOAuthUserInfoExchangeRejectsInvalidTokenType(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeAcceptsBearerCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	s := newSrvPair(t,
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]string{"access_token": "at-case", "token_type": "BEARER"})
@@ -274,6 +279,7 @@ func TestOAuthUserInfoExchangeAcceptsBearerCaseInsensitive(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeRejectsEmptyTokenType(t *testing.T) {
+	t.Parallel()
 	s := newSrvPair(t,
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]string{"access_token": "at-nottype"})
@@ -289,6 +295,7 @@ func TestOAuthUserInfoExchangeRejectsEmptyTokenType(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeRejectsOAuthError(t *testing.T) {
+	t.Parallel()
 	s := newSrvPair(t,
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]string{"access_token": "at-err", "error": "invalid_grant"})
@@ -304,6 +311,7 @@ func TestOAuthUserInfoExchangeRejectsOAuthError(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeRejectsNon2xx(t *testing.T) {
+	t.Parallel()
 	s := newSrvPair(t,
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "upstream error", http.StatusBadGateway)
@@ -319,6 +327,7 @@ func TestOAuthUserInfoExchangeRejectsNon2xx(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeRejectsTrailingData(t *testing.T) {
+	t.Parallel()
 	s := newSrvPair(t,
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]string{"access_token": "at", "token_type": "Bearer"})
@@ -335,6 +344,7 @@ func TestOAuthUserInfoExchangeRejectsTrailingData(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeRejectsDuplicateSub(t *testing.T) {
+	t.Parallel()
 	s := newSrvPair(t,
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]string{"access_token": "at", "token_type": "Bearer"})
@@ -351,6 +361,7 @@ func TestOAuthUserInfoExchangeRejectsDuplicateSub(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeRejectsMissingSub(t *testing.T) {
+	t.Parallel()
 	s := newSrvPair(t,
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]string{"access_token": "at", "token_type": "Bearer"})
@@ -366,6 +377,7 @@ func TestOAuthUserInfoExchangeRejectsMissingSub(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeRejectsNonStringSub(t *testing.T) {
+	t.Parallel()
 	s := newSrvPair(t,
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]string{"access_token": "at", "token_type": "Bearer"})
@@ -382,6 +394,7 @@ func TestOAuthUserInfoExchangeRejectsNonStringSub(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeRejectsEmptySub(t *testing.T) {
+	t.Parallel()
 	s := newSrvPair(t,
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]string{"access_token": "at", "token_type": "Bearer"})
@@ -398,6 +411,7 @@ func TestOAuthUserInfoExchangeRejectsEmptySub(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeRejectsOversizeUserinfo(t *testing.T) {
+	t.Parallel()
 	bigSub := strings.Repeat("x", userinfoMaxBytes+100)
 	s := newSrvPair(t,
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -415,6 +429,7 @@ func TestOAuthUserInfoExchangeRejectsOversizeUserinfo(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeRejectsUserinfoRedirect(t *testing.T) {
+	t.Parallel()
 	var destHits atomic.Int32
 	dest := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		destHits.Add(1)
@@ -441,6 +456,7 @@ func TestOAuthUserInfoExchangeRejectsUserinfoRedirect(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeRejectsTLSReject(t *testing.T) {
+	t.Parallel()
 	// Token endpoint signed by trustedCA; userinfo signed by untrustedCA.
 	trustedPool, trustedCA, trustedKey := freshCA(t)
 	untrustedPool, untrustedCA, untrustedKey := freshCA(t)
@@ -480,6 +496,7 @@ func TestOAuthUserInfoExchangeRejectsTLSReject(t *testing.T) {
 }
 
 func TestOAuthUserInfoExchangeRejectsInvalidUTF8(t *testing.T) {
+	t.Parallel()
 	s := newSrvPair(t,
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]string{"access_token": "at", "token_type": "Bearer"})
@@ -499,6 +516,7 @@ func TestOAuthUserInfoExchangeRejectsInvalidUTF8(t *testing.T) {
 // ===================== parseUserInfoSub unit table =====================
 
 func TestParseUserInfoSubUnit(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		body    string

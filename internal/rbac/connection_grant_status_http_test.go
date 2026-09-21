@@ -15,6 +15,7 @@ import (
 )
 
 func TestUserResourceConnectionUseGrantStatusBoundary(t *testing.T) {
+	t.Parallel()
 	h, store, _, _ := membershipHTTPFixture(t)
 	if err := h.BindAuthCollections(authcollection.NewStore(store.db)); err != nil {
 		t.Fatal(err)

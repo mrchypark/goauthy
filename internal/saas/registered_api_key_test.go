@@ -33,6 +33,7 @@ func registeredAPIKeyFixture(t *testing.T, id string) (context.Context, *Credent
 }
 
 func TestRegisteredAPIKeyBindsProviderAndFailsClosedWhenDisabled(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b, registered := registeredAPIKeyFixture(t, "provider")
 	registered, err := store.APIKeyConnector(ctx, b.Owner, b.CollectionID, b.ConnectionID, credentialAuthority())
 	if err != nil || registered.Digest() == "" {
@@ -60,6 +61,7 @@ func TestRegisteredAPIKeyBindsProviderAndFailsClosedWhenDisabled(t *testing.T) {
 }
 
 func TestRegisteredAPIKeyProviderIDMayBeSentinel(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b, connector := registeredAPIKeyFixture(t, apiKeyProviderID)
 	if _, err := store.PutBoundAPIKey(ctx, b.Owner, b.CollectionID, b.ConnectionID, 0, "bound", connector, connector.Digest(), credentialAuthority()); err != nil {
 		t.Fatal(err)
@@ -77,6 +79,7 @@ func TestRegisteredAPIKeyProviderIDMayBeSentinel(t *testing.T) {
 }
 
 func TestRegisteredAPIKeyRejectsChangedConnector(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b, connector := registeredAPIKeyFixture(t, "provider")
 	if _, err := store.PutBoundAPIKey(ctx, b.Owner, b.CollectionID, b.ConnectionID, 0, "bound", connector, connector.Digest(), credentialAuthority()); err != nil {
 		t.Fatal(err)
@@ -94,6 +97,7 @@ func TestRegisteredAPIKeyRejectsChangedConnector(t *testing.T) {
 }
 
 func TestRegisteredAPIKeyPutRevisionFence(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b, connector := registeredAPIKeyFixture(t, "provider")
 	calls := 0
 	authority := func() (string, []any) {

@@ -12,6 +12,7 @@ import (
 )
 
 func TestForceLogoutAtomicRevocationAndDelivery(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "target")
 	insertActive(t, db, "other")
@@ -84,6 +85,7 @@ func TestForceLogoutAtomicRevocationAndDelivery(t *testing.T) {
 }
 
 func TestForceLogoutEmailAndInactiveAssociations(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	for _, subject := range []string{"profile", "recovery", "empty"} {
 		insertActive(t, db, subject)
@@ -124,6 +126,7 @@ func TestForceLogoutEmailAndInactiveAssociations(t *testing.T) {
 }
 
 func TestForceLogoutRollsBackOnEventFailure(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "rollback-target")
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "force-rollback-seed", Statements: []rhiza.SQLStatement{
@@ -164,6 +167,7 @@ func TestForceLogoutRollsBackOnEventFailure(t *testing.T) {
 }
 
 func TestForceLogoutConcurrentSameClientSubjects(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "same-client-a")
 	insertActive(t, db, "same-client-b")

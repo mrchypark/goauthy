@@ -12,7 +12,6 @@ import (
 
 	"github.com/go-webauthn/webauthn/protocol"
 	wa "github.com/go-webauthn/webauthn/webauthn"
-	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -47,7 +46,8 @@ func bootstrapPasskeyOnlyUser(t *testing.T, db *rhiza.DB, subject, username stri
 
 func mustHash(t *testing.T) string {
 	t.Helper()
-	h, err := credential.Hash([]byte("dummy"))
+	ctx := context.Background()
+	h, err := testHash(ctx, []byte("dummy"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,6 +55,7 @@ func mustHash(t *testing.T) string {
 }
 
 func TestWebAuthnStartPasskeyOnlyAbsentCookieNoUsernameDenies(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	page := httptest.NewRecorder()
 	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
@@ -79,6 +80,7 @@ func TestWebAuthnStartPasskeyOnlyAbsentCookieNoUsernameDenies(t *testing.T) {
 }
 
 func TestWebAuthnStartPasskeyOnlyTamperedCookieDenies(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	page := httptest.NewRecorder()
 	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
@@ -109,6 +111,7 @@ func TestWebAuthnStartPasskeyOnlyTamperedCookieDenies(t *testing.T) {
 }
 
 func TestWebAuthnStartPasskeyOnlyUnknownUserDenies(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	page := httptest.NewRecorder()
 	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
@@ -134,6 +137,7 @@ func TestWebAuthnStartPasskeyOnlyUnknownUserDenies(t *testing.T) {
 }
 
 func TestWebAuthnStartPasskeyOnlyPasswordModeUserDenies(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	page := httptest.NewRecorder()
 	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
@@ -160,6 +164,7 @@ func TestWebAuthnStartPasskeyOnlyPasswordModeUserDenies(t *testing.T) {
 }
 
 func TestWebAuthnStartPasskeyOnlyWrongInteractionDenies(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, false)
 
 	// Create a passkey-only user.
@@ -190,6 +195,7 @@ func TestWebAuthnStartPasskeyOnlyWrongInteractionDenies(t *testing.T) {
 }
 
 func TestWebAuthnStartPasskeyOnlyDisabledUserDenies(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 
 	// "disabled" user exists but is disabled.
@@ -217,6 +223,7 @@ func TestWebAuthnStartPasskeyOnlyDisabledUserDenies(t *testing.T) {
 }
 
 func TestWebAuthnStartValidUsernameEmptyCookieDenies(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	page := httptest.NewRecorder()
 	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
@@ -249,6 +256,7 @@ func credentialEnvelopePurpose(subject string) string {
 }
 
 func TestWebAuthnStartFreshPasskeyOnlyUserRequiresUserVerification(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, false)
 	subject := "passkey-only-subject"
 

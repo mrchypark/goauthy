@@ -6,6 +6,7 @@ import (
 )
 
 func TestCompleteRefreshNeverExpandsScopes(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		old, next []string

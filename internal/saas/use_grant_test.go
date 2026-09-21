@@ -9,6 +9,7 @@ import (
 )
 
 func TestUseGrantAPIKeyCreateListAuthorizeRevoke(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "use-grant-api-key", SQL: `UPDATE auth_collection_definitions SET auth_method='api_key',providers_json='[]' WHERE id=?`, Args: []any{b.CollectionID}}); err != nil {
 		t.Fatal(err)
@@ -63,6 +64,7 @@ func TestUseGrantAPIKeyCreateListAuthorizeRevoke(t *testing.T) {
 }
 
 func TestUseGrantWrongConsumerExpiryAndStaleCAS(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	connector, err := NewAPIKeyConnector(validAPIKeyConnectorConfig())
 	if err != nil {
@@ -95,6 +97,7 @@ func TestUseGrantWrongConsumerExpiryAndStaleCAS(t *testing.T) {
 }
 
 func TestUseGrantGuards(t *testing.T) {
+	t.Parallel()
 	ctx, store, _, b := credentialStoreFixture(t)
 	if _, err := store.CreateUseGrant(ctx, b.Owner, b.CollectionID, b.ConnectionID, "https://resource.example", UseGrantInput{ConsumerClientID: "missing", Mode: "proxy", Purpose: "x", ExpiresAt: store.now() + 1000}, nil); !errors.Is(err, ErrCredentialUnauthorized) {
 		t.Fatalf("nil authority=%v", err)
