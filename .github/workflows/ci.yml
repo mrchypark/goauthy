@@ -14,6 +14,29 @@ permissions:
   contents: read
 
 jobs:
+  manifests:
+    name: Manifest checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        name: Checkout
+
+      - name: Install kustomize and yq
+        run: |
+          curl -sSfL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" | tar -xz -C /usr/local/bin kustomize
+          curl -sSfL "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64" -o /usr/local/bin/yq
+          chmod +x /usr/local/bin/yq
+
+      # The qualification base manifests and the standalone overlay are parsed
+      # and rendered here because a duplicate YAML key or a dropped pod-template
+      # label silently changes the deployed resources.
+      - name: deploy/standalone
+        run: ./deploy/standalone/test.sh
+
+      - name: deploy/ied-qualification
+        run: ./deploy/ied-qualification/test.sh
+
   vet-session-policy:
     name: Vet & session-policy
     runs-on: ubuntu-latest
@@ -65,4 +88,3 @@ jobs:
       - name: test -race
         run: go test -race -timeout=90m -p 3 ./...
         # Known passing race suite (OAuth) takes ~56m; 60m timeout has too little headroom.
-
