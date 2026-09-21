@@ -13,6 +13,7 @@ import (
 )
 
 func TestScimResourceFailuresEmitExactTerminalEvents(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for name, request := range map[string]func(*Outbox, time.Time) error{
 		"group": func(o *Outbox, now time.Time) error {
@@ -35,6 +36,7 @@ func TestScimResourceFailuresEmitExactTerminalEvents(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			o := newOutboxTest(t, func(context.Context, string) (Reconciler, error) {
 				return fakeReconciler(func(context.Context, Request) (Result, error) { return Result{}, ErrRetryable }), nil
 			}, OutboxConfig{MaxAttempts: 1, Random: bytes.NewReader(bytes.Repeat([]byte{12}, 128))})
@@ -61,6 +63,7 @@ func TestScimResourceFailuresEmitExactTerminalEvents(t *testing.T) {
 }
 
 func TestScimDeleteFailureStaleTombstoneGenerationSuppressesEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var o *Outbox
 	generation := "BBBBBBBBBBBBBBBBBBBBBB"
@@ -91,6 +94,7 @@ func TestScimDeleteFailureStaleTombstoneGenerationSuppressesEvent(t *testing.T) 
 }
 
 func TestScimDeleteFailureStaleProviderPolicySuppressesEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var o *Outbox
 	generation := "DDDDDDDDDDDDDDDDDDDDDD"
@@ -125,6 +129,7 @@ func TestScimDeleteFailureStaleProviderPolicySuppressesEvent(t *testing.T) {
 }
 
 func TestScimExpiredFinalDeleteAfterTombstoneRemovalPreservesRow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	o := newOutboxTest(t, func(context.Context, string) (Reconciler, error) {
 		return fakeReconciler(func(context.Context, Request) (Result, error) { return Result{}, ErrRetryable }), nil

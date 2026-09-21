@@ -17,6 +17,7 @@ import (
 )
 
 func TestEventRetentionFromEnv(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		env  string
@@ -40,6 +41,7 @@ func TestEventRetentionFromEnv(t *testing.T) {
 }
 
 func TestRunEventCleanupCanceledBeforeStart(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "event-worker-test", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -60,10 +62,11 @@ func TestRunEventCleanupCanceledBeforeStart(t *testing.T) {
 }
 
 func TestRunEventCleanupDrainsBoundedBatchesAtOneTick(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	now := time.UnixMilli(2_000_000_000_000).UTC()
 	retention := time.Hour
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "event-worker-drain-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "event-worker-drain-test", DataDir: migratedDataDir(t, "event-worker-drain-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,6 +141,7 @@ func TestRunEventCleanupDrainsBoundedBatchesAtOneTick(t *testing.T) {
 }
 
 func TestTokenIssuedConfigFromEnv(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		generate, level string
 		want            bool
@@ -167,8 +171,9 @@ func TestTokenIssuedConfigFromEnv(t *testing.T) {
 }
 
 func TestRecordTokenIssuedPersistenceFailure(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "token-events-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "token-events-test", DataDir: migratedDataDir(t, "token-events-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +211,7 @@ func TestRecordTokenIssuedPersistenceFailure(t *testing.T) {
 func emailFailureTestStore(t *testing.T, nodeID string) (*rhiza.DB, context.Context) {
 	t.Helper()
 	ctx := t.Context()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: nodeID, DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: nodeID, DataDir: migratedDataDir(t, nodeID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,6 +225,7 @@ func emailFailureTestStore(t *testing.T, nodeID string) (*rhiza.DB, context.Cont
 // GA-MAIL-005: an SMTP failure must reach the audit trail through the shared
 // callback, which the replicated store only accepts with a mutation request ID.
 func TestEmailDeliveryFailureHandlerWritesDurableEvent(t *testing.T) {
+	t.Parallel()
 	db, ctx := emailFailureTestStore(t, "email-failure-event-test")
 	newEmailDeliveryFailureHandler(ctx, db, nil)("user@example.com", "password reset", "subject", "text body", "<p>body</p>", errors.New("smtp down"))
 	rows, err := db.Query(ctx, rhiza.QueryRequest{SQL: "SELECT level,typ,text FROM event_log WHERE typ='EmailSendError'", Consistency: rhiza.ConsistencyLinearizable})

@@ -27,6 +27,7 @@ import (
 // Archive-only cases skip Close; checkpoint cases explicitly publish on Close.
 // This is not an S3/network or HA qualification.
 func TestNoPVCRejectsCorruptArchiveAndRecovers(t *testing.T) {
+	t.Parallel()
 	for _, fault := range []string{"malformed-head", "missing-blocks", "corrupt-blocks", "checkpoint-pointer", "checkpoint-root", "checkpoint-blocks"} {
 		t.Run(fault, func(t *testing.T) {
 			root := t.TempDir()
@@ -287,6 +288,7 @@ func assertNoPVCv98v102(t *testing.T, ctx context.Context, db *rhiza.DB) {
 }
 
 func TestNoPVCAccountAndSigningKeyRecovery(t *testing.T) {
+	t.Parallel()
 	root := os.Getenv("GOAUTHY_RECOVERY_TEST_ROOT")
 	if root == "" {
 		root = t.TempDir()

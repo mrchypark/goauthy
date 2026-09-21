@@ -3,6 +3,7 @@ package main
 import "testing"
 
 func TestConnectionsResourceFromEnv(t *testing.T) {
+	t.Parallel()
 	const resource = "https://identity.example/connections"
 	for _, tc := range []struct {
 		name    string

@@ -9,6 +9,7 @@ import (
 )
 
 func TestSchemaV75DeviceResourcePreservesLegacyRows(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "device-resource-schema", DataDir: t.TempDir()})
 	if err != nil {

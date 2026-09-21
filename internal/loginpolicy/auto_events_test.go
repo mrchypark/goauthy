@@ -11,6 +11,7 @@ import (
 )
 
 func TestAutomaticBlacklistFailureEventsUseThresholdsAndHostIP(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	blacklist := ipblacklist.NewStore(db, 10000)
 	store := NewStoreWithBlacklist(db, blacklist)
@@ -40,6 +41,7 @@ func TestAutomaticBlacklistFailureEventsUseThresholdsAndHostIP(t *testing.T) {
 }
 
 func TestAutomaticBlacklistConcurrentThresholdEmitsOneEventPerCommittedFailure(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	blacklist := ipblacklist.NewStore(db, 10000)
 	store := NewStoreWithBlacklist(db, blacklist)
@@ -56,6 +58,7 @@ func TestAutomaticBlacklistConcurrentThresholdEmitsOneEventPerCommittedFailure(t
 }
 
 func TestAutomaticBlacklistConcurrentThresholdEmitsExactlyOneAtSeven(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	blacklist := ipblacklist.NewStore(db, 10000)
 	first, second := NewStoreWithBlacklist(db, blacklist), NewStoreWithBlacklist(db, blacklist)

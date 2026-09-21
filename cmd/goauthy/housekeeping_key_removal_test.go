@@ -15,6 +15,7 @@ import (
 // anonymous-DCR cleanup are owned by their dedicated workers in main. The shared
 // scheduler owning one of them as well made every replica run that task twice.
 func TestHousekeepingLeavesDedicatedTasksToTheirOwners(t *testing.T) {
+	t.Parallel()
 	db := retirementCmdDB(t, true)
 	jobs := buildHousekeepingJobs(db, nil, loginpolicy.NewStore(db), retirementCmdKeyring(t, "key-c"), nil)
 	owners := map[string]int{}
@@ -43,6 +44,7 @@ func TestHousekeepingLeavesDedicatedTasksToTheirOwners(t *testing.T) {
 // window and its own archival acknowledgment, and every member that still
 // holds the key still sees the obligation after another node recorded removal.
 func TestHousekeepingKeyRemovalRetainsObligationsAcrossEpochs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	first, second := retirementCmdKeyring(t, "key-c"), retirementCmdKeyring(t, "key-c")
@@ -123,6 +125,7 @@ func TestHousekeepingKeyRemovalRetainsObligationsAcrossEpochs(t *testing.T) {
 }
 
 func TestKeyRemovalRequiresAcknowledgedArchivalAndOverlap(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	keyring := retirementCmdKeyring(t, "key-b")

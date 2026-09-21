@@ -10,6 +10,7 @@ import (
 )
 
 func TestAggregateMasterKeyStatusDisabledPasskeysAreExplicitZeroFamily(t *testing.T) {
+	t.Parallel()
 	oidcStatus := oidc.MasterKeyReferenceStatus{
 		ActiveMasterKeyID: "master-b",
 		Safe:              true,
@@ -32,6 +33,7 @@ func TestAggregateMasterKeyStatusDisabledPasskeysAreExplicitZeroFamily(t *testin
 }
 
 func TestAggregateMasterKeyStatusEnabledOldAndLegacyAreUnsafe(t *testing.T) {
+	t.Parallel()
 	oidcStatus := oidc.MasterKeyReferenceStatus{ActiveMasterKeyID: "master-b", Safe: true}
 	passkeyStatus := passkey.EnvelopeReferenceStatus{
 		ActiveMasterKeyID: "master-b",
@@ -50,6 +52,7 @@ func TestAggregateMasterKeyStatusEnabledOldAndLegacyAreUnsafe(t *testing.T) {
 }
 
 func TestAggregateMasterKeyStatusTamperErrorsFailClosedAndJoin(t *testing.T) {
+	t.Parallel()
 	oidcErr := oidc.ErrUnsafeMasterKeyStatus
 	passkeyErr := passkey.ErrUnsafeEnvelopeReferences
 	status, err := aggregateMasterKeyStatus(
@@ -63,6 +66,7 @@ func TestAggregateMasterKeyStatusTamperErrorsFailClosedAndJoin(t *testing.T) {
 }
 
 func TestAggregateMasterKeyStatusRejectsInspectorActiveIDMismatch(t *testing.T) {
+	t.Parallel()
 	status, err := aggregateMasterKeyStatus(
 		"master-b", time.Unix(1_900_000_000, 0).UTC(), true,
 		oidc.MasterKeyReferenceStatus{ActiveMasterKeyID: "master-a", Safe: true}, nil,
@@ -74,6 +78,7 @@ func TestAggregateMasterKeyStatusRejectsInspectorActiveIDMismatch(t *testing.T) 
 }
 
 func TestAggregateMasterKeyStatusIncludesLoginRevoke(t *testing.T) {
+	t.Parallel()
 	status, err := aggregateMasterKeyStatus(
 		"master-b", time.Unix(1_900_000_000, 0).UTC(), false,
 		oidc.MasterKeyReferenceStatus{

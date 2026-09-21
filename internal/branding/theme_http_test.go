@@ -19,6 +19,7 @@ import (
 )
 
 func TestThemeHandlerPublicGetFallbackTimestampAndGzip(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewThemeStore(db)
 	if err != nil {
@@ -84,6 +85,7 @@ func TestThemeHandlerPublicGetFallbackTimestampAndGzip(t *testing.T) {
 }
 
 func TestThemeHandlerBrowserAdminReadAndGuardedMutations(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewThemeStore(db)
 	if err != nil {
@@ -150,6 +152,7 @@ func TestThemeHandlerBrowserAdminReadAndGuardedMutations(t *testing.T) {
 }
 
 func TestThemeHandlerValidatesPutPathPayloadAndClient(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewThemeStore(db)
 	if err != nil {
@@ -188,6 +191,7 @@ func TestThemeHandlerValidatesPutPathPayloadAndClient(t *testing.T) {
 }
 
 func TestThemeHandlerAPIKeyRightAndForbiddenMutation(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewThemeStore(db)
 	if err != nil {
@@ -240,6 +244,7 @@ func themeRequest(method, path string, body io.Reader, clientID, timestamp strin
 }
 
 func TestThemeHandlerIgnoresNonTextAcceptEncoding(t *testing.T) {
+	t.Parallel()
 	_, db := clientFaviconDB(t)
 	store, err := NewThemeStore(db)
 	if err != nil {
@@ -267,6 +272,7 @@ func TestThemeHandlerIgnoresNonTextAcceptEncoding(t *testing.T) {
 // representation varies on Accept-Encoding so a shared cache cannot serve an
 // incompatible copy that breaks login-page styling.
 func TestThemeEncodingNegotiationAndCacheVariation(t *testing.T) {
+	t.Parallel()
 	_, db := clientFaviconDB(t)
 	store, err := NewThemeStore(db)
 	if err != nil {

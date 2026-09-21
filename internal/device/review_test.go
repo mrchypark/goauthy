@@ -7,6 +7,7 @@ import (
 )
 
 func TestReviewPendingGrant(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	grant, err := store.CreateWithBinding(ctx, "client", []string{"openid", "goauthy.read"}, ClientBinding{Resource: "https://resource.example.test/api"}, now)
@@ -23,6 +24,7 @@ func TestReviewPendingGrant(t *testing.T) {
 }
 
 func TestReviewRejectsUnavailableCodes(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	grant, err := store.Create(ctx, "client", nil, now)

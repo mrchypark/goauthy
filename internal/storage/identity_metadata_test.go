@@ -8,6 +8,7 @@ import (
 )
 
 func TestMigrationV56IdentityMetadataDefaultsAndIdempotency(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dataDir := t.TempDir()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "identity-metadata", DataDir: dataDir})
@@ -59,6 +60,7 @@ func TestMigrationV56IdentityMetadataDefaultsAndIdempotency(t *testing.T) {
 }
 
 func TestMigrationV56PreservesV55IdentityRows(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "identity-partial", DataDir: t.TempDir()})
 	if err != nil {
@@ -83,6 +85,7 @@ func TestMigrationV56PreservesV55IdentityRows(t *testing.T) {
 }
 
 func TestMigrationV56RejectsPartialMarkedSchema(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "identity-partial-marked", DataDir: t.TempDir()})
 	if err != nil {
@@ -102,6 +105,7 @@ func TestMigrationV56RejectsPartialMarkedSchema(t *testing.T) {
 }
 
 func TestMigrationV56ConcurrentCallers(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "identity-concurrent", DataDir: t.TempDir()})
 	if err != nil {

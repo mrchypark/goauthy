@@ -15,6 +15,7 @@ import (
 )
 
 func TestSendLoginLocationUsesSMTPFixtureAndEscapesDynamicHTML(t *testing.T) {
+	t.Parallel()
 	address, received := startSMTPFixture(t)
 	host, port := splitSMTPAddress(t, address)
 	sender, err := NewSMTPSender(SMTPConfig{Host: host, Port: port, From: "support@example.test", Timeout: time.Second, AllowInsecure: true})
@@ -46,6 +47,7 @@ func TestSendLoginLocationUsesSMTPFixtureAndEscapesDynamicHTML(t *testing.T) {
 }
 
 func TestSendLoginLocationMIMEUsesSubjectPrefixAndPinnedTemplate(t *testing.T) {
+	t.Parallel()
 	address, received := startSMTPFixture(t)
 	host, port := splitSMTPAddress(t, address)
 	sender, err := NewSMTPSender(SMTPConfig{Host: host, Port: port, From: "support@example.test", Timeout: time.Second, AllowInsecure: true})
@@ -72,6 +74,7 @@ func TestSendLoginLocationMIMEUsesSubjectPrefixAndPinnedTemplate(t *testing.T) {
 }
 
 func TestSendLoginLocationRejectsInvalidTypedThemeBeforeSMTP(t *testing.T) {
+	t.Parallel()
 	sender := testSMTPSender(t)
 	sender.send = func(context.Context, *mail.Msg) error {
 		t.Fatal("invalid typed theme reached SMTP send hook")
@@ -87,6 +90,7 @@ func TestSendLoginLocationRejectsInvalidTypedThemeBeforeSMTP(t *testing.T) {
 }
 
 func TestSendLoginLocationRendersLocationAndAllLanguages(t *testing.T) {
+	t.Parallel()
 	sender := testSMTPSender(t)
 	location := `Seoul <&>`
 	for _, language := range []string{"de", "en", "fr", "ko", "nb", "nl", "ru", "uk", "zhhans"} {
@@ -122,6 +126,7 @@ func TestSendLoginLocationRendersLocationAndAllLanguages(t *testing.T) {
 }
 
 func TestSendLoginLocationRejectsInvalidLinksWithoutLeakingCode(t *testing.T) {
+	t.Parallel()
 	sender := testSMTPSender(t)
 	sends := 0
 	sender.send = func(_ context.Context, _ *mail.Msg) error {

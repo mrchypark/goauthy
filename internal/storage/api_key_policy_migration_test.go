@@ -7,7 +7,8 @@ import (
 )
 
 func TestSchemaV70PreservesAPIKeyCredentialsAndRevokesOAuthProviders(t *testing.T) {
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "api-key-policy-migration", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "api-key-policy-migration", DataDir: testDatabaseDir(t, "api-key-policy-migration")})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,7 +17,7 @@ import (
 func scimWakeRuntime(t *testing.T) (*scimRuntime, *identity.Store, *rhiza.DB) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "scim-wake-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "scim-wake-test", DataDir: migratedDataDir(t, "scim-wake-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,6 +42,7 @@ func scimWakeRuntime(t *testing.T) (*scimRuntime, *identity.Store, *rhiza.DB) {
 }
 
 func TestSCIMRuntimeWakeReconcilesNewPendingUserAcrossProviders(t *testing.T) {
+	t.Parallel()
 	runtime, store, db := scimWakeRuntime(t)
 	runtime.providerIDs = []string{"provider-a", "provider-b"}
 	runtime.providers = map[string]configuredSCIMProvider{"provider-a": {}, "provider-b": {}}
@@ -127,6 +128,7 @@ func seedSCIMWakeUser(t *testing.T, db *rhiza.DB, subject string) {
 }
 
 func TestSCIMRuntimeWakeStartupImmediateAndCancellation(t *testing.T) {
+	t.Parallel()
 	runtime, _, db := scimWakeRuntime(t)
 	seedSCIMWakeUser(t, db, "startup-user")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -148,6 +150,7 @@ func TestSCIMRuntimeWakeStartupImmediateAndCancellation(t *testing.T) {
 }
 
 func TestSCIMRuntimeWakeRetainsWakeDuringActiveReconciliation(t *testing.T) {
+	t.Parallel()
 	runtime, _, db := scimWakeRuntime(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -192,6 +195,7 @@ func TestSCIMRuntimeWakeRetainsWakeDuringActiveReconciliation(t *testing.T) {
 }
 
 func TestSCIMRuntimeWakeBurstCoalescesAndNilIsHarmless(t *testing.T) {
+	t.Parallel()
 	var nilRuntime *scimRuntime
 	nilRuntime.Wake()
 	runtime, _, _ := scimWakeRuntime(t)

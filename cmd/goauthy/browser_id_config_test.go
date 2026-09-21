@@ -8,6 +8,7 @@ import (
 )
 
 func TestBrowserIDPolicyConfigAndPasswordReader(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		mode, path, name, cookiePath string
 		valid                        bool

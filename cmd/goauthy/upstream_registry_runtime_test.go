@@ -69,7 +69,7 @@ type drtFixture struct {
 func drtNewFixture(t *testing.T) *drtFixture {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "dispatcher-rt-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "dispatcher-rt-test", DataDir: migratedDataDir(t, "dispatcher-rt-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,6 +207,7 @@ func drtMux(d *dynamicUpstreamDispatcher) *http.ServeMux {
 }
 
 func TestDynamicDispatcherReservesStaticIDs(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	f.seedProvider(drtStaticID)
 	d := drtDispatcher(t, f, []string{drtStaticID})
@@ -219,6 +220,7 @@ func TestDynamicDispatcherReservesStaticIDs(t *testing.T) {
 }
 
 func TestDynamicDispatcherRejectsEmptyProviderID(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	d := drtDispatcher(t, f, nil)
 	rec := httptest.NewRecorder()
@@ -229,6 +231,7 @@ func TestDynamicDispatcherRejectsEmptyProviderID(t *testing.T) {
 }
 
 func TestDynamicDispatcherRejectsInvalidProviderID(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	d := drtDispatcher(t, f, nil)
 	for _, id := range []string{"short", "AbCdEfGhIjKl!", strings.Repeat("a", 25)} {
@@ -243,6 +246,7 @@ func TestDynamicDispatcherRejectsInvalidProviderID(t *testing.T) {
 }
 
 func TestDynamicDispatcherMissingProviderNotFound(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	d := drtDispatcher(t, f, nil)
 	rec := httptest.NewRecorder()
@@ -255,6 +259,7 @@ func TestDynamicDispatcherMissingProviderNotFound(t *testing.T) {
 }
 
 func TestDynamicDispatcherDisabledProviderNotFound(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	f.seedProvider(drtProviderID)
 	f.disableProvider(drtProviderID)
@@ -273,6 +278,7 @@ func TestDynamicDispatcherDisabledProviderNotFound(t *testing.T) {
 }
 
 func TestDynamicDispatcherExistsDisabledReturnsFalse(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	f.seedProvider(drtProviderID)
 	d := drtDispatcher(t, f, nil)
@@ -292,6 +298,7 @@ func TestDynamicDispatcherExistsDisabledReturnsFalse(t *testing.T) {
 }
 
 func TestDynamicDispatcherExistsClosedDBError(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	f.seedProvider(drtProviderID)
 	d := drtDispatcher(t, f, nil)
@@ -303,6 +310,7 @@ func TestDynamicDispatcherExistsClosedDBError(t *testing.T) {
 }
 
 func TestDynamicDispatcherVersionMissingNotFound(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	f.seedProvider(drtProviderID)
 	if _, err := storage.Execute(f.ctx, f.db, rhiza.ExecuteRequest{
@@ -321,6 +329,7 @@ func TestDynamicDispatcherVersionMissingNotFound(t *testing.T) {
 }
 
 func TestDynamicDispatcherCreateAfterConstructLocalStart(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	d := drtDispatcher(t, f, nil)
 	mux := drtMux(d)
@@ -349,6 +358,7 @@ func TestDynamicDispatcherCreateAfterConstructLocalStart(t *testing.T) {
 }
 
 func TestDynamicDispatcherStartPersistsTxSourceAndVersion(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	d := drtDispatcher(t, f, nil)
 	mux := drtMux(d)
@@ -395,6 +405,7 @@ func TestDynamicDispatcherStartPersistsTxSourceAndVersion(t *testing.T) {
 }
 
 func TestDynamicDispatcherAllThreeProtocolFlagsFromDB(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	f.seedProvider(drtProviderID)
 	cfg, _, err := f.store.RuntimeConfig(f.ctx, drtProviderID)
@@ -413,6 +424,7 @@ func TestDynamicDispatcherAllThreeProtocolFlagsFromDB(t *testing.T) {
 }
 
 func TestDynamicDispatcherVersionChangedCallbackFailsClosed(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	d := drtDispatcher(t, f, nil)
 	mux := drtMux(d)
@@ -460,6 +472,7 @@ func TestDynamicDispatcherVersionChangedCallbackFailsClosed(t *testing.T) {
 }
 
 func TestDynamicDispatcherMountDynamicRoutes(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	d := drtDispatcher(t, f, nil)
 	mux := http.NewServeMux()
@@ -477,6 +490,7 @@ func TestDynamicDispatcherMountDynamicRoutes(t *testing.T) {
 }
 
 func TestDynamicDispatcherConsumeRejectsClosedDB(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	_ = f.db.Close()
 	_, err := f.rhizaStore.Consume(f.ctx, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", "someprovider", time.Now())
@@ -490,6 +504,7 @@ func TestDynamicDispatcherConsumeRejectsClosedDB(t *testing.T) {
 // a verifier so an invalid logout token cannot drive a fresh JWKS fetch per
 // request, and a configuration change must select a new cache identity.
 func TestDynamicDispatcherReusesManagedJWKSCache(t *testing.T) {
+	t.Parallel()
 	f := drtNewFixture(t)
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

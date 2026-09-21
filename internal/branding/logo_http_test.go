@@ -18,6 +18,7 @@ import (
 )
 
 func TestClientLogoHandlerPublicFallbackCacheAndCSP(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientLogoStore(db)
 	if err != nil {
@@ -74,6 +75,7 @@ func TestClientLogoHandlerPublicFallbackCacheAndCSP(t *testing.T) {
 }
 
 func TestClientLogoHandlerAPIKeyMutationsPreserveFavicon(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientLogoStore(db)
 	if err != nil {
@@ -124,6 +126,7 @@ func TestClientLogoHandlerAPIKeyMutationsPreserveFavicon(t *testing.T) {
 }
 
 func TestClientLogoHandlerRejectsUnauthorizedRevokedAndMalformedMutation(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientLogoStore(db)
 	if err != nil {
@@ -257,6 +260,7 @@ func logoHTTPMultipartRequest(t *testing.T, method, path, contentType string, da
 }
 
 func TestClientLogoMultipartFaviconProcessing(t *testing.T) {
+	t.Parallel()
 	for _, contentType := range []string{"image/png", "image/svg+xml"} {
 		var data []byte
 		if contentType == "image/png" {

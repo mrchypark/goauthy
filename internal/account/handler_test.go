@@ -29,6 +29,7 @@ import (
 )
 
 func TestPasswordHandlerChangesOnlyAuthenticatedSubject(t *testing.T) {
+	t.Parallel()
 	h, sessions, identities, cookie, csrf := testPasswordHandler(t)
 
 	get := httptest.NewRequest(http.MethodGet, "/account/password", nil)
@@ -57,6 +58,7 @@ func TestPasswordHandlerChangesOnlyAuthenticatedSubject(t *testing.T) {
 }
 
 func TestPasswordlessCookieMatchesLoginContract(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		issuer, name string
 		secure       bool
@@ -75,6 +77,7 @@ func TestPasswordlessCookieMatchesLoginContract(t *testing.T) {
 }
 
 func TestRegistrationCookieMatchesHostCookieContract(t *testing.T) {
+	t.Parallel()
 	h := &Handler{issuer: "https://issuer.example.test"}
 	cookie := h.registrationCookie("subject", "code", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC))
 	cleared := h.clearRegistrationCookie()
@@ -90,6 +93,7 @@ func TestRegistrationCookieMatchesHostCookieContract(t *testing.T) {
 }
 
 func TestMFAWebAuthnStartExpiryUsesRauthyEpochSeconds(t *testing.T) {
+	t.Parallel()
 	raw, err := json.Marshal(mfaWebAuthnStartResponse{Exp: 123})
 	if err != nil {
 		t.Fatal(err)
@@ -100,6 +104,7 @@ func TestMFAWebAuthnStartExpiryUsesRauthyEpochSeconds(t *testing.T) {
 }
 
 func TestPasswordHandlerRejectsUntrustedOrMalformedChanges(t *testing.T) {
+	t.Parallel()
 	h, _, identities, cookie, csrf := testPasswordHandler(t)
 	valid := passwordChangeRequest{Current: stringPtr("CurrentPassword1"), Next: stringPtr("UpdatedPassword2")}
 
@@ -178,6 +183,7 @@ func TestPasswordHandlerRejectsUntrustedOrMalformedChanges(t *testing.T) {
 }
 
 func TestConvertSelfPasskey(t *testing.T) {
+	t.Parallel()
 	h, identities, cookie, csrf, addCredential := testConversionHandler(t)
 	addCredential(t, true)
 
@@ -200,6 +206,7 @@ func TestConvertSelfPasskey(t *testing.T) {
 }
 
 func TestConvertSelfPasskeyRequiresCurrentMFAPeerBoundSession(t *testing.T) {
+	t.Parallel()
 	h, _, _, _, addCredential := testConversionHandler(t)
 	addCredential(t, true)
 	ctx := context.Background()
@@ -238,6 +245,7 @@ func TestConvertSelfPasskeyRequiresCurrentMFAPeerBoundSession(t *testing.T) {
 }
 
 func TestConvertSelfPasskeyRejectsUntrustedOrInvalidRequests(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name         string
 		subject      string
@@ -283,6 +291,7 @@ func TestConvertSelfPasskeyRejectsUntrustedOrInvalidRequests(t *testing.T) {
 }
 
 func TestExternalLinkAccountBoundary(t *testing.T) {
+	t.Parallel()
 	h, sessions, identities, cookie, csrf := testPasswordHandler(t)
 	ctx := context.Background()
 
@@ -426,6 +435,7 @@ func TestExternalLinkAccountBoundary(t *testing.T) {
 }
 
 func TestExternalLinkUnlinkAllowsPasskeyOnlyAccount(t *testing.T) {
+	t.Parallel()
 	h, identities, cookie, csrf, addCredential := testConversionHandler(t)
 	ctx := context.Background()
 	addCredential(t, true)
@@ -469,6 +479,7 @@ func TestExternalLinkUnlinkAllowsPasskeyOnlyAccount(t *testing.T) {
 }
 
 func TestCurrentExternalLinkSession(t *testing.T) {
+	t.Parallel()
 	h, db, _, cookie, _, passwordSession := testPasskeyAccountHandler(t)
 	ctx := context.Background()
 	request := func(cookie *http.Cookie) *http.Request {
@@ -557,6 +568,7 @@ func TestCurrentExternalLinkSession(t *testing.T) {
 }
 
 func TestExternalLinkUnlinkRejectsDisabledSessionSubject(t *testing.T) {
+	t.Parallel()
 	h, db, _, cookie, csrf, _ := testPasskeyAccountHandler(t)
 	ctx := context.Background()
 	if err := h.ConfigureExternalLinks(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), []string{"google"}); err != nil {
@@ -585,6 +597,7 @@ func TestExternalLinkUnlinkRejectsDisabledSessionSubject(t *testing.T) {
 }
 
 func TestPasskeyCrossSiteRequestsDoNotMutateState(t *testing.T) {
+	t.Parallel()
 	h, db, service, cookie, csrf, session := testPasskeyAccountHandler(t)
 	ctx := context.Background()
 
@@ -643,6 +656,7 @@ func TestPasskeyCrossSiteRequestsDoNotMutateState(t *testing.T) {
 }
 
 func TestIssueModificationTokenEnforcesRauthyFactorSelection(t *testing.T) {
+	t.Parallel()
 	validProof := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	for _, tc := range []struct {
 		name            string
@@ -682,6 +696,7 @@ func TestIssueModificationTokenEnforcesRauthyFactorSelection(t *testing.T) {
 }
 
 func TestMFAWebAuthnHandlersRejectUntrustedAndMalformedRequestsWithoutState(t *testing.T) {
+	t.Parallel()
 	validCode := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	for _, tc := range []struct {
 		name    string
@@ -738,6 +753,7 @@ func TestMFAWebAuthnHandlersRejectUntrustedAndMalformedRequestsWithoutState(t *t
 }
 
 func TestPutSelfPasswordPasskeyOnlyRequiresPasswordNewProof(t *testing.T) {
+	t.Parallel()
 	h, db, _, cookie, csrf, session := testPasskeyAccountHandler(t)
 	seedAccountCredential(t, db, "reverse-credential", "reverse")
 	if err := h.identity.ConvertToPasskeyOnly(context.Background(), "subject-1"); err != nil {
@@ -766,6 +782,7 @@ func TestPutSelfPasswordPasskeyOnlyRequiresPasswordNewProof(t *testing.T) {
 }
 
 func TestPutSelfPasswordPasskeyOnlyRejectsInvalidFormsWithoutProofMutation(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		subject string
@@ -820,6 +837,7 @@ func TestPutSelfPasswordPasskeyOnlyRejectsInvalidFormsWithoutProofMutation(t *te
 }
 
 func TestModificationProofCannotCrossBrowserSessions(t *testing.T) {
+	t.Parallel()
 	h, db, _, _, _, original := testPasskeyAccountHandler(t)
 	seedAccountCredential(t, db, "proof-credential", "proof")
 	proof := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -851,6 +869,7 @@ func TestModificationProofCannotCrossBrowserSessions(t *testing.T) {
 }
 
 func TestMFAModificationRejectsAmbiguousContentTypeWithoutMutation(t *testing.T) {
+	t.Parallel()
 	h, db, _, cookie, csrf, _ := testPasskeyAccountHandler(t)
 	request := sameOriginPasskeyRequest(t, http.MethodPost, "/auth/v1/users/subject-1/mfa_token", "subject-1", cookie, csrf, []byte(`{"password":"CurrentPassword1"}`))
 	request.Header.Add("Content-Type", "application/json")
@@ -862,6 +881,7 @@ func TestMFAModificationRejectsAmbiguousContentTypeWithoutMutation(t *testing.T)
 }
 
 func TestPasskeyMutationsRejectDuplicateJSONKeysWithoutStateChange(t *testing.T) {
+	t.Parallel()
 	t.Run("delete modification token", func(t *testing.T) {
 		h, db, _, cookie, csrf, _ := testPasskeyAccountHandler(t)
 		seedAccountCredential(t, db, "duplicate-delete", "duplicate-delete")
@@ -900,6 +920,7 @@ func TestPasskeyMutationsRejectDuplicateJSONKeysWithoutStateChange(t *testing.T)
 }
 
 func TestValidPasskeyNameMatchesRauthyPolicy(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		value string
@@ -923,6 +944,7 @@ func TestValidPasskeyNameMatchesRauthyPolicy(t *testing.T) {
 }
 
 func TestPasskeyAdminAndAPIKeyBoundaries(t *testing.T) {
+	t.Parallel()
 	h, db, _, cookie, csrf, _ := testPasskeyAccountHandler(t)
 	seedAccountCredential(t, db, "credential-api", "api-key")
 	keys, err := apikey.NewStore(db)
@@ -1033,6 +1055,7 @@ func TestPasskeyAdminAndAPIKeyBoundaries(t *testing.T) {
 }
 
 func TestUserDeletionHTTPBoundaries(t *testing.T) {
+	t.Parallel()
 	t.Run("DELETE rejects browser boundary violations without mutation", func(t *testing.T) {
 		for _, tc := range []struct {
 			name        string

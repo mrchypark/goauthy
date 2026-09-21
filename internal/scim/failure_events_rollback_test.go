@@ -70,6 +70,7 @@ func seedFinalScimJob(t *testing.T, o *Outbox, eventID string, now time.Time) (J
 }
 
 func TestSCIMTerminalFailureEventBeforeInsertRollback(t *testing.T) {
+	t.Parallel()
 	now := time.UnixMilli(1_800_000_000_000).UTC()
 	o := newOutboxTest(t, func(context.Context, string) (Reconciler, error) { return fakeReconciler(nil), nil }, OutboxConfig{MaxAttempts: 3, Random: bytes.NewReader(bytes.Repeat([]byte{7}, 128))})
 	job, jobID := seedFinalScimJob(t, o, "before", now)
@@ -116,6 +117,7 @@ func TestSCIMTerminalFailureEventBeforeInsertRollback(t *testing.T) {
 }
 
 func TestSCIMDeadLetterExpiredEventOrderRollbackAndStaleNoop(t *testing.T) {
+	t.Parallel()
 	now := time.UnixMilli(1_800_000_000_000).UTC()
 	o := newOutboxTest(t, func(context.Context, string) (Reconciler, error) { return fakeReconciler(nil), nil }, OutboxConfig{MaxAttempts: 3, Random: bytes.NewReader(bytes.Repeat([]byte{8}, 128))})
 	ctx := context.Background()
@@ -185,6 +187,7 @@ func TestSCIMDeadLetterExpiredEventOrderRollbackAndStaleNoop(t *testing.T) {
 }
 
 func TestSCIMTerminalFailureEventOrderAndUpdateAbortRollback(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		trigger string
@@ -193,6 +196,7 @@ func TestSCIMTerminalFailureEventOrderAndUpdateAbortRollback(t *testing.T) {
 		{name: "outbox update", trigger: `CREATE TRIGGER scim_failure_finish_update_abort BEFORE UPDATE ON scim_user_outbox WHEN NEW.status='dead' BEGIN SELECT RAISE(ABORT, 'outbox update unavailable'); END`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			now := time.UnixMilli(1_800_000_000_000).UTC()
 			o := newOutboxTest(t, func(context.Context, string) (Reconciler, error) { return fakeReconciler(nil), nil }, OutboxConfig{MaxAttempts: 3, Random: bytes.NewReader(bytes.Repeat([]byte{9}, 128))})
 			job, jobID := seedFinalScimJob(t, o, "finish-"+tc.name, now)
@@ -230,6 +234,7 @@ func TestSCIMTerminalFailureEventOrderAndUpdateAbortRollback(t *testing.T) {
 }
 
 func TestSCIMDeadLetterExpiredEventBeforeInsertRollback(t *testing.T) {
+	t.Parallel()
 	now := time.UnixMilli(1_800_000_000_000).UTC()
 	o := newOutboxTest(t, func(context.Context, string) (Reconciler, error) { return fakeReconciler(nil), nil }, OutboxConfig{MaxAttempts: 3, Random: bytes.NewReader(bytes.Repeat([]byte{10}, 128))})
 	ctx := context.Background()

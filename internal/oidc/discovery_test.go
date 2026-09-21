@@ -8,6 +8,7 @@ import (
 )
 
 func TestDiscoveryHandlerAdvertisesOnlyImplementedCapabilities(t *testing.T) {
+	t.Parallel()
 	handler := DiscoveryHandler("https://id.example.com/", false)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil))
@@ -35,6 +36,7 @@ func TestDiscoveryHandlerAdvertisesOnlyImplementedCapabilities(t *testing.T) {
 }
 
 func TestDiscoveryHandlerRejectsInvalidIssuer(t *testing.T) {
+	t.Parallel()
 	response := httptest.NewRecorder()
 	DiscoveryHandler("https://id.example.com/?query", false).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/.well-known/openid-configuration", nil))
 	if response.Code != http.StatusInternalServerError {
@@ -43,6 +45,7 @@ func TestDiscoveryHandlerRejectsInvalidIssuer(t *testing.T) {
 }
 
 func TestOpenIDDiscoveryAdvertisesImplementedClaims(t *testing.T) {
+	t.Parallel()
 	response := httptest.NewRecorder()
 	OpenIDDiscoveryHandler("https://id.example.com", false).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/.well-known/openid-configuration", nil))
 	if response.Code != http.StatusOK {
@@ -61,6 +64,7 @@ func TestOpenIDDiscoveryAdvertisesImplementedClaims(t *testing.T) {
 }
 
 func TestDiscoveryUsesIssuerBasePath(t *testing.T) {
+	t.Parallel()
 	response := httptest.NewRecorder()
 	OpenIDDiscoveryHandler("https://id.example.com/tenant", false).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/tenant/.well-known/openid-configuration", nil))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"issuer":"https://id.example.com/tenant"`) || !strings.Contains(response.Body.String(), `"authorization_endpoint":"https://id.example.com/tenant/oidc/authorize"`) {
@@ -69,6 +73,7 @@ func TestDiscoveryUsesIssuerBasePath(t *testing.T) {
 }
 
 func TestDiscoveryHandlersAdvertiseRegistrationOnlyWhenEnabled(t *testing.T) {
+	t.Parallel()
 	for _, handler := range []http.Handler{
 		DiscoveryHandler("https://id.example.com", true),
 		OpenIDDiscoveryHandler("https://id.example.com", true),
@@ -82,6 +87,7 @@ func TestDiscoveryHandlersAdvertiseRegistrationOnlyWhenEnabled(t *testing.T) {
 }
 
 func TestDiscoveryHandlersAdvertiseCIMDOnlyWhenConfigured(t *testing.T) {
+	t.Parallel()
 	for _, handler := range []http.Handler{
 		DiscoveryHandlerWithOptions("https://id.example.com", DiscoveryOptions{ClientIDMetadataDocumentSupported: true}),
 		OpenIDDiscoveryHandlerWithOptions("https://id.example.com", DiscoveryOptions{ClientIDMetadataDocumentSupported: true}),
@@ -105,6 +111,7 @@ func TestDiscoveryHandlersAdvertiseCIMDOnlyWhenConfigured(t *testing.T) {
 }
 
 func TestDiscoveryPasswordCapability(t *testing.T) {
+	t.Parallel()
 	for _, enabled := range []bool{false, true} {
 		options := DiscoveryOptions{PasswordGrantEnabled: enabled}
 		for _, handler := range []http.Handler{DiscoveryHandlerWithOptions("https://id.example.com", options), OpenIDDiscoveryHandlerWithOptions("https://id.example.com", options)} {

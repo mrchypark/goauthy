@@ -7,7 +7,8 @@ import (
 )
 
 func TestSchemaV68AddsProviderDefaultAndReplays(t *testing.T) {
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "collection-provider-migration", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "collection-provider-migration", DataDir: testDatabaseDir(t, "collection-provider-migration")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +36,8 @@ func TestSchemaV68AddsProviderDefaultAndReplays(t *testing.T) {
 }
 
 func TestSchemaV68RevokesRemovedProviders(t *testing.T) {
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "collection-provider-revoke", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "collection-provider-revoke", DataDir: testDatabaseDir(t, "collection-provider-revoke")})
 	if err != nil {
 		t.Fatal(err)
 	}

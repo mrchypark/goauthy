@@ -9,6 +9,7 @@ import (
 )
 
 func TestUserValuesPolicyFromEnv(t *testing.T) {
+	t.Parallel()
 	policy, err := userValuesPolicyFromEnv(func(string) string { return "" })
 	if err != nil || policy != (identity.UserValuesPolicy{}) {
 		t.Fatalf("default=%+v err=%v", policy, err)
@@ -39,6 +40,7 @@ func TestUserValuesPolicyFromEnv(t *testing.T) {
 }
 
 func TestPreferredUsernamePolicyFromEnv(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, mode, pattern, blacklist string
 		invalid                        bool
@@ -84,6 +86,7 @@ func TestPreferredUsernamePolicyFromEnv(t *testing.T) {
 }
 
 func TestPreferredUsernameImmutableFromEnv(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, value   string
 		want, invalid bool
@@ -117,6 +120,7 @@ func TestPreferredUsernameImmutableFromEnv(t *testing.T) {
 }
 
 func TestRevalidateDuringLoginFromEnv(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, value   string
 		want, invalid bool
@@ -156,6 +160,7 @@ func TestRevalidateDuringLoginFromEnv(t *testing.T) {
 }
 
 func TestPreferredUsernamePresentationFromEnv(t *testing.T) {
+	t.Parallel()
 	settings := map[string]string{
 		"GOAUTHY_USER_VALUES_PREFERRED_USERNAME":              "required",
 		"GOAUTHY_USER_VALUES_PREFERRED_USERNAME_REGEX":        `^[a-z]+$`,

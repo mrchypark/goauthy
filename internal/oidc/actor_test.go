@@ -12,6 +12,7 @@ import (
 )
 
 func TestActorClaimsValidationAndSignedRoundTrip(t *testing.T) {
+	t.Parallel()
 	value := map[string]any{"sub": "immediate", "act": map[string]any{"sub": "ancestor"}}
 	actor, err := ParseActorClaims(value)
 	if err != nil {

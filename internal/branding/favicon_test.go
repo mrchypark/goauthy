@@ -57,6 +57,7 @@ func testICO() []byte {
 }
 
 func TestLoadFileAndHandler(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "favicon.png")
 	if err := os.WriteFile(path, testPNG(t), 0o600); err != nil {
@@ -82,6 +83,7 @@ func TestLoadFileAndHandler(t *testing.T) {
 }
 
 func TestAssetFormatPolicy(t *testing.T) {
+	t.Parallel()
 	if _, err := NewAsset(testICO()); err != nil {
 		t.Fatalf("valid ICO rejected: %v", err)
 	}
@@ -97,6 +99,7 @@ func TestAssetFormatPolicy(t *testing.T) {
 }
 
 func TestRejectsHugePNGDimensionsBeforeDecode(t *testing.T) {
+	t.Parallel()
 	if _, err := NewAsset(testPNGHeader(^uint32(0), ^uint32(0))); err != ErrInvalidFormat {
 		t.Fatalf("huge PNG dimensions err=%v, want ErrInvalidFormat", err)
 	}
@@ -114,6 +117,7 @@ func TestRejectsHugePNGDimensionsBeforeDecode(t *testing.T) {
 }
 
 func TestRejectsICOUint32PayloadOverflowShape(t *testing.T) {
+	t.Parallel()
 	ico := testICO()
 	binary.LittleEndian.PutUint32(ico[14:18], ^uint32(0))
 	if _, err := NewAsset(ico); err != ErrInvalidFormat {
@@ -122,6 +126,7 @@ func TestRejectsICOUint32PayloadOverflowShape(t *testing.T) {
 }
 
 func TestLoadFileRejectsNonRegularAndOversize(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if _, err := LoadFile(dir); err == nil {
 		t.Fatal("directory accepted")

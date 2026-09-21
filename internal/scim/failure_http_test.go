@@ -33,6 +33,7 @@ func (r *realHTTPRequests) snapshot() []string {
 }
 
 func TestScimRealHTTPGroupFailureTerminalEvent(t *testing.T) {
+	t.Parallel()
 	var requests realHTTPRequests
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.add(r.Method + " " + r.URL.Path)
@@ -80,6 +81,7 @@ func TestScimRealHTTPGroupFailureTerminalEvent(t *testing.T) {
 }
 
 func TestScimRealHTTPGroupCreateFailureTerminalEvent(t *testing.T) {
+	t.Parallel()
 	var requests realHTTPRequests
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.add(r.Method + " " + r.URL.Path)
@@ -129,6 +131,7 @@ func TestScimRealHTTPGroupCreateFailureTerminalEvent(t *testing.T) {
 }
 
 func TestScimRealHTTPTombstoneDeleteFailureTerminalEvent(t *testing.T) {
+	t.Parallel()
 	var requests realHTTPRequests
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.add(r.Method + " " + r.URL.Path)

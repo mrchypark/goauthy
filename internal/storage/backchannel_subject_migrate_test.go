@@ -9,6 +9,7 @@ import (
 )
 
 func TestMigrationV61BackchannelSubjectsPreservesRows(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v61-test", DataDir: t.TempDir()})
 	if err != nil {
@@ -70,6 +71,7 @@ func TestMigrationV61BackchannelSubjectsPreservesRows(t *testing.T) {
 }
 
 func TestMigrationV61RejectsMissingObjects(t *testing.T) {
+	t.Parallel()
 	for _, table := range []string{"oidc_backchannel_deliveries", "oidc_user_clients"} {
 		t.Run(table, func(t *testing.T) {
 			db, ctx := eventSchemaDB(t)
@@ -103,6 +105,7 @@ func TestMigrationV61RejectsMissingObjects(t *testing.T) {
 }
 
 func TestMigrationV61RejectsMarkerShapeMismatch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v61-mismatch", DataDir: t.TempDir()})
 	if err != nil {

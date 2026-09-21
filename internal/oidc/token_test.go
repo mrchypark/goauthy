@@ -16,6 +16,7 @@ import (
 )
 
 func TestIDTokenSignsAndVerifiesWithPublicJWKS(t *testing.T) {
+	t.Parallel()
 	key := testTokenSigningKey(t)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	want := IDTokenClaims{
@@ -46,6 +47,7 @@ func TestIDTokenSignsAndVerifiesWithPublicJWKS(t *testing.T) {
 }
 
 func TestIDTokenStandardProfileClaimsRoundTrip(t *testing.T) {
+	t.Parallel()
 	key := fixedTokenSigningKey()
 	now := time.Unix(1_800_000_000, 0).UTC()
 	name, email, given := "team_34", "user@example.test", "Given"
@@ -66,6 +68,7 @@ func TestIDTokenStandardProfileClaimsRoundTrip(t *testing.T) {
 }
 
 func TestIDTokenCustomClaimsCannotCollideWithProfileNames(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(1_800_000_000, 0).UTC()
 	value := "x"
 	_, err := SignIDToken(fixedTokenSigningKey(), IDTokenClaims{Issuer: "https://id.example.com", Subject: "user-1", Audience: []string{"client-1"}, IssuedAt: now, ExpiresAt: now.Add(time.Hour), Roles: []string{}, Profile: ProfileClaims{GivenName: &value}, CustomClaims: CustomClaims{Values: map[string]json.RawMessage{"given_name": json.RawMessage(`"evil"`)}, AtRoot: true}})
@@ -75,6 +78,7 @@ func TestIDTokenCustomClaimsCannotCollideWithProfileNames(t *testing.T) {
 }
 
 func TestIDTokenCustomClaimsRoundTripIsCanonicalAndDeterministic(t *testing.T) {
+	t.Parallel()
 	key := fixedTokenSigningKey()
 	now := time.Unix(1_800_000_000, 0).UTC()
 	base := IDTokenClaims{
@@ -105,6 +109,7 @@ func TestIDTokenCustomClaimsRoundTripIsCanonicalAndDeterministic(t *testing.T) {
 }
 
 func TestIDTokenRootCustomClaimsRejectReservedNames(t *testing.T) {
+	t.Parallel()
 	key := fixedTokenSigningKey()
 	now := time.Unix(1_800_000_000, 0).UTC()
 	base := IDTokenClaims{Issuer: "https://id.example.com", Subject: "user-1", Audience: []string{"client-1"}, IssuedAt: now, ExpiresAt: now.Add(time.Hour)}
@@ -127,6 +132,7 @@ func TestIDTokenRootCustomClaimsRejectReservedNames(t *testing.T) {
 }
 
 func TestIDTokenMixedCustomClaimsRoundTrip(t *testing.T) {
+	t.Parallel()
 	key := fixedTokenSigningKey()
 	now := time.Unix(1_800_000_000, 0).UTC()
 	base := IDTokenClaims{
@@ -163,6 +169,7 @@ func TestIDTokenMixedCustomClaimsRoundTrip(t *testing.T) {
 }
 
 func TestIDTokenRejectsInvalidCustomClaimPayloads(t *testing.T) {
+	t.Parallel()
 	key := fixedTokenSigningKey()
 	now := time.Unix(1_800_000_000, 0).UTC()
 	base := IDTokenClaims{Issuer: "https://id.example.com", Subject: "user-1", Audience: []string{"client-1"}, IssuedAt: now, ExpiresAt: now.Add(time.Hour)}
@@ -190,12 +197,14 @@ func TestIDTokenRejectsInvalidCustomClaimPayloads(t *testing.T) {
 }
 
 func TestAccessTokenHash(t *testing.T) {
+	t.Parallel()
 	if got, want := AccessTokenHash("access-token"), "Rb10lsqrobcpd02MQ_878ctvfDDbaRese_Z50nFw5Jw"; got != want {
 		t.Fatalf("AccessTokenHash() = %q, want %q", got, want)
 	}
 }
 
 func TestAccessTokenSignsCustomClaimsWithFixedClock(t *testing.T) {
+	t.Parallel()
 	key := fixedTokenSigningKey()
 	now := time.Unix(1_800_000_000, 0).UTC()
 	claims := AccessTokenClaims{
@@ -223,6 +232,7 @@ func TestAccessTokenSignsCustomClaimsWithFixedClock(t *testing.T) {
 }
 
 func TestAccessTokenRejectsRootScopeCollisionAndInvalidSignature(t *testing.T) {
+	t.Parallel()
 	key := fixedTokenSigningKey()
 	now := time.Unix(1_800_000_000, 0).UTC()
 	claims := AccessTokenClaims{Issuer: "https://id.example.com", Subject: "user-1", Audience: []string{"client-1"}, IssuedAt: now, NotBefore: now, ExpiresAt: now.Add(time.Hour), ID: "jti", AuthorizedParty: "client-1", Scope: []string{"openid"}, Type: "Bearer", CustomClaims: CustomClaims{Root: map[string]json.RawMessage{"scope": json.RawMessage(`"admin"`)}}}
@@ -243,6 +253,7 @@ func TestAccessTokenRejectsRootScopeCollisionAndInvalidSignature(t *testing.T) {
 }
 
 func TestVerifyIDTokenRejectsWrongClaimsAlgorithmAndExpiry(t *testing.T) {
+	t.Parallel()
 	key := testTokenSigningKey(t)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	claims := IDTokenClaims{Issuer: "https://id.example.com", Subject: "user-1", Audience: []string{"client-1"}, IssuedAt: now, ExpiresAt: now.Add(time.Hour)}
@@ -260,6 +271,7 @@ func TestVerifyIDTokenRejectsWrongClaimsAlgorithmAndExpiry(t *testing.T) {
 		{"expiry", claims.Issuer, "client-1", claims.ExpiresAt},
 	} {
 		t.Run(check.name, func(t *testing.T) {
+			t.Parallel()
 			if _, err := VerifyIDToken(compact, keys, check.issuer, check.audience, check.at); err == nil {
 				t.Fatal("invalid token was accepted")
 			}
@@ -275,6 +287,7 @@ func TestVerifyIDTokenRejectsWrongClaimsAlgorithmAndExpiry(t *testing.T) {
 }
 
 func TestVerifyLogoutIDTokenLeeway(t *testing.T) {
+	t.Parallel()
 	key := testTokenSigningKey(t)
 	keys := jose.JSONWebKeySet{Keys: []jose.JSONWebKey{key.PublicJWK}}
 	now := time.Unix(1_800_000_000, 0).UTC()
@@ -301,6 +314,7 @@ func TestVerifyLogoutIDTokenLeeway(t *testing.T) {
 		{"issued-at beyond leeway", signedTestIDToken(t, key, issuer, audience, now.Add(logoutIDTokenClockLeeway+time.Second), now, now.Add(time.Hour)), now, false},
 	} {
 		t.Run(check.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := VerifyLogoutIDToken(check.token, keys, issuer, audience, check.at)
 			if (err == nil) != check.ok {
 				t.Fatalf("VerifyLogoutIDToken() error = %v, want accepted=%v", err, check.ok)
@@ -310,6 +324,7 @@ func TestVerifyLogoutIDTokenLeeway(t *testing.T) {
 }
 
 func TestVerifyLogoutIDTokenRetainsNonTimeValidation(t *testing.T) {
+	t.Parallel()
 	key := testTokenSigningKey(t)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	claims := IDTokenClaims{Issuer: "https://id.example.com", Subject: "user-1", Audience: []string{"client-1"}, IssuedAt: now, ExpiresAt: now.Add(time.Hour)}
@@ -327,6 +342,7 @@ func TestVerifyLogoutIDTokenRetainsNonTimeValidation(t *testing.T) {
 		{"wrong signature", mustSignedIDToken(t, testTokenSigningKey(t), idTokenPayload{Claims: jwt.Claims{Issuer: claims.Issuer, Subject: claims.Subject, Audience: jwt.Audience(claims.Audience), IssuedAt: jwt.NewNumericDate(claims.IssuedAt), Expiry: jwt.NewNumericDate(claims.ExpiresAt)}}), claims.Issuer, "client-1"},
 	} {
 		t.Run(check.name, func(t *testing.T) {
+			t.Parallel()
 			if _, err := VerifyLogoutIDToken(check.token, keys, check.issuer, check.audience, now); err == nil {
 				t.Fatal("invalid logout hint was accepted")
 			}
@@ -335,6 +351,7 @@ func TestVerifyLogoutIDTokenRetainsNonTimeValidation(t *testing.T) {
 }
 
 func TestIDTokenOmitsOptionalClaims(t *testing.T) {
+	t.Parallel()
 	key := testTokenSigningKey(t)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	compact, err := SignIDToken(key, IDTokenClaims{Issuer: "https://id.example.com", Subject: "user-1", Audience: []string{"client-1"}, IssuedAt: now, ExpiresAt: now.Add(time.Hour)})
@@ -373,6 +390,7 @@ func TestIDTokenOmitsOptionalClaims(t *testing.T) {
 }
 
 func TestIDTokenRejectsMalformedOptionalClaims(t *testing.T) {
+	t.Parallel()
 	key := testTokenSigningKey(t)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	valid := IDTokenClaims{Issuer: "https://id.example.com", Subject: "user-1", Audience: []string{"client-1"}, IssuedAt: now, ExpiresAt: now.Add(time.Hour)}
@@ -410,6 +428,7 @@ func TestIDTokenRejectsMalformedOptionalClaims(t *testing.T) {
 }
 
 func TestIDTokenRejectsMoreThan64RoleOrGroupClaims(t *testing.T) {
+	t.Parallel()
 	key := testTokenSigningKey(t)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	valid := IDTokenClaims{Issuer: "https://id.example.com", Subject: "user-1", Audience: []string{"client-1"}, IssuedAt: now, ExpiresAt: now.Add(time.Hour), Roles: make([]string, 65)}
@@ -430,6 +449,7 @@ func TestIDTokenRejectsMoreThan64RoleOrGroupClaims(t *testing.T) {
 }
 
 func TestGroupClaimGrammar(t *testing.T) {
+	t.Parallel()
 	for _, check := range []struct {
 		value string
 		valid bool
@@ -446,6 +466,7 @@ func TestGroupClaimGrammar(t *testing.T) {
 		{"팀", false},
 	} {
 		t.Run(check.value, func(t *testing.T) {
+			t.Parallel()
 			if got := validCanonicalClaimValues([]string{check.value}, groupClaimPattern); got != check.valid {
 				t.Fatalf("validCanonicalClaimValues(%q) = %v, want %v", check.value, got, check.valid)
 			}
@@ -454,6 +475,7 @@ func TestGroupClaimGrammar(t *testing.T) {
 }
 
 func TestVerifyIDTokenRejectsNotYetValidToken(t *testing.T) {
+	t.Parallel()
 	key := testTokenSigningKey(t)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	compact, err := SignIDToken(key, IDTokenClaims{Issuer: "https://id.example.com", Subject: "user-1", Audience: []string{"client-1"}, IssuedAt: now, NotBefore: now.Add(time.Minute), ExpiresAt: now.Add(time.Hour)})
@@ -466,6 +488,7 @@ func TestVerifyIDTokenRejectsNotYetValidToken(t *testing.T) {
 }
 
 func TestIDTokenRejectsLifetimeBeyondRotationRetentionBound(t *testing.T) {
+	t.Parallel()
 	key := testTokenSigningKey(t)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	_, err := SignIDToken(key, IDTokenClaims{Issuer: "https://id.example.com", Subject: "user-1", Audience: []string{"client-1"}, IssuedAt: now, ExpiresAt: now.Add(MaxIDTokenLifetime + time.Second)})
@@ -553,6 +576,7 @@ func mustSignedIDToken(t *testing.T, key SigningKey, payload idTokenPayload) str
 // that name must not be signable and an ordinary locale must stay a profile
 // claim instead of being re-extracted as custom during verification.
 func TestIDTokenLocaleIsReservedAndNotReExtractedAsCustomClaim(t *testing.T) {
+	t.Parallel()
 	key := fixedTokenSigningKey()
 	now := time.Unix(1_800_000_000, 0).UTC()
 	locale := "de-DE"
@@ -560,6 +584,7 @@ func TestIDTokenLocaleIsReservedAndNotReExtractedAsCustomClaim(t *testing.T) {
 
 	for name, value := range map[string]string{"string": `"en"`, "non-string": `7`} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			claims := base
 			claims.CustomClaims = CustomClaims{Root: map[string]json.RawMessage{"locale": json.RawMessage(value)}}
 			if _, err := SignIDToken(key, claims); err == nil {

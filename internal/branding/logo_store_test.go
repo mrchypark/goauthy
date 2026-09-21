@@ -13,6 +13,7 @@ import (
 )
 
 func TestClientLogoStoreReplacementAndFallback(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientLogoStore(db)
 	if err != nil {
@@ -72,6 +73,7 @@ func TestClientLogoStoreReplacementAndFallback(t *testing.T) {
 }
 
 func TestClientLogoStoreMalformedBatchPreservesOld(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientLogoStore(db)
 	if err != nil {
@@ -98,6 +100,7 @@ func TestClientLogoStoreMalformedBatchPreservesOld(t *testing.T) {
 }
 
 func TestClientLogoStoreMixedSVGAndRasterPreservesOld(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientLogoStore(db)
 	if err != nil {
@@ -124,6 +127,7 @@ func TestClientLogoStoreMixedSVGAndRasterPreservesOld(t *testing.T) {
 }
 
 func TestClientLogoStoreRevokedKeyDeniesReplacement(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientLogoStore(db)
 	if err != nil {
@@ -145,6 +149,7 @@ func TestClientLogoStoreRevokedKeyDeniesReplacement(t *testing.T) {
 }
 
 func TestClientLogoStoreDeletedClientDeniesMutation(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientLogoStore(db)
 	if err != nil {

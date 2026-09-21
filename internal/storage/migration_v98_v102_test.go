@@ -62,8 +62,9 @@ func assertColumnAbsent(t *testing.T, db *rhiza.DB, table, col string) {
 }
 
 func TestMigrationV98V102SchemaVerification(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v98-102-schema", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v98-102-schema", DataDir: testDatabaseDir(t, "v98-102-schema")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +115,7 @@ func TestMigrationV98V102SchemaVerification(t *testing.T) {
 // via migrateThroughV97, seeds v97 data, then invokes the public Migrate
 // to perform the real v98-v102 upgrade.
 func TestMigrationV98V102UpgradeFromV97PreservesData(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	dataDir := t.TempDir()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v98-102-upgrade", DataDir: dataDir})
@@ -359,8 +361,9 @@ func TestMigrationV98V102UpgradeFromV97PreservesData(t *testing.T) {
 	}
 }
 func TestMigrationV98V102ReplayIdempotent(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v98-102-replay", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v98-102-replay", DataDir: testDatabaseDir(t, "v98-102-replay")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,8 +382,9 @@ func TestMigrationV98V102ReplayIdempotent(t *testing.T) {
 }
 
 func TestMigrationV98V102Constraints(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v98-102-constraints", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v98-102-constraints", DataDir: testDatabaseDir(t, "v98-102-constraints")})
 	if err != nil {
 		t.Fatal(err)
 	}

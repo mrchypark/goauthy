@@ -9,6 +9,7 @@ import (
 )
 
 func TestOpenObjectStoreRejectsInvalidConfiguration(t *testing.T) {
+	t.Parallel()
 	secret := "do-not-disclose"
 	for _, test := range []struct {
 		name   string

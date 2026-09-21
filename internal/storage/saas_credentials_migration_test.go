@@ -7,7 +7,8 @@ import (
 )
 
 func TestSchemaV67CreatesSaaSCredentialsTableAndReplays(t *testing.T) {
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "saas-credentials-migration", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "saas-credentials-migration", DataDir: testDatabaseDir(t, "saas-credentials-migration")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +33,8 @@ func TestSchemaV67CreatesSaaSCredentialsTableAndReplays(t *testing.T) {
 }
 
 func TestSchemaV67SaaSCredentialsConstraints(t *testing.T) {
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "saas-credentials-constraints", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "saas-credentials-constraints", DataDir: testDatabaseDir(t, "saas-credentials-constraints")})
 	if err != nil {
 		t.Fatal(err)
 	}

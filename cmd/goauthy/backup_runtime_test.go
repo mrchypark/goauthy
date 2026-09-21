@@ -99,6 +99,7 @@ func TestScheduledBackupRuntimeStartupVerifiesArtifactWithinOperationBudget(t *t
 }
 
 func TestScheduledBackupRuntimeS3(t *testing.T) {
+	t.Parallel()
 	endpoint := os.Getenv("GOAUTHY_RECOVERY_S3_ENDPOINT")
 	if endpoint == "" {
 		t.Skip("requires disposable S3 fixture")

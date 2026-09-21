@@ -8,8 +8,9 @@ import (
 )
 
 func TestSchemaV73AuthorizationVerifierMigrationReplay(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "schema-v73-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "schema-v73-test", DataDir: testDatabaseDir(t, "schema-v73-test")})
 	if err != nil {
 		t.Fatal(err)
 	}

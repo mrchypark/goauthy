@@ -9,6 +9,7 @@ import (
 )
 
 func TestGlobalCSSHandlerGetAndHead(t *testing.T) {
+	t.Parallel()
 	handler := GlobalCSSHandler()
 	get := httptest.NewRecorder()
 	handler.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/auth/v1/theme/global.css", nil))
@@ -39,6 +40,7 @@ func TestGlobalCSSHandlerGetAndHead(t *testing.T) {
 }
 
 func TestGlobalCSSHandlerMethodBoundary(t *testing.T) {
+	t.Parallel()
 	response := httptest.NewRecorder()
 	GlobalCSSHandler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/auth/v1/theme/global.css", nil))
 	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != "GET, HEAD" {

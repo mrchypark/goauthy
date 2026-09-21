@@ -14,6 +14,7 @@ import (
 )
 
 func TestMasterKeyRewrapWorkerRunsKVAfterOtherFamilies(t *testing.T) {
+	t.Parallel()
 	var order []string
 	w := &masterKeyRewrapWorker{
 		rewrapSigning: func(context.Context, string) (oidc.SigningKeyRewrapBatchResult, error) {
@@ -53,6 +54,7 @@ func TestMasterKeyRewrapWorkerRunsKVAfterOtherFamilies(t *testing.T) {
 }
 
 func TestMasterKeyLifecycleCountsOldKVReferencesAndDetectsTamper(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	oldKeyring := retirementCmdKeyring(t, "key-a")

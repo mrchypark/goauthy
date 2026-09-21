@@ -11,6 +11,7 @@ import (
 )
 
 func TestUserExpirySettingsFromEnv(t *testing.T) {
+	t.Parallel()
 	getenv := func(values map[string]string) func(string) string {
 		return func(name string) string { return values[name] }
 	}
@@ -34,8 +35,9 @@ func TestUserExpirySettingsFromEnv(t *testing.T) {
 }
 
 func TestRunUserExpiryImmediatelyExpiresAndDeletes(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "expiry-runner-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "expiry-runner-test", DataDir: migratedDataDir(t, "expiry-runner-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,6 +78,7 @@ func TestRunUserExpiryImmediatelyExpiresAndDeletes(t *testing.T) {
 }
 
 func TestRunUserExpiryRejectsInvalidConfigurationAndCanceledContext(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := runUserExpiry(ctx, nil, userExpirySettings{interval: time.Minute}, time.Now, nil); err == nil {
