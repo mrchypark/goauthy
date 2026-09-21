@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-for tool in kustomize yq rg awk; do
+for tool in kustomize yq awk; do
 	command -v "$tool" >/dev/null 2>&1 || {
 		echo "required tool not found: $tool" >&2
 		exit 1
@@ -40,7 +40,7 @@ for key in master-key-ternal-1 oauth-hmac bootstrap-client bootstrap-user-passwo
 	test "$(yq -r "$statefulset | .spec.template.spec.volumes[] | select(.name == \"secrets\") | .secret.items[] | select(.key == \"$key\") | .key" "$render")" = "$key"
 done
 
-if rg -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: minio|image: .*:latest|<[^>]+>|CHANGEME|TODO' "$render"; then
+if grep -E -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: minio|image: .*:latest|<[^>]+>|CHANGEME|TODO' "$render"; then
 	echo "Ternal no-PVC render contains a forbidden resource or placeholder" >&2
 	exit 1
 fi
@@ -61,11 +61,11 @@ done
 for key in s3-access-key s3-secret-key; do
 	test "$(yq -r "$standalone_statefulset | .spec.template.spec.containers[0].env[] | select(.valueFrom.secretKeyRef.key == \"$key\") | .valueFrom.secretKeyRef.name" "$standalone_render")" = ternal-goauthy-secrets
 done
-if rg -n 'GOAUTHY_RHIZA_(PEER|MEMBERS|ADMIN)|name: peer|targetPort: peer|containerPort: 8444|port: 8444' "$standalone_render"; then
+if grep -E -n 'GOAUTHY_RHIZA_(PEER|MEMBERS|ADMIN)|name: peer|targetPort: peer|containerPort: 8444|port: 8444' "$standalone_render"; then
 	echo "Ternal standalone render retains a cluster-only peer setting" >&2
 	exit 1
 fi
-if rg -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: minio|image: .*:latest|<[^>]+>|CHANGEME|TODO' "$standalone_render"; then
+if grep -E -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: minio|image: .*:latest|<[^>]+>|CHANGEME|TODO' "$standalone_render"; then
 	echo "Ternal standalone render contains a forbidden resource or placeholder" >&2
 	exit 1
 fi
@@ -83,7 +83,7 @@ if yq -e "$gcs_statefulset | .spec.template.spec.containers[0].env[] | select(.n
 	echo "Ternal GCS standalone render retains S3 configuration" >&2
 	exit 1
 fi
-if rg -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: minio|s3-access-key|s3-secret-key|service-account\.json|GOOGLE_APPLICATION_CREDENTIALS' "$gcs_standalone_render"; then
+if grep -E -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: minio|s3-access-key|s3-secret-key|service-account\.json|GOOGLE_APPLICATION_CREDENTIALS' "$gcs_standalone_render"; then
 	echo "Ternal GCS standalone render contains a forbidden storage fallback" >&2
 	exit 1
 fi
@@ -102,11 +102,11 @@ if yq -e "$gcs_ha_statefulset | .spec.template.spec.containers[0].env[] | select
 	echo "Ternal GCS HA render retains S3 configuration" >&2
 	exit 1
 fi
-if rg -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: minio|s3-access-key|s3-secret-key|service-account\.json|GOOGLE_APPLICATION_CREDENTIALS' "$gcs_ha_render"; then
+if grep -E -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: minio|s3-access-key|s3-secret-key|service-account\.json|GOOGLE_APPLICATION_CREDENTIALS' "$gcs_ha_render"; then
 	echo "Ternal GCS HA render contains a forbidden storage fallback" >&2
 	exit 1
 fi
-if rg -n 'GOAUTHY_RHIZA_(PEER|MEMBERS|ADMIN)|name: peer|targetPort: peer|containerPort: 8444|port: 8444' "$gcs_ha_render" >/dev/null; then
+if grep -E -n 'GOAUTHY_RHIZA_(PEER|MEMBERS|ADMIN)|name: peer|targetPort: peer|containerPort: 8444|port: 8444' "$gcs_ha_render" >/dev/null; then
 	: # peer retained expected in HA
 else
 	echo "Ternal GCS HA render lost peer configuration" >&2

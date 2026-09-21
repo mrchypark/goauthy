@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-for tool in kustomize yq rg awk; do
+for tool in kustomize yq awk; do
 	command -v "$tool" >/dev/null 2>&1 || {
 		echo "required tool not found: $tool" >&2
 		exit 1
@@ -28,7 +28,7 @@ test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | 
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.metadata.labels."app.kubernetes.io/component"' "$render")" = object-store-client
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .metadata.name' "$render" | awk 'END { print NR }')" = 1
 test "$(yq -r 'select(.kind == "PodDisruptionBudget" and .metadata.name == "goauthy") | .spec.minAvailable' "$render")" = 1
-if rg -n 'GOAUTHY_RHIZA_(PEER_ADDR|MEMBERS|ADMIN_TOKEN)|name: peer|targetPort: peer' "$render"; then
+if grep -E -n 'GOAUTHY_RHIZA_(PEER_ADDR|MEMBERS|ADMIN_TOKEN)|name: peer|targetPort: peer' "$render"; then
 	echo "standalone render contains forbidden peer settings" >&2
 	exit 1
 fi

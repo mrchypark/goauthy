@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-for tool in kustomize yq rg awk; do
+for tool in kustomize yq awk; do
 	command -v "$tool" >/dev/null 2>&1 || {
 		echo "required tool not found: $tool" >&2
 		exit 1
@@ -169,7 +169,7 @@ if ! yq -e 'select(.kind == "NetworkPolicy" and .metadata.name == "goauthy-qual-
 fi
 
 # --- Forbidden content ---
-if rg -n 'volumeClaimTemplates|kind: Job|kind: PersistentVolumeClaim|name: minio|CHANGEME|TODO' "$render"; then
+if grep -E -n 'volumeClaimTemplates|kind: Job|kind: PersistentVolumeClaim|name: minio|CHANGEME|TODO' "$render"; then
 	echo "qualification render contains a forbidden resource or placeholder" >&2; exit 1
 fi
 
