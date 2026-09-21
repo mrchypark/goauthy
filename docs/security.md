@@ -13,8 +13,9 @@
 7. [IP 블랙리스트](#ip-블랙리스트)
 8. [Geo-blocking](#geo-blocking)
 9. [DPoP (Demonstrating Proof-of-Possession)](#dpop)
-10. [감사 로깅](#감사-로깅)
-11. [설정 가이드](#설정-가이드)
+10. [Audience contract](#audience-contract)
+11. [감사 로깅](#감사-로깅)
+12. [설정 가이드](#설정-가이드)
 
 ---
 
@@ -319,6 +320,25 @@ GOAUTHY_GEOBLOCK_COUNTRY_HEADER=X-Country
 - 서버 발행 nonce 사용
 - replay 방지
 - 다중 Pod 환경에서 안전
+
+---
+
+## Audience contract
+
+`internal/oauth/forward_auth.go`의 `forward_auth` 핸들러는 리버스 프록시를 위한 인증 게이트이며,
+보호 리소스별 audience 격리를 구현하지 않습니다. 이 동작은 누락이 아니라 결정된 계약입니다.
+
+1. **게이트 조건**: `openid` 스코프를 가진 살아 있는 사용자 액세스 토큰, 살아 있는 클라이언트,
+   비어 있지 않은 subject, 통과하는 클라이언트 그룹 정책을 모두 만족할 때만 요청을 허용합니다.
+2. **리소스별 audience 격리 없음**: 한 리소스를 위해 발급된 사용자 토큰은 프록시가 보호하는
+   다른 리소스에도 그대로 허용됩니다. 보호 리소스 사이의 격리는 프록시의 책임이며, 프록시가 어떤
+   클라이언트와 그룹 정책을 요구하는지로 표현합니다. 따라서 액세스 토큰의 `aud`와 보호 리소스를
+   비교하는 검사는 의도적으로 없습니다.
+3. **거부 대상**: DPoP 바인딩 토큰, 사용자 토큰이 아닌 토큰(예: client credentials), 알 수 없는
+   클라이언트는 거부합니다.
+
+이 계약은 `internal/oauth/forward_auth_audience_contract_test.go`가 고정하고, 엔드투엔드 경로는
+`scripts/e2e-forward-auth-standalone.sh`가 검증합니다.
 
 ---
 

@@ -145,3 +145,29 @@ GOAUTHY_ARGON2_WAIT_TIMEOUT=100ms
 2. **예측적 로딩**: 자주 접근되는 데이터 사전 로딩
 3. **캐시 워밍**: 서버 시작 시 핫 데이터 미리 로딩
 4. **적응형 TTL**: 접근 빈도에 따른 동적 TTL 조정
+
+## Measured baselines (issue #65)
+
+Apple M3, 8 CPU, macOS, go1.27.0 darwin/arm64; representative run of
+`go test -bench . -benchtime 3x -run '^$' ./internal/ipblacklist/ ./internal/oauth/`.
+Measurements only; no behavior changed.
+
+| item | benchmark | 1000 rows | 10000 rows |
+|------|-----------|-----------|------------|
+| GA-PERF-002 Check hit /32 | `BenchmarkCheckAtCeiling` `hit32` | 0.86 ms | 9.1 ms |
+| GA-PERF-002 Check miss | `BenchmarkCheckAtCeiling` `miss` | 0.84 ms | 8.8 ms |
+| GA-PERF-002 Check longest prefix | `BenchmarkCheckAtCeiling` `longestPrefix` | 1.14 ms | 9.1 ms |
+| GA-PERF-001 issuance + cleanup | `BenchmarkCreateAccessTokenSessionWithCleanup` | 9.8 ms | 16.6 ms |
+
+GA-PERF-002 (`internal/ipblacklist/bench_test.go`): one linearizable SELECT of
+every row, then longest-prefix matching in Go; cost is linear in table size,
+bounded by `DefaultMaxEntries = 10000` which `Add` enforces with a `COUNT(*)`
+precondition. `TestAddCeilingDeterministic` (`internal/ipblacklist/store_test.go`)
+already proves that ceiling deterministically, so it is not duplicated.
+
+GA-PERF-001 (`internal/oauth/bench_test.go`): the storage-layer cycle
+`Store.CreateAccessTokenSession` on a migrated database, where both cleanup
+DELETEs batch with the token INSERT in one replicated Execute (the full fosite
+HTTP token-endpoint path is not driven). Cleanup runs on every issuance, and the
+orphan-row DELETE anti-joins `oauth_token_requests` against
+`oauth_access_tokens`, so its cost tracks the live token count.

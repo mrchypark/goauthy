@@ -43,6 +43,23 @@ HTTP 폼 요청을 보내는 E2E다. 이번 결과는 Chromium 렌더링/클릭 
 인증하여 `active`, `sub`, `goauthy.read`를 검사한다. GoAuthy 자체가 사용자
 비즈니스 API를 제공한다는 의미는 아니다.
 
+## 결정 순서와 펜싱
+
+승인·거절의 유효 범위는 기기 흐름을 시작한 브라우저 세션이 아니라 grant
+상태로 정한다. 이 순서는 확정된 계약이며 고정 테스트로 검증한다.
+
+- 결정은 `state='pending'`과 grant 만료로만 펜싱하고, 흐름을 시작한
+  세션·개시자에게는 묶지 않는다. 다른 기기에서의 승인이 이 흐름의 목적이므로
+  사용자 코드를 가진 인증된 subject는 누구나 결정할 수 있다.
+- 요청 제한은 인증 후에 인증된 승인자 subject(`verify/<subject>`)에 부과한다.
+  인증되지 않은 호출자가 다른 subject의 예산을 소모할 수 없다.
+- 거절은 subject를 기록하지 않고, 승인은 승인자 subject를 grant subject로
+  기록한다.
+
+순서와 제한 키는 `internal/device/http.go`의 `verifyDevice`·`allow`가,
+상태·만료 펜싱과 subject 기록은 `internal/device/store.go`의 `decide`가
+강제한다. 고정 테스트는 `internal/device/http_decision_contract_test.go`다.
+
 ## 재실행
 
 ### 실제 Ternal CLI 소비자 (opt-in)
