@@ -15,6 +15,7 @@ func validTestConfig(src, ver string) Config {
 }
 
 func TestIsPinned24ManagedID(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		id   string
 		want bool
@@ -36,6 +37,7 @@ func TestIsPinned24ManagedID(t *testing.T) {
 }
 
 func TestValidConfigProviderID_LegacyLowercase(t *testing.T) {
+	t.Parallel()
 	cfg := validTestConfig("", "")
 	if !validConfigProviderID("google", cfg) {
 		t.Error("lowercase id should be accepted for legacy")
@@ -49,6 +51,7 @@ func TestValidConfigProviderID_LegacyLowercase(t *testing.T) {
 }
 
 func TestValidConfigProviderID_ManagedMixedCase(t *testing.T) {
+	t.Parallel()
 	cfg := validTestConfig("registry", "v1.0")
 	id := "AbCdEfGhIjKlMnOpQrStUvWx"
 	if !validConfigProviderID(id, cfg) {
@@ -57,6 +60,7 @@ func TestValidConfigProviderID_ManagedMixedCase(t *testing.T) {
 }
 
 func TestValidConfigProviderID_CaseDistinct(t *testing.T) {
+	t.Parallel()
 	cfg := validTestConfig("registry", "v1.0")
 	lower := "abcdefghijklmnopqrstuvwx"
 	upper := "ABCDEFGHIJKLMNOPQRSTUVWX"
@@ -72,6 +76,7 @@ func TestValidConfigProviderID_CaseDistinct(t *testing.T) {
 }
 
 func TestValidConfigProviderID_ManagedRejectsShortLong(t *testing.T) {
+	t.Parallel()
 	cfg := validTestConfig("registry", "v1.0")
 	if validConfigProviderID("short", cfg) {
 		t.Error("short id rejected for registry")
@@ -82,6 +87,7 @@ func TestValidConfigProviderID_ManagedRejectsShortLong(t *testing.T) {
 }
 
 func TestValidConfigProviderID_ManagedRejectsNonAlphanumeric(t *testing.T) {
+	t.Parallel()
 	cfg := validTestConfig("registry", "v1.0")
 	for _, bad := range []string{
 		"abcdefghijklm-nopqrstuvwx", // hyphen
@@ -96,6 +102,7 @@ func TestValidConfigProviderID_ManagedRejectsNonAlphanumeric(t *testing.T) {
 }
 
 func TestValidConfigProviderID_UnknownSource(t *testing.T) {
+	t.Parallel()
 	cfg := validTestConfig("external", "v1.0")
 	if validConfigProviderID("abcdefghijklmnopqrstuvwx", cfg) {
 		t.Error("unknown source should be rejected")
@@ -103,6 +110,7 @@ func TestValidConfigProviderID_UnknownSource(t *testing.T) {
 }
 
 func TestValidConfigProviderID_RegistryRequiresValidBinding(t *testing.T) {
+	t.Parallel()
 	id := "abcdefghijklmnopqrstuvwx"
 	for _, tt := range []struct {
 		src, ver string
@@ -120,6 +128,7 @@ func TestValidConfigProviderID_RegistryRequiresValidBinding(t *testing.T) {
 }
 
 func TestValidConfigProviderID_LegacyNonEmpty(t *testing.T) {
+	t.Parallel()
 	cfg := validTestConfig("", "")
 	if validConfigProviderID("", cfg) {
 		t.Error("empty id rejected for legacy")

@@ -167,6 +167,7 @@ func makeCallbackRequest(providerID, state, code string, stateCookie, browserCoo
 }
 
 func TestCallbacksUseTimeAfterTokenExchange(t *testing.T) {
+	t.Parallel()
 	setupClock := func(h *Handler, clock *time.Time) {
 		h.now = func() time.Time { return *clock }
 		h.exchanger = &advancingTokenExchanger{now: clock, advance: 2 * time.Second}
@@ -257,6 +258,7 @@ func getClearCookies(t *testing.T, rec *httptest.ResponseRecorder) (stateClear, 
 // TestTwoUserStartBarrier proves no cross-talk between two simultaneous
 // users through start + callback flows with a genuine start barrier.
 func TestTwoUserStartBarrier(t *testing.T) {
+	t.Parallel()
 	const clientID = "test-client"
 
 	entropy1 := make([]byte, 256)
@@ -412,6 +414,7 @@ func TestTwoUserStartBarrier(t *testing.T) {
 // rejects redirect_uri values not in the allowlist before saving any
 // transaction (fix 1).
 func TestStartRejectsRedirectURIOutsideAllowlist(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	claims := &IDTokenClaims{
 		Issuer:    "https://issuer.example.com",
@@ -436,6 +439,7 @@ func TestStartRejectsRedirectURIOutsideAllowlist(t *testing.T) {
 // stores the raw secret while the transaction stores only its SHA-256
 // digest (fix 2).
 func TestBrowserCookieContainsRawNotDigest(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	for i := range entropy {
 		entropy[i] = byte(i)
@@ -478,6 +482,7 @@ func TestBrowserCookieContainsRawNotDigest(t *testing.T) {
 // query parameter differing from the cookie is rejected. The source
 // code review confirms this goes through crypto/subtle.ConstantTimeCompare.
 func TestTamperedSameLengthStateRejected(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	for i := range entropy {
 		entropy[i] = byte(i)
@@ -519,6 +524,7 @@ func TestTamperedSameLengthStateRejected(t *testing.T) {
 // TestCollapsedCallbackErrors verifies that all callback validation
 // failures produce the same status/body/content-type (fix 4).
 func TestCollapsedCallbackErrors(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	for i := range entropy {
 		entropy[i] = byte(i)
@@ -575,6 +581,7 @@ func TestCollapsedCallbackErrors(t *testing.T) {
 // verifies that verifier failures and exchange failures also produce
 // the collapsed response (fix 4).
 func TestCollapsedCallbackErrorsIncludesVerifierAndExchangeFailures(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	for i := range entropy {
 		entropy[i] = byte(i)
@@ -656,6 +663,7 @@ func TestCollapsedCallbackErrorsIncludesVerifierAndExchangeFailures(t *testing.T
 // TestCookiesClearedAfterCallback verifies that both cookies are cleared
 // after every callback attempt (fix 5).
 func TestCookiesClearedAfterCallback(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	for i := range entropy {
 		entropy[i] = byte(i)
@@ -712,6 +720,7 @@ func TestCookiesClearedAfterCallback(t *testing.T) {
 // TestReplayedStateRejected verifies that replaying a consumed
 // transaction is rejected with the collapsed error response.
 func TestReplayedStateRejected(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	for i := range entropy {
 		entropy[i] = byte(i)
@@ -753,6 +762,7 @@ func TestReplayedStateRejected(t *testing.T) {
 // TestConstructorClonesConfigs verifies that mutating the original
 // configs map after construction does not affect the handler (fix 7).
 func TestConstructorClonesConfigs(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	ex := &fakeTokenExchanger{idToken: "t"}
 	ver := &fakeTokenVerifierHTTP{claims: &IDTokenClaims{}}
@@ -795,6 +805,7 @@ func TestConstructorClonesConfigs(t *testing.T) {
 
 // TestStartMethodNotAllowed verifies 405 on non-GET start.
 func TestStartMethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	claims := &IDTokenClaims{
 		Issuer:    "https://issuer.example.com",
@@ -817,6 +828,7 @@ func TestStartMethodNotAllowed(t *testing.T) {
 
 // TestCallbackMethodNotAllowed verifies 405 on non-GET callback.
 func TestCallbackMethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	claims := &IDTokenClaims{
 		Issuer:    "https://issuer.example.com",
@@ -836,6 +848,7 @@ func TestCallbackMethodNotAllowed(t *testing.T) {
 
 // TestInvalidProviderRejected verifies 404 for unknown provider.
 func TestInvalidProviderRejected(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	claims := &IDTokenClaims{
 		Issuer:    "https://issuer.example.com",
@@ -855,6 +868,7 @@ func TestInvalidProviderRejected(t *testing.T) {
 
 // TestMissingStartParams verifies 400 for missing redirect_uri.
 func TestMissingStartParams(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	claims := &IDTokenClaims{
 		Issuer:    "https://issuer.example.com",
@@ -874,6 +888,7 @@ func TestMissingStartParams(t *testing.T) {
 
 // TestMissingCallbackParams verifies 400 for missing state or code.
 func TestMissingCallbackParams(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	claims := &IDTokenClaims{
 		Issuer:    "https://issuer.example.com",
@@ -907,6 +922,7 @@ func TestMissingCallbackParams(t *testing.T) {
 
 // TestLargeQueryRejected verifies 400 for oversized query string.
 func TestLargeQueryRejected(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	claims := &IDTokenClaims{
 		Issuer:    "https://issuer.example.com",
@@ -931,6 +947,7 @@ func TestLargeQueryRejected(t *testing.T) {
 
 // TestNewHandlerValidation verifies constructor rejects nil/empty inputs.
 func TestNewHandlerValidation(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	ex := &fakeTokenExchanger{idToken: "t"}
 	ver := &fakeTokenVerifierHTTP{claims: &IDTokenClaims{}}
@@ -966,6 +983,7 @@ func TestNewHandlerValidation(t *testing.T) {
 
 // TestExtractProviderID verifies URL path parsing.
 func TestExtractProviderID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		path, want string
 	}{
@@ -985,6 +1003,7 @@ func TestExtractProviderID(t *testing.T) {
 
 // TestStartHandlerSetsSecureCookies verifies cookie security attributes.
 func TestStartHandlerSetsSecureCookies(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	for i := range entropy {
 		entropy[i] = byte(i)
@@ -1020,6 +1039,7 @@ func TestStartHandlerSetsSecureCookies(t *testing.T) {
 
 // TestCallbackResponseContentType verifies successful callback returns JSON.
 func TestCallbackResponseContentType(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	for i := range entropy {
 		entropy[i] = byte(i)
@@ -1051,6 +1071,7 @@ func TestCallbackResponseContentType(t *testing.T) {
 // TestStateMismatchBetweenCookieAndQuery verifies that a state query
 // parameter differing from the cookie is rejected.
 func TestStateMismatchBetweenCookieAndQuery(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	for i := range entropy {
 		entropy[i] = byte(i)
@@ -1078,6 +1099,7 @@ func TestStateMismatchBetweenCookieAndQuery(t *testing.T) {
 
 // TestStartHandlerRedirectLocation verifies the redirect URL is correct.
 func TestStartHandlerRedirectLocation(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	for i := range entropy {
 		entropy[i] = byte(i)
@@ -1204,6 +1226,7 @@ func localStart(t *testing.T, h *Handler) (*http.Cookie, string) {
 }
 
 func TestLocalLoginHooksRequired(t *testing.T) {
+	t.Parallel()
 	_, err := NewLocalLoginHandler(map[string]Config{"g": {}}, newTestStore(), &fakeTokenExchanger{}, &fakeTokenVerifierHTTP{}, nil, nil, LocalLoginHooks{})
 	if !errors.Is(err, errHandlerLocalHooks) {
 		t.Fatalf("err=%v", err)
@@ -1211,6 +1234,7 @@ func TestLocalLoginHooksRequired(t *testing.T) {
 }
 
 func TestGitHubCallbacksPassImmutableSubjectWithoutIDTokenVerification(t *testing.T) {
+	t.Parallel()
 	github := Config{
 		Kind: ProviderKindGitHub, Issuer: "https://github.com",
 		AuthorizationEndpoint: "https://github.com/login/oauth/authorize",
@@ -1277,6 +1301,7 @@ func TestGitHubCallbacksPassImmutableSubjectWithoutIDTokenVerification(t *testin
 }
 
 func TestLocalStartPrepareFailureDoesNotPersist(t *testing.T) {
+	t.Parallel()
 	hooks := &localHookRecorder{prepareErr: errors.New("no")}
 	h, store := testLocalHandler(t, hooks.hooks())
 	rec := httptest.NewRecorder()
@@ -1287,6 +1312,7 @@ func TestLocalStartPrepareFailureDoesNotPersist(t *testing.T) {
 }
 
 func TestLocalStartRejectsMismatchedRawSessionToken(t *testing.T) {
+	t.Parallel()
 	hooks := &localHookRecorder{session: testCanonicalTestToken, prepareToken: "other-token", digest: testCanonicalTestDigest, interaction: DigestSHA256("interaction")}
 	h, store := testLocalHandler(t, hooks.hooks())
 	rec := httptest.NewRecorder()
@@ -1297,6 +1323,7 @@ func TestLocalStartRejectsMismatchedRawSessionToken(t *testing.T) {
 }
 
 func TestLocalFlowBindsAndCompletesWithoutBrowserCookie(t *testing.T) {
+	t.Parallel()
 	hooks := &localHookRecorder{session: testCanonicalTestToken, digest: testCanonicalTestDigest, interaction: DigestSHA256("interaction")}
 	h, store := testLocalHandler(t, hooks.hooks())
 	stateCookie, state := localStart(t, h)
@@ -1318,6 +1345,7 @@ func TestLocalFlowBindsAndCompletesWithoutBrowserCookie(t *testing.T) {
 }
 
 func TestLocalCallbackRejectsCurrentResolveAndSessionFailures(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name             string
 		current, resolve error
@@ -1351,6 +1379,7 @@ func TestLocalCallbackRejectsCurrentResolveAndSessionFailures(t *testing.T) {
 }
 
 func TestLocalCallbackRejectsMismatchedRawSessionTokenWithoutConsume(t *testing.T) {
+	t.Parallel()
 	hooks := &localHookRecorder{session: testCanonicalTestToken, currentToken: "other-token", digest: testCanonicalTestDigest, interaction: DigestSHA256("interaction")}
 	h, store := testLocalHandler(t, hooks.hooks())
 	stateCookie, state := localStart(t, h)
@@ -1373,6 +1402,7 @@ func TestLocalCallbackRejectsMismatchedRawSessionTokenWithoutConsume(t *testing.
 }
 
 func TestLoginCallbacksRejectLinkPurpose(t *testing.T) {
+	t.Parallel()
 	t.Run("legacy", func(t *testing.T) {
 		exchanger := &recordingExchanger{idToken: "token"}
 		h, store := testHandler(t, exchanger, &fakeTokenVerifierHTTP{claims: &IDTokenClaims{Issuer: "https://issuer.example.com", Subject: "external-user", Audience: []string{"test-client"}, ExpiresAt: fixedNow.Add(time.Hour).Unix(), IssuedAt: fixedNow.Add(-time.Minute).Unix()}}, make([]byte, 256))
@@ -1454,6 +1484,7 @@ func testLinkHandler(t *testing.T, hooks LinkHooks) (*Handler, *testInMemoryStor
 }
 
 func TestLinkFlowFixedCallbackAndOutcomes(t *testing.T) {
+	t.Parallel()
 	newFlow := func(t *testing.T, decision LinkDecision) (*Handler, *testInMemoryStore, *linkHookRecorder, *http.Cookie, string) {
 		hooks := &linkHookRecorder{subject: "local-user", token: testCanonicalTestToken, digest: testCanonicalTestDigest, decision: decision}
 		h, store := testLinkHandler(t, hooks.hooks())
@@ -1524,6 +1555,7 @@ func TestLinkFlowFixedCallbackAndOutcomes(t *testing.T) {
 }
 
 func TestCombinedCallbackSelectsOnlyOneSessionMode(t *testing.T) {
+	t.Parallel()
 	newCombined := func(t *testing.T, local *localHookRecorder, link *linkHookRecorder) (*Handler, *testInMemoryStore) {
 		store := newTestStore()
 		claims := &IDTokenClaims{Issuer: "https://issuer.example.com", Subject: "external-user", Audience: []string{"test-client"}, ExpiresAt: fixedNow.Add(time.Hour).Unix(), IssuedAt: fixedNow.Add(-time.Minute).Unix()}
@@ -1572,6 +1604,7 @@ func TestCombinedCallbackSelectsOnlyOneSessionMode(t *testing.T) {
 }
 
 func TestLocalCallbackConcurrentReplayCompletesOnce(t *testing.T) {
+	t.Parallel()
 	hooks := &localHookRecorder{session: testCanonicalTestToken, digest: testCanonicalTestDigest, interaction: DigestSHA256("interaction")}
 	h, _ := testLocalHandler(t, hooks.hooks())
 	stateCookie, state := localStart(t, h)
@@ -1612,6 +1645,7 @@ func TestLocalCallbackConcurrentReplayCompletesOnce(t *testing.T) {
 // the providerID and the exact transaction CallbackURI (stored, trusted
 // context) rather than any query-controlled data.
 func TestExchangerReceivesTrustedStoredContext(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	for i := range entropy {
 		entropy[i] = byte(i)
@@ -1671,6 +1705,7 @@ func TestExchangerReceivesTrustedStoredContext(t *testing.T) {
 }
 
 func TestLocalCallbackCarriesVerifiedOIDCSession(t *testing.T) {
+	t.Parallel()
 	for _, sid := range []string{"", "upstream-session"} {
 		t.Run("sid="+sid, func(t *testing.T) {
 			hooks := &localHookRecorder{session: testCanonicalTestToken, digest: testCanonicalTestDigest, interaction: DigestSHA256("interaction")}
@@ -1747,6 +1782,7 @@ func testLocalHandlerWithMFA(t *testing.T, hooks LocalLoginHooks, mfaPath string
 }
 
 func TestLocalCallbackMFAEvalErrorRejectsBeforeResolve(t *testing.T) {
+	t.Parallel()
 	// MFAClaimPath present but MFAClaimValue nil triggers evalErr
 	// and the callback must reject before reaching ResolveVerified.
 	hooks := &localHookRecorder{session: testCanonicalTestToken, digest: testCanonicalTestDigest, interaction: DigestSHA256("interaction")}
@@ -1769,6 +1805,7 @@ func TestLocalCallbackMFAEvalErrorRejectsBeforeResolve(t *testing.T) {
 }
 
 func TestLocalCallbackMFAMalformedPathContinuesWithoutMFA(t *testing.T) {
+	t.Parallel()
 	// Malformed JSONPath returns nil matched (no error), callback proceeds
 	// without setting MFAPassed.
 	hooks := &localHookRecorder{session: testCanonicalTestToken, digest: testCanonicalTestDigest, interaction: DigestSHA256("interaction")}
@@ -1797,6 +1834,7 @@ func TestLocalCallbackMFAMalformedPathContinuesWithoutMFA(t *testing.T) {
 }
 
 func TestLocalCallbackMFATrueClaimSetsMFAPassed(t *testing.T) {
+	t.Parallel()
 	// Matching claim sets MFAPassed=true on the OIDCSession passed to Complete.
 	hooks := &localHookRecorder{session: testCanonicalTestToken, digest: testCanonicalTestDigest, interaction: DigestSHA256("interaction")}
 	mfaVal := "mfa"

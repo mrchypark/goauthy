@@ -76,6 +76,7 @@ func assertUserUpdateSnapshot(t *testing.T, s *Store, before map[string][][]any)
 }
 
 func TestUpdateUserReplacesProfileAndPreservesSeparateState(t *testing.T) {
+	t.Parallel()
 	s, input := userUpdateFixture(t)
 	ctx := context.Background()
 	raw, _, err := s.IssuePasswordResetForEmail(ctx, "target", input.Email, time.Hour)
@@ -124,6 +125,7 @@ func TestUpdateUserReplacesProfileAndPreservesSeparateState(t *testing.T) {
 }
 
 func TestUpdateUserDenialConflictAndRollback(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, change string
 		denied       bool
@@ -155,6 +157,7 @@ func TestUpdateUserDenialConflictAndRollback(t *testing.T) {
 }
 
 func TestUpdateUserDisableReactivateAndFinalAdministrator(t *testing.T) {
+	t.Parallel()
 	s, input := userUpdateFixture(t)
 	ctx := context.Background()
 	input.Enabled = false
@@ -204,6 +207,7 @@ func TestUpdateUserDisableReactivateAndFinalAdministrator(t *testing.T) {
 }
 
 func TestUpdateUserRechecksSnapshotAndAuthorityAtCommit(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{
 		`UPDATE identity_users SET disabled=1 WHERE subject='admin'`,
 		`UPDATE identity_user_profiles SET given_name='Concurrent' WHERE subject='target'`,
@@ -227,6 +231,7 @@ func TestUpdateUserRechecksSnapshotAndAuthorityAtCommit(t *testing.T) {
 }
 
 func TestUpdateUserConcurrentEditsHaveOneSnapshotWinner(t *testing.T) {
+	t.Parallel()
 	s, input := userUpdateFixture(t)
 	arrived, release := make(chan struct{}, 2), make(chan struct{})
 	s.now = func() time.Time { arrived <- struct{}{}; <-release; return time.UnixMilli(userUpdateNow) }
@@ -250,6 +255,7 @@ func TestUpdateUserConcurrentEditsHaveOneSnapshotWinner(t *testing.T) {
 }
 
 func TestUpdateUserRefreshesAuthorizationTimeAfterPasswordWork(t *testing.T) {
+	t.Parallel()
 	s, input := userUpdateFixture(t)
 	before := userUpdateSnapshot(t, s)
 	clock, calls := int64(10), 0
@@ -264,6 +270,7 @@ func TestUpdateUserRefreshesAuthorizationTimeAfterPasswordWork(t *testing.T) {
 }
 
 func TestUpdateUserCancelsInflightProofsWithoutDeletingPasskeys(t *testing.T) {
+	t.Parallel()
 	s, input := userUpdateFixture(t)
 	code, otherCode, session := strings.Repeat("a", 43), strings.Repeat("b", 43), strings.Repeat("s", 43)
 	userUpdateExecute(t, s, "inflight-proofs", []rhiza.SQLStatement{
@@ -289,6 +296,7 @@ func TestUpdateUserCancelsInflightProofsWithoutDeletingPasskeys(t *testing.T) {
 }
 
 func TestUpdateUserPromotionEventsRollbackAndRetry(t *testing.T) {
+	t.Parallel()
 	s, input := userUpdateFixture(t)
 	password := "NextPassword2"
 	input.Email, input.Roles, input.Password, input.SourceIP = "new@example.test", []string{"rauthy_admin"}, &password, "203.0.113.8"
@@ -314,6 +322,7 @@ func TestUpdateUserPromotionEventsRollbackAndRetry(t *testing.T) {
 }
 
 func TestUpdateUserConcurrentDisablePreservesOneAdministrator(t *testing.T) {
+	t.Parallel()
 	s, input := userUpdateFixture(t)
 	input.Roles = []string{"rauthy_admin"}
 	if _, err := s.UpdateUserWithGuard(context.Background(), "target", input, userUpdateTestAuthority); err != nil {

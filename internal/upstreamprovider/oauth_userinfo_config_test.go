@@ -9,6 +9,7 @@ import (
 // --- Enum roundtrip ---
 
 func TestOAuthUserInfoEnumRoundtrip(t *testing.T) {
+	t.Parallel()
 	data, err := json.Marshal(AuthProviderTypeOAuthUserInfo)
 	if err != nil {
 		t.Fatal(err)
@@ -27,6 +28,7 @@ func TestOAuthUserInfoEnumRoundtrip(t *testing.T) {
 }
 
 func TestOAuthUserInfoValid(t *testing.T) {
+	t.Parallel()
 	if !AuthProviderTypeOAuthUserInfo.valid() {
 		t.Fatal("oauth_userinfo should be valid")
 	}
@@ -35,6 +37,7 @@ func TestOAuthUserInfoValid(t *testing.T) {
 // --- Unknown type rejects ---
 
 func TestAuthProviderTypeUnknownRejects(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"saml", "ldap", "oauth", "openid_connect"} {
 		t.Run(raw, func(t *testing.T) {
 			var at AuthProviderType
@@ -51,6 +54,7 @@ func TestAuthProviderTypeUnknownRejects(t *testing.T) {
 // --- Existing types still map correctly ---
 
 func TestMapProviderKindExistingTypes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		typ  AuthProviderType
 		want ProviderKind
@@ -76,6 +80,7 @@ func TestMapProviderKindExistingTypes(t *testing.T) {
 // --- New kind maps correctly ---
 
 func TestMapProviderKindOAuthUserInfo(t *testing.T) {
+	t.Parallel()
 	got, err := mapProviderKind(AuthProviderTypeOAuthUserInfo)
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +91,7 @@ func TestMapProviderKindOAuthUserInfo(t *testing.T) {
 }
 
 func TestMapProviderKindUnknownFailsClosed(t *testing.T) {
+	t.Parallel()
 	_, err := mapProviderKind("saml")
 	if !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("unknown type: err=%v, want ErrInvalidConfig", err)
@@ -95,6 +101,7 @@ func TestMapProviderKindUnknownFailsClosed(t *testing.T) {
 // --- NormalizedKind for the new kind ---
 
 func TestNormalizedKindOAuthUserInfo(t *testing.T) {
+	t.Parallel()
 	cfg := Config{Kind: ProviderKindOAuthUserInfo}
 	if got := cfg.NormalizedKind(); got != ProviderKindOAuthUserInfo {
 		t.Fatalf("NormalizedKind() = %q, want %q", got, ProviderKindOAuthUserInfo)
@@ -121,6 +128,7 @@ func validOAuthUserInfoConfig() *Config {
 // --- PKCE required ---
 
 func TestOAuthUserInfoPKCERequired(t *testing.T) {
+	t.Parallel()
 	cfg := validOAuthUserInfoConfig()
 	f := false
 	cfg.Protocol = ProviderProtocol{UsePKCE: &f}
@@ -132,6 +140,7 @@ func TestOAuthUserInfoPKCERequired(t *testing.T) {
 // --- UserInfoEndpoint required ---
 
 func TestOAuthUserInfoEndpointRequired(t *testing.T) {
+	t.Parallel()
 	cfg := validOAuthUserInfoConfig()
 	cfg.UserInfoEndpoint = ""
 	if err := cfg.Validate(); !errors.Is(err, ErrInvalidConfig) {
@@ -140,6 +149,7 @@ func TestOAuthUserInfoEndpointRequired(t *testing.T) {
 }
 
 func TestOAuthUserInfoEndpointMustBeHTTPS(t *testing.T) {
+	t.Parallel()
 	cfg := validOAuthUserInfoConfig()
 	cfg.UserInfoEndpoint = "http://issuer.example.test/userinfo"
 	if err := cfg.Validate(); !errors.Is(err, ErrInvalidConfig) {
@@ -150,6 +160,7 @@ func TestOAuthUserInfoEndpointMustBeHTTPS(t *testing.T) {
 // --- No JWKS accepted ---
 
 func TestOAuthUserInfoNoJWKS(t *testing.T) {
+	t.Parallel()
 	cfg := validOAuthUserInfoConfig()
 	cfg.JWKSURI = "https://issuer.example.test/jwks"
 	if err := cfg.Validate(); !errors.Is(err, ErrInvalidConfig) {
@@ -160,6 +171,7 @@ func TestOAuthUserInfoNoJWKS(t *testing.T) {
 // --- Legacy/static provider source denied ---
 
 func TestOAuthUserInfoLegacySourceDenied(t *testing.T) {
+	t.Parallel()
 	cfg := validOAuthUserInfoConfig()
 	cfg.ProviderSource = ""
 	cfg.RuntimeVersion = ""
@@ -171,6 +183,7 @@ func TestOAuthUserInfoLegacySourceDenied(t *testing.T) {
 // --- Valid config passes ---
 
 func TestOAuthUserInfoValidConfig(t *testing.T) {
+	t.Parallel()
 	if err := validOAuthUserInfoConfig().Validate(); err != nil {
 		t.Fatalf("valid config: %v", err)
 	}
@@ -179,6 +192,7 @@ func TestOAuthUserInfoValidConfig(t *testing.T) {
 // --- JWKSVerifier skips oauth_userinfo kind ---
 
 func TestJWKSVerifierSkipsOAuthUserInfo(t *testing.T) {
+	t.Parallel()
 	cfgs := map[string]Config{
 		"https://issuer.example.test": *validOAuthUserInfoConfig(),
 	}
@@ -197,6 +211,7 @@ func TestJWKSVerifierSkipsOAuthUserInfo(t *testing.T) {
 // --- Clone protocol deep copy still works ---
 
 func TestOAuthUserInfoCloneProtocol(t *testing.T) {
+	t.Parallel()
 	cfg := validOAuthUserInfoConfig()
 	cloned := cloneProtocol(cfg.Protocol)
 	f := false

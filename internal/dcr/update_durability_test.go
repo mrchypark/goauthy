@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
 
@@ -18,6 +17,7 @@ import (
 // request resolving through the durability barrier once the archive answers
 // again.
 func TestUpdateRequiresAckDurabilityForRotatedCredentials(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name    string
 		restore bool
@@ -28,20 +28,11 @@ func TestUpdateRequiresAckDurabilityForRotatedCredentials(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := t.Context()
 			objectStoreDir := t.TempDir()
-			db, err := rhiza.Open(ctx, rhiza.Config{
-				NodeID:             "dcr-update-before-ack-" + strings.ReplaceAll(test.name, " ", "-"),
-				DataDir:            t.TempDir(),
+			db := openTestDBWithConfig(t, "dcr-update-before-ack-"+strings.ReplaceAll(test.name, " ", "-"), rhiza.Config{
 				ObjStoreProvider:   rhiza.ObjectStoreProviderFilesystem,
 				ObjStoreDir:        objectStoreDir,
 				ObjStoreDurability: rhiza.ObjectStoreDurabilityBeforeAck,
 			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = db.Close() })
-			if err := storage.Migrate(ctx, db); err != nil {
-				t.Fatal(err)
-			}
 
 			base := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
 			store := NewStore(db, Config{Now: func() time.Time { return base }})

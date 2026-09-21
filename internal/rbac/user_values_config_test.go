@@ -25,6 +25,7 @@ func configRequest(cookie *http.Cookie, method, body string) *http.Request {
 }
 
 func TestUserValuesConfigPublicAndClosedAuthorization(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, admin := userCreateHTTPFixture(t)
 	if err := h.SetUserValuesPolicy(identity.UserValuesPolicy{GivenName: "optional"}); err != nil {
 		t.Fatal(err)
@@ -110,6 +111,7 @@ func TestUserValuesConfigPublicAndClosedAuthorization(t *testing.T) {
 }
 
 func TestUserValuesConfigDelegatedAndStrictGates(t *testing.T) {
+	t.Parallel()
 	h, store, _, _, admin := userCreateHTTPFixture(t)
 	ctx := context.Background()
 	insertActive(t, store.db, "config-delegated")
@@ -154,6 +156,7 @@ func TestUserValuesConfigDelegatedAndStrictGates(t *testing.T) {
 }
 
 func TestUserValuesConfigCapturedGuard(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, admin := userCreateHTTPFixture(t)
 	closed := h.UserValuesConfigHandler(false)
 	h.beforeUserValuesConfigRead = func() {

@@ -77,6 +77,7 @@ func assertResetEventText(t *testing.T, store *Store, want string) {
 }
 
 func TestPasswordResetAppendsUserPasswordResetEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for _, usage := range []string{"password_reset", "password_new"} {
 		t.Run(usage, func(t *testing.T) {
@@ -138,6 +139,7 @@ func TestPasswordResetAppendsUserPasswordResetEvent(t *testing.T) {
 }
 
 func TestPasswordResetRejectedAttemptsAppendNoEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, credential.DefaultRules())
 	at := time.UnixMilli(1_704_067_201_000).UTC()
@@ -189,6 +191,7 @@ func TestPasswordResetRejectedAttemptsAppendNoEvent(t *testing.T) {
 }
 
 func TestPasswordResetRecoveryEmailFallbackAndProfilePriority(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for _, withProfile := range []bool{false, true} {
 		t.Run(map[bool]string{false: "recovery-only", true: "profile-priority"}[withProfile], func(t *testing.T) {
@@ -218,6 +221,7 @@ func TestPasswordResetRecoveryEmailFallbackAndProfilePriority(t *testing.T) {
 }
 
 func TestPasswordResetRecoveryEmailRaceDoesNotConsumeProof(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, credential.DefaultRules())
 	store.now = func() time.Time { return time.UnixMilli(1_704_067_207_000).UTC() }
@@ -253,6 +257,7 @@ func TestPasswordResetRecoveryEmailRaceDoesNotConsumeProof(t *testing.T) {
 }
 
 func TestPasswordResetEventInsertFailureRollsBackMutation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, credential.DefaultRules())
 	at := time.UnixMilli(1_704_067_202_000).UTC()
@@ -307,6 +312,7 @@ func TestPasswordResetEventInsertFailureRollsBackMutation(t *testing.T) {
 }
 
 func TestPasswordResetProfileEmailRaceDoesNotConsumeProof(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, credential.DefaultRules())
 	store.now = func() time.Time { return time.UnixMilli(1_704_067_204_000).UTC() }
@@ -349,6 +355,7 @@ func TestPasswordResetProfileEmailRaceDoesNotConsumeProof(t *testing.T) {
 }
 
 func TestPasswordResetInvalidSourceIPDoesNotConsumeProof(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, credential.DefaultRules())
 	store.now = func() time.Time { return time.UnixMilli(1_704_067_205_000).UTC() }
@@ -370,6 +377,7 @@ func TestPasswordResetInvalidSourceIPDoesNotConsumeProof(t *testing.T) {
 }
 
 func TestPasswordResetConcurrentConsumersAppendOneEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, credential.DefaultRules())
 	store.now = func() time.Time { return time.UnixMilli(1_704_067_203_000).UTC() }

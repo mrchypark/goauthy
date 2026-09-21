@@ -10,6 +10,7 @@ import (
 )
 
 func TestDeleteUserPurgesOwnedAuthCollectionConnections(t *testing.T) {
+	t.Parallel()
 	store := testConversionStore(t)
 	ctx := context.Background()
 	bootstrapPassword(t, store, "collection-owner", "owner", []byte("CurrentPassword1"))
@@ -36,6 +37,7 @@ func TestDeleteUserPurgesOwnedAuthCollectionConnections(t *testing.T) {
 }
 
 func TestDeleteUserUnauthorizedDoesNotPurgeAuthCollectionConnections(t *testing.T) {
+	t.Parallel()
 	store := testConversionStore(t)
 	ctx := context.Background()
 	bootstrapPassword(t, store, "collection-owner-guard", "owner-guard", []byte("CurrentPassword1"))

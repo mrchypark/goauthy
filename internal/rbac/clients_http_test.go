@@ -51,6 +51,7 @@ func managedRequest(method, path string, body string, cookie *http.Cookie, csrf,
 }
 
 func TestManagedClientHTTPAdminCRUDAndSecretTransition(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	h.BindClients(managedHTTPStore(t, store))
 	create := managedRequest(http.MethodPost, "/auth/v1/clients", `{"id":"managed-http-client","name":"HTTP","confidential":true,"redirect_uris":["https://app.example/cb"]}`, cookie, csrf, "")
@@ -78,6 +79,7 @@ func TestManagedClientHTTPAdminCRUDAndSecretTransition(t *testing.T) {
 }
 
 func TestManagedClientHTTPAPIKeyLeastPrivilegeAndRevokedBrowser(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, _ := membershipHTTPFixture(t)
 	h.BindClients(managedHTTPStore(t, store))
 	keys, err := apikey.NewStore(store.db)
@@ -133,6 +135,7 @@ func TestManagedClientHTTPAPIKeyLeastPrivilegeAndRevokedBrowser(t *testing.T) {
 }
 
 func TestManagedClientHTTPStrictBodies(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("POST", "/auth/v1/clients", strings.NewReader(`{"id":"app","name":"App","confidential":true,"redirect_uris":["https://app.example/cb"]}`))
 	r.Header.Set("Content-Type", "application/json")
 	v, err := decodeManagedClient(r)
@@ -164,6 +167,7 @@ func TestManagedClientHTTPStrictBodies(t *testing.T) {
 }
 
 func TestManagedClientHTTPIfMatch(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("PUT", "/auth/v1/clients/app", nil)
 	if _, err := clientRevision(r); err == nil {
 		t.Fatal("missing If-Match accepted")
@@ -175,6 +179,7 @@ func TestManagedClientHTTPIfMatch(t *testing.T) {
 }
 
 func TestManagedClientHTTPBackchannelMetadata(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	h.BindClients(managedHTTPStore(t, store))
 	w := httptest.NewRecorder()
@@ -209,6 +214,7 @@ func TestManagedClientHTTPBackchannelMetadata(t *testing.T) {
 }
 
 func TestManagedClientHTTPGroupPrefixMetadata(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	h.BindClients(managedHTTPStore(t, store))
 	w := httptest.NewRecorder()

@@ -39,6 +39,7 @@ func selfProfileFixture(t *testing.T) (*Store, UserValuesPolicy) {
 }
 
 func TestSelfProfileValidInputAllTablesUnchangedExceptProfiles(t *testing.T) {
+	t.Parallel()
 	s, policy := selfProfileFixture(t)
 	ctx := context.Background()
 	before := userUpdateSnapshot(t, s)
@@ -85,6 +86,7 @@ func TestSelfProfileValidInputAllTablesUnchangedExceptProfiles(t *testing.T) {
 }
 
 func TestSelfProfileAuthorityFalseDeniedNoMutation(t *testing.T) {
+	t.Parallel()
 	s, policy := selfProfileFixture(t)
 	ctx := context.Background()
 	givenName := "Denied"
@@ -99,6 +101,7 @@ func TestSelfProfileAuthorityFalseDeniedNoMutation(t *testing.T) {
 }
 
 func TestSelfProfileAuthoritySecondCallChangesGivenConflictPreservesConcurrent(t *testing.T) {
+	t.Parallel()
 	s, policy := selfProfileFixture(t)
 	ctx := context.Background()
 	callCount := 0
@@ -122,6 +125,7 @@ func TestSelfProfileAuthoritySecondCallChangesGivenConflictPreservesConcurrent(t
 }
 
 func TestSelfProfileExpiredAccountDenied(t *testing.T) {
+	t.Parallel()
 	s, policy := selfProfileFixture(t)
 	ctx := context.Background()
 	userUpdateExecute(t, s, "expire", []rhiza.SQLStatement{
@@ -136,6 +140,7 @@ func TestSelfProfileExpiredAccountDenied(t *testing.T) {
 }
 
 func TestSelfProfileNilNestedRequiredPreferredImmutableClearRejected(t *testing.T) {
+	t.Parallel()
 	s, policy := selfProfileFixture(t)
 	ctx := context.Background()
 
@@ -163,6 +168,7 @@ func TestSelfProfileNilNestedRequiredPreferredImmutableClearRejected(t *testing.
 }
 
 func TestSelfProfileDefaultNilPolicyImmutablePreferredChangeDenied(t *testing.T) {
+	t.Parallel()
 	s, _ := selfProfileFixture(t)
 	ctx := context.Background()
 	nilPolicy := UserValuesPolicy{
@@ -179,6 +185,7 @@ func TestSelfProfileDefaultNilPolicyImmutablePreferredChangeDenied(t *testing.T)
 }
 
 func TestSelfProfileDefaultNilPolicyImmutablePreferredClearDenied(t *testing.T) {
+	t.Parallel()
 	s, _ := selfProfileFixture(t)
 	ctx := context.Background()
 	nilPolicy := UserValuesPolicy{
@@ -195,6 +202,7 @@ func TestSelfProfileDefaultNilPolicyImmutablePreferredClearDenied(t *testing.T) 
 }
 
 func TestSelfProfileDefaultNilPolicyImmutablePreferredSameValueAccepted(t *testing.T) {
+	t.Parallel()
 	s, _ := selfProfileFixture(t)
 	ctx := context.Background()
 	nilPolicy := UserValuesPolicy{
@@ -214,6 +222,7 @@ func TestSelfProfileDefaultNilPolicyImmutablePreferredSameValueAccepted(t *testi
 }
 
 func TestSelfProfileMutableExplicitNilPreferredClears(t *testing.T) {
+	t.Parallel()
 	s, policy := selfProfileFixture(t)
 	policy.PreferredUsername = policy.PreferredUsername.WithImmutable(false)
 	ctx := context.Background()
@@ -229,6 +238,7 @@ func TestSelfProfileMutableExplicitNilPreferredClears(t *testing.T) {
 }
 
 func TestSelfProfileDuplicatePreferredConflict(t *testing.T) {
+	t.Parallel()
 	s, policy := selfProfileFixture(t)
 	policy.PreferredUsername = policy.PreferredUsername.WithImmutable(false)
 	ctx := context.Background()
@@ -247,6 +257,7 @@ func TestSelfProfileDuplicatePreferredConflict(t *testing.T) {
 }
 
 func TestSelfProfileGivenOptionalPreferredNilNamesEmptyValuesClear(t *testing.T) {
+	t.Parallel()
 	s, policy := selfProfileFixture(t)
 	ctx := context.Background()
 	emptyGiven := ""
@@ -267,6 +278,7 @@ func TestSelfProfileGivenOptionalPreferredNilNamesEmptyValuesClear(t *testing.T)
 }
 
 func TestSelfProfileMissingProfileRowInsertsAfterDelete(t *testing.T) {
+	t.Parallel()
 	s, policy := selfProfileFixture(t)
 	ctx := context.Background()
 	userUpdateExecute(t, s, "delete-profile", []rhiza.SQLStatement{

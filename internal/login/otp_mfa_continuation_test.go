@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/browser"
-	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/recovery"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
@@ -136,10 +135,11 @@ func postOTPJSON(cookie *http.Cookie, code string) *http.Request {
 // JSON API) is verified exactly once through the shared completion path, and the
 // stored session carries the "mfa" method the client policy and amr claim need.
 func TestForcedMFAOTPStepUpCompletesAsMFA(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, true)
 	service, delivered := testOTPStepUp(t, h, db)
 	ctx := context.Background()
-	second, err := credential.Hash([]byte("correct password"))
+	second, err := testHash(ctx, []byte("correct password"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,6 +230,7 @@ func TestForcedMFAOTPStepUpCompletesAsMFA(t *testing.T) {
 // in replicated state instead of the raw continuation token, and completion
 // still works through the digest path.
 func TestForcedMFAOTPStepUpPersistsOnlyTheInteractionDigest(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, true)
 	service, _ := testOTPStepUp(t, h, db)
 	ctx := context.Background()
@@ -306,6 +307,7 @@ func TestForcedMFAOTPStepUpPersistsOnlyTheInteractionDigest(t *testing.T) {
 // page continues a forced-MFA challenge in the browser instead of navigating to
 // the raw JSON, and that the nonce policy that permits the script is present.
 func TestAuthorizeRendersForcedMFAContinuationScript(t *testing.T) {
+	t.Parallel()
 	h := testHandlerWithForceMFA(t)
 	page := httptest.NewRecorder()
 	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
@@ -334,6 +336,7 @@ func TestAuthorizeRendersForcedMFAContinuationScript(t *testing.T) {
 // submission for clients that do not force MFA, so the ordinary login redirect
 // is never replaced by a fetched continuation.
 func TestAuthorizeOmitsMFAContinuationForUnforcedClient(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	page := httptest.NewRecorder()
 	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))

@@ -10,6 +10,7 @@ import (
 )
 
 func TestReconnectInstallRequiresRevokedPriorGenerationAndNextVersion(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, old := credentialStoreFixture(t)
 	if err := store.Install(ctx, old, testCredential(), credentialAuthority()); err != nil {
 		t.Fatal(err)

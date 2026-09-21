@@ -7,6 +7,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,6 +23,7 @@ import (
 )
 
 func TestBootstrapConcurrentAndNeverResetsCredential(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 	first, err := credential.Hash([]byte("first password"))
@@ -65,6 +69,7 @@ func TestBootstrapConcurrentAndNeverResetsCredential(t *testing.T) {
 }
 
 func TestBootstrapCreatesPrincipalVersionWithoutReset(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 	first := time.UnixMilli(1_000)
@@ -86,6 +91,7 @@ func TestBootstrapCreatesPrincipalVersionWithoutReset(t *testing.T) {
 }
 
 func TestAuthenticateHidesUnknownDisabledAndBadPassword(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 	password, err := credential.Hash([]byte("correct password"))
@@ -118,6 +124,7 @@ func TestAuthenticateHidesUnknownDisabledAndBadPassword(t *testing.T) {
 }
 
 func TestUserBySubjectAndVerifyPassword(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 	password := []byte("CurrentPassword1")
@@ -158,6 +165,7 @@ func TestUserBySubjectAndVerifyPassword(t *testing.T) {
 }
 
 func TestAccountProfileBySubjectIsActiveAndUsesSafeEmailFallbacks(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 	bootstrapPassword(t, store, "subject-1", "alice@example.test", []byte("CurrentPassword1"))
@@ -195,6 +203,7 @@ func TestAccountProfileBySubjectIsActiveAndUsesSafeEmailFallbacks(t *testing.T) 
 }
 
 func TestVerifyPasswordRejectsExpiredPassword(t *testing.T) {
+	t.Parallel()
 	rules := testRules(1)
 	rules.ValidDays = 1
 	store := testStoreWithRules(t, rules)
@@ -209,6 +218,7 @@ func TestVerifyPasswordRejectsExpiredPassword(t *testing.T) {
 }
 
 func TestConvertToPasskeyOnlyErasesPasswordAdmissionAndArtifacts(t *testing.T) {
+	t.Parallel()
 	store := testConversionStore(t)
 	ctx := context.Background()
 	now := time.UnixMilli(17_000)
@@ -298,6 +308,7 @@ func TestConvertToPasskeyOnlyErasesPasswordAdmissionAndArtifacts(t *testing.T) {
 }
 
 func TestConvertToPasskeyOnlyRequiresVerifiedCredentialAndHasOneWinner(t *testing.T) {
+	t.Parallel()
 	store := testConversionStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(19_000) }
@@ -342,6 +353,7 @@ func TestConvertToPasskeyOnlyRequiresVerifiedCredentialAndHasOneWinner(t *testin
 }
 
 func TestSetPasswordWithWebAuthnProofRequiresFreshPasswordNewProof(t *testing.T) {
+	t.Parallel()
 	store := testConversionStore(t)
 	ctx := context.Background()
 	now := time.UnixMilli(31_000)
@@ -399,6 +411,7 @@ func TestSetPasswordWithWebAuthnProofRequiresFreshPasswordNewProof(t *testing.T)
 }
 
 func TestSetPasswordWithWebAuthnProofDisabledAndConcurrentExactlyOneWinner(t *testing.T) {
+	t.Parallel()
 	store := testConversionStore(t)
 	policy := credential.DefaultPolicy()
 	policy.MaxConcurrency = 8
@@ -457,6 +470,7 @@ func TestSetPasswordWithWebAuthnProofDisabledAndConcurrentExactlyOneWinner(t *te
 }
 
 func TestMissingAuthenticationModeFailsClosedForEveryPasswordPath(t *testing.T) {
+	t.Parallel()
 	store := testConversionStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(23_000) }
@@ -492,6 +506,7 @@ func TestMissingAuthenticationModeFailsClosedForEveryPasswordPath(t *testing.T) 
 }
 
 func TestBootstrapRejectsMalformedInput(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	valid, err := credential.Hash([]byte("correct password"))
 	if err != nil {
@@ -514,6 +529,7 @@ func TestBootstrapRejectsMalformedInput(t *testing.T) {
 }
 
 func TestBootstrapConflictingIdentityFails(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	password, err := credential.Hash([]byte("correct password"))
 	if err != nil {
@@ -531,6 +547,7 @@ func TestBootstrapConflictingIdentityFails(t *testing.T) {
 }
 
 func TestBootstrapUsesInjectedHasherPolicy(t *testing.T) {
+	t.Parallel()
 	policy := credential.DefaultPolicy()
 	policy.MemoryKiB = 20 * 1024
 	hasher, err := credential.NewHasher(policy)
@@ -548,6 +565,7 @@ func TestBootstrapUsesInjectedHasherPolicy(t *testing.T) {
 }
 
 func TestAuthenticateUpgradesLegacyCredentialAfterSuccess(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	password := []byte("correct password")
 	salt := []byte("1234567890abcdef")
@@ -576,6 +594,7 @@ func TestAuthenticateUpgradesLegacyCredentialAfterSuccess(t *testing.T) {
 }
 
 func TestExistingBootstrapSurvivesPolicyRolloutAndUpgradesOnLogin(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testStore(t)
 	password := []byte("correct password")
@@ -611,6 +630,7 @@ func TestExistingBootstrapSurvivesPolicyRolloutAndUpgradesOnLogin(t *testing.T) 
 }
 
 func TestAuthenticateDoesNotDowngradeStrongerOrMixedCredentials(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	password := []byte("correct password")
 	policy := credential.DefaultPolicy()
@@ -646,6 +666,7 @@ func TestAuthenticateDoesNotDowngradeStrongerOrMixedCredentials(t *testing.T) {
 }
 
 func TestAuthenticateDoesNotRehashWrongOrDisabledCredential(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testStore(t)
 	legacy := testPHC([]byte("correct password"), 8*1024, 1, 1)
@@ -678,6 +699,7 @@ func TestAuthenticateDoesNotRehashWrongOrDisabledCredential(t *testing.T) {
 }
 
 func TestAuthenticateConcurrentLegacyUpgradeIsSafe(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	policy := credential.DefaultPolicy()
 	policy.MaxConcurrency = 3
@@ -725,6 +747,7 @@ func TestAuthenticateConcurrentLegacyUpgradeIsSafe(t *testing.T) {
 }
 
 func TestChangePasswordRulesHistoryAndMetadata(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	rules := testRules(3)
 	store := testStoreWithRules(t, rules)
@@ -752,6 +775,7 @@ func TestChangePasswordRulesHistoryAndMetadata(t *testing.T) {
 }
 
 func TestChangePasswordHistoryDepthThree(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testStoreWithRules(t, testRules(3))
 	passwords := [][]byte{[]byte("PasswordZero1"), []byte("PasswordOne2"), []byte("PasswordTwo3"), []byte("PasswordThree4")}
@@ -771,6 +795,7 @@ func TestChangePasswordHistoryDepthThree(t *testing.T) {
 }
 
 func TestChangePasswordHistoryZeroStoresNoHistory(t *testing.T) {
+	t.Parallel()
 	store := testStoreWithRules(t, testRules(0))
 	current := []byte("CurrentPassword1")
 	next := []byte("NextPassword2")
@@ -787,6 +812,7 @@ func TestChangePasswordHistoryZeroStoresNoHistory(t *testing.T) {
 }
 
 func TestChangePasswordDoesNotMutateInvalidCurrentOrDisabled(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testStoreWithRules(t, testRules(3))
 	current := []byte("CurrentPassword1")
@@ -823,6 +849,7 @@ func TestChangePasswordDoesNotMutateInvalidCurrentOrDisabled(t *testing.T) {
 }
 
 func TestChangePasswordConcurrentExactlyOneWinner(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testStoreWithRules(t, testRules(1))
 	store.now = func() time.Time { return time.UnixMilli(2000) }
@@ -852,6 +879,7 @@ func TestChangePasswordConcurrentExactlyOneWinner(t *testing.T) {
 }
 
 func TestAuthenticateRehashPreservesPasswordMetadata(t *testing.T) {
+	t.Parallel()
 	rules := credential.DefaultRules()
 	rules.ValidDays = 0
 	store := testStoreWithRules(t, rules)
@@ -874,6 +902,7 @@ func TestAuthenticateRehashPreservesPasswordMetadata(t *testing.T) {
 }
 
 func TestAuthenticatePasswordExpiryUsesStrictBoundary(t *testing.T) {
+	t.Parallel()
 	rules := testRules(1)
 	rules.ValidDays = 1
 	store := testStoreWithRules(t, rules)
@@ -893,6 +922,7 @@ func TestAuthenticatePasswordExpiryUsesStrictBoundary(t *testing.T) {
 }
 
 func TestPasswordResetConsumesExactlyOnceAndAppliesHistory(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, testRules(3))
 	base := time.UnixMilli(1_000)
@@ -927,6 +957,7 @@ func TestPasswordResetConsumesExactlyOnceAndAppliesHistory(t *testing.T) {
 }
 
 func TestPasswordResetBrowserBindingLastChallengeWins(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, testRules(1))
 	store.now = func() time.Time { return time.UnixMilli(1_000) }
@@ -964,6 +995,7 @@ func TestPasswordResetBrowserBindingLastChallengeWins(t *testing.T) {
 }
 
 func TestBeginPasswordResetRejectsExactExpiry(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, testRules(1))
 	base := time.UnixMilli(1_000)
@@ -981,6 +1013,7 @@ func TestBeginPasswordResetRejectsExactExpiry(t *testing.T) {
 }
 
 func TestPasswordResetStaleGenerationAndConcurrentConsumer(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, testRules(1))
 	store.now = func() time.Time { return time.UnixMilli(1_000) }
@@ -1025,6 +1058,7 @@ func TestPasswordResetStaleGenerationAndConcurrentConsumer(t *testing.T) {
 }
 
 func TestPasswordResetRevokesOnlyBoundSubjectArtifacts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, testRules(1))
 	store.now = func() time.Time { return time.UnixMilli(1_000) }
@@ -1088,6 +1122,7 @@ func TestPasswordResetRevokesOnlyBoundSubjectArtifacts(t *testing.T) {
 }
 
 func TestPasswordResetRejectsDisabledSubjectWithoutMutation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, testRules(1))
 	store.now = func() time.Time { return time.UnixMilli(1_000) }
@@ -1106,6 +1141,7 @@ func TestPasswordResetRejectsDisabledSubjectWithoutMutation(t *testing.T) {
 }
 
 func TestIssuePasswordResetRejectsShortRandomRead(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, testRules(1))
 	store.now = func() time.Time { return time.UnixMilli(1_000) }
@@ -1126,6 +1162,7 @@ func TestIssuePasswordResetRejectsShortRandomRead(t *testing.T) {
 }
 
 func TestIssuePasswordResetRejectsGenerationChangedBeforeInsert(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, testRules(1))
 	store.now = func() time.Time { return time.UnixMilli(1_000) }
@@ -1154,6 +1191,7 @@ func TestIssuePasswordResetRejectsGenerationChangedBeforeInsert(t *testing.T) {
 }
 
 func TestIssuePasswordResetStaleIssuerDoesNotDeleteNewGenerationToken(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, testRules(1))
 	store.now = func() time.Time { return time.UnixMilli(1_000) }
@@ -1203,6 +1241,7 @@ func TestIssuePasswordResetStaleIssuerDoesNotDeleteNewGenerationToken(t *testing
 }
 
 func TestRegisterOpenUserFirstPasswordIsExactOnce(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, testRules(2))
 	now := time.UnixMilli(42_000)
@@ -1239,6 +1278,7 @@ func TestRegisterOpenUserFirstPasswordIsExactOnce(t *testing.T) {
 }
 
 func TestRegisterOpenUserDuplicateConcurrentHidesBearer(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, testRules(1))
 	store.now = func() time.Time { return time.UnixMilli(43_000) }
@@ -1288,6 +1328,7 @@ func TestRegisterOpenUserDuplicateConcurrentHidesBearer(t *testing.T) {
 }
 
 func TestRegisterOpenUserExistingRecoveryOwnerDoesNotCreateOrphan(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, testRules(1))
 	store.now = func() time.Time { return time.UnixMilli(44_000) }
@@ -1320,6 +1361,7 @@ func TestRegisterOpenUserExistingRecoveryOwnerDoesNotCreateOrphan(t *testing.T) 
 }
 
 func TestRegisterOpenUserCleansExpiredPendingIdentityAtFixedClock(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, testRules(1))
 	base := time.UnixMilli(45_000)
@@ -1341,6 +1383,7 @@ func TestRegisterOpenUserCleansExpiredPendingIdentityAtFixedClock(t *testing.T) 
 }
 
 func TestCleanupExpiredOpenRegistrationsIsBoundedAcrossTicks(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	store := testResetStore(t, testRules(1))
 	now := time.UnixMilli(46_000)
@@ -1381,6 +1424,7 @@ func TestCleanupExpiredOpenRegistrationsIsBoundedAcrossTicks(t *testing.T) {
 }
 
 func TestAuthenticatePropagatesCredentialWorkCancellation(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -1390,6 +1434,7 @@ func TestAuthenticatePropagatesCredentialWorkCancellation(t *testing.T) {
 }
 
 func TestValidateSubjectRejectsUnknownAndDisabled(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 	password, err := credential.Hash([]byte("correct password"))
@@ -1420,6 +1465,91 @@ func TestValidateSubjectRejectsUnknownAndDisabled(t *testing.T) {
 	}
 }
 
+// Rhiza applies every migration statement through replicated consensus,
+// which costs ~8s for a fresh database under -race. The migrated schema is
+// built once per NodeID and each test opens a private copy.
+
+type identityTemplateEntry struct {
+	once sync.Once
+	dir  string
+	err  error
+}
+
+var identityTemplates = map[string]*identityTemplateEntry{
+	"identity-test":            {},
+	"identity-reset-test":      {},
+	"identity-conversion-test": {},
+	"identity-scim-delete":     {},
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	for _, entry := range identityTemplates {
+		if entry.dir != "" {
+			_ = os.RemoveAll(entry.dir)
+		}
+	}
+	os.Exit(code)
+}
+
+func identityMigratedTemplate(t *testing.T, nodeID string, migrateFn func(*rhiza.DB) error) string {
+	t.Helper()
+	entry := identityTemplates[nodeID]
+	if entry == nil {
+		t.Fatalf("unknown identity template node ID: %s", nodeID)
+	}
+	entry.once.Do(func() {
+		directory, err := os.MkdirTemp("", "goauthy-identity-"+nodeID+"-template-")
+		if err != nil {
+			entry.err = err
+			return
+		}
+		db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: nodeID, DataDir: directory})
+		if err != nil {
+			_ = os.RemoveAll(directory)
+			entry.err = fmt.Errorf("open %s test template: %w", nodeID, err)
+			return
+		}
+		if err := migrateFn(db); err != nil {
+			_ = db.Close()
+			_ = os.RemoveAll(directory)
+			entry.err = fmt.Errorf("migrate %s test template: %w", nodeID, err)
+			return
+		}
+		if err := db.Close(); err != nil {
+			_ = os.RemoveAll(directory)
+			entry.err = fmt.Errorf("close %s test template: %w", nodeID, err)
+			return
+		}
+		entry.dir = directory
+	})
+	if entry.err != nil {
+		t.Fatal(entry.err)
+	}
+	return entry.dir
+}
+
+func copyDirTree(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, content, 0o644)
+	})
+}
+
 func testStore(t *testing.T) *Store {
 	t.Helper()
 	hasher, err := credential.NewHasher(credential.DefaultPolicy())
@@ -1444,14 +1574,18 @@ func testStoreWithRules(t *testing.T, rules credential.Rules) *Store {
 
 func testStoreWithPolicies(t *testing.T, hasher *credential.Hasher, rules credential.Rules) *Store {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "identity-test", DataDir: t.TempDir()})
+	directory := t.TempDir()
+	if err := copyDirTree(identityMigratedTemplate(t, "identity-test", func(db *rhiza.DB) error {
+		_, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "identity-test-schema", Statements: SchemaStatements()})
+		return err
+	}), directory); err != nil {
+		t.Fatal(err)
+	}
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "identity-test", DataDir: directory})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "identity-test-schema", Statements: SchemaStatements()}); err != nil {
-		t.Fatal(err)
-	}
 	store, err := NewStoreWithPolicies(db, hasher, rules)
 	if err != nil {
 		t.Fatal(err)
@@ -1461,14 +1595,15 @@ func testStoreWithPolicies(t *testing.T, hasher *credential.Hasher, rules creden
 
 func testResetStore(t *testing.T, rules credential.Rules) *Store {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "identity-reset-test", DataDir: t.TempDir()})
+	directory := t.TempDir()
+	if err := copyDirTree(identityMigratedTemplate(t, "identity-reset-test", func(db *rhiza.DB) error { return storage.Migrate(context.Background(), db) }), directory); err != nil {
+		t.Fatal(err)
+	}
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "identity-reset-test", DataDir: directory})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
 	hasher, err := credential.NewHasher(credential.DefaultPolicy())
 	if err != nil {
 		t.Fatal(err)
@@ -1482,14 +1617,15 @@ func testResetStore(t *testing.T, rules credential.Rules) *Store {
 
 func testConversionStore(t *testing.T) *Store {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "identity-conversion-test", DataDir: t.TempDir()})
+	directory := t.TempDir()
+	if err := copyDirTree(identityMigratedTemplate(t, "identity-conversion-test", func(db *rhiza.DB) error { return storage.Migrate(context.Background(), db) }), directory); err != nil {
+		t.Fatal(err)
+	}
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "identity-conversion-test", DataDir: directory})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
 	hasher, err := credential.NewHasher(credential.DefaultPolicy())
 	if err != nil {
 		t.Fatal(err)

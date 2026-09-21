@@ -10,6 +10,7 @@ import (
 )
 
 func TestLookupPasskeyOnlySubjectReturnsActivePasskeyOnlyAccount(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 	if _, err := store.BootstrapUser(ctx, "subject-1", "alice", mustHashPassword(t)); err != nil {
@@ -41,6 +42,7 @@ func TestLookupPasskeyOnlySubjectReturnsActivePasskeyOnlyAccount(t *testing.T) {
 }
 
 func TestLookupPasskeyOnlySubjectRejectsPasswordModeUser(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 	if _, err := store.BootstrapUser(ctx, "subject-1", "alice", mustHashPassword(t)); err != nil {
@@ -53,6 +55,7 @@ func TestLookupPasskeyOnlySubjectRejectsPasswordModeUser(t *testing.T) {
 }
 
 func TestLookupPasskeyOnlySubjectRejectsUnknownUser(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 
@@ -62,6 +65,7 @@ func TestLookupPasskeyOnlySubjectRejectsUnknownUser(t *testing.T) {
 }
 
 func TestLookupPasskeyOnlySubjectRejectsDisabledUser(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 	if _, err := store.BootstrapUser(ctx, "subject-1", "alice", mustHashPassword(t)); err != nil {
@@ -81,6 +85,7 @@ func TestLookupPasskeyOnlySubjectRejectsDisabledUser(t *testing.T) {
 }
 
 func TestLookupPasskeyOnlySubjectRejectsInvalidUsername(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 
@@ -91,6 +96,7 @@ func TestLookupPasskeyOnlySubjectRejectsInvalidUsername(t *testing.T) {
 }
 
 func TestLookupPasskeyOnlySubjectRejectsNilStore(t *testing.T) {
+	t.Parallel()
 	var store *Store
 	if _, _, err := store.LookupPasskeyOnlySubject(context.Background(), "alice"); err == nil {
 		t.Fatal("expected error for nil store")

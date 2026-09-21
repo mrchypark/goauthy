@@ -79,6 +79,7 @@ func secretPtr(s string) *string { return &s }
 // --- Test: CreateAuthorized oauth_userinfo with PKCE, no JWKS, encrypted secret ---
 
 func TestProviderModeBoundaryCreateOAuthUserInfo(t *testing.T) {
+	t.Parallel()
 	f := boundaryFixture(t)
 	secret := "oauth-ui-secret"
 	if len(boundaryCreateID) != 24 {
@@ -146,6 +147,7 @@ func TestProviderModeBoundaryCreateOAuthUserInfo(t *testing.T) {
 // ProviderDocument equality (reflect.DeepEqual), not just typ/secret/version.
 
 func TestProviderModeBoundaryCrossOAuthToOIDC(t *testing.T) {
+	t.Parallel()
 	f := boundaryFixture(t)
 	secret := "cross-oauth-secret"
 	if len(boundaryCrossO2OID) != 24 {
@@ -187,6 +189,7 @@ func TestProviderModeBoundaryCrossOAuthToOIDC(t *testing.T) {
 }
 
 func TestProviderModeBoundaryCrossOIDCToOAuthUserInfo(t *testing.T) {
+	t.Parallel()
 	f := boundaryFixture(t)
 	if len(boundaryCrossOID2O) != 24 {
 		t.Fatalf("len(boundaryCrossOID2O)=%d, want 24", len(boundaryCrossOID2O))
@@ -228,6 +231,7 @@ func TestProviderModeBoundaryCrossOIDCToOAuthUserInfo(t *testing.T) {
 // --- Test: Same-mode oauth_userinfo update allowed, rotates version ---
 
 func TestProviderModeBoundarySameModeOAuthUserInfoAllowed(t *testing.T) {
+	t.Parallel()
 	f := boundaryFixture(t)
 	origSecret := "orig-secret"
 	if len(boundarySameOAuthID) != 24 {
@@ -297,6 +301,7 @@ func TestProviderModeBoundarySameModeOAuthUserInfoAllowed(t *testing.T) {
 // --- Test: custom->oidc allowed (neither is oauth_userinfo, v97 trigger not violated) ---
 
 func TestProviderModeBoundaryCustomToOIDCAllowed(t *testing.T) {
+	t.Parallel()
 	f := boundaryFixture(t)
 	if len(boundaryCustOIDID) != 24 {
 		t.Fatalf("len(boundaryCustOIDID)=%d, want 24", len(boundaryCustOIDID))

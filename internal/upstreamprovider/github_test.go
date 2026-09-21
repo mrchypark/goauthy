@@ -12,6 +12,7 @@ import (
 )
 
 func TestGitHubExchangeUsesFormAuthAndResolvesImmutableID(t *testing.T) {
+	t.Parallel()
 	var tokenRequests, userRequests atomic.Int32
 	var gotForm url.Values
 	var gotUser *http.Request
@@ -80,6 +81,7 @@ func TestGitHubExchangeUsesFormAuthAndResolvesImmutableID(t *testing.T) {
 }
 
 func TestGitHubIDParsingRejectsNonCanonicalIDs(t *testing.T) {
+	t.Parallel()
 	for name, body := range map[string]string{
 		"missing":        `{"login":"user"}`,
 		"duplicate":      `{"id":123,"id":124}`,
@@ -100,6 +102,7 @@ func TestGitHubIDParsingRejectsNonCanonicalIDs(t *testing.T) {
 }
 
 func TestGitHubExchangeRejectsBadScopeTokenAndUserResponses(t *testing.T) {
+	t.Parallel()
 	for name, tokenResponse := range map[string]string{
 		"missing scope":      `{"access_token":"access"}`,
 		"missing read scope": `{"access_token":"access","scope":"user:email"}`,
@@ -122,6 +125,7 @@ func TestGitHubExchangeRejectsBadScopeTokenAndUserResponses(t *testing.T) {
 }
 
 func TestGitHubExchangeRejectsRedirectAndOversizedUserResponse(t *testing.T) {
+	t.Parallel()
 	for name, userResponse := range map[string]string{
 		"redirect":  "redirect",
 		"oversized": strings.Repeat("x", githubUserMaxBytes+1),
@@ -150,6 +154,7 @@ func TestGitHubExchangeRejectsRedirectAndOversizedUserResponse(t *testing.T) {
 }
 
 func TestGitHubExchangeCancellation(t *testing.T) {
+	t.Parallel()
 	started := make(chan struct{})
 	release := make(chan struct{})
 	defer close(release)

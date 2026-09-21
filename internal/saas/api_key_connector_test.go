@@ -8,6 +8,7 @@ import (
 )
 
 func TestAPIKeyConnectorInfoMatchesExecutionAndIsDetached(t *testing.T) {
+	t.Parallel()
 	c, err := NewAPIKeyConnector(validAPIKeyConnectorConfig())
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +47,7 @@ func validAPIKeyConnectorConfig() APIKeyConnectorConfig {
 }
 
 func TestNewAPIKeyConnectorDeterministicAndImmutable(t *testing.T) {
+	t.Parallel()
 	cfg := validAPIKeyConnectorConfig()
 	a, err := NewAPIKeyConnector(cfg)
 	if err != nil {
@@ -70,6 +72,7 @@ func TestNewAPIKeyConnectorDeterministicAndImmutable(t *testing.T) {
 }
 
 func TestAPIKeyConnectorDigestSemanticChanges(t *testing.T) {
+	t.Parallel()
 	base := validAPIKeyConnectorConfig()
 	a, _ := NewAPIKeyConnector(base)
 	for name, mutate := range map[string]func(*APIKeyConnectorConfig){
@@ -92,6 +95,7 @@ func TestAPIKeyConnectorDigestSemanticChanges(t *testing.T) {
 }
 
 func TestAPIKeyConnectorRejectsInvalidConfig(t *testing.T) {
+	t.Parallel()
 	cases := []func(*APIKeyConnectorConfig){
 		func(c *APIKeyConnectorConfig) { c.ID = "Billing" },
 		func(c *APIKeyConnectorConfig) { c.Operations[0].ID = "Read" },
@@ -119,6 +123,7 @@ func TestAPIKeyConnectorRejectsInvalidConfig(t *testing.T) {
 }
 
 func TestAPIKeyConnectorRawAuthorizationIsDistinct(t *testing.T) {
+	t.Parallel()
 	cfg := validAPIKeyConnectorConfig()
 	bearer, err := NewAPIKeyConnector(cfg)
 	if err != nil {

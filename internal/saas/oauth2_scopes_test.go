@@ -9,6 +9,7 @@ import (
 )
 
 func TestOAuthGrantedScopes(t *testing.T) {
+	t.Parallel()
 	requested := []string{"openid", "profile", "email"}
 	for _, test := range []struct {
 		name   string
@@ -47,6 +48,7 @@ func TestOAuthGrantedScopes(t *testing.T) {
 }
 
 func TestOAuthGrantedScopesNilAndDefensiveCopy(t *testing.T) {
+	t.Parallel()
 	if _, err := oauthGrantedScopes(nil, []string{"openid"}); !errors.Is(err, ErrOAuth2Exchange) {
 		t.Fatalf("nil token err=%v", err)
 	}

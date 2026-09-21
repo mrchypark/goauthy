@@ -20,6 +20,7 @@ func oauth2RefreshHTTPFixture(t *testing.T) (*Handler, *http.Cookie, string) {
 }
 
 func TestAccountConnectionOAuth2RefreshBoundary(t *testing.T) {
+	t.Parallel()
 	h, cookie, csrf := oauth2RefreshHTTPFixture(t)
 	path := "/auth/v1/account/connections/c/g/oauth2/refresh"
 	for name, alter := range map[string]func(*http.Request){
@@ -74,6 +75,7 @@ func TestAccountConnectionOAuth2RefreshBoundary(t *testing.T) {
 }
 
 func TestAccountConnectionOAuth2RefreshHTTPSAndAuthFailure(t *testing.T) {
+	t.Parallel()
 	h, _, csrf := oauth2RefreshHTTPFixture(t)
 	h.issuer = "http://issuer.example.test"
 	w := httptest.NewRecorder()
@@ -93,6 +95,7 @@ func TestAccountConnectionOAuth2RefreshHTTPSAndAuthFailure(t *testing.T) {
 }
 
 func TestAccountConnectionOAuth2RefreshMissingConfigAndResource(t *testing.T) {
+	t.Parallel()
 	h, cookie, csrf := oauth2RefreshHTTPFixture(t)
 	path := "/auth/v1/account/connections/missing/unknown/oauth2/refresh"
 	validRequest := func() *http.Request {

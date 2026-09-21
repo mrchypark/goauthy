@@ -36,6 +36,7 @@ func userUpdateAuthorityFixture(t *testing.T) (context.Context, *rhiza.DB) {
 }
 
 func TestUserUpdateAuthorityMatchesPUTScope(t *testing.T) {
+	t.Parallel()
 	ctx, db := userUpdateAuthorityFixture(t)
 	for _, tc := range []struct {
 		name, actor, target string
@@ -85,6 +86,7 @@ func TestUserUpdateAuthorityMatchesPUTScope(t *testing.T) {
 }
 
 func TestUserUpdateAuthoritySnapshotSurvivesManagedGroupRemoval(t *testing.T) {
+	t.Parallel()
 	ctx, db := userUpdateAuthorityFixture(t)
 	guard, args := userUpdateAuthority("delegate", "bare", nil, nil)
 	one := int64(1)
@@ -104,6 +106,7 @@ func TestUserUpdateAuthoritySnapshotSurvivesManagedGroupRemoval(t *testing.T) {
 }
 
 func TestUserUpdateAuthorityRechecksCurrentRowsAtMutation(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, change string }{
 		{"actor role revoked", `DELETE FROM rbac_user_roles WHERE subject='delegate'`},
 		{"actor disabled", `UPDATE identity_users SET disabled=1 WHERE subject='delegate'`},

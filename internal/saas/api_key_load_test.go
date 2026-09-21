@@ -9,6 +9,7 @@ import (
 )
 
 func TestLoadAPIKeyEnforcesCurrentParentAndReturnsLatest(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "saas-api-key-load-method", SQL: `UPDATE auth_collection_definitions SET auth_method='api_key',providers_json='[]' WHERE id=?`, Args: []any{b.CollectionID}}); err != nil {
 		t.Fatal(err)
@@ -45,6 +46,7 @@ func TestLoadAPIKeyEnforcesCurrentParentAndReturnsLatest(t *testing.T) {
 }
 
 func TestLoadAPIKeyFailsClosedForDisabledAndCorruptCiphertext(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "saas-api-key-load-method-2", SQL: `UPDATE auth_collection_definitions SET auth_method='api_key',providers_json='[]' WHERE id=?`, Args: []any{b.CollectionID}}); err != nil {
 		t.Fatal(err)

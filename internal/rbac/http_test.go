@@ -18,6 +18,7 @@ import (
 )
 
 func TestRolesAPIKeyHasNoBrowserFallback(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, _ := membershipHTTPFixture(t)
 	keys, err := apikey.NewStore(store.db)
 	if err != nil {
@@ -69,6 +70,7 @@ func TestRolesAPIKeyHasNoBrowserFallback(t *testing.T) {
 }
 
 func TestDecodeRequestStrictlyAcceptsOnlyItsEntityShape(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		role bool
@@ -96,6 +98,7 @@ func TestDecodeRequestStrictlyAcceptsOnlyItsEntityShape(t *testing.T) {
 }
 
 func TestDecodeRequestRejectsWrongContentTypeAndLimit(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name, contentType, body string
 	}{
@@ -117,6 +120,7 @@ func TestDecodeRequestRejectsWrongContentTypeAndLimit(t *testing.T) {
 }
 
 func TestDecodeLoginRestrictionIsStrictAndPreservesPrefixBytes(t *testing.T) {
+	t.Parallel()
 	valid := httptest.NewRequest(http.MethodPut, "/auth/v1/clients/bootstrap-client/login-restriction", strings.NewReader(`{"restrict_group_prefix":" team/a","revision":0}`))
 	valid.Header.Set("Content-Type", "application/json")
 	got, err := decodeLoginRestriction(httptest.NewRecorder(), valid)
@@ -137,6 +141,7 @@ func TestDecodeLoginRestrictionIsStrictAndPreservesPrefixBytes(t *testing.T) {
 }
 
 func TestLoginRestrictionRequiresConfiguredClientAndAdminSession(t *testing.T) {
+	t.Parallel()
 	h, _, cookie, csrf := membershipHTTPFixture(t)
 	h.bootstrapClients = map[string]struct{}{"bootstrap-client": {}}
 
@@ -190,6 +195,7 @@ func TestLoginRestrictionRequiresConfiguredClientAndAdminSession(t *testing.T) {
 }
 
 func TestValidIDRejectsRoutingAmbiguity(t *testing.T) {
+	t.Parallel()
 	for _, id := range []string{"", "a/b", "a\\b", "a\r", "a\n", strings.Repeat("a", 65)} {
 		if validID(id) {
 			t.Fatalf("accepted %q", id)
@@ -201,6 +207,7 @@ func TestValidIDRejectsRoutingAmbiguity(t *testing.T) {
 }
 
 func TestDecodeMembershipPatchIsStrictAndDeterministic(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name                        string
 		body                        string
@@ -224,6 +231,7 @@ func TestDecodeMembershipPatchIsStrictAndDeterministic(t *testing.T) {
 }
 
 func TestDecodeMembershipPatchRejectsAmbiguousOrOutOfScopeInput(t *testing.T) {
+	t.Parallel()
 	for _, body := range []string{
 		`{}`, `{"put":[],"del":[]}{}`, `{"put":[],"del":[],"put":[]}`,
 		`{"put":[{"key":"roles","value":["viewer"],"value":[]}],"del":[]}`,
@@ -255,6 +263,7 @@ func sameStrings(left, right []string) bool {
 }
 
 func TestPatchUserMembershipReplacesOnlyRequestedDimensions(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	request := membershipRequest(t, cookie, csrf, `{"put":[{"key":"roles","value":["viewer"]},{"key":"groups","value":["team/a"]}],"del":[]}`)
 	response := httptest.NewRecorder()
@@ -281,6 +290,7 @@ func TestPatchUserMembershipReplacesOnlyRequestedDimensions(t *testing.T) {
 }
 
 func TestPatchUserMembershipRejectsUntrustedRequestsWithoutMutation(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	for _, test := range []struct {
 		name   string
@@ -315,6 +325,7 @@ func TestPatchUserMembershipRejectsUntrustedRequestsWithoutMutation(t *testing.T
 }
 
 func TestPatchUserMembershipAllowsDelegatedGroupAdminOnly(t *testing.T) {
+	t.Parallel()
 	h, store, _, _ := membershipHTTPFixture(t)
 	ctx := context.Background()
 	insertActive(t, store.db, "delegated")

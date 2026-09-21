@@ -11,6 +11,7 @@ import (
 // TestHandlerProtocolDeepCopy proves that NewHandler deep-copies Protocol
 // pointer fields so the caller can safely mutate its data after construction.
 func TestHandlerProtocolDeepCopy(t *testing.T) {
+	t.Parallel()
 	trueVal := true
 	configs := map[string]Config{
 		"google": {
@@ -62,6 +63,7 @@ func TestHandlerProtocolDeepCopy(t *testing.T) {
 // TestHandlerStartURLBehaviorAfterMutation proves that start handler URL
 // generation (PKCE challenge, scope) is unaffected by caller mutation.
 func TestHandlerStartURLBehaviorAfterMutation(t *testing.T) {
+	t.Parallel()
 	configs := map[string]Config{
 		"google": {
 			Issuer:                "https://issuer.example.com",

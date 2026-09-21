@@ -9,18 +9,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/loginpolicy"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
 
 func TestLockdownEnforcementAllAuthMethods(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, false)
 	ctx := context.Background()
 
 	// Bootstrap an admin user with rauthy_admin role.
-	adminPW, _ := credential.Hash([]byte("correct password"))
+	adminPW, _ := testHash(ctx, []byte("correct password"))
 	if _, err := h.identity.BootstrapUser(ctx, "admin-1", "adminuser", adminPW); err != nil {
 		t.Fatal(err)
 	}

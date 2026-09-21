@@ -18,6 +18,7 @@ import (
 )
 
 func TestRhizaStoreCiphertextDoesNotExposeSecrets(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	if err := store.Save(ctx, tx); err != nil {
@@ -34,6 +35,7 @@ func TestRhizaStoreCiphertextDoesNotExposeSecrets(t *testing.T) {
 }
 
 func TestRhizaStoreExpiryBoundary(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	tx.ExpiresAt = tx.CreatedAt.Add(time.Millisecond)
@@ -47,6 +49,7 @@ func TestRhizaStoreExpiryBoundary(t *testing.T) {
 }
 
 func TestRhizaStoreFencedOldWriterRollsBackAndReplacementIsAllowed(t *testing.T) {
+	t.Parallel()
 	ctx, db, oldStore, newStore := testRotatingRhizaStore(t)
 	fenceMasterKeyRetirementForTest(t, ctx, db, "master-old", "master-new")
 	tx := testRhizaTransaction()
@@ -68,6 +71,7 @@ func TestRhizaStoreFencedOldWriterRollsBackAndReplacementIsAllowed(t *testing.T)
 }
 
 func TestRhizaStoreUsesAuthenticatedSealedKeyAsWriter(t *testing.T) {
+	t.Parallel()
 	ctx, db, _, replacement := testRotatingRhizaStore(t)
 	fenceMasterKeyRetirementForTest(t, ctx, db, "master-old", "master-new")
 	store, err := NewRhizaStore(db, &interposedRhizaKeyring{EnvelopeKeyring: replacement.keyring, active: "master-old"})
@@ -89,6 +93,7 @@ type interposedRhizaKeyring struct {
 func (k *interposedRhizaKeyring) ActiveMasterKeyID() (string, error) { return k.active, nil }
 
 func TestRhizaStoreRejectsInvalidTransaction(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	tx.StateDigest = "not-a-digest"
@@ -103,6 +108,7 @@ func TestRhizaStoreRejectsInvalidTransaction(t *testing.T) {
 }
 
 func TestRhizaStoreSaveRequestIDsUseEnvelopeDigest(t *testing.T) {
+	t.Parallel()
 	state := DigestSHA256("state")
 	browser := DigestSHA256("browser")
 	if first, second := transactionSaveRequestID(state, browser, "google", "envelope-one"), transactionSaveRequestID(state, browser, "google", "envelope-two"); first == second {
@@ -120,6 +126,7 @@ func TestRhizaStoreSaveRequestIDsUseEnvelopeDigest(t *testing.T) {
 }
 
 func TestRhizaStoreBindingRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	if err := store.Save(ctx, tx); err != nil {
@@ -135,6 +142,7 @@ func TestRhizaStoreBindingRoundTrip(t *testing.T) {
 }
 
 func TestRhizaStoreRoundTripsOAuthProviderWithoutNonce(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	tx.ProviderID = "github"
@@ -152,6 +160,7 @@ func TestRhizaStoreRoundTripsOAuthProviderWithoutNonce(t *testing.T) {
 }
 
 func TestRhizaStoreLinkRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaLinkTransaction()
 	if err := store.Save(ctx, tx); err != nil {
@@ -170,6 +179,7 @@ func TestRhizaStoreLinkRoundTrip(t *testing.T) {
 }
 
 func TestRhizaStoreLinkWrongSessionNeverConsumes(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaLinkTransaction()
 	if err := store.Save(ctx, tx); err != nil {
@@ -184,6 +194,7 @@ func TestRhizaStoreLinkWrongSessionNeverConsumes(t *testing.T) {
 }
 
 func TestRhizaStoreLegacyBindingRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	tx.SessionDigest, tx.InteractionDigest = "", ""
@@ -200,6 +211,7 @@ func TestRhizaStoreLegacyBindingRoundTrip(t *testing.T) {
 }
 
 func TestRhizaStoreRejectsMalformedLocalOAuthBinding(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	for _, tx := range []Transaction{
 		func() Transaction { tx := testRhizaTransaction(); tx.SessionDigest = ""; return tx }(),
@@ -215,6 +227,7 @@ func TestRhizaStoreRejectsMalformedLocalOAuthBinding(t *testing.T) {
 }
 
 func TestRhizaStoreRejectsMalformedPurposeBindings(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	for _, tx := range []Transaction{
 		func() Transaction { tx := testRhizaTransaction(); tx.LinkSubject = "subject"; return tx }(),
@@ -237,6 +250,7 @@ func TestRhizaStoreRejectsMalformedPurposeBindings(t *testing.T) {
 }
 
 func TestRhizaStoreRejectsBindingColumnEnvelopeMismatch(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	if err := store.Save(ctx, tx); err != nil {
@@ -251,6 +265,7 @@ func TestRhizaStoreRejectsBindingColumnEnvelopeMismatch(t *testing.T) {
 }
 
 func TestRhizaStoreRejectsLinkColumnEnvelopeMismatch(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testRhizaStore(t)
 	tx := testRhizaLinkTransaction()
 	if err := store.Save(ctx, tx); err != nil {
@@ -265,6 +280,7 @@ func TestRhizaStoreRejectsLinkColumnEnvelopeMismatch(t *testing.T) {
 }
 
 func TestRhizaStoreRejectsTamperedLinkEnvelope(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testRhizaStore(t)
 	tx := testRhizaLinkTransaction()
 	if err := store.Save(ctx, tx); err != nil {
@@ -279,6 +295,7 @@ func TestRhizaStoreRejectsTamperedLinkEnvelope(t *testing.T) {
 }
 
 func TestRhizaStoreWrongBindingsNeverConsume(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	if err := store.Save(ctx, tx); err != nil {
@@ -296,6 +313,7 @@ func TestRhizaStoreWrongBindingsNeverConsume(t *testing.T) {
 }
 
 func TestRhizaStoreRejectsReplay(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	if err := store.Save(ctx, tx); err != nil {
@@ -310,6 +328,7 @@ func TestRhizaStoreRejectsReplay(t *testing.T) {
 }
 
 func TestRhizaStoreConcurrentConsumeHasOneWinner(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaLinkTransaction()
 	if err := store.Save(ctx, tx); err != nil {
@@ -348,14 +367,7 @@ func TestRhizaStoreConcurrentConsumeHasOneWinner(t *testing.T) {
 func testRhizaStore(t *testing.T) (context.Context, *RhizaStore, *rhiza.DB) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "upstream-store-test", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "upstream-store-test")
 	dir := t.TempDir()
 	key := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
 	if err := os.WriteFile(filepath.Join(dir, "test-key"), []byte(key), 0o600); err != nil {

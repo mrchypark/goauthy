@@ -19,6 +19,7 @@ func (f cleanupReconciler) Reconcile(ctx context.Context, request scim.Request) 
 }
 
 func TestCleanupExpiredOpenRegistrationSnapshotsSCIMDelete(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, credential.DefaultRules())
 	base := time.UnixMilli(2_000_000).UTC()
 	store.now = func() time.Time { return base }
@@ -43,6 +44,7 @@ func TestCleanupExpiredOpenRegistrationSnapshotsSCIMDelete(t *testing.T) {
 }
 
 func TestExpiredOpenRegistrationSCIMDeleteClosesDeliveredProjection(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, credential.DefaultRules())
 	base := time.UnixMilli(2_000_000).UTC()
 	store.now = func() time.Time { return base }
@@ -112,6 +114,7 @@ func TestExpiredOpenRegistrationSCIMDeleteClosesDeliveredProjection(t *testing.T
 }
 
 func TestExpiredOpenRegistrationCleanupRandomFailurePreservesState(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, credential.DefaultRules())
 	base := time.UnixMilli(2_000_000).UTC()
 	store.now = func() time.Time { return base }

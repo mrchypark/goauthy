@@ -17,6 +17,7 @@ import (
 )
 
 func TestUserListHTTPPaginationAndWire(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, _ := membershipHTTPFixture(t)
 	if err := h.SetUserListThreshold(2); err != nil {
 		t.Fatal(err)
@@ -76,6 +77,7 @@ func TestUserListHTTPPaginationAndWire(t *testing.T) {
 }
 
 func TestUserListHTTPRechecksAuthorityAfterPreflight(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"role", "disabled", "session", "key", "grant", "delegated"} {
 		t.Run(kind, func(t *testing.T) {
 			h, store, cookie, _ := membershipHTTPFixture(t)
@@ -147,6 +149,7 @@ func TestUserListHTTPRechecksAuthorityAfterPreflight(t *testing.T) {
 }
 
 func TestUserListHTTPNoAmbientFallback(t *testing.T) {
+	t.Parallel()
 	h, _, cookie, _ := membershipHTTPFixture(t)
 	for _, tc := range []struct {
 		header, cross string
@@ -171,6 +174,7 @@ func TestUserListHTTPNoAmbientFallback(t *testing.T) {
 }
 
 func TestParseUserListOptions(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"page_size=0", "page_size=65536", "page_size=-1", "page_size=1&page_size=2", "offset=65536", "backwards=1", "session_state=auth", "continuation_token=", "unknown=1", "offset=1;page_size=1", "%"} {
 		if _, err := parseUserListOptions(raw); err == nil {
 			t.Errorf("accepted %q", raw)

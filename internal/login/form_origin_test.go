@@ -6,6 +6,7 @@ import (
 )
 
 func TestSameIssuerOriginNoReferrerForm(t *testing.T) {
+	t.Parallel()
 	for _, site := range []string{"same-origin", "same-site", "cross-site", "none", ""} {
 		t.Run(site, func(t *testing.T) {
 			r := httptest.NewRequest("POST", "https://id.example/account/connection-login", nil)

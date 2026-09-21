@@ -12,6 +12,7 @@ import (
 )
 
 func TestDeleteRegistrationRemovesAllClientChildren(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	created, err := store.Create(ctx, validRequest("delete-backchannel", TokenEndpointAuthNone))
 	if err != nil {
@@ -26,6 +27,7 @@ func TestDeleteRegistrationRemovesAllClientChildren(t *testing.T) {
 }
 
 func TestCleanupAnonymousClientsRemovesUserAndSessionAssociations(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
 	clientID := cleanupClient(t, ctx, store, db, "cleanup-backchannel", now.Add(-time.Hour), nil, true)
@@ -38,6 +40,7 @@ func TestCleanupAnonymousClientsRemovesUserAndSessionAssociations(t *testing.T) 
 }
 
 func TestDeleteRegistrationWrongAndStaleTokenLeaveChildrenUntouched(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	created, err := store.Create(ctx, validRequest("delete-wrong-token", TokenEndpointAuthNone))
 	if err != nil {
@@ -63,6 +66,7 @@ func TestDeleteRegistrationWrongAndStaleTokenLeaveChildrenUntouched(t *testing.T
 }
 
 func TestDeleteRegistrationParentFailureRollsBackChildren(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	created, err := store.Create(ctx, validRequest("delete-trigger-failure", TokenEndpointAuthNone))
 	if err != nil {

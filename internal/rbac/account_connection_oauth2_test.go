@@ -34,6 +34,7 @@ func oauthCredentialHTTPStore(t *testing.T, store *Store) *saas.CredentialStore 
 }
 
 func TestAccountConnectionOAuth2Boundary(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	if err := h.BindSaaSProviderStore(providerHTTPStore(t, store)); err != nil {
 		t.Fatal(err)

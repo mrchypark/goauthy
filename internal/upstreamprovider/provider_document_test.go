@@ -23,6 +23,7 @@ func validProviderRequest() ProviderRequest {
 }
 
 func TestProviderRequestValidationAndNormalization(t *testing.T) {
+	t.Parallel()
 	req := validProviderRequest()
 	if err := req.Validate(); err != nil {
 		t.Fatalf("valid request rejected: %v", err)
@@ -49,6 +50,7 @@ func TestProviderRequestValidationAndNormalization(t *testing.T) {
 }
 
 func TestProviderRequestAcceptsPinnedUnicodeWhitespace(t *testing.T) {
+	t.Parallel()
 	request := validProviderRequest()
 	request.Name = "Example\u00a0Provider"
 	request.Scope = "openid\u2003profile"
@@ -67,6 +69,7 @@ func TestProviderRequestAcceptsPinnedUnicodeWhitespace(t *testing.T) {
 }
 
 func TestProviderRequestJSONRequiredAndOptionalFields(t *testing.T) {
+	t.Parallel()
 	data, err := json.Marshal(validProviderRequest())
 	if err != nil {
 		t.Fatal(err)
@@ -113,6 +116,7 @@ func TestProviderRequestJSONRequiredAndOptionalFields(t *testing.T) {
 }
 
 func TestProviderRequestRejectsPinnedInvalidCases(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		edit func(*ProviderRequest)
@@ -136,6 +140,7 @@ func TestProviderRequestRejectsPinnedInvalidCases(t *testing.T) {
 }
 
 func TestProviderLookupAndLinkedUserDocuments(t *testing.T) {
+	t.Parallel()
 	issuer := "issuer.example.test/tenant"
 	request := ProviderLookupRequest{Issuer: &issuer}
 	if err := request.ValidateForLookup(); err != nil {
@@ -164,6 +169,7 @@ func TestProviderLookupAndLinkedUserDocuments(t *testing.T) {
 }
 
 func TestProviderDocumentMapsAllPersistedFieldsAndResponseSecretPointer(t *testing.T) {
+	t.Parallel()
 	req := validProviderRequest()
 	secretCiphertext := []byte("opaque-ciphertext")
 	doc, err := req.Normalize().ToDocument("provider-1", secretCiphertext)

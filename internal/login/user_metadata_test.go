@@ -11,6 +11,7 @@ import (
 )
 
 func TestLoginMetadataUsesPersistedSessionTime(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, false)
 	ctx := context.Background()
 	// Fix only the persisted creation time; assertions never compare elapsed
@@ -51,6 +52,7 @@ func TestLoginMetadataUsesPersistedSessionTime(t *testing.T) {
 }
 
 func TestLoginMetadataFailurePreservesOldSessionAndPublishesNoCookie(t *testing.T) {
+	t.Parallel()
 	h, db := testHandlerWithDB(t, false)
 	ctx := context.Background()
 	page := httptest.NewRecorder()

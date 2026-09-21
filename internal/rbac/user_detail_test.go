@@ -44,6 +44,7 @@ func detailSession(t *testing.T, h *Handler, subject string) *http.Cookie {
 }
 
 func TestUserDetailAuthorizationAndWire(t *testing.T) {
+	t.Parallel()
 	h, s, admin, _ := membershipHTTPFixture(t)
 	ctx := context.Background()
 	member := detailSession(t, h, "member")
@@ -94,6 +95,7 @@ func TestUserDetailAuthorizationAndWire(t *testing.T) {
 }
 
 func TestUserDetailPersistedLanguage(t *testing.T) {
+	t.Parallel()
 	h, s, admin, _ := membershipHTTPFixture(t)
 	for _, language := range []string{"", "de", "en", "fr", "ko", "nb", "nl", "ru", "uk", "zhhans"} {
 		var value any = language
@@ -117,6 +119,7 @@ func TestUserDetailPersistedLanguage(t *testing.T) {
 }
 
 func TestUserDetailDelegatedScopeAndCommitBarrier(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"scope", "group", "target-admin", "role", "disabled", "session", "direct-precedence", "self"} {
 		t.Run(kind, func(t *testing.T) {
 			h, s, admin, _ := membershipHTTPFixture(t)
@@ -177,6 +180,7 @@ func TestUserDetailDelegatedScopeAndCommitBarrier(t *testing.T) {
 }
 
 func TestUserDetailAPIKeyRevocation(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"key", "grant"} {
 		t.Run(kind, func(t *testing.T) {
 			h, s, admin, _ := membershipHTTPFixture(t)
@@ -211,6 +215,7 @@ func TestUserDetailAPIKeyRevocation(t *testing.T) {
 }
 
 func TestUserDetailExactAndWildcardScopes(t *testing.T) {
+	t.Parallel()
 	h, s, _, _ := membershipHTTPFixture(t)
 	ctx := context.Background()
 	insertActive(t, s.db, "delegated")
@@ -240,6 +245,7 @@ func TestUserDetailExactAndWildcardScopes(t *testing.T) {
 }
 
 func TestUserDetailAccountTypesAndProviderAmbiguity(t *testing.T) {
+	t.Parallel()
 	s := userListStore(t)
 	ctx := context.Background()
 	for i, tc := range []struct {
@@ -283,6 +289,7 @@ func TestUserDetailAccountTypesAndProviderAmbiguity(t *testing.T) {
 }
 
 func TestUserDetailRequestBoundaries(t *testing.T) {
+	t.Parallel()
 	h, s, admin, _ := membershipHTTPFixture(t)
 	for _, tc := range []struct {
 		method, query, site, subject string

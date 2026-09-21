@@ -10,6 +10,7 @@ import (
 // namespace produces the same ExternalKey as the original scheme
 // (SHA-256 of providerID + NUL + subject, base64url).
 func TestLegacyExternalKeyUnchanged(t *testing.T) {
+	t.Parallel()
 	s := SubjectResult{ProviderID: "google", Subject: "user123"}
 	got := s.ExternalKey()
 	if s.IdentityNamespace != "" {
@@ -28,6 +29,7 @@ func TestLegacyExternalKeyUnchanged(t *testing.T) {
 // providers with the same providerID and subject but different
 // issuer/clientID pairs produce different ExternalKeys.
 func TestDifferentIssuerClientIDDifferentKey(t *testing.T) {
+	t.Parallel()
 	subject := SubjectResult{ProviderID: "AbCdEfGhIjKlMnOpQrStUvWx", Subject: "uid42"}
 
 	tx1 := Transaction{
@@ -66,6 +68,7 @@ func TestDifferentIssuerClientIDDifferentKey(t *testing.T) {
 // (e.g. secret rotation) does not change the namespace or ExternalKey,
 // because the namespace is derived from issuer+clientID only.
 func TestVersionOnlyRotationSameKey(t *testing.T) {
+	t.Parallel()
 	subject := SubjectResult{ProviderID: "AbCdEfGhIjKlMnOpQrStUvWx", Subject: "uid42"}
 
 	tx1 := Transaction{
@@ -100,6 +103,7 @@ func TestVersionOnlyRotationSameKey(t *testing.T) {
 // TestInvalidBindingFails verifies that partial source/version and
 // unknown source are rejected by bindManagedSubject.
 func TestInvalidBindingFails(t *testing.T) {
+	t.Parallel()
 	subject := SubjectResult{ProviderID: "google", Subject: "uid"}
 
 	cases := []struct {
@@ -121,6 +125,7 @@ func TestInvalidBindingFails(t *testing.T) {
 // TestBindManagedSubjectDeterministic verifies that the same inputs
 // always produce the same namespace and ExternalKey.
 func TestBindManagedSubjectDeterministic(t *testing.T) {
+	t.Parallel()
 	subject := SubjectResult{ProviderID: "AbCdEfGhIjKlMnOpQrStUvWx", Subject: "uid42"}
 	tx := Transaction{
 		ProviderSource: "registry",

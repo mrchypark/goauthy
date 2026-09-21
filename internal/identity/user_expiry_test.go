@@ -12,6 +12,7 @@ import (
 )
 
 func TestUserExpiryBoundaryMatrix(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name    string
@@ -87,6 +88,7 @@ func TestUserExpiryBoundaryMatrix(t *testing.T) {
 }
 
 func TestExpiredAccountCannotResetOrActivate(t *testing.T) {
+	t.Parallel()
 	for _, usage := range []string{"password_reset", "password_new"} {
 		t.Run(usage, func(t *testing.T) {
 			s := testResetStore(t, credential.DefaultRules())

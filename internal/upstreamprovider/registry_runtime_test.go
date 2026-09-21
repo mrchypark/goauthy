@@ -36,6 +36,7 @@ func assertLen24(t *testing.T, id string) {
 }
 
 func TestRuntimeConfigOIDC(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	assertLen24(t, testOIDC)
 	seedProviderWithVersion(t, f, testOIDC)
@@ -86,6 +87,7 @@ func TestRuntimeConfigOIDC(t *testing.T) {
 }
 
 func TestRuntimeConfigGitHub(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	assertLen24(t, testGitHub)
 	ghReq := validProviderMutationRequest()
@@ -143,6 +145,7 @@ func TestRuntimeConfigGitHub(t *testing.T) {
 }
 
 func TestRuntimeConfigInvalidID(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	_, _, err := f.store.RuntimeConfig(f.ctx, "")
 	if !errors.Is(err, ErrInvalidConfig) {
@@ -151,6 +154,7 @@ func TestRuntimeConfigInvalidID(t *testing.T) {
 }
 
 func TestRuntimeConfigNotFound(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	_, _, err := f.store.RuntimeConfig(f.ctx, "abcdefghijklmnopqrstuvwx")
 	if !errors.Is(err, ErrProviderNotFound) {
@@ -159,6 +163,7 @@ func TestRuntimeConfigNotFound(t *testing.T) {
 }
 
 func TestRuntimeConfigNilSecretPreserved(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	assertLen24(t, testNoSec)
 	seedProviderWithVersion(t, f, testNoSec)
@@ -173,6 +178,7 @@ func TestRuntimeConfigNilSecretPreserved(t *testing.T) {
 }
 
 func TestRuntimeConfigEmptyEncryptedSecret(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	assertLen24(t, testEmpSec)
 	empty := ""
@@ -197,6 +203,7 @@ func TestRuntimeConfigEmptyEncryptedSecret(t *testing.T) {
 }
 
 func TestRuntimeConfigTamperDecryptFails(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	assertLen24(t, testTamper)
 	sec := "my-secret"
@@ -223,6 +230,7 @@ func TestRuntimeConfigTamperDecryptFails(t *testing.T) {
 }
 
 func TestRuntimeConfigDisabledFails(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	assertLen24(t, testDisabled)
 	seedProviderWithVersion(t, f, testDisabled)
@@ -242,6 +250,7 @@ func TestRuntimeConfigDisabledFails(t *testing.T) {
 }
 
 func TestRuntimeConfigCustomMapping(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	assertLen24(t, testCustom)
 	req := validProviderMutationRequest()
@@ -262,6 +271,7 @@ func TestRuntimeConfigCustomMapping(t *testing.T) {
 }
 
 func TestRuntimeConfigGoogleMapping(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	assertLen24(t, testGoogle)
 	req := validProviderMutationRequest()
@@ -282,6 +292,7 @@ func TestRuntimeConfigGoogleMapping(t *testing.T) {
 }
 
 func TestRuntimeConfigUnsupportedType(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	assertLen24(t, testUnsupp)
 
@@ -309,6 +320,7 @@ func TestRuntimeConfigUnsupportedType(t *testing.T) {
 // --- Scope tests: all use testScopeID ("AbCdEfGhIjKlMnOpQrStUvWx") ---
 
 func TestRuntimeConfigPlusDelimitedScopes(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	assertLen24(t, testScopeID)
 	req := validProviderMutationRequest()
@@ -330,6 +342,7 @@ func TestRuntimeConfigPlusDelimitedScopes(t *testing.T) {
 }
 
 func TestRuntimeConfigSingleScope(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	assertLen24(t, testOIDC)
 	seedProviderWithVersion(t, f, testOIDC)
@@ -344,6 +357,7 @@ func TestRuntimeConfigSingleScope(t *testing.T) {
 }
 
 func TestRuntimeConfigEmptyScope(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	assertLen24(t, testScopeID)
 	req := validProviderMutationRequest()
@@ -365,6 +379,7 @@ func TestRuntimeConfigEmptyScope(t *testing.T) {
 }
 
 func TestRuntimeConfigLegacyMultispaceScope(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	assertLen24(t, testScopeID)
 	req := validProviderMutationRequest()
@@ -389,6 +404,7 @@ func TestRuntimeConfigLegacyMultispaceScope(t *testing.T) {
 // --- GenerateAuthorizationURL: full CreateAuthorized → RuntimeConfig → GenerateURL chain ---
 
 func TestGenerateAuthorizationURLScope(t *testing.T) {
+	t.Parallel()
 	assertLen24(t, testScopeID)
 	f := runtimeFixture(t)
 

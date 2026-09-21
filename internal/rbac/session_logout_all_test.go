@@ -10,6 +10,7 @@ import (
 )
 
 func TestLogoutAllSessionsRevokesAllBrowserAndOAuthState(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	for _, subject := range []string{"target", "other"} {
 		insertActive(t, db, subject)
@@ -95,6 +96,7 @@ func TestLogoutAllSessionsRevokesAllBrowserAndOAuthState(t *testing.T) {
 }
 
 func TestLogoutAllSessionsBarrierAndRollback(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	if err := store.LogoutAllSessions(ctx, "logout-all-empty", "1=1"); err != nil {
 		t.Fatal(err)
@@ -138,6 +140,7 @@ func TestLogoutAllSessionsBarrierAndRollback(t *testing.T) {
 }
 
 func TestLogoutSkipsUnregisteredBackchannelEndpoint(t *testing.T) {
+	t.Parallel()
 	for _, all := range []bool{false, true} {
 		name := "subject"
 		if all {

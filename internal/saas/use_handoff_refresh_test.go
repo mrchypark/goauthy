@@ -8,6 +8,7 @@ import (
 )
 
 func TestUseHandoffRefreshOptInPersistsThroughApproval(t *testing.T) {
+	t.Parallel()
 	ctx, s, db, b, requester, consumer := oauth2HandoffFixture(t)
 	in := oauth2HandoffInput(s, b, consumer)
 	in.AllowRefresh = true
@@ -29,6 +30,7 @@ func TestUseHandoffRefreshOptInPersistsThroughApproval(t *testing.T) {
 }
 
 func TestUseHandoffRefreshDigestAndLegacyAPIKeyBoundaries(t *testing.T) {
+	t.Parallel()
 	// Use the same ticket hash: two different tickets already have different
 	// digests even without a refresh opt-in, so that alone proves nothing.
 	h := useHandoff{Hash: "same-ticket", CredentialVersion: 1}
@@ -68,6 +70,7 @@ func TestUseHandoffRefreshDigestAndLegacyAPIKeyBoundaries(t *testing.T) {
 }
 
 func TestUseHandoffLegacyFalseDigestUnchanged(t *testing.T) {
+	t.Parallel()
 	ctx, s, db, b, connector, _, consumer, id := handoffCreate(t)
 	review, err := s.ReviewUseHandoff(ctx, b.Owner, id, credentialAuthority())
 	if err != nil || review.Grant.AllowRefresh || review.ReviewDigest != connector.Digest() {

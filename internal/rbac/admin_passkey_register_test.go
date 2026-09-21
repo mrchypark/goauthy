@@ -15,6 +15,7 @@ import (
 // continuation, so the mounted route must report that its contract does not
 // exist and leave no enrollment state behind for the target account.
 func TestAdminRegisterPasskeyFailsClosedWithoutEnrollmentBinding(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	h.SetPasskeyService(&passkey.Service{})
 	request := httptest.NewRequest(http.MethodPost, "/auth/v1/users/member/webauthn/admin_register", nil)

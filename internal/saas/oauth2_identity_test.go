@@ -13,6 +13,7 @@ import (
 )
 
 func TestOAuth2IdentityUsesBearerAndAcceptsStringOrInteger(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ body, want string }{{`{"sub":"user-1"}`, "user-1"}, {`{"sub":123456789012345678}`, "123456789012345678"}} {
 		fixture := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodGet || r.Header.Get("Authorization") != "Bearer access-token" || r.Header.Get("Accept") != "application/json" {
@@ -38,6 +39,7 @@ func TestOAuth2IdentityUsesBearerAndAcceptsStringOrInteger(t *testing.T) {
 }
 
 func TestOAuth2IdentityRejectsMalformedResponsesAndConfig(t *testing.T) {
+	t.Parallel()
 	base := OAuth2Config{ClientID: "client", AuthorizationURL: "https://provider.example/auth", TokenURL: "https://provider.example/token", CallbackURL: "https://auth.example/callback", Scopes: []string{"openid"}, AuthStyle: oauth2.AuthStyleInHeader}
 	for _, mutate := range []func(*OAuth2Config){func(c *OAuth2Config) { c.IdentityEndpoint = "https://provider.example/user" }, func(c *OAuth2Config) { c.SubjectField = "sub" }, func(c *OAuth2Config) { c.IdentityEndpoint = "http://provider.example/user"; c.SubjectField = "sub" }, func(c *OAuth2Config) {
 		c.IdentityEndpoint = "https://provider.example/user"
@@ -70,6 +72,7 @@ func TestOAuth2IdentityRejectsMalformedResponsesAndConfig(t *testing.T) {
 }
 
 func TestOAuth2IdentityBoundaryFailures(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		status int

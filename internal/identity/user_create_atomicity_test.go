@@ -12,6 +12,7 @@ import (
 )
 
 func TestCreateUserConcurrentPreferredHasOneWinner(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, credential.DefaultRules())
 	now := time.Unix(1700000000, 0)
 	arrived, release := make(chan struct{}, 2), make(chan struct{})
@@ -40,6 +41,7 @@ func TestCreateUserConcurrentPreferredHasOneWinner(t *testing.T) {
 }
 
 func TestCreateUserPendingCleanupRemovesMembershipsButPreservesPasskeys(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, credential.DefaultRules())
 	ctx := context.Background()
 	now := time.Unix(1700000000, 0)
@@ -75,6 +77,7 @@ func TestCreateUserPendingCleanupRemovesMembershipsButPreservesPasskeys(t *testi
 }
 
 func TestCreateUserPreferredUniquenessIncludesPublicRegistration(t *testing.T) {
+	t.Parallel()
 	for _, publicFirst := range []bool{false, true} {
 		t.Run(map[bool]string{false: "admin first", true: "public first"}[publicFirst], func(t *testing.T) {
 			store := testResetStore(t, credential.DefaultRules())

@@ -8,6 +8,7 @@ import (
 )
 
 func TestHasExactRedirectURI(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	request := validRequest("redirect-match", TokenEndpointAuthNone)
 	request.RedirectURIs = []string{"https://rp.example.test/callback"}
@@ -37,6 +38,7 @@ func TestHasExactRedirectURI(t *testing.T) {
 }
 
 func TestHasExactRedirectURIFailsClosedOnMalformedRow(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	if _, err := store.Create(ctx, validRequest("valid-redirect", TokenEndpointAuthNone)); err != nil {
 		t.Fatal(err)

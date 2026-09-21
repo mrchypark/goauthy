@@ -16,6 +16,7 @@ import (
 )
 
 func TestAuthCollectionsHTTPAdminUserOwnershipAndRevision(t *testing.T) {
+	t.Parallel()
 	h, store, adminCookie, adminCSRF := membershipHTTPFixture(t)
 	if err := h.BindAuthCollections(authcollection.NewStore(store.db)); err != nil {
 		t.Fatal(err)
@@ -104,6 +105,7 @@ func TestAuthCollectionsHTTPAdminUserOwnershipAndRevision(t *testing.T) {
 }
 
 func TestAuthCollectionsHTTPStrictJSONCSRFAndImmutableUsedDefinition(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	if err := h.BindAuthCollections(authcollection.NewStore(store.db)); err != nil {
 		t.Fatal(err)
@@ -150,6 +152,7 @@ func TestAuthCollectionsHTTPStrictJSONCSRFAndImmutableUsedDefinition(t *testing.
 }
 
 func TestAuthCollectionsHTTPBoundaryAndRevisionFailures(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	if err := h.BindAuthCollections(authcollection.NewStore(store.db)); err != nil {
 		t.Fatal(err)
@@ -225,6 +228,7 @@ func TestAuthCollectionsHTTPBoundaryAndRevisionFailures(t *testing.T) {
 // list endpoint fail with 503 even though every row was accepted through this
 // same handler, because Rhiza bounds one query's encoded result.
 func TestAuthCollectionsHTTPListSurvivesOversizedAcceptedState(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	if err := h.BindAuthCollections(authcollection.NewStore(store.db)); err != nil {
 		t.Fatal(err)

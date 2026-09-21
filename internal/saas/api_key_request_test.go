@@ -44,6 +44,7 @@ func newAPIKeyTestConnector(server *httptest.Server, fields map[string]string) *
 }
 
 func TestAPIKeyRequestReturnsConfiguredScalarsAndFixedRequest(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -74,6 +75,7 @@ func TestAPIKeyRequestReturnsConfiguredScalarsAndFixedRequest(t *testing.T) {
 }
 
 func TestAPIKeyRequestRawAuthorization(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -96,6 +98,7 @@ func TestAPIKeyRequestRawAuthorization(t *testing.T) {
 }
 
 func TestAPIKeyRequestRejectsInvalidResponsesAndNeverSendsUnboundCredential(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name        string
 		body        string
@@ -146,6 +149,7 @@ func TestAPIKeyRequestRejectsInvalidResponsesAndNeverSendsUnboundCredential(t *t
 }
 
 func TestAPIKeyRequestHonorsCancellation(t *testing.T) {
+	t.Parallel()
 	started := make(chan struct{})
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		close(started)
@@ -168,6 +172,7 @@ func TestAPIKeyRequestHonorsCancellation(t *testing.T) {
 }
 
 func TestAPIKeyRequestRejectsRedirectAndResponseLimits(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		body string
@@ -200,6 +205,7 @@ func TestAPIKeyRequestRejectsRedirectAndResponseLimits(t *testing.T) {
 }
 
 func TestAPIKeyRequestIntegerStrictness(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"1e2", "1.0", "01", "-01", "9223372036854775808", "-9223372036854775809"} {
 		if _, err := validateAPIKeyResponseValue(json.RawMessage(raw), "integer", "synthetic-key"); err == nil {
 			t.Errorf("accepted integer %q", raw)

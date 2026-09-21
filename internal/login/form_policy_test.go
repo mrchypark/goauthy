@@ -6,6 +6,7 @@ import (
 )
 
 func TestAuthorizationFormCSP(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ redirect, action string }{
 		{"https://rp.example.test/callback?tenant=one", "'self' https://rp.example.test"},
 		{"https://rp.example.test:8443/callback", "'self' https://rp.example.test:8443"},

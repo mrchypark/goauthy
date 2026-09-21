@@ -17,6 +17,7 @@ import (
 )
 
 func TestJWKSVerifierVerifiesCachesAndRotates(t *testing.T) {
+	t.Parallel()
 	key1, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +59,7 @@ func TestJWKSVerifierVerifiesCachesAndRotates(t *testing.T) {
 }
 
 func TestJWKSVerifierColdFetchIsDeduplicatedAndWaitersCancel(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +107,7 @@ func TestJWKSVerifierColdFetchIsDeduplicatedAndWaitersCancel(t *testing.T) {
 }
 
 func TestNewJWKSVerifierRejectsInvalidAndConflictingIssuer(t *testing.T) {
+	t.Parallel()
 	valid := func(jwks string) Config {
 		return Config{Issuer: "https://issuer.example.test", AuthorizationEndpoint: "https://issuer.example.test/auth", TokenEndpoint: "https://issuer.example.test/token", ClientID: "client", JWKSURI: jwks}
 	}
@@ -117,6 +120,7 @@ func TestNewJWKSVerifierRejectsInvalidAndConflictingIssuer(t *testing.T) {
 }
 
 func TestNewJWKSVerifierSkipsGitHubAndVerifiesOIDC(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -148,6 +152,7 @@ func TestNewJWKSVerifierSkipsGitHubAndVerifiesOIDC(t *testing.T) {
 }
 
 func TestJWKSVerifierIsInstanceLocalAndBoundsUnknownKidRefresh(t *testing.T) {
+	t.Parallel()
 	key1, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -188,6 +193,7 @@ func TestJWKSVerifierIsInstanceLocalAndBoundsUnknownKidRefresh(t *testing.T) {
 }
 
 func TestJWKSVerifierExpiryStartsAfterFetch(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -210,6 +216,7 @@ func TestJWKSVerifierExpiryStartsAfterFetch(t *testing.T) {
 }
 
 func TestJWKSVerifierLeaderCancellationDoesNotCancelFetch(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -250,6 +257,7 @@ func TestJWKSVerifierLeaderCancellationDoesNotCancelFetch(t *testing.T) {
 }
 
 func TestJWKSVerifierRejectsDuplicateKid(t *testing.T) {
+	t.Parallel()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)

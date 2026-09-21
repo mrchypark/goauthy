@@ -33,14 +33,7 @@ type mutationHTTPFixture struct {
 func newMutationHTTPFixture(t *testing.T) *mutationHTTPFixture {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "mutation-http-test", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "mutation-http-test")
 	dir := t.TempDir()
 	key := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x07}, 32))
 	if err := os.WriteFile(filepath.Join(dir, "test-key"), []byte(key), 0o600); err != nil {
@@ -127,6 +120,7 @@ func validMutationHTTPJSONWithSecret() []byte {
 // --- Create tests ---
 
 func TestCreateProviderSuccess(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -145,6 +139,7 @@ func TestCreateProviderSuccess(t *testing.T) {
 }
 
 func TestCreateProviderWithSecret(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -169,6 +164,7 @@ func TestCreateProviderWithSecret(t *testing.T) {
 }
 
 func TestCreateProviderReturnsDecryptedSecret(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -185,6 +181,7 @@ func TestCreateProviderReturnsDecryptedSecret(t *testing.T) {
 }
 
 func TestCreateProviderInvalidRequestNoMutation(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -208,6 +205,7 @@ func TestCreateProviderInvalidRequestNoMutation(t *testing.T) {
 }
 
 func TestCreateProviderReservedIssuer(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -220,6 +218,7 @@ func TestCreateProviderReservedIssuer(t *testing.T) {
 }
 
 func TestCreateProviderPKCEOrSecretRequired(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -232,6 +231,7 @@ func TestCreateProviderPKCEOrSecretRequired(t *testing.T) {
 }
 
 func TestCreateProviderSecretRequiresMethod(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -253,6 +253,7 @@ func TestCreateProviderSecretRequiresMethod(t *testing.T) {
 }
 
 func TestCreateProviderMethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -264,6 +265,7 @@ func TestCreateProviderMethodNotAllowed(t *testing.T) {
 }
 
 func TestCreateProviderUnauthorized(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -274,6 +276,7 @@ func TestCreateProviderUnauthorized(t *testing.T) {
 }
 
 func TestCreateProviderWrongRight(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	_, token, err := f.keys.Create(f.ctx, nil, apikey.Request{
 		Name: "read-only-key", Access: []apikey.Access{{Group: authProvidersGroup, AccessRights: []apikey.Right{apikey.Read}}},
@@ -289,6 +292,7 @@ func TestCreateProviderWrongRight(t *testing.T) {
 }
 
 func TestCreateProviderRevokedKey(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	if _, err := storage.Execute(f.ctx, f.db, rhiza.ExecuteRequest{
 		RequestID: "revoke-mut-key", SQL: "UPDATE api_keys SET secret_digest=? WHERE name=?",
@@ -306,6 +310,7 @@ func TestCreateProviderRevokedKey(t *testing.T) {
 // --- Update tests ---
 
 func TestUpdateProviderSuccess(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	f.seedProvider("upd-ok")
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
@@ -319,6 +324,7 @@ func TestUpdateProviderSuccess(t *testing.T) {
 }
 
 func TestUpdateProviderWithSecret(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	f.seedProvider("upd-sec")
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
@@ -339,6 +345,7 @@ func TestUpdateProviderWithSecret(t *testing.T) {
 }
 
 func TestUpdateProviderClearSecret(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	f.seedProvider("upd-clear")
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
@@ -355,6 +362,7 @@ func TestUpdateProviderClearSecret(t *testing.T) {
 }
 
 func TestUpdateProviderInvalidRequestNoMutation(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	f.seedProvider("upd-inv")
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
@@ -374,6 +382,7 @@ func TestUpdateProviderInvalidRequestNoMutation(t *testing.T) {
 }
 
 func TestUpdateProviderNotFound(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -386,6 +395,7 @@ func TestUpdateProviderNotFound(t *testing.T) {
 }
 
 func TestUpdateProviderMethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -398,6 +408,7 @@ func TestUpdateProviderMethodNotAllowed(t *testing.T) {
 }
 
 func TestUpdateProviderUnauthorized(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -409,6 +420,7 @@ func TestUpdateProviderUnauthorized(t *testing.T) {
 }
 
 func TestUpdateProviderWrongRight(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	f.seedProvider("upd-wr")
 	_, token, err := f.keys.Create(f.ctx, nil, apikey.Request{
@@ -426,6 +438,7 @@ func TestUpdateProviderWrongRight(t *testing.T) {
 }
 
 func TestUpdateProviderRevokedKey(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	f.seedProvider("upd-rv")
 	if _, err := storage.Execute(f.ctx, f.db, rhiza.ExecuteRequest{
@@ -445,6 +458,7 @@ func TestUpdateProviderRevokedKey(t *testing.T) {
 // --- Delete tests ---
 
 func TestDeleteProviderSuccess(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	f.seedProvider("del-ok")
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
@@ -460,6 +474,7 @@ func TestDeleteProviderSuccess(t *testing.T) {
 }
 
 func TestDeleteProviderMissingIDSucceeds(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -472,6 +487,7 @@ func TestDeleteProviderMissingIDSucceeds(t *testing.T) {
 }
 
 func TestDeleteProviderWithSecret(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -493,6 +509,7 @@ func TestDeleteProviderWithSecret(t *testing.T) {
 }
 
 func TestDeleteProviderInvalidRequestNoMutation(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -505,6 +522,7 @@ func TestDeleteProviderInvalidRequestNoMutation(t *testing.T) {
 }
 
 func TestDeleteProviderMethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -517,6 +535,7 @@ func TestDeleteProviderMethodNotAllowed(t *testing.T) {
 }
 
 func TestDeleteProviderUnauthorized(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -528,6 +547,7 @@ func TestDeleteProviderUnauthorized(t *testing.T) {
 }
 
 func TestDeleteProviderWrongRight(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	_, token, err := f.keys.Create(f.ctx, nil, apikey.Request{
 		Name: "read-only-key-del", Access: []apikey.Access{{Group: authProvidersGroup, AccessRights: []apikey.Right{apikey.Read}}},
@@ -544,6 +564,7 @@ func TestDeleteProviderWrongRight(t *testing.T) {
 }
 
 func TestDeleteProviderRevokedKey(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	if _, err := storage.Execute(f.ctx, f.db, rhiza.ExecuteRequest{
 		RequestID: "revoke-del-key", SQL: "UPDATE api_keys SET secret_digest=? WHERE name=?",
@@ -562,12 +583,14 @@ func TestDeleteProviderRevokedKey(t *testing.T) {
 // --- Provider ID generation ---
 
 func TestGenerateProviderIDLength(t *testing.T) {
+	t.Parallel()
 	id, err := GenerateProviderID()
 	if err != nil { t.Fatal(err) }
 	if len(id) != 24 { t.Fatalf("len=%d", len(id)) }
 }
 
 func TestGenerateProviderIDAlphanumeric(t *testing.T) {
+	t.Parallel()
 	for i := 0; i < 100; i++ {
 		id, err := GenerateProviderID()
 		if err != nil { t.Fatal(err) }
@@ -580,6 +603,7 @@ func TestGenerateProviderIDAlphanumeric(t *testing.T) {
 }
 
 func TestGenerateProviderIDUnique(t *testing.T) {
+	t.Parallel()
 	seen := make(map[string]bool, 1000)
 	for i := 0; i < 1000; i++ {
 		id, err := GenerateProviderID()
@@ -592,6 +616,7 @@ func TestGenerateProviderIDUnique(t *testing.T) {
 // --- Cross-provider secret binding ---
 
 func TestCreateCrossProviderSecretBinding(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -618,6 +643,7 @@ func TestCreateCrossProviderSecretBinding(t *testing.T) {
 // --- Lifecycle ---
 
 func TestProviderLifecycleCreateUpdateDelete(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -650,6 +676,7 @@ func TestProviderLifecycleCreateUpdateDelete(t *testing.T) {
 // --- Browser admin ---
 
 func TestCreateProviderBrowserAdmin(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	called := false
 	ba := func(w http.ResponseWriter, r *http.Request, write bool) bool { called = true; if !write { t.Error("expected CSRF") }; return true }
@@ -663,6 +690,7 @@ func TestCreateProviderBrowserAdmin(t *testing.T) {
 }
 
 func TestUpdateProviderBrowserAdmin(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	f.seedProvider("ba-upd")
 	called := false
@@ -678,6 +706,7 @@ func TestUpdateProviderBrowserAdmin(t *testing.T) {
 }
 
 func TestDeleteProviderBrowserAdmin(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	f.seedProvider("ba-del")
 	called := false
@@ -693,6 +722,7 @@ func TestDeleteProviderBrowserAdmin(t *testing.T) {
 }
 
 func TestCreateProviderNoBrowserAdmin(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -705,6 +735,7 @@ func TestCreateProviderNoBrowserAdmin(t *testing.T) {
 // --- Invalid JSON ---
 
 func TestCreateProviderInvalidJSON(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -716,6 +747,7 @@ func TestCreateProviderInvalidJSON(t *testing.T) {
 }
 
 func TestUpdateProviderInvalidJSON(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -728,6 +760,7 @@ func TestUpdateProviderInvalidJSON(t *testing.T) {
 }
 
 func TestCreateProviderUnknownFieldsRejected(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -742,6 +775,7 @@ func TestCreateProviderUnknownFieldsRejected(t *testing.T) {
 // --- Bounded JSON body ---
 
 func TestCreateProviderTrailingJSONRejected(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }
@@ -754,6 +788,7 @@ func TestCreateProviderTrailingJSONRejected(t *testing.T) {
 }
 
 func TestUpdateProviderTrailingJSONRejected(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	f.seedProvider("trail-upd")
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
@@ -768,6 +803,7 @@ func TestUpdateProviderTrailingJSONRejected(t *testing.T) {
 }
 
 func TestCreateProviderOversizeBodyRejected(t *testing.T) {
+	t.Parallel()
 	f := newMutationHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil { t.Fatal(err) }

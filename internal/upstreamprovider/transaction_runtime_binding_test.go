@@ -9,6 +9,7 @@ import (
 // --- Rhiza envelope roundtrip: version + source ---
 
 func TestRhizaStoreRuntimeBindingRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	tx.ProviderSource = "registry"
@@ -26,6 +27,7 @@ func TestRhizaStoreRuntimeBindingRoundTrip(t *testing.T) {
 }
 
 func TestRhizaStoreRuntimeBindingSourceOnlyRejects(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	tx.ProviderSource = "registry"
@@ -36,6 +38,7 @@ func TestRhizaStoreRuntimeBindingSourceOnlyRejects(t *testing.T) {
 }
 
 func TestRhizaStoreRuntimeBindingVersionOnlyRejects(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	tx.ProviderSource = ""
@@ -46,6 +49,7 @@ func TestRhizaStoreRuntimeBindingVersionOnlyRejects(t *testing.T) {
 }
 
 func TestRhizaStoreRuntimeBindingUnknownSourceRejects(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	tx.ProviderSource = "unknown"
@@ -56,6 +60,7 @@ func TestRhizaStoreRuntimeBindingUnknownSourceRejects(t *testing.T) {
 }
 
 func TestRhizaStoreRuntimeBindingMalformedVersionRejects(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	tx.ProviderSource = "registry"
@@ -66,6 +71,7 @@ func TestRhizaStoreRuntimeBindingMalformedVersionRejects(t *testing.T) {
 }
 
 func TestRhizaStoreRuntimeBindingLongVersionRejects(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	tx.ProviderSource = "registry"
@@ -80,6 +86,7 @@ func TestRhizaStoreRuntimeBindingLongVersionRejects(t *testing.T) {
 }
 
 func TestRhizaStoreLegacyRuntimeBindingBothEmpty(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	tx.ProviderSource = ""
@@ -99,18 +106,21 @@ func TestRhizaStoreLegacyRuntimeBindingBothEmpty(t *testing.T) {
 // --- ValidateRuntimeBinding unit tests ---
 
 func TestValidateRuntimeBindingBothEmpty(t *testing.T) {
+	t.Parallel()
 	if err := validateRuntimeBinding("", ""); err != nil {
 		t.Fatalf("both empty: %v", err)
 	}
 }
 
 func TestValidateRuntimeBindingRegistryManaged(t *testing.T) {
+	t.Parallel()
 	if err := validateRuntimeBinding("registry", "v1.0"); err != nil {
 		t.Fatalf("registry v1.0: %v", err)
 	}
 }
 
 func TestValidateRuntimeBindingRegistryMaxVersion(t *testing.T) {
+	t.Parallel()
 	max := ""
 	for i := 0; i < 128; i++ {
 		max += "a"
@@ -121,24 +131,28 @@ func TestValidateRuntimeBindingRegistryMaxVersion(t *testing.T) {
 }
 
 func TestValidateRuntimeBindingPartialSource(t *testing.T) {
+	t.Parallel()
 	if err := validateRuntimeBinding("registry", ""); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("partial source: %v", err)
 	}
 }
 
 func TestValidateRuntimeBindingPartialVersion(t *testing.T) {
+	t.Parallel()
 	if err := validateRuntimeBinding("", "v1.0"); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("partial version: %v", err)
 	}
 }
 
 func TestValidateRuntimeBindingUnknownSource(t *testing.T) {
+	t.Parallel()
 	if err := validateRuntimeBinding("external", "v1.0"); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("unknown source: %v", err)
 	}
 }
 
 func TestValidateRuntimeBindingMalformedVersion(t *testing.T) {
+	t.Parallel()
 	for _, v := range []string{"v1.0 beta", "v1.0@latest", "v1.0#bad"} {
 		if err := validateRuntimeBinding("registry", v); !errors.Is(err, ErrInvalidConfig) {
 			t.Fatalf("version %q: %v", v, err)
@@ -147,6 +161,7 @@ func TestValidateRuntimeBindingMalformedVersion(t *testing.T) {
 }
 
 func TestValidateRuntimeBindingLongVersion(t *testing.T) {
+	t.Parallel()
 	long := ""
 	for i := 0; i < 129; i++ {
 		long += "a"
@@ -159,6 +174,7 @@ func TestValidateRuntimeBindingLongVersion(t *testing.T) {
 // --- AuthURL params -> saved binding ---
 
 func TestGenerateAuthURLCopiesRuntimeBinding(t *testing.T) {
+	t.Parallel()
 	cfg, p, store, params, binding, now := authProtocolFixture(t)
 	params.ProviderSource = "registry"
 	params.RuntimeVersion = "v2.0"
@@ -172,6 +188,7 @@ func TestGenerateAuthURLCopiesRuntimeBinding(t *testing.T) {
 }
 
 func TestGenerateAuthURLRejectsPartialRuntimeBinding(t *testing.T) {
+	t.Parallel()
 	cfg, p, _, _, binding, _ := authProtocolFixture(t)
 	params := AuthorizationParams{
 		CallbackURI:    "https://app.example.com/cb",
@@ -188,6 +205,7 @@ func TestGenerateAuthURLRejectsPartialRuntimeBinding(t *testing.T) {
 }
 
 func TestGenerateAuthURLRejectsUnknownSource(t *testing.T) {
+	t.Parallel()
 	cfg, p, _, _, binding, _ := authProtocolFixture(t)
 	params := AuthorizationParams{
 		CallbackURI:    "https://app.example.com/cb",
@@ -206,6 +224,7 @@ func TestGenerateAuthURLRejectsUnknownSource(t *testing.T) {
 // --- Replay rejection with runtime binding ---
 
 func TestRhizaStoreRuntimeBindingReplayRejects(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testRhizaStore(t)
 	tx := testRhizaTransaction()
 	tx.ProviderSource = "registry"

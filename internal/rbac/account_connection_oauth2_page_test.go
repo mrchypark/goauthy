@@ -11,6 +11,7 @@ import (
 )
 
 func TestWantsOAuth2CompletionPage(t *testing.T) {
+	t.Parallel()
 	for name, setup := range map[string]func(*http.Request){
 		"single matching values": func(r *http.Request) {
 			r.Header.Set("Sec-Fetch-Mode", "navigate")
@@ -39,6 +40,7 @@ func TestWantsOAuth2CompletionPage(t *testing.T) {
 }
 
 func TestRenderOAuth2CompletionPageEscapesFixedAccountPath(t *testing.T) {
+	t.Parallel()
 	h := &Handler{issuer: `https://issuer.example/<script>alert("x")</script>`}
 	w := httptest.NewRecorder()
 	h.renderOAuth2CompletionPage(w)
@@ -61,6 +63,7 @@ func TestRenderOAuth2CompletionPageEscapesFixedAccountPath(t *testing.T) {
 }
 
 func TestWriteOAuth2CompletionJSONCompatibility(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest(http.MethodGet, "/callback?state=secret&code=secret", nil)
 	w := httptest.NewRecorder()
 	want := saas.OAuth2ConnectionStatus{Connected: true, AccountID: "account", Scopes: []string{"openid"}}

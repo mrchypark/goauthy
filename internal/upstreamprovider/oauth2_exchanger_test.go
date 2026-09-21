@@ -39,6 +39,7 @@ func testOAuth2Exchanger(t *testing.T, handler http.Handler) (*OAuth2TokenExchan
 }
 
 func TestOAuth2TokenExchangerExchangeCode(t *testing.T) {
+	t.Parallel()
 	exchanger, _, _ := testOAuth2Exchanger(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got, want := r.Method, http.MethodPost; got != want {
 			t.Errorf("method = %q, want %q", got, want)
@@ -69,6 +70,7 @@ func TestOAuth2TokenExchangerExchangeCode(t *testing.T) {
 }
 
 func TestOAuth2TokenExchangerRejectsInvalidInputAndCopiesMaps(t *testing.T) {
+	t.Parallel()
 	exchanger, configs, secrets := testOAuth2Exchanger(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"access","id_token":"identity"}`))
@@ -102,6 +104,7 @@ func TestOAuth2TokenExchangerRejectsInvalidInputAndCopiesMaps(t *testing.T) {
 }
 
 func TestOAuth2TokenExchangerRejectsMalformedCallbackWithoutNetwork(t *testing.T) {
+	t.Parallel()
 	called := make(chan struct{}, 1)
 	exchanger, _, _ := testOAuth2Exchanger(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		called <- struct{}{}
@@ -118,6 +121,7 @@ func TestOAuth2TokenExchangerRejectsMalformedCallbackWithoutNetwork(t *testing.T
 }
 
 func TestOAuth2TokenExchangerClientPolicy(t *testing.T) {
+	t.Parallel()
 	configs := map[string]Config{"provider": {
 		Issuer: "https://issuer.example.test", AuthorizationEndpoint: "https://issuer.example.test/auth",
 		TokenEndpoint: "https://issuer.example.test/token", ClientID: "client",
@@ -150,6 +154,7 @@ func TestOAuth2TokenExchangerClientPolicy(t *testing.T) {
 }
 
 func TestOAuth2TokenExchangerDoesNotFollowRedirect(t *testing.T) {
+	t.Parallel()
 	followed := make(chan struct{}, 1)
 	exchanger, _, _ := testOAuth2Exchanger(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -172,6 +177,7 @@ func TestOAuth2TokenExchangerDoesNotFollowRedirect(t *testing.T) {
 }
 
 func TestOAuth2TokenExchangerRejectsBadTokenResponses(t *testing.T) {
+	t.Parallel()
 	for name, response := range map[string]string{
 		"non-2xx":          "status",
 		"error field":      `{"access_token":"x","error":"invalid_grant"}`,
@@ -196,6 +202,7 @@ func TestOAuth2TokenExchangerRejectsBadTokenResponses(t *testing.T) {
 }
 
 func TestOAuth2TokenExchangerCancellation(t *testing.T) {
+	t.Parallel()
 	exchanger, _, _ := testOAuth2Exchanger(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -206,6 +213,7 @@ func TestOAuth2TokenExchangerCancellation(t *testing.T) {
 }
 
 func TestOAuth2TokenExchangerCancelsInFlightRequest(t *testing.T) {
+	t.Parallel()
 	started := make(chan struct{})
 	release := make(chan struct{})
 	defer close(release)
@@ -257,6 +265,7 @@ func testExchangerWithProtocol(t *testing.T, handler http.Handler, proto Provide
 }
 
 func TestExplicitBasicOnly(t *testing.T) {
+	t.Parallel()
 	var gotBasic, gotPost, gotVerifier bool
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, _, ok := r.BasicAuth()
@@ -284,6 +293,7 @@ func TestExplicitBasicOnly(t *testing.T) {
 }
 
 func TestExplicitPostOnly(t *testing.T) {
+	t.Parallel()
 	var gotBasic, gotPost, gotVerifier bool
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _, ok := r.BasicAuth()
@@ -311,6 +321,7 @@ func TestExplicitPostOnly(t *testing.T) {
 }
 
 func TestExplicitBasicAndPost(t *testing.T) {
+	t.Parallel()
 	var gotBasic, gotPost bool
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
@@ -334,6 +345,7 @@ func TestExplicitBasicAndPost(t *testing.T) {
 }
 
 func TestExplicitPKCEOff(t *testing.T) {
+	t.Parallel()
 	var gotVerifier bool
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotVerifier = r.FormValue("code_verifier") != ""
@@ -353,6 +365,7 @@ func TestExplicitPKCEOff(t *testing.T) {
 }
 
 func TestExplicitPublicClient(t *testing.T) {
+	t.Parallel()
 	// Public client: PKCE on, no secret auth.
 	var gotBasic, gotPost, gotVerifier bool
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -381,6 +394,7 @@ func TestExplicitPublicClient(t *testing.T) {
 }
 
 func TestExplicitRejectsMissingVerifierWhenPKCE(t *testing.T) {
+	t.Parallel()
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"access","id_token":"identity"}`))
@@ -394,6 +408,7 @@ func TestExplicitRejectsMissingVerifierWhenPKCE(t *testing.T) {
 }
 
 func TestExplicitAllowsEmptyVerifierWhenPKCEOff(t *testing.T) {
+	t.Parallel()
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"access","id_token":"identity"}`))
@@ -407,6 +422,7 @@ func TestExplicitAllowsEmptyVerifierWhenPKCEOff(t *testing.T) {
 }
 
 func TestExplicitRejectsTokenErrors(t *testing.T) {
+	t.Parallel()
 	for name, response := range map[string]string{
 		"non-2xx":     "status",
 		"error field": `{"access_token":"x","error":"invalid_grant"}`,
@@ -431,6 +447,7 @@ func TestExplicitRejectsTokenErrors(t *testing.T) {
 }
 
 func TestExplicitConstructorAllowsNoSecretWhenBasic(t *testing.T) {
+	t.Parallel()
 	_, err := NewOAuth2TokenExchanger(map[string]Config{"p": {
 		Issuer:                "https://issuer.example.test",
 		AuthorizationEndpoint: "https://issuer.example.test/auth",
@@ -444,6 +461,7 @@ func TestExplicitConstructorAllowsNoSecretWhenBasic(t *testing.T) {
 }
 
 func TestExplicitConstructorAllowsNoSecretForPublicClient(t *testing.T) {
+	t.Parallel()
 	_, err := NewOAuth2TokenExchanger(map[string]Config{"p": {
 		Issuer:                "https://issuer.example.test",
 		AuthorizationEndpoint: "https://issuer.example.test/auth",
@@ -457,6 +475,7 @@ func TestExplicitConstructorAllowsNoSecretForPublicClient(t *testing.T) {
 }
 
 func TestExplicitConstructorClonesProtocolPointers(t *testing.T) {
+	t.Parallel()
 	trueVal := true
 	cfg := Config{
 		Issuer:                "https://issuer.example.test",
@@ -487,6 +506,7 @@ func TestExplicitConstructorClonesProtocolPointers(t *testing.T) {
 }
 
 func TestExplicitPublicClientNoSecret2xxAccepted(t *testing.T) {
+	t.Parallel()
 	// Public client with no secret, server returns 201.
 	var gotBasic, gotPost bool
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -512,6 +532,7 @@ func TestExplicitPublicClientNoSecret2xxAccepted(t *testing.T) {
 }
 
 func TestExplicitRejectsMissingIDToken(t *testing.T) {
+	t.Parallel()
 	// OIDC providers must return a non-empty id_token.
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -526,6 +547,7 @@ func TestExplicitRejectsMissingIDToken(t *testing.T) {
 }
 
 func TestExplicitBasicAuthSendsUsernameColonWithAbsentSecret(t *testing.T) {
+	t.Parallel()
 	// Rauthy-aligned: Basic flag => Authorization header even with absent secret.
 	var gotBasic bool
 	var gotUser, gotPass string
@@ -549,6 +571,7 @@ func TestExplicitBasicAuthSendsUsernameColonWithAbsentSecret(t *testing.T) {
 }
 
 func TestExplicitPostIncludesEmptySecretWhenKeyPresent(t *testing.T) {
+	t.Parallel()
 	// Post flag => form field when map key is present, even with empty value.
 	var gotPostVal string
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -568,6 +591,7 @@ func TestExplicitPostIncludesEmptySecretWhenKeyPresent(t *testing.T) {
 }
 
 func TestExplicitPostOmitsSecretWhenKeyAbsent(t *testing.T) {
+	t.Parallel()
 	// Post flag => no form field when map key is absent.
 	var gotPost bool
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -587,6 +611,7 @@ func TestExplicitPostOmitsSecretWhenKeyAbsent(t *testing.T) {
 }
 
 func TestLegacyConstructorRejectsMissingSecret(t *testing.T) {
+	t.Parallel()
 	// Legacy protocol (isZero) must reject missing/empty secret.
 	_, err := NewOAuth2TokenExchanger(map[string]Config{"p": {
 		Issuer: "https://issuer.example.test", AuthorizationEndpoint: "https://issuer.example.test/auth",
@@ -598,6 +623,7 @@ func TestLegacyConstructorRejectsMissingSecret(t *testing.T) {
 }
 
 func TestLegacyConstructorRejectsEmptySecret(t *testing.T) {
+	t.Parallel()
 	// Legacy protocol (isZero) must reject key-present-but-empty secret.
 	_, err := NewOAuth2TokenExchanger(map[string]Config{"p": {
 		Issuer: "https://issuer.example.test", AuthorizationEndpoint: "https://issuer.example.test/auth",
@@ -609,6 +635,7 @@ func TestLegacyConstructorRejectsEmptySecret(t *testing.T) {
 }
 
 func TestExplicitConstructorPreservesSecretMembership(t *testing.T) {
+	t.Parallel()
 	// Basic flag always sends header; Post flag distinguishes absent vs present.
 	t.Run("basic_sends_with_both_absent_and_present", func(t *testing.T) {
 		for _, tc := range []struct {
@@ -674,6 +701,7 @@ func TestExplicitConstructorPreservesSecretMembership(t *testing.T) {
 }
 
 func TestExplicitRejectsTrailingJSON(t *testing.T) {
+	t.Parallel()
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id_token":"id"}{"extra":true}`))
@@ -687,6 +715,7 @@ func TestExplicitRejectsTrailingJSON(t *testing.T) {
 }
 
 func TestExplicitRejectsOversizeBody(t *testing.T) {
+	t.Parallel()
 	big := strings.Repeat("x", tokenMaxBytes+100)
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -701,6 +730,7 @@ func TestExplicitRejectsOversizeBody(t *testing.T) {
 }
 
 func TestExplicitRejectsTrailingNonWhitespace(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		body    string
@@ -732,6 +762,7 @@ func TestExplicitRejectsTrailingNonWhitespace(t *testing.T) {
 }
 
 func TestExplicitOIDCRequiresIDToken(t *testing.T) {
+	t.Parallel()
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"access_token":"at","token_type":"Bearer"}`))
@@ -745,6 +776,7 @@ func TestExplicitOIDCRequiresIDToken(t *testing.T) {
 }
 
 func TestExplicitOIDCAcceptsIDTokenOnly(t *testing.T) {
+	t.Parallel()
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id_token":"myid"}`))
@@ -758,6 +790,7 @@ func TestExplicitOIDCAcceptsIDTokenOnly(t *testing.T) {
 }
 
 func TestOIDCProviderRejectsMissingIDTokenEvenWithUserInfo(t *testing.T) {
+	t.Parallel()
 	// OIDC providers must reject access-token-only responses even when a
 	// UserInfo endpoint is configured. Falling back to UserInfo bypasses
 	// id_token signature, issuer, audience, nonce, and time validation.
@@ -780,6 +813,7 @@ func TestOIDCProviderRejectsMissingIDTokenEvenWithUserInfo(t *testing.T) {
 }
 
 func TestOAuthUserInfoProviderAcceptsMissingIDToken(t *testing.T) {
+	t.Parallel()
 	// Control: ProviderKindOAuthUserInfo legitimately uses UserInfo and does
 	// not require an id_token.
 	var userinfoHits int
@@ -826,6 +860,7 @@ func TestOAuthUserInfoProviderAcceptsMissingIDToken(t *testing.T) {
 }
 
 func TestExplicitBasicAuthFormEncodesCredentialComponents(t *testing.T) {
+	t.Parallel()
 	// RFC 6749 section 2.3.1: client_id and client_secret are
 	// application/x-www-form-urlencoded encoded before Basic construction.
 	const reservedID = "client:id/@"

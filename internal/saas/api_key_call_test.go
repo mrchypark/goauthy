@@ -11,6 +11,7 @@ import (
 )
 
 func TestCallAPIKeyEncryptedStoreToTLSProvider(t *testing.T) {
+	t.Parallel()
 	for _, scenario := range []string{"success", "unbound", "different-policy", "revoked-before", "revoked-inflight", "rotated-inflight", "authority-inflight"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx, store, db, b := credentialStoreFixture(t)

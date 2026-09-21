@@ -8,6 +8,7 @@ import (
 )
 
 func TestAccountConnectionAPIKeyRejectsUnauthenticatedAndStrictBodies(t *testing.T) {
+	t.Parallel()
 	h, _, _, _ := membershipHTTPFixture(t)
 	if err := h.BindSaaSCredentials(nil); err == nil {
 		t.Fatal("nil credential store accepted")
@@ -25,6 +26,7 @@ func TestAccountConnectionAPIKeyRejectsUnauthenticatedAndStrictBodies(t *testing
 }
 
 func TestAPIKeyVersionAcceptsIfMatchOrStrictBody(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest(http.MethodDelete, "/", strings.NewReader(`{"version":3}`))
 	r.Header.Set("Content-Type", "application/json")
 	if got, err := apiKeyVersion(r); err != nil || got != 3 {
