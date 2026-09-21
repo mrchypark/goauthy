@@ -13,6 +13,7 @@ import (
 )
 
 func TestProviderLogoStoreReplaceAndFind(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -44,6 +45,7 @@ func TestProviderLogoStoreReplaceAndFind(t *testing.T) {
 }
 
 func TestProviderLogoStoreSVGReplaceAndFind(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -75,6 +77,7 @@ func TestProviderLogoStoreSVGReplaceAndFind(t *testing.T) {
 }
 
 func TestProviderLogoStoreSVGUploadFindSmallRegression(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -106,6 +109,7 @@ func TestProviderLogoStoreSVGUploadFindSmallRegression(t *testing.T) {
 }
 
 func TestProviderLogoStoreMalformedBatchPreservesOld(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -146,6 +150,7 @@ func TestProviderLogoStoreMalformedBatchPreservesOld(t *testing.T) {
 }
 
 func TestProviderLogoStoreRevokedKeyDeniesMutation(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -170,6 +175,7 @@ func TestProviderLogoStoreRevokedKeyDeniesMutation(t *testing.T) {
 }
 
 func TestProviderLogoStoreInexistentProviderDeniesMutation(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -185,6 +191,7 @@ func TestProviderLogoStoreInexistentProviderDeniesMutation(t *testing.T) {
 }
 
 func TestProviderLogoStoreDeleteOnlyTarget(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -208,6 +215,7 @@ func TestProviderLogoStoreDeleteOnlyTarget(t *testing.T) {
 }
 
 func TestProviderLogoStoreNoGlobalFallback(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {

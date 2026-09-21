@@ -11,6 +11,7 @@ import (
 )
 
 func TestMasterKeyRewrapStepAdvancesAndResetsCursors(t *testing.T) {
+	t.Parallel()
 	var signingCursors, idempotencyCursors, transactionCursors, passkeyCursors []string
 	pass := 0
 	worker := &masterKeyRewrapWorker{
@@ -69,6 +70,7 @@ func TestMasterKeyRewrapStepAdvancesAndResetsCursors(t *testing.T) {
 }
 
 func TestMasterKeyRewrapStepIncludesLoginRevoke(t *testing.T) {
+	t.Parallel()
 	loginRevokeErr := errors.New("login-revoke envelope unavailable")
 	calls := 0
 	worker := &masterKeyRewrapWorker{
@@ -91,6 +93,7 @@ func TestMasterKeyRewrapStepIncludesLoginRevoke(t *testing.T) {
 }
 
 func TestMasterKeyRewrapStepIncludesEmailOutbox(t *testing.T) {
+	t.Parallel()
 	emailOutboxErr := errors.New("email outbox envelope unavailable")
 	calls := 0
 	worker := &masterKeyRewrapWorker{
@@ -113,6 +116,7 @@ func TestMasterKeyRewrapStepIncludesEmailOutbox(t *testing.T) {
 }
 
 func TestMasterKeyRewrapStepPasskeyDisabledIsNoOp(t *testing.T) {
+	t.Parallel()
 	worker := &masterKeyRewrapWorker{
 		now: func() time.Time { return time.Unix(1_900_000_000, 0).UTC() },
 		rewrapSigning: func(context.Context, string) (oidc.SigningKeyRewrapBatchResult, error) {
@@ -135,6 +139,7 @@ func TestMasterKeyRewrapStepPasskeyDisabledIsNoOp(t *testing.T) {
 }
 
 func TestMasterKeyRewrapStepPasskeyCursorChangesOnlyAfterSuccess(t *testing.T) {
+	t.Parallel()
 	passkeyErr := errors.New("passkey envelope unavailable")
 	pass := 0
 	worker := &masterKeyRewrapWorker{
@@ -165,6 +170,7 @@ func TestMasterKeyRewrapStepPasskeyCursorChangesOnlyAfterSuccess(t *testing.T) {
 }
 
 func TestMasterKeyRewrapRunImmediatelyReportsAndContinues(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ticks := make(chan time.Time)
@@ -210,6 +216,7 @@ func TestMasterKeyRewrapRunImmediatelyReportsAndContinues(t *testing.T) {
 }
 
 func TestMasterKeyRewrapStepContinuesAfterDCRFailure(t *testing.T) {
+	t.Parallel()
 	dcrErr := errors.New("tampered idempotency envelope")
 	upstreamCalled := false
 	passkeyCalled := false
@@ -237,6 +244,7 @@ func TestMasterKeyRewrapStepContinuesAfterDCRFailure(t *testing.T) {
 }
 
 func TestMasterKeyRewrapRunFamilyTimeoutAllowsLaterTickRecovery(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ticks := make(chan time.Time)
@@ -380,6 +388,7 @@ func TestMasterKeyRewrapRunFamilyTimeoutAllowsLaterTickRecovery(t *testing.T) {
 }
 
 func TestMasterKeyRewrapRunStopsBeforeImmediateStepWhenCanceled(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	called := false

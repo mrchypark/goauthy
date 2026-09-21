@@ -7,6 +7,7 @@ import (
 )
 
 func TestDefaultThemeAndCSS(t *testing.T) {
+	t.Parallel()
 	theme := DefaultTheme("client-1")
 	if err := theme.Validate(); err != nil {
 		t.Fatal(err)
@@ -25,6 +26,7 @@ func TestDefaultThemeAndCSS(t *testing.T) {
 }
 
 func TestThemeValidateRejectsMalformedJSONAndCSS(t *testing.T) {
+	t.Parallel()
 	valid := `{"client_id":"client-1","light":{"text":[1,2,3],"text_high":[1,2,3],"bg":[1,2,3],"bg_high":[1,2,3],"action":[1,2,3],"accent":[1,2,3],"error":[1,2,3],"btn_text":"white","theme_sun":"none","theme_moon":"none"},"dark":{"text":[1,2,3],"text_high":[1,2,3],"bg":[1,2,3],"bg_high":[1,2,3],"action":[1,2,3],"accent":[1,2,3],"error":[1,2,3],"btn_text":"white","theme_sun":"none","theme_moon":"none"},"border_radius":"5px"}`
 	for name, input := range map[string]string{
 		"valid":                   valid,
@@ -51,6 +53,7 @@ func TestThemeValidateRejectsMalformedJSONAndCSS(t *testing.T) {
 }
 
 func TestThemeValidateActionOmissionAndClientID(t *testing.T) {
+	t.Parallel()
 	theme := DefaultTheme("client-1")
 	theme.Light.Action = []uint16{65535, 65535, 65535}
 	if err := theme.Validate(); err != nil {
@@ -76,6 +79,7 @@ func TestThemeValidateActionOmissionAndClientID(t *testing.T) {
 }
 
 func TestThemeCSSValidationMatchesRustWhitespace(t *testing.T) {
+	t.Parallel()
 	theme := DefaultTheme("client-1")
 	theme.Light.ThemeSun = "hsla(var(--action)\u00a0/\u000b.7)"
 	if err := theme.Validate(); err != nil {

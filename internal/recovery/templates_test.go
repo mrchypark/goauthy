@@ -8,6 +8,7 @@ import (
 )
 
 func TestLoadEmailTemplatesDefaultsAndPartialOverride(t *testing.T) {
+	t.Parallel()
 	defaults, err := LoadEmailTemplates("")
 	if err != nil {
 		t.Fatal(err)
@@ -64,6 +65,7 @@ subject = "기존 사용자 지정"
 }
 
 func TestLoadEmailTemplatesRejectsInvalidInput(t *testing.T) {
+	t.Parallel()
 	for name, content := range map[string]string{
 		"unknown type": `[[templates]]
 lang = "en"
@@ -118,6 +120,7 @@ subject = "safe\r\nBcc: victim@example.test"`,
 }
 
 func TestFixedPasswordResetLayoutsEscapeHTML(t *testing.T) {
+	t.Parallel()
 	template := defaultEmailTemplates().PasswordReset("en")
 	template.Header = `<img src=x onerror=alert(1)>`
 	template.Text = `<script>alert(1)</script>`
@@ -136,6 +139,7 @@ func TestFixedPasswordResetLayoutsEscapeHTML(t *testing.T) {
 }
 
 func TestFixedPasswordNewLayoutsEscapeHTML(t *testing.T) {
+	t.Parallel()
 	template := defaultEmailTemplates().PasswordNew("en")
 	template.Header = `<img src=x onerror=alert(1)>`
 	data := passwordNewData{EmailTemplate: template, ResetURL: "https://auth.example.test/new?a=1&b=2", ExpiresAt: "2030-01-02T03:04:05Z"}
@@ -150,6 +154,7 @@ func TestFixedPasswordNewLayoutsEscapeHTML(t *testing.T) {
 }
 
 func TestFixedRegisteredAlreadyLayoutsEscapeHTML(t *testing.T) {
+	t.Parallel()
 	template := defaultEmailTemplates().AlreadyRegistered("en")
 	template.Text = `<script>alert(1)</script>`
 	html, err := renderRegisteredAlreadyHTML(registeredAlreadyData{EmailTemplate: template})

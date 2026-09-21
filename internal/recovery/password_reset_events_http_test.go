@@ -86,6 +86,7 @@ func resetEventIPs(t *testing.T, service *Service) []string {
 }
 
 func TestPutResetPasswordEventUsesResolvedPeerIP(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	token, cookie, csrf := resetHTTPChallenge(t, service)
 	response := putResetHTTP(t, service, token, cookie, csrf, "198.51.100.7:1234", "2001:db8::7")
@@ -99,6 +100,7 @@ func TestPutResetPasswordEventUsesResolvedPeerIP(t *testing.T) {
 }
 
 func TestPutResetPasswordEventFallsBackToRemotePeer(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	token, cookie, csrf := resetHTTPChallenge(t, service)
 	response := putResetHTTP(t, service, token, cookie, csrf, "198.51.100.8:1234", "")
@@ -112,6 +114,7 @@ func TestPutResetPasswordEventFallsBackToRemotePeer(t *testing.T) {
 }
 
 func TestPutResetInvalidPeerLeavesResetUnconsumed(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	token, cookie, challengeCSRF := resetHTTPChallenge(t, service)
 	response := putResetHTTP(t, service, token, cookie, challengeCSRF, "not-an-ip", "")

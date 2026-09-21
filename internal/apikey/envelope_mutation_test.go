@@ -17,14 +17,7 @@ import (
 func envelopeFixture(t *testing.T, state string, rights ...Right) (*Store, *Principal, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "apikey-envelope-" + state, DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "apikey-envelope-"+state)
 	if state != "" {
 		now := time.UnixMilli(1_800_000_000_000).UTC()
 		if _, err := storage.PrepareMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementPrepareRequest{
@@ -83,6 +76,7 @@ func envelopeFixture(t *testing.T, state string, rights ...Right) (*Store, *Prin
 }
 
 func TestRunEnvelopeMutationAuthorizedMutationSucceeds(t *testing.T) {
+	t.Parallel()
 	s, p, ctx := envelopeFixture(t, "")
 	requestID := strings.Repeat("e", 43)
 	targetDigest := strings.Repeat("T", 43)
@@ -109,6 +103,7 @@ func TestRunEnvelopeMutationAuthorizedMutationSucceeds(t *testing.T) {
 }
 
 func TestRunEnvelopeMutationRevokedBeforeSubmissionChangesNothing(t *testing.T) {
+	t.Parallel()
 	s, p, ctx := envelopeFixture(t, "")
 	// Revoke the key before the mutation is submitted.
 	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
@@ -136,6 +131,7 @@ func TestRunEnvelopeMutationRevokedBeforeSubmissionChangesNothing(t *testing.T) 
 }
 
 func TestRunEnvelopeMutationFencedOldWriterRollsBackIncludingGuard(t *testing.T) {
+	t.Parallel()
 	s, p, ctx := envelopeFixture(t, storage.MasterKeyRetirementFenced)
 	requestID := strings.Repeat("f", 43)
 	targetDigest := strings.Repeat("T", 43)
@@ -161,6 +157,7 @@ func TestRunEnvelopeMutationFencedOldWriterRollsBackIncludingGuard(t *testing.T)
 }
 
 func TestRunEnvelopeMutationReplacementWriterSucceeds(t *testing.T) {
+	t.Parallel()
 	s, p, ctx := envelopeFixture(t, storage.MasterKeyRetirementFenced)
 	requestID := strings.Repeat("w", 43)
 	targetDigest := strings.Repeat("T", 43)
@@ -183,6 +180,7 @@ func TestRunEnvelopeMutationReplacementWriterSucceeds(t *testing.T) {
 }
 
 func TestRunEnvelopeMutationConstraintFailureRollsBackTargetsAndGuard(t *testing.T) {
+	t.Parallel()
 	s, p, ctx := envelopeFixture(t, "")
 	requestID := strings.Repeat("c", 43)
 	// The audit insert has a unique constraint on event_id; duplicate

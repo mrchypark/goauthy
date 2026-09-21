@@ -13,6 +13,7 @@ import (
 )
 
 func TestClientLogoFaviconAuthorizedReplaceDeletePreservesLogo(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientLogoStore(db)
 	if err != nil {
@@ -72,6 +73,7 @@ func TestClientLogoFaviconAuthorizedReplaceDeletePreservesLogo(t *testing.T) {
 }
 
 func TestClientLogoFaviconAuthorizedRejectsInvalidAsset(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientLogoStore(db)
 	if err != nil {
@@ -98,6 +100,7 @@ func TestClientLogoFaviconAuthorizedRejectsInvalidAsset(t *testing.T) {
 }
 
 func TestClientLogoFaviconAuthorizedRevokedAndDeletedPreserveBoth(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientLogoStore(db)
 	if err != nil {

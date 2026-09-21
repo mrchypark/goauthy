@@ -9,12 +9,10 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/mrchypark/goauthy/internal/storage"
-	"github.com/mrchypark/rhiza"
 )
 
 func TestKeysRejectsNestedDuplicateJSONField(t *testing.T) {
+	t.Parallel()
 	h := NewHandler(nil, func(http.ResponseWriter, *http.Request, bool) bool { return true })
 	r := httptest.NewRequest(http.MethodPost, "/auth/v1/api_keys", strings.NewReader(`{"name":"nested","access":{"groups":["Roles"],"groups":["Users"]}}`))
 	r.Header.Set("Content-Type", "application/json")
@@ -26,14 +24,8 @@ func TestKeysRejectsNestedDuplicateJSONField(t *testing.T) {
 }
 
 func TestAuthorizationHeaderNeverFallsBackToBrowserAdmin(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "apikey-http", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err = storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	db := openTestDB(t, "apikey-http")
 	store, err := NewStore(db)
 	if err != nil {
 		t.Fatal(err)
@@ -62,14 +54,8 @@ func TestAuthorizationHeaderNeverFallsBackToBrowserAdmin(t *testing.T) {
 }
 
 func TestAPIKeyCannotManageAPIKeys(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "apikey-http-deny", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err = storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	db := openTestDB(t, "apikey-http-deny")
 	store, err := NewStore(db)
 	if err != nil {
 		t.Fatal(err)
@@ -120,15 +106,9 @@ func TestAPIKeyCannotManageAPIKeys(t *testing.T) {
 }
 
 func TestEventsRequiresEventsReadAndStrictCursorQuery(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "apikey-events-http", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "apikey-events-http")
 	store, err := NewStore(db)
 	if err != nil {
 		t.Fatal(err)
@@ -189,6 +169,7 @@ func TestEventsRequiresEventsReadAndStrictCursorQuery(t *testing.T) {
 }
 
 func TestScopedAPIKeyCanTestOnlyItself(t *testing.T) {
+	t.Parallel()
 	db := bootstrapTestDB(t, "apikey-self-test")
 	store, err := NewStore(db)
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 )
 
 func TestThemePutAuthorizedAllowsBootstrapClient(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewThemeStore(db)
 	if err != nil {
@@ -43,6 +44,7 @@ func TestThemePutAuthorizedAllowsBootstrapClient(t *testing.T) {
 }
 
 func TestThemePutAuthorizedAllowsDynamicClientAndDeniesAfterDeletion(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewThemeStore(db)
 	if err != nil {
@@ -92,6 +94,7 @@ func TestThemePutAuthorizedAllowsDynamicClientAndDeniesAfterDeletion(t *testing.
 }
 
 func TestThemePutAuthorizedRejectsMissingClient(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewThemeStore(db)
 	if err != nil {
@@ -112,6 +115,7 @@ func TestThemePutAuthorizedRejectsMissingClient(t *testing.T) {
 }
 
 func TestThemePutAuthorizedAllowsDisabledManagedClient(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewThemeStore(db)
 	if err != nil {

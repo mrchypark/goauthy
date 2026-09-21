@@ -7,6 +7,7 @@ import (
 )
 
 func TestMountMasterKeyRetirementRoutes(t *testing.T) {
+	t.Parallel()
 	mux := http.NewServeMux()
 	mountMasterKeyRetirementRoutes(mux, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

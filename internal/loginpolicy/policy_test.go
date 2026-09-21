@@ -2,9 +2,13 @@ package loginpolicy
 
 import (
 	"context"
+	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -15,6 +19,7 @@ import (
 )
 
 func TestFailureScheduleBlockAndSuccessReset(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.Unix(1_700_000_000, 0).UTC()
@@ -49,6 +54,7 @@ func TestFailureScheduleBlockAndSuccessReset(t *testing.T) {
 }
 
 func TestAttemptAdmissionIsDistributedAndCapped(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	first, second := NewStore(db), NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -87,6 +93,7 @@ func TestAttemptAdmissionIsDistributedAndCapped(t *testing.T) {
 }
 
 func TestPasswordResetAdmissionHasIndependentFiveAttemptWindow(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -108,6 +115,7 @@ func TestPasswordResetAdmissionHasIndependentFiveAttemptWindow(t *testing.T) {
 }
 
 func TestOpenRegistrationAdmissionIsIndependentAndDeterministic(t *testing.T) {
+	t.Parallel()
 	store := NewStore(testDB(t))
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	for attempt := 1; attempt <= OpenRegistrationAttemptLimit; attempt++ {
@@ -133,6 +141,7 @@ func TestOpenRegistrationAdmissionIsIndependentAndDeterministic(t *testing.T) {
 }
 
 func TestPasswordResetAdmissionRequiresCanonicalIP(t *testing.T) {
+	t.Parallel()
 	store := NewStore(testDB(t))
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	for _, ip := range []string{"", "forged", "192.0.2.1:443", "2001:0db8::1", "2001:db8::1%eth0"} {
@@ -143,6 +152,7 @@ func TestPasswordResetAdmissionRequiresCanonicalIP(t *testing.T) {
 }
 
 func TestRateLimitExpiryIsSetAndTriggerDeletesExpired(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -211,6 +221,7 @@ func TestRateLimitExpiryIsSetAndTriggerDeletesExpired(t *testing.T) {
 }
 
 func TestTriggerCleanupBounded64RowProgress(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -263,6 +274,7 @@ func TestTriggerCleanupBounded64RowProgress(t *testing.T) {
 }
 
 func TestTriggerCleanupExpiryEquality(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -317,6 +329,7 @@ func TestTriggerCleanupExpiryEquality(t *testing.T) {
 }
 
 func TestRateLimitCrossDomainIsolation(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -345,6 +358,7 @@ func TestRateLimitCrossDomainIsolation(t *testing.T) {
 }
 
 func TestRateLimitConcurrentCleanupAndAdmission(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -418,6 +432,7 @@ func TestRateLimitConcurrentCleanupAndAdmission(t *testing.T) {
 }
 
 func TestRateLimitRestartPersistence(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -451,6 +466,7 @@ func TestRateLimitRestartPersistence(t *testing.T) {
 }
 
 func TestPasswordResetAdmissionIsDistributedAndCapped(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	first, second := NewStore(db), NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -489,6 +505,7 @@ func TestPasswordResetAdmissionIsDistributedAndCapped(t *testing.T) {
 }
 
 func TestFailuresAreDistributedAndIPHeadersAreNotInputs(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	first, second := NewStore(db), NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -524,6 +541,7 @@ func TestFailuresAreDistributedAndIPHeadersAreNotInputs(t *testing.T) {
 }
 
 func TestPeerIPFromRequestTrustedProxyPolicy(t *testing.T) {
+	t.Parallel()
 	trusted := []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24"), netip.MustParsePrefix("2001:db8:1::/48")}
 	for _, test := range []struct {
 		name       string
@@ -565,6 +583,7 @@ func TestPeerIPFromRequestTrustedProxyPolicy(t *testing.T) {
 }
 
 func TestParseTrustedProxyCIDRs(t *testing.T) {
+	t.Parallel()
 	prefixes, err := ParseTrustedProxyCIDRs([]string{"192.0.2.23/24", "2001:db8::1/64"})
 	if err != nil || len(prefixes) != 2 || prefixes[0].String() != "192.0.2.0/24" || prefixes[1].String() != "2001:db8::/64" {
 		t.Fatalf("prefixes=%v err=%v", prefixes, err)
@@ -576,7 +595,11 @@ func TestParseTrustedProxyCIDRs(t *testing.T) {
 
 func testDB(t *testing.T) *rhiza.DB {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "login-policy-test", DataDir: t.TempDir()})
+	directory := t.TempDir()
+	if err := copyDirTree(loginpolicyMigratedTemplate(t), directory); err != nil {
+		t.Fatal(err)
+	}
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "login-policy-test", DataDir: directory})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,4 +608,76 @@ func testDB(t *testing.T) *rhiza.DB {
 		t.Fatal(err)
 	}
 	return db
+}
+
+// Rhiza applies every migration statement through replicated consensus, which
+// costs several seconds for a fresh database under -race. The migrated schema is
+// built once per test binary and each test opens a private copy of it, which
+// keeps per-test isolation and still exercises the idempotent migrate path.
+var (
+	loginpolicyTemplateOnce      sync.Once
+	loginpolicyTemplateDirectory string
+	loginpolicyTemplateErr       error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if loginpolicyTemplateDirectory != "" {
+		_ = os.RemoveAll(loginpolicyTemplateDirectory)
+	}
+	os.Exit(code)
+}
+
+func loginpolicyMigratedTemplate(t *testing.T) string {
+	t.Helper()
+	loginpolicyTemplateOnce.Do(func() {
+		directory, err := os.MkdirTemp("", "goauthy-loginpolicy-template-")
+		if err != nil {
+			loginpolicyTemplateErr = err
+			return
+		}
+		db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "login-policy-test", DataDir: directory})
+		if err != nil {
+			_ = os.RemoveAll(directory)
+			loginpolicyTemplateErr = fmt.Errorf("open login policy test template: %w", err)
+			return
+		}
+		if err := storage.Migrate(context.Background(), db); err != nil {
+			_ = db.Close()
+			_ = os.RemoveAll(directory)
+			loginpolicyTemplateErr = fmt.Errorf("migrate login policy test template: %w", err)
+			return
+		}
+		if err := db.Close(); err != nil {
+			_ = os.RemoveAll(directory)
+			loginpolicyTemplateErr = fmt.Errorf("close login policy test template: %w", err)
+			return
+		}
+		loginpolicyTemplateDirectory = directory
+	})
+	if loginpolicyTemplateErr != nil {
+		t.Fatal(loginpolicyTemplateErr)
+	}
+	return loginpolicyTemplateDirectory
+}
+
+func copyDirTree(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, content, 0o644)
+	})
 }

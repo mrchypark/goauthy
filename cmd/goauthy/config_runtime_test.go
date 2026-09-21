@@ -43,6 +43,7 @@ func applicationConfigTestEnv(t *testing.T, overrides map[string]string) func(st
 }
 
 func TestRunConfigCommandCheckValidatesWithoutStartingRuntime(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	if err := runConfigCommand([]string{"check"}, applicationConfigTestEnv(t, nil), &out); err != nil {
 		t.Fatal(err)
@@ -53,6 +54,7 @@ func TestRunConfigCommandCheckValidatesWithoutStartingRuntime(t *testing.T) {
 }
 
 func TestRunConfigCommandRejectsInvalidRuntimeConfig(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	err := runConfigCommand([]string{"check"}, applicationConfigTestEnv(t, map[string]string{
 		"GOAUTHY_RHIZA_PROFILE": "invalid",
@@ -66,6 +68,7 @@ func TestRunConfigCommandRejectsInvalidRuntimeConfig(t *testing.T) {
 }
 
 func TestRunConfigCommandDumpEffectiveRedactsStorageCredentials(t *testing.T) {
+	t.Parallel()
 	getenv := applicationConfigTestEnv(t, map[string]string{
 		"GOAUTHY_RHIZA_PROFILE":                 "standalone",
 		"GOAUTHY_RHIZA_OBJECT_STORE_BUCKET":     "test-bucket",
@@ -90,6 +93,7 @@ func TestRunConfigCommandDumpEffectiveRedactsStorageCredentials(t *testing.T) {
 }
 
 func TestRunConfigCommandRejectsUnknownAction(t *testing.T) {
+	t.Parallel()
 	var out bytes.Buffer
 	if err := runConfigCommand([]string{"unknown"}, applicationConfigTestEnv(t, nil), &out); err == nil {
 		t.Fatal("unknown config action accepted")
@@ -99,6 +103,7 @@ func TestRunConfigCommandRejectsUnknownAction(t *testing.T) {
 // GA-CONFIG-001: every runtime parser that used to fail after Rhiza was opened
 // must fail through the configuration command, before any storage side effect.
 func TestRunConfigCommandRejectsInvalidRuntimeConfiguration(t *testing.T) {
+	t.Parallel()
 	dataDir := filepath.Join(t.TempDir(), "data")
 	tokenFile := filepath.Join(t.TempDir(), "dcr-token")
 	if err := os.WriteFile(tokenFile, []byte(strings.Repeat("a", 32)), 0o600); err != nil {
@@ -245,6 +250,7 @@ func bootstrapSharedOverBudgetFile(t *testing.T) string {
 // GA-CONFIG-001: configured files are content-validated, and a valid runtime
 // configuration still passes the preflight.
 func TestRunConfigCommandValidatesRuntimeFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	tokenFile := filepath.Join(dir, "metrics-token")
 	if err := os.WriteFile(tokenFile, []byte("local-token\n"), 0o600); err != nil {

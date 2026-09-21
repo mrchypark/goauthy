@@ -29,7 +29,7 @@ var testNS = upstreamprovider.ComputeNamespace(testIss, testCID)
 
 func testSetup(t *testing.T) (*identity.Store, *rhiza.DB) {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test", DataDir: migratedDataDir(t, "test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,6 +198,7 @@ func getClaims(t *testing.T, v *upstreamprovider.JWKSVerifier, raw string) *upst
 // --- Tests ---
 
 func TestResolveVerifiedNilCases(t *testing.T) {
+	t.Parallel()
 	var nilR *FederatedIdentityResolver
 	_, err := nilR.resolveVerified(context.Background(), upstreamprovider.VerifiedIdentity{})
 	if err == nil || err.Error() != "upstream identity unavailable" {
@@ -211,6 +212,7 @@ func TestResolveVerifiedNilCases(t *testing.T) {
 }
 
 func TestResolveVerifiedExistingLinked(t *testing.T) {
+	t.Parallel()
 	store, db := testSetup(t)
 	ctx := context.Background()
 	seedAdminRole(t, db)
@@ -271,6 +273,7 @@ func TestResolveVerifiedExistingLinked(t *testing.T) {
 }
 
 func TestResolveVerifiedAdminGrantRevokeNil(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		claims     map[string]any
@@ -359,6 +362,7 @@ func TestResolveVerifiedAdminGrantRevokeNil(t *testing.T) {
 }
 
 func TestResolveVerifiedMalformedPathAllowed(t *testing.T) {
+	t.Parallel()
 	store, db := testSetup(t)
 	seedAdminRole(t, db)
 	createUser(t, store, "local-mal", "malformed")
@@ -398,6 +402,7 @@ func TestResolveVerifiedMalformedPathAllowed(t *testing.T) {
 }
 
 func TestResolveVerifiedNoRawClaimsRejects(t *testing.T) {
+	t.Parallel()
 	store, _ := testSetup(t)
 	path := "$.admin"
 	vi := upstreamprovider.VerifiedIdentity{
@@ -413,6 +418,7 @@ func TestResolveVerifiedNoRawClaimsRejects(t *testing.T) {
 }
 
 func TestResolveVerifiedNoEmailRejects(t *testing.T) {
+	t.Parallel()
 	store, _ := testSetup(t)
 	verifier, rawToken := signClaims(t, map[string]any{
 		"iss": testIss, "sub": "up-noemail", "aud": testCID,
@@ -436,6 +442,7 @@ func TestResolveVerifiedNoEmailRejects(t *testing.T) {
 }
 
 func TestResolveVerifiedEvalErrRejects(t *testing.T) {
+	t.Parallel()
 	store, _ := testSetup(t)
 	verifier, rawToken := signClaims(t, map[string]any{
 		"iss": testIss, "sub": "up-eval", "aud": testCID,
@@ -458,6 +465,7 @@ func TestResolveVerifiedEvalErrRejects(t *testing.T) {
 }
 
 func TestResolveVerifiedLegacyStatic(t *testing.T) {
+	t.Parallel()
 	store, _ := testSetup(t)
 	createUser(t, store, "legacy-subj", "legacy-user")
 	external := upstreamprovider.SubjectResult{ProviderID: "legacy", Subject: "legacy-ext"}

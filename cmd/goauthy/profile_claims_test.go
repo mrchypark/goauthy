@@ -8,6 +8,7 @@ import (
 )
 
 func TestOIDCProfileMappingAndEmailFallback(t *testing.T) {
+	t.Parallel()
 	email, given, family := "member@example.test", "Ada", "Lovelace"
 	street, zip, city, country := "Main Street", "12345", "London", "GB"
 	phone, locale := "+44123456789", "en"
@@ -32,6 +33,7 @@ func TestOIDCProfileMappingAndEmailFallback(t *testing.T) {
 }
 
 func TestPreferredUsernameEmailFallbackConfiguration(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"", "true", "false", "TRUE", "0", " false "} {
 		t.Run(raw, func(t *testing.T) {
 			p, err := userValuesPolicyFromEnv(func(key string) string {

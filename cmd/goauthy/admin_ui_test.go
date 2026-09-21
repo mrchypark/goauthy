@@ -13,6 +13,7 @@ import (
 )
 
 func TestAdminUICSRFUsesAuthorizedIssuerCookie(t *testing.T) {
+	t.Parallel()
 	issuer := "https://issuer.example.test"
 	name, err := browser.CookieName(issuer)
 	if err != nil {

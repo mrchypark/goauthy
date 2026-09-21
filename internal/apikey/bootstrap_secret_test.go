@@ -32,6 +32,7 @@ func cryptrTestValue(t *testing.T, id string, key, plain []byte) []byte {
 }
 
 func TestEncryptedBootstrapImportsIntoRhizaAndRejectsWrongKeyAtomically(t *testing.T) {
+	t.Parallel()
 	db := bootstrapTestDB(t, "bootstrap-encrypted")
 	store, err := NewStore(db)
 	if err != nil {
@@ -84,6 +85,7 @@ func TestEncryptedBootstrapImportsIntoRhizaAndRejectsWrongKeyAtomically(t *testi
 }
 
 func TestDecryptCryptrValueAuthenticatesAndUsesKeyID(t *testing.T) {
+	t.Parallel()
 	key := make([]byte, 32)
 	for i := range key {
 		key[i] = byte(i + 1)
@@ -104,6 +106,7 @@ func TestDecryptCryptrValueAuthenticatesAndUsesKeyID(t *testing.T) {
 }
 
 func TestLoadBootstrapMasterKeysStrict(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	key := make([]byte, 32)
 	encoded := base64.RawURLEncoding.EncodeToString(key)
@@ -121,6 +124,7 @@ func TestLoadBootstrapMasterKeysStrict(t *testing.T) {
 }
 
 func TestLoadBootstrapMasterKeysRejectsInvalidFiles(t *testing.T) {
+	t.Parallel()
 	for name, value := range map[string][]byte{
 		"bad id!": []byte("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
 		"bad-key": []byte("not-base64"),
@@ -139,6 +143,7 @@ func TestLoadBootstrapMasterKeysRejectsInvalidFiles(t *testing.T) {
 }
 
 func TestBootstrapWithMasterKeyDirEmptyPathRemainsNoOp(t *testing.T) {
+	t.Parallel()
 	db := bootstrapTestDB(t, "bootstrap-empty-path")
 	store, err := NewStore(db)
 	if err != nil {
@@ -150,6 +155,7 @@ func TestBootstrapWithMasterKeyDirEmptyPathRemainsNoOp(t *testing.T) {
 }
 
 func TestBootstrapGeneratedArtifactRoundTripExpiryAndTamper(t *testing.T) {
+	t.Parallel()
 	dir, path := t.TempDir(), filepath.Join(t.TempDir(), "bootstrap.secrets.enc")
 	key := make([]byte, 32)
 	for i := range key {

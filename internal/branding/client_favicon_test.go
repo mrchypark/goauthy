@@ -22,6 +22,7 @@ import (
 )
 
 func TestClientFaviconStorePutGetReplaceDelete(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientFaviconStore(db)
 	if err != nil {
@@ -66,6 +67,7 @@ func TestClientFaviconStorePutGetReplaceDelete(t *testing.T) {
 }
 
 func TestClientFaviconHandlerUsesPublicGETAndClientsUpdate(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientFaviconStore(db)
 	if err != nil {
@@ -142,6 +144,7 @@ func TestClientFaviconHandlerUsesPublicGETAndClientsUpdate(t *testing.T) {
 }
 
 func TestClientFaviconHandlerUsesAPIKeyClientsUpdate(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientFaviconStore(db)
 	if err != nil {
@@ -176,6 +179,7 @@ func TestClientFaviconHandlerUsesAPIKeyClientsUpdate(t *testing.T) {
 }
 
 func TestClientFaviconHandlerRequiresStrongConditionalMutation(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientFaviconStore(db)
 	if err != nil {
@@ -244,6 +248,7 @@ func TestClientFaviconHandlerRequiresStrongConditionalMutation(t *testing.T) {
 }
 
 func TestClientFaviconStoreRechecksAPIKeyAtCommit(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientFaviconStore(db)
 	if err != nil {
@@ -273,6 +278,7 @@ func TestClientFaviconStoreRechecksAPIKeyAtCommit(t *testing.T) {
 }
 
 func TestClientFaviconHandlerRejectsMalformedUploads(t *testing.T) {
+	t.Parallel()
 	_, db := clientFaviconDB(t)
 	store, err := NewClientFaviconStore(db)
 	if err != nil {

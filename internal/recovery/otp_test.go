@@ -88,6 +88,7 @@ func otpScalar(t *testing.T, db *rhiza.DB, sql string, args ...any) int64 {
 // the rejected issuance rolls back with it, and the next window admits the
 // subject again.
 func TestGenerateOTPEnforcesWindowedRateLimit(t *testing.T) {
+	t.Parallel()
 	db := testOTPDatabase(t)
 	service, err := NewOTPService(db)
 	if err != nil {
@@ -131,6 +132,7 @@ func TestGenerateOTPEnforcesWindowedRateLimit(t *testing.T) {
 // TestGenerateOTPSimultaneousIssuanceStaysWithinLimit proves the same conflict
 // target keeps the bounded counter correct when issuance races itself.
 func TestGenerateOTPSimultaneousIssuanceStaysWithinLimit(t *testing.T) {
+	t.Parallel()
 	db := testOTPDatabase(t)
 	service, err := NewOTPService(db)
 	if err != nil {
@@ -179,6 +181,7 @@ func TestGenerateOTPSimultaneousIssuanceStaysWithinLimit(t *testing.T) {
 // replica or a restarted process, reads the same binding and expired bindings
 // fail closed.
 func TestOTPInteractionStorePersistsAcrossInstances(t *testing.T) {
+	t.Parallel()
 	db := testOTPDatabase(t)
 	ctx := context.Background()
 	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
@@ -225,6 +228,7 @@ func TestOTPInteractionStorePersistsAcrossInstances(t *testing.T) {
 // for a bounded retry, another session cannot spend the code, and the bound
 // session spends it exactly once.
 func TestVerifyOTPAndConsumeInteractionBindsSessionAndCode(t *testing.T) {
+	t.Parallel()
 	db := testOTPDatabase(t)
 	ctx := context.Background()
 	seedOTPSubject(t, db, "subject-1", "alice", 1, 1)
@@ -275,6 +279,7 @@ func TestVerifyOTPAndConsumeInteractionBindsSessionAndCode(t *testing.T) {
 // the binding with B, and the stale verification must fail without spending the
 // code or deleting the replacement binding. The replacement must still complete.
 func TestVerifyOTPAndConsumeInteractionRejectsReplacedBinding(t *testing.T) {
+	t.Parallel()
 	db := testOTPDatabase(t)
 	ctx := context.Background()
 	seedOTPSubject(t, db, "subject-1", "alice", 1, 1)
@@ -323,6 +328,7 @@ func TestVerifyOTPAndConsumeInteractionRejectsReplacedBinding(t *testing.T) {
 // password step proved, so a later credential change revokes the pending
 // continuation without spending the code or deleting the binding.
 func TestVerifyOTPAndConsumeInteractionRejectsStaleFirstFactor(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		advance string
@@ -377,6 +383,7 @@ func wrongOTPCode(code string) string {
 // proof can neither complete nor spend the code, while a fresh flow with the
 // replacement password still succeeds.
 func TestVerifyOTPAndConsumeInteractionRejectsResetPasswordContinuation(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	ctx := context.Background()
 	otp, err := NewOTPService(service.db)

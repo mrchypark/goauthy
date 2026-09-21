@@ -7,6 +7,7 @@ import (
 )
 
 func TestRecordAccountFailureTracksDistinctIPs(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -28,6 +29,7 @@ func TestRecordAccountFailureTracksDistinctIPs(t *testing.T) {
 }
 
 func TestRecordAccountFailureLocksAtThreshold(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -58,6 +60,7 @@ func TestRecordAccountFailureLocksAtThreshold(t *testing.T) {
 }
 
 func TestRecordAccountFailureSameIPDoesNotDoubleCount(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -79,6 +82,7 @@ func TestRecordAccountFailureSameIPDoesNotDoubleCount(t *testing.T) {
 }
 
 func TestCheckAccountLockReturnsLockStatus(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -134,6 +138,7 @@ func TestCheckAccountLockReturnsLockStatus(t *testing.T) {
 }
 
 func TestClearAccountLockRemovesLock(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -164,6 +169,7 @@ func TestClearAccountLockRemovesLock(t *testing.T) {
 }
 
 func TestCleanupStuffingEntriesRemovesExpired(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -195,6 +201,7 @@ func TestCleanupStuffingEntriesRemovesExpired(t *testing.T) {
 }
 
 func TestDifferentAccountsAreIsolated(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -221,6 +228,7 @@ func TestDifferentAccountsAreIsolated(t *testing.T) {
 }
 
 func TestAccountStuffingDigestIsConsistent(t *testing.T) {
+	t.Parallel()
 	d1 := AccountStuffingDigest("test-user")
 	d2 := AccountStuffingDigest("test-user")
 	if d1 != d2 {
@@ -233,6 +241,7 @@ func TestAccountStuffingDigestIsConsistent(t *testing.T) {
 }
 
 func TestRecordAccountFailureRejectsInvalidInput(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -256,6 +265,7 @@ func TestRecordAccountFailureRejectsInvalidInput(t *testing.T) {
 }
 
 func TestCheckAccountLockRejectsInvalidInput(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -267,6 +277,7 @@ func TestCheckAccountLockRejectsInvalidInput(t *testing.T) {
 }
 
 func TestRecordAccountFailureCountsReturningSourcesInLaterWindows(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	ctx := context.Background()

@@ -12,6 +12,7 @@ import (
 )
 
 func TestDynamicExternalLinks(t *testing.T) {
+	t.Parallel()
 	h, _, identities, cookie, csrf := testPasswordHandler(t)
 	ctx := context.Background()
 

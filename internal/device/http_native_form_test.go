@@ -8,6 +8,7 @@ import (
 )
 
 func TestDeviceVerificationNativeFormOrigin(t *testing.T) {
+	t.Parallel()
 	for _, action := range []string{"approve", "deny"} {
 		t.Run(action+" accepts native same-origin form", func(t *testing.T) {
 			ctx, store, _ := testStore(t)

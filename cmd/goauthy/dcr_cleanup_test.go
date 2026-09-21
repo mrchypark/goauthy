@@ -3,6 +3,7 @@ package main
 import "testing"
 
 func TestDCRAnonymousCleanupConfigFromEnv(t *testing.T) {
+	t.Parallel()
 	getenv := func(values map[string]string) func(string) string {
 		return func(name string) string { return values[name] }
 	}

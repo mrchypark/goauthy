@@ -18,6 +18,7 @@ import (
 // This is an isolated process/filesystem-object-store crash test. It does not
 // qualify HA replication, S3 semantics, or a power-loss filesystem guarantee.
 func TestSharedGeneratedBootstrapRecoversAfterSIGKILL(t *testing.T) {
+	t.Parallel()
 	root := os.Getenv("GOAUTHY_SHARED_BOOTSTRAP_CRASH_ROOT")
 	if root != "" {
 		runSharedGeneratedBootstrapCrashChild(t, root)

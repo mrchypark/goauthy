@@ -30,6 +30,7 @@ func (s *languageSender) SendAlreadyRegistered(_ context.Context, m Message) err
 }
 
 func TestOpenRegistrationPersistsLocale(t *testing.T) {
+	t.Parallel()
 	s, _ := testService(t, "subject-1", "alice")
 	sender := &languageSender{}
 	s.sender = sender
@@ -84,6 +85,7 @@ func TestOpenRegistrationPersistsLocale(t *testing.T) {
 }
 
 func TestStoredLanguageUsedForResetMail(t *testing.T) {
+	t.Parallel()
 	s, _ := testService(t, "subject-1", "alice")
 	sender := &languageSender{}
 	s.sender = sender
@@ -100,6 +102,7 @@ func TestStoredLanguageUsedForResetMail(t *testing.T) {
 }
 
 func TestUnknownStoredLanguageKeepsMailFallback(t *testing.T) {
+	t.Parallel()
 	s, _ := testService(t, "subject-1", "alice")
 	sender := &languageSender{}
 	s.sender = sender
@@ -116,6 +119,7 @@ func TestUnknownStoredLanguageKeepsMailFallback(t *testing.T) {
 }
 
 func TestLanguageLookupMissingResetTargetIsNonActionable(t *testing.T) {
+	t.Parallel()
 	s, sender := testService(t, "subject-1", "alice")
 	if err := s.issueFor(context.Background(), "missing", "missing@example.test"); err != nil {
 		t.Fatal(err)

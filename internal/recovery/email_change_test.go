@@ -9,6 +9,7 @@ import (
 )
 
 func TestIssueForStaleEmailDoesNotDeliverAfterAdministratorUpdate(t *testing.T) {
+	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
 	ctx := context.Background()
 	if err := service.BindEmail(ctx, "subject-1", "old@example.test"); err != nil {

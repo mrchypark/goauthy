@@ -19,6 +19,7 @@ import (
 // production Handle/HandleFunc route is added. It checks operations, not body
 // schemas; those are intentionally catalogued separately.
 func TestOpenAPIRouteCoverage(t *testing.T) {
+	t.Parallel()
 	root := repoRoot(t)
 	want := sourceRoutes(t, filepath.Join(root, "cmd", "goauthy", "main.go"), filepath.Join(root, "cmd", "goauthy", "upstream.go"), filepath.Join(root, "internal", "kv", "http.go"))
 	for path, methods := range kvRoutes {

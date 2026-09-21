@@ -12,6 +12,7 @@ import (
 )
 
 func TestSaaSAuthorizationProofEnvelopeBlocksRetirementUntilRewrapped(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	oldKeys := retirementCmdKeyring(t, "key-a")
