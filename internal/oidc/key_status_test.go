@@ -14,6 +14,7 @@ import (
 )
 
 func TestInspectMasterKeyReferencesCountsLiveAuthenticatedEnvelopes(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	issuer := "https://id.example.com"
@@ -49,6 +50,7 @@ func TestInspectMasterKeyReferencesCountsLiveAuthenticatedEnvelopes(t *testing.T
 }
 
 func TestInspectMasterKeyReferencesSafeOnlyForActiveKey(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	issuer := "https://id.example.com"
@@ -67,6 +69,7 @@ func TestInspectMasterKeyReferencesSafeOnlyForActiveKey(t *testing.T) {
 }
 
 func TestInspectMasterKeyReferencesScansBoundedPages(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	issuer := "https://id.example.com"
@@ -83,6 +86,7 @@ func TestInspectMasterKeyReferencesScansBoundedPages(t *testing.T) {
 }
 
 func TestInspectMasterKeyReferencesFailsClosedForTampering(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	issuer := "https://id.example.com"
@@ -100,11 +104,13 @@ func TestInspectMasterKeyReferencesFailsClosedForTampering(t *testing.T) {
 }
 
 func TestInspectMasterKeyReferencesFailsClosedForAuthenticatedTamperingAndUnknownKeys(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	issuer := "https://id.example.com"
 	now := time.Unix(1_900_000_000, 0).UTC()
 
 	t.Run("authenticated tampering", func(t *testing.T) {
+		t.Parallel()
 		db := testDB(t)
 		active := fixedKeyring("master-b")
 		insertStatusDCR(t, ctx, db, active, "authenticated-tamper", now.Add(time.Hour))
@@ -128,6 +134,7 @@ func TestInspectMasterKeyReferencesFailsClosedForAuthenticatedTamperingAndUnknow
 	})
 
 	t.Run("unknown key", func(t *testing.T) {
+		t.Parallel()
 		db := testDB(t)
 		old := fixedKeyring("master-a")
 		knownOnly := fixedKeyring("master-b")

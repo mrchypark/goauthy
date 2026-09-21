@@ -8,6 +8,7 @@ import (
 )
 
 func TestMigrationV87PreservesDynamicRegistration(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "dcr-backchannel-migration", DataDir: t.TempDir()})
 	if err != nil {

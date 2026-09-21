@@ -32,8 +32,9 @@ const legacyUseHandoffsSchema = `CREATE TABLE saas_use_handoffs (
 ) STRICT`
 
 func TestMigrationV81OAuthHandoffCredentialVersion(t *testing.T) {
+	t.Parallel()
 	t.Run("fresh and replay preserve versions", func(t *testing.T) {
-		db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "oauth-handoff-v81", DataDir: t.TempDir()})
+		db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "oauth-handoff-v81", DataDir: testDatabaseDir(t, "oauth-handoff-v81")})
 		if err != nil {
 			t.Fatal(err)
 		}

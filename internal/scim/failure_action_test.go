@@ -7,6 +7,7 @@ import (
 )
 
 func TestScimFailureActionUsesSafeQuotedExternalIDs(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		request Request
@@ -19,6 +20,7 @@ func TestScimFailureActionUsesSafeQuotedExternalIDs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := scimFailureAction(tc.request); got != tc.want {
 				t.Fatalf("got=%q want=%q", got, tc.want)
 			}

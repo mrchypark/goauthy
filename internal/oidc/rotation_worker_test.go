@@ -8,6 +8,7 @@ import (
 )
 
 func TestSigningKeyRotationWorkerPrepublishesActivatesAndCleansUp(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	keyring := testKeyring(t, "master-1")
 	issuer := "https://id.example.com"
@@ -60,6 +61,7 @@ func TestSigningKeyRotationWorkerPrepublishesActivatesAndCleansUp(t *testing.T) 
 }
 
 func TestSigningKeyRotationWorkersConvergeAndStopOnCancellation(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	keyring := testKeyring(t, "master-1")
 	issuer := "https://id.example.com"
@@ -93,6 +95,7 @@ func TestSigningKeyRotationWorkersConvergeAndStopOnCancellation(t *testing.T) {
 }
 
 func TestSigningKeyRotationWorkerRetriesRuntimeError(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	keyring := testKeyring(t, "master-1")
 	issuer := "https://id.example.com"

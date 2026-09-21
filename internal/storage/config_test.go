@@ -10,6 +10,7 @@ import (
 )
 
 func TestRhizaConfigFromEnvStandaloneProfiles(t *testing.T) {
+	t.Parallel()
 	base := map[string]string{
 		"GOAUTHY_CLUSTER_ID": "prod", "GOAUTHY_NODE_ID": "node-0", "GOAUTHY_DATA_DIR": "./data/node-0",
 	}
@@ -32,6 +33,7 @@ func TestRhizaConfigFromEnvStandaloneProfiles(t *testing.T) {
 }
 
 func TestRhizaConfigFromEnvStandaloneRejectsClusterSettings(t *testing.T) {
+	t.Parallel()
 	base := map[string]string{
 		"GOAUTHY_RHIZA_PROFILE": RhizaProfileStandalone, "GOAUTHY_CLUSTER_ID": "prod", "GOAUTHY_NODE_ID": "node-0", "GOAUTHY_DATA_DIR": "./data/node-0",
 	}
@@ -50,6 +52,7 @@ func TestRhizaConfigFromEnvStandaloneRejectsClusterSettings(t *testing.T) {
 }
 
 func TestRhizaConfigFromEnvCluster(t *testing.T) {
+	t.Parallel()
 	env := clusterEnv()
 	env["GOAUTHY_RHIZA_CHECKPOINT_INTERVAL"] = "1s"
 	config, err := RhizaConfigFromEnv(envMap(env))
@@ -62,6 +65,7 @@ func TestRhizaConfigFromEnvCluster(t *testing.T) {
 }
 
 func TestRhizaConfigFromEnvDurableStandalone(t *testing.T) {
+	t.Parallel()
 	env := clusterEnv()
 	env["GOAUTHY_RHIZA_PROFILE"] = RhizaProfileStandalone
 	env["GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE"] = "true"
@@ -92,6 +96,7 @@ func TestRhizaConfigFromEnvDurableStandalone(t *testing.T) {
 }
 
 func TestRhizaConfigFromEnvGCSBeforeAck(t *testing.T) {
+	t.Parallel()
 	for _, profile := range []string{RhizaProfileStandalone, RhizaProfileCluster} {
 		t.Run(profile, func(t *testing.T) {
 			env := clusterEnv()
@@ -115,6 +120,7 @@ func TestRhizaConfigFromEnvGCSBeforeAck(t *testing.T) {
 }
 
 func TestRhizaConfigFromEnvGCSRejectsS3Settings(t *testing.T) {
+	t.Parallel()
 	for _, name := range s3OnlyObjectStoreEnv {
 		t.Run(name, func(t *testing.T) {
 			env := clusterEnv()
@@ -128,6 +134,7 @@ func TestRhizaConfigFromEnvGCSRejectsS3Settings(t *testing.T) {
 }
 
 func TestRhizaConfigFromEnvRejectsUnknownObjectStoreProvider(t *testing.T) {
+	t.Parallel()
 	env := clusterEnv()
 	env["GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER"] = "azure"
 	if _, err := RhizaConfigFromEnv(envMap(env)); err == nil {
@@ -136,6 +143,7 @@ func TestRhizaConfigFromEnvRejectsUnknownObjectStoreProvider(t *testing.T) {
 }
 
 func TestRhizaConfigRequiredObjectStoreFailsClosed(t *testing.T) {
+	t.Parallel()
 	base := map[string]string{
 		"GOAUTHY_CLUSTER_ID": "test", "GOAUTHY_NODE_ID": "node-0", "GOAUTHY_DATA_DIR": "./data",
 		"GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE": "true",
@@ -155,6 +163,7 @@ func TestRhizaConfigRequiredObjectStoreFailsClosed(t *testing.T) {
 }
 
 func TestRhizaConfigFromEnvRejectsUnsafeCheckpointIntervals(t *testing.T) {
+	t.Parallel()
 	for _, interval := range []string{"not-a-duration", "0s", "-1s", "999ms", "24h1m", "2562048h"} {
 		t.Run(interval, func(t *testing.T) {
 			env := clusterEnv()
@@ -167,6 +176,7 @@ func TestRhizaConfigFromEnvRejectsUnsafeCheckpointIntervals(t *testing.T) {
 }
 
 func TestRhizaConfigFromEnvAcceptsLegacyAdminTokenAlias(t *testing.T) {
+	t.Parallel()
 	env := clusterEnv()
 	env["GOAUTHY_RHIZA_PEER_TOKEN"] = env["GOAUTHY_RHIZA_ADMIN_TOKEN"]
 	delete(env, "GOAUTHY_RHIZA_ADMIN_TOKEN")
@@ -180,6 +190,7 @@ func TestRhizaConfigFromEnvAcceptsLegacyAdminTokenAlias(t *testing.T) {
 }
 
 func TestRhizaConfigFromEnvRejectsUnsafeClusterConfig(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name   string
 		mutate func(map[string]string)
@@ -218,6 +229,7 @@ func TestRhizaConfigFromEnvRejectsUnsafeClusterConfig(t *testing.T) {
 }
 
 func TestRhizaConfigFromEnvRejectsUnsupportedClusterObjectStoreSettings(t *testing.T) {
+	t.Parallel()
 	for _, field := range unsupportedClusterObjectStoreEnv {
 		t.Run(field, func(t *testing.T) {
 			env := clusterEnv()
@@ -230,6 +242,7 @@ func TestRhizaConfigFromEnvRejectsUnsupportedClusterObjectStoreSettings(t *testi
 }
 
 func TestRhizaOpenRejectsMissingVoterTokenAfterParse(t *testing.T) {
+	t.Parallel()
 	config, err := RhizaConfigFromEnv(envMap(clusterEnv()))
 	if err != nil {
 		t.Fatal(err)
@@ -242,12 +255,14 @@ func TestRhizaOpenRejectsMissingVoterTokenAfterParse(t *testing.T) {
 }
 
 func TestRhizaConfigFromEnvRejectsUnknownProfile(t *testing.T) {
+	t.Parallel()
 	if _, err := RhizaConfigFromEnv(envMap(map[string]string{"GOAUTHY_RHIZA_PROFILE": "four-peer"})); err == nil {
 		t.Fatal("unknown profile was accepted")
 	}
 }
 
 func TestRhizaConfigFromEnvRejectsBroadDataDirectory(t *testing.T) {
+	t.Parallel()
 	for _, directory := range []string{".", "..", "/"} {
 		if _, err := RhizaConfigFromEnv(envMap(map[string]string{
 			"GOAUTHY_RHIZA_PROFILE": RhizaProfileStandalone, "GOAUTHY_CLUSTER_ID": "dev", "GOAUTHY_NODE_ID": "dev-0", "GOAUTHY_DATA_DIR": directory,

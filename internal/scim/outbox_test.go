@@ -39,7 +39,10 @@ func (f fakeReconciler) Reconcile(ctx context.Context, request Request) (Result,
 
 func newOutboxTest(t *testing.T, resolve ClientResolver, config OutboxConfig) *Outbox {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "scim-outbox-test", DataDir: t.TempDir()})
+	tmpl := buildSCIMTemplate(t)
+	dir := t.TempDir()
+	cpDir(t, tmpl, dir)
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "scim-outbox-test", DataDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}

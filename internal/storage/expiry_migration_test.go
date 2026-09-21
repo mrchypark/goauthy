@@ -8,6 +8,7 @@ import (
 )
 
 func TestMigrationV58ExpiryDefaultsRoundTripAndIdempotence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "expiry-v58", DataDir: t.TempDir()})
 	if err != nil {
@@ -51,13 +52,14 @@ func TestMigrationV58ExpiryDefaultsRoundTripAndIdempotence(t *testing.T) {
 }
 
 func TestMigrationV58RejectsPartialMarkedAndUnmarkedExistingColumn(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for _, tc := range []struct{ name, setup string }{
 		{"marked-missing-column", `ALTER TABLE identity_users DROP COLUMN user_expires_at_unix_ms`},
 		{"unmarked-existing-column", `DELETE FROM goauthy_schema_migrations WHERE version=58`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "expiry-v58-" + tc.name, DataDir: t.TempDir()})
+			db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "expiry-v58-" + tc.name, DataDir: testDatabaseDir(t, "expiry-v58-"+tc.name)})
 			if err != nil {
 				t.Fatal(err)
 			}

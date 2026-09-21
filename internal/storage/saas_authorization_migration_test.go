@@ -7,7 +7,8 @@ import (
 )
 
 func TestSchemaV69CreatesAuthorizationRequestsAndReplays(t *testing.T) {
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "saas-authorization-migration", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "saas-authorization-migration", DataDir: testDatabaseDir(t, "saas-authorization-migration")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +66,8 @@ func TestSchemaV69CreatesAuthorizationRequestsAndReplays(t *testing.T) {
 }
 
 func TestSchemaV69AuthorizationRequestConstraints(t *testing.T) {
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "saas-authorization-constraints", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "saas-authorization-constraints", DataDir: testDatabaseDir(t, "saas-authorization-constraints")})
 	if err != nil {
 		t.Fatal(err)
 	}

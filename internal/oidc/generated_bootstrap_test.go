@@ -40,6 +40,7 @@ func generatedAPIKeyBootstrapEnvelope(t *testing.T, db *rhiza.DB) []byte {
 }
 
 func TestGeneratedAPIKeyBootstrapEnvelopeReferencesAndRewrap(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	old, active := fixedKeyring("master-a"), fixedKeyring("master-b")
@@ -69,8 +70,10 @@ func TestGeneratedAPIKeyBootstrapEnvelopeReferencesAndRewrap(t *testing.T) {
 }
 
 func TestGeneratedAPIKeyBootstrapEnvelopeTamperAndFenceFailClosed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t.Run("tamper", func(t *testing.T) {
+		t.Parallel()
 		db := testDB(t)
 		active := fixedKeyring("master-b")
 		insertGeneratedAPIKeyBootstrapEnvelope(t, db, active, []byte(`{"version":1,"deadline":0,"entries":[]}`))
@@ -83,6 +86,7 @@ func TestGeneratedAPIKeyBootstrapEnvelopeTamperAndFenceFailClosed(t *testing.T) 
 		}
 	})
 	t.Run("fenced rewrap preserves ciphertext", func(t *testing.T) {
+		t.Parallel()
 		db := testDB(t)
 		source, old, replacement := fixedKeyring("master-a"), fixedKeyring("master-a"), fixedKeyring("master-b")
 		var sourceKey [32]byte
@@ -106,6 +110,7 @@ func TestGeneratedAPIKeyBootstrapEnvelopeTamperAndFenceFailClosed(t *testing.T) 
 }
 
 func TestGeneratedAPIKeyBootstrapRewrapDoesNotReviveExpiryTombstone(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	active := fixedKeyring("master-b")
 	insertGeneratedAPIKeyBootstrapEnvelope(t, db, fixedKeyring("master-a"), []byte(`{"version":1,"deadline":0,"entries":[]}`))

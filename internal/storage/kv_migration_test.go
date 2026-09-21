@@ -8,7 +8,8 @@ import (
 )
 
 func TestMigrationV55KVIsIdempotentAndCascades(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "kv-test", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "kv-test", DataDir: testDatabaseDir(t, "kv-test")})
 	if err != nil {
 		t.Fatal(err)
 	}

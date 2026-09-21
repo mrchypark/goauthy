@@ -8,6 +8,7 @@ import (
 )
 
 func TestMigrationV76CreatesUseGrantsFromPre76Fixture(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "migration-v76", DataDir: t.TempDir()})
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 )
 
 func TestMigrationV92ThemeDocumentConstraints(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "theme-migration", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)

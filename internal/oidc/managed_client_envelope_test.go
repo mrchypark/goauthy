@@ -13,6 +13,7 @@ import (
 )
 
 func TestManagedClientSecretPurposeBoundsAndBinding(t *testing.T) {
+	t.Parallel()
 	keyring := fixedKeyring("master-a")
 	id, generation := strings.Repeat("a", 256), strings.Repeat("g", 32)
 	purpose := ManagedClientSecretPurpose(id, generation)
@@ -46,6 +47,7 @@ func insertManagedEnvelope(t *testing.T, db *rhiza.DB, id, generation string, en
 }
 
 func TestManagedClientEnvelopeReferencesBlockOldKeyAndTamperFailsClosed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	old, active := fixedKeyring("master-a"), fixedKeyring("master-b")
@@ -69,6 +71,7 @@ func TestManagedClientEnvelopeReferencesBlockOldKeyAndTamperFailsClosed(t *testi
 }
 
 func TestRewrapManagedClientSecretBatchPreservesPlaintextAndUsesCAS(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	old, active := fixedKeyring("master-a"), fixedKeyring("master-b")

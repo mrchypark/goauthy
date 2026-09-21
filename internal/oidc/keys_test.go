@@ -314,7 +314,10 @@ func TestActiveMasterKeyID(t *testing.T) {
 
 func testDB(t *testing.T) *rhiza.DB {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	tmpl := buildOIDCTemplate(t)
+	dir := t.TempDir()
+	cpDir(t, tmpl, dir)
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}

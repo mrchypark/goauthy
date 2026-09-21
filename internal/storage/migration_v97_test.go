@@ -35,6 +35,7 @@ func seedAuthProviders(t *testing.T, db *rhiza.DB) {
 }
 
 func TestMigrationV97TriggerExists(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v97-trigger", DataDir: t.TempDir()})
 	if err != nil {
@@ -61,6 +62,7 @@ func TestMigrationV97TriggerExists(t *testing.T) {
 }
 
 func TestMigrationV97RowsRetained(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v97-retain", DataDir: t.TempDir()})
 	if err != nil {
@@ -91,6 +93,7 @@ func TestMigrationV97RowsRetained(t *testing.T) {
 }
 
 func TestMigrationV97CrossModeOauthUserinfoToOidcFails(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v97-cross-o2o", DataDir: t.TempDir()})
 	if err != nil {
@@ -136,6 +139,7 @@ func TestMigrationV97CrossModeOauthUserinfoToOidcFails(t *testing.T) {
 }
 
 func TestMigrationV97CrossModeOidcToOauthUserinfoFails(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v97-cross-o2u", DataDir: t.TempDir()})
 	if err != nil {
@@ -180,6 +184,7 @@ func TestMigrationV97CrossModeOidcToOauthUserinfoFails(t *testing.T) {
 }
 
 func TestMigrationV97SameModeUpdateAllowed(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v97-same-mode", DataDir: t.TempDir()})
 	if err != nil {
@@ -224,6 +229,7 @@ func TestMigrationV97SameModeUpdateAllowed(t *testing.T) {
 }
 
 func TestMigrationV97LegacyCustomToOidcAllowed(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v97-legacy", DataDir: t.TempDir()})
 	if err != nil {
@@ -254,8 +260,9 @@ func TestMigrationV97LegacyCustomToOidcAllowed(t *testing.T) {
 }
 
 func TestMigrationV97ReplayMigrateReadyMaxVersion(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v97-replay", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v97-replay", DataDir: testDatabaseDir(t, "v97-replay")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,6 +281,7 @@ func TestMigrationV97ReplayMigrateReadyMaxVersion(t *testing.T) {
 }
 
 func TestMigrationV97CrossModeWithinExecuteRollsBack(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v97-cross-exec", DataDir: t.TempDir()})
 	if err != nil {
@@ -362,6 +370,7 @@ func TestMigrationV97CrossModeWithinExecuteRollsBack(t *testing.T) {
 }
 
 func TestMigrationV97SameModeSetTypAllowed(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v97-same-settyp", DataDir: t.TempDir()})
 	if err != nil {

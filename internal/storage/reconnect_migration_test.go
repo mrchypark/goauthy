@@ -9,6 +9,7 @@ import (
 )
 
 func TestSchemaV74ReconnectAuthorizationVersionDefaultAndReplay(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "reconnect-schema-test", DataDir: t.TempDir()})
 	if err != nil {

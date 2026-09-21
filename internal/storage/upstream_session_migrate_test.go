@@ -7,8 +7,9 @@ import (
 )
 
 func TestMigrationV83UpstreamSessionBindings(t *testing.T) {
+	t.Parallel()
 	t.Run("fresh", func(t *testing.T) {
-		db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "upstream-session-v83-fresh", DataDir: t.TempDir()})
+		db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "upstream-session-v83-fresh", DataDir: testDatabaseDir(t, "upstream-session-v83-fresh")})
 		if err != nil {
 			t.Fatal(err)
 		}

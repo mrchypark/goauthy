@@ -14,6 +14,7 @@ import (
 )
 
 func TestMasterKeyRetirementStateMachineRequiresFreshExactThreeAttestations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementTestDB(t)
 	now := time.UnixMilli(1_800_000_000_000).UTC()
@@ -46,6 +47,7 @@ func TestMasterKeyRetirementStateMachineRequiresFreshExactThreeAttestations(t *t
 }
 
 func TestMasterKeyRetirementRejectsUnsafeAttestationsAndAbortsWithoutDeletion(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementTestDB(t)
 	now := time.UnixMilli(1_800_000_000_000).UTC()
@@ -90,6 +92,7 @@ func TestMasterKeyRetirementRejectsUnsafeAttestationsAndAbortsWithoutDeletion(t 
 // replacement becomes the new old key, so rotations chain A->B->C without
 // deleting the barrier or weakening monotonic fencing.
 func TestMasterKeyRetirementChainsSecondEpochAfterReady(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementTestDB(t)
 	now := time.UnixMilli(1_800_000_000_000).UTC()
@@ -161,6 +164,7 @@ func TestMasterKeyRetirementChainsSecondEpochAfterReady(t *testing.T) {
 // in the prepared state, the aborted state, and after the archival
 // acknowledgment that precedes deletion.
 func TestMasterKeyRetirementKeepsRetiredWriterFencedAcrossLaterEpochs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementTestDB(t)
 	now := time.UnixMilli(1_800_000_000_000).UTC()
@@ -255,6 +259,7 @@ func TestMasterKeyRetirementKeepsRetiredWriterFencedAcrossLaterEpochs(t *testing
 }
 
 func TestMasterKeyRetirementRejectsInvalidPreparation(t *testing.T) {
+	t.Parallel()
 	db := retirementTestDB(t)
 	now := time.UnixMilli(1_800_000_000_000).UTC()
 	for _, members := range [][]string{
@@ -279,6 +284,7 @@ func TestMasterKeyRetirementRejectsInvalidPreparation(t *testing.T) {
 }
 
 func TestGuardedRetirementReceiptRejectsInterposedNoOp(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name string
 		want int64
@@ -301,6 +307,7 @@ func TestGuardedRetirementReceiptRejectsInterposedNoOp(t *testing.T) {
 }
 
 func TestMasterKeyRetirementExactOneLifecycleSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementTestDB(t)
 	now := time.UnixMilli(1_800_000_000_000).UTC()
@@ -326,6 +333,7 @@ func TestMasterKeyRetirementExactOneLifecycleSurvivesRestart(t *testing.T) {
 }
 
 func TestMasterKeyRetirementGuardedTransitionsUseFixedAPIKeyPredicate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementTestDB(t)
 	now := time.UnixMilli(1_800_000_000_000).UTC()
@@ -354,6 +362,7 @@ func TestMasterKeyRetirementGuardedTransitionsUseFixedAPIKeyPredicate(t *testing
 }
 
 func TestMasterKeyRetirementRejectsStaleSequenceAndTerminalAttestation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementTestDB(t)
 	now := time.UnixMilli(1_800_000_000_000).UTC()
@@ -393,6 +402,7 @@ func TestMasterKeyRetirementRejectsStaleSequenceAndTerminalAttestation(t *testin
 }
 
 func TestGuardedRetirementTransitionsAuditExactlyOnce(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementTestDB(t)
 	now := time.UnixMilli(1_800_000_000_000).UTC()
@@ -438,6 +448,7 @@ func TestGuardedRetirementTransitionsAuditExactlyOnce(t *testing.T) {
 }
 
 func TestGuardedRetirementUnauthorizedAndRevokedEmitNoAudit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementTestDB(t)
 	now := time.UnixMilli(1_800_000_000_000).UTC()
@@ -473,6 +484,7 @@ func TestGuardedRetirementUnauthorizedAndRevokedEmitNoAudit(t *testing.T) {
 }
 
 func TestLoadMasterKeyRetirementGuardedRechecksReadAuthorityAndRejectsMalformedState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementTestDB(t)
 	now := time.UnixMilli(1_800_000_000_000).UTC()
@@ -511,7 +523,7 @@ func TestLoadMasterKeyRetirementGuardedRechecksReadAuthorityAndRejectsMalformedS
 
 func retirementTestDB(t *testing.T) *rhiza.DB {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "retirement-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "retirement-test", DataDir: testDatabaseDir(t, "retirement-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
