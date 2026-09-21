@@ -116,7 +116,9 @@ func TestNewCustomRootCAs(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	defer server.Close()
+	// t.Cleanup runs after the parallel subtests below finish; a defer here
+	// would close the server before they resume.
+	t.Cleanup(server.Close)
 
 	trustedRoots := x509.NewCertPool()
 	trustedRoots.AddCert(server.Certificate())

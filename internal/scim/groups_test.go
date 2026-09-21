@@ -186,7 +186,9 @@ func TestSyncGroupRejectsAmbiguousOrConflictingIdentity(t *testing.T) {
 func TestGroupValidationRejectsDuplicatesMalformedAndOversize(t *testing.T) {
 	t.Parallel()
 	client, server := testClient(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("invalid group reached transport") }))
-	defer server.Close()
+	// t.Cleanup runs after the parallel subtests below finish; a defer here
+	// would close the server before they resume.
+	t.Cleanup(server.Close)
 	for name, group := range map[string]Group{
 		"duplicate member": {ExternalID: "group-1", DisplayName: "Engineering", Members: []GroupMember{{Value: "user-1"}, {Value: "user-1"}}},
 		"slash member id":  {ExternalID: "group-1", DisplayName: "Engineering", Members: []GroupMember{{Value: "user/1"}}},
