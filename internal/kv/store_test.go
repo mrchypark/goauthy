@@ -180,10 +180,10 @@ func TestKeysListsNamesWithoutReadingValues(t *testing.T) {
 	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "kv-malformed-value", SQL: `INSERT INTO kv_values(namespace,key,encrypted,value) VALUES(?,?,1,?)`, Args: []any{"default", "000-malformed", []byte(`not-an-envelope`)}}); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.Keys(ctx, a, 0, ""); err != nil || len(got) != 1 || got[0] != "000-malformed" {
+	if got, _, err := s.Keys(ctx, a, 0, "", ""); err != nil || len(got) != 1 || got[0] != "000-malformed" {
 		t.Fatalf("keys with unreadable neighbor=%v err=%v", got, err)
 	}
-	if _, err := s.Values(ctx, a, 0, ""); !errors.Is(err, ErrCorrupt) {
+	if _, _, err := s.Values(ctx, a, 0, "", ""); !errors.Is(err, ErrCorrupt) {
 		t.Fatalf("value read with malformed row=%v", err)
 	}
 	// Individually valid near-limit values whose aggregate far exceeds the
@@ -194,7 +194,7 @@ func TestKeysListsNamesWithoutReadingValues(t *testing.T) {
 			t.Fatalf("fill %d: %v", i, err)
 		}
 	}
-	names, err := s.Keys(ctx, a, 0, "")
+	names, _, err := s.Keys(ctx, a, 0, "", "")
 	if err != nil || len(names) != 501 {
 		t.Fatalf("keys beyond budget=%d err=%v", len(names), err)
 	}
@@ -202,4 +202,142 @@ func TestKeysListsNamesWithoutReadingValues(t *testing.T) {
 	if names[0] != "000-malformed" || names[500] != "zz-99" {
 		t.Fatalf("key order=%q..%q", names[0], names[500])
 	}
+}
+
+// GA-KV-001: 1,000 accepted 64 KiB values are roughly 60 MiB of stored bytes,
+// far past the engine's 16 MiB result budget, so a value list must read pages
+// inside that budget instead of failing for valid stored data.
+func TestValueListPagesInsideResultBudget(t *testing.T) {
+	s, _ := newHTTPStore(t)
+	ctx := context.Background()
+	a := Access{Namespace: "default"}
+	// Unencrypted rows keep the stored size equal to the accepted JSON size.
+	payload := json.RawMessage(fmt.Sprintf("%q", strings.Repeat("x", 60<<10)))
+	const rows = 300
+	for i := 0; i < rows; i++ {
+		if err := s.Set(ctx, a, Value{"big-" + strconv.Itoa(i), false, payload}); err != nil {
+			t.Fatalf("fill %d: %v", i, err)
+		}
+	}
+	seen := map[string]bool{}
+	cursor := ""
+	pages := 0
+	for {
+		page, next, err := s.Values(ctx, a, 1000, "", cursor)
+		if err != nil {
+			t.Fatalf("page %d cursor=%q err=%v", pages, cursor, err)
+		}
+		pages++
+		for _, v := range page {
+			if seen[v.Key] {
+				t.Fatalf("key %q repeated across pages", v.Key)
+			}
+			seen[v.Key] = true
+			if len(v.Value) != len(payload) {
+				t.Fatalf("key %q payload=%d want %d", v.Key, len(v.Value), len(payload))
+			}
+		}
+		if next == "" {
+			break
+		}
+		if len(page) == 0 {
+			t.Fatal("continuation returned an empty page")
+		}
+		cursor = next
+	}
+	if pages < 2 {
+		t.Fatalf("pages=%d want at least 2", pages)
+	}
+	if len(seen) != rows {
+		t.Fatalf("enumerated=%d want %d", len(seen), rows)
+	}
+}
+
+// A continuation token names its listing, so a token from one list cannot be
+// replayed against another and a malformed token is refused outright.
+func TestListCursorBoundaries(t *testing.T) {
+	s, _ := newHTTPStore(t)
+	ctx := context.Background()
+	for _, ns := range []string{"cursor-a", "cursor-b"} {
+		if err := s.PutNamespace(ctx, "", ns, false, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, err := s.CreateAccess(ctx, "cursor-a", true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := s.Set(ctx, Access{Namespace: "cursor-a"}, Value{"key-" + strconv.Itoa(i), false, json.RawMessage(strconv.Itoa(i))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	names, next, err := s.ListNamespaces(ctx, 1, "")
+	if err != nil || len(names) != 1 || next == "" {
+		t.Fatalf("namespaces page=%v next=%q err=%v", names, next, err)
+	}
+	if _, _, err := s.ListNamespaces(ctx, 1, next); err != nil {
+		t.Fatalf("namespace continuation=%v", err)
+	}
+	// A namespace token is not a value token, even though both are valid
+	// tokens for their own listing.
+	if _, _, err := s.Values(ctx, Access{Namespace: "cursor-a"}, 1, "", next); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("cross-list token=%v", err)
+	}
+	if _, _, err := s.Keys(ctx, Access{Namespace: "cursor-a"}, 1, "", "not-base64!"); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("malformed token=%v", err)
+	}
+	if _, _, err := s.Keys(ctx, Access{Namespace: "cursor-a"}, 1, "", encodeKVListCursor(kvListCursor{Kind: kvListValues, Position: "key-1"})); !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("wrong-kind token=%v", err)
+	}
+	// Each listing resumes exactly after its last row and ends with no token.
+	for _, tc := range []struct {
+		name string
+		list func(string) (int, string, error)
+	}{
+		{"keys", func(c string) (int, string, error) {
+			v, n, e := s.Keys(ctx, Access{Namespace: "cursor-a"}, 1, "", c)
+			return len(v), n, e
+		}},
+		{"values", func(c string) (int, string, error) {
+			v, n, e := s.Values(ctx, Access{Namespace: "cursor-a"}, 1, "", c)
+			return len(v), n, e
+		}},
+		{"accesses", func(c string) (int, string, error) { v, n, e := s.Accesses(ctx, "cursor-a", 1, c); return len(v), n, e }},
+		{"namespaces", func(c string) (int, string, error) { v, n, e := s.ListNamespaces(ctx, 1, c); return len(v), n, e }},
+	} {
+		cursor, seen := "", 0
+		for {
+			got, nxt, err := tc.list(cursor)
+			if err != nil {
+				t.Fatalf("%s cursor=%q err=%v", tc.name, cursor, err)
+			}
+			if got != 1 {
+				t.Fatalf("%s page size=%d want 1", tc.name, got)
+			}
+			seen++
+			if nxt == "" {
+				break
+			}
+			cursor = nxt
+			if seen > 4 {
+				t.Fatalf("%s did not terminate", tc.name)
+			}
+		}
+		want := 3
+		if tc.name == "accesses" {
+			want = 1
+		}
+		if tc.name == "namespaces" {
+			// The store always seeds `default`, plus the two namespaces above.
+			want = 3
+		}
+		if seen != want {
+			t.Fatalf("%s pages=%d want %d", tc.name, seen, want)
+		}
+	}
+	if _, next, err := s.Keys(ctx, Access{Namespace: "cursor-a"}, 1000, "", ""); err != nil || next != "" {
+		t.Fatalf("final page token=%q err=%v", next, err)
+	}
+	_ = a
 }

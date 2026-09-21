@@ -69,7 +69,7 @@ func addKVOperations(doc *openapi3.T, features Features) error {
 		}
 		return &openapi3.ResponseRef{Value: r}
 	}
-	add := func(path, method, operationID string, body *openapi3.SchemaRef, statuses []int, security *openapi3.SecurityRequirements, query bool, params ...string) {
+	add := func(path, method, operationID string, body *openapi3.SchemaRef, statuses []int, security *openapi3.SecurityRequirements, query, search bool, params ...string) {
 		op := openapi3.NewOperation()
 		op.OperationID, op.Tags, op.Security = operationID, []string{"kv"}, security
 		for _, name := range params {
@@ -82,33 +82,43 @@ func addKVOperations(doc *openapi3.T, features Features) error {
 		}
 		if query {
 			op.AddParameter(openapi3.NewQueryParameter("limit").WithSchema(openapi3.NewIntegerSchema().WithMin(0).WithMax(1000)))
-			op.AddParameter(openapi3.NewQueryParameter("search").WithSchema(openapi3.NewStringSchema().WithMaxLength(64)))
+			if search {
+				// Only the key and value listings filter by a search term; the
+				// namespace and access listings accept limit and cursor alone.
+				op.AddParameter(openapi3.NewQueryParameter("search").WithSchema(openapi3.NewStringSchema().WithMaxLength(64)))
+			}
+			op.AddParameter(openapi3.NewQueryParameter("cursor").WithSchema(openapi3.NewStringSchema().WithMaxLength(128)))
 		}
 		if body != nil {
 			op.RequestBody = &openapi3.RequestBodyRef{Value: openapi3.NewRequestBody().WithRequired(true).WithJSONSchema(body.Value)}
 		}
 		op.Responses = openapi3.NewResponses()
-		for _, status := range statuses {
-			var schema *openapi3.SchemaRef
+		schemaFor := func(operationID string) *openapi3.SchemaRef {
 			switch operationID {
 			case "listKVNamespaces":
-				schema = nsResponse
+				return nsResponse
 			case "listKVAccess":
-				schema = accessResponse
+				return accessResponse
 			case "createKVAccess", "rotateKVAccessSecret":
-				schema = accessObjectResponse
+				return accessObjectResponse
 			case "listKVNamespaceValues", "listKVValues":
-				schema = valueResponse
+				return valueResponse
 			case "listKVKeys":
-				schema = keyResponse
+				return keyResponse
 			case "getPublicKVValue", "getKVValue":
-				schema = rawResponse
+				return rawResponse
 			case "testKVAccess":
-				schema = strict(map[string]*openapi3.SchemaRef{"id": {Value: openapi3.NewStringSchema().WithPattern(`^[A-Za-z0-9]{16}$`)}, "ns": str(), "name": {Value: str().Value.WithNullable()}}, "id", "ns", "name")
-			default:
-				schema = nil
+				return strict(map[string]*openapi3.SchemaRef{"id": {Value: openapi3.NewStringSchema().WithPattern(`^[A-Za-z0-9]{16}$`)}, "ns": str(), "name": {Value: str().Value.WithNullable()}}, "id", "ns", "name")
 			}
-			op.Responses.Set(fmt.Sprint(status), jsonResponse(status, schema))
+			return nil
+		}
+		for _, status := range statuses {
+			op.Responses.Set(fmt.Sprint(status), jsonResponse(status, schemaFor(operationID)))
+		}
+		if query {
+			// A listing that continues stays 200 and carries the token that
+			// resumes exactly after the returned rows.
+			op.Responses.Value(fmt.Sprint(http.StatusOK)).Value.Headers = openapi3.Headers{"x-continuation-token": {Value: &openapi3.Header{Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema().WithMaxLength(128)}}}}
 		}
 		doc.AddOperation(path, method, op)
 	}
@@ -120,25 +130,25 @@ func addKVOperations(doc *openapi3.T, features Features) error {
 	writeAdmin := []int{http.StatusOK, http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable}
 	readBearer := []int{http.StatusOK, http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusServiceUnavailable}
 	writeBearer := readBearer
-	add("/auth/v1/kv/ns", "GET", "listKVNamespaces", nil, readAdmin, adminRead, false)
-	add("/auth/v1/kv/ns", "POST", "createKVNamespace", nsBody, writeAdmin, adminWrite, false)
-	add("/auth/v1/kv/ns/{ns}", "PUT", "updateKVNamespace", nsBody, writeAdmin, adminWrite, false, "ns")
-	add("/auth/v1/kv/ns/{ns}", "DELETE", "deleteKVNamespace", nil, readAdmin, adminWrite, false, "ns")
-	add("/auth/v1/kv/ns/{ns}/access", "GET", "listKVAccess", nil, readAdmin, adminRead, false, "ns")
-	add("/auth/v1/kv/ns/{ns}/access", "POST", "createKVAccess", accessBody, []int{http.StatusCreated, http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable}, adminWrite, false, "ns")
-	add("/auth/v1/kv/ns/{ns}/access/{id}", "PUT", "updateKVAccess", accessBody, readAdmin, adminWrite, false, "ns", "id")
-	add("/auth/v1/kv/ns/{ns}/access/{id}", "DELETE", "deleteKVAccess", nil, readAdmin, adminWrite, false, "ns", "id")
-	add("/auth/v1/kv/ns/{ns}/access/{id}/secret", "POST", "rotateKVAccessSecret", nil, readAdmin, adminWrite, false, "ns", "id")
-	add("/auth/v1/kv/ns/{ns}/values", "GET", "listKVNamespaceValues", nil, readAdmin, adminRead, true, "ns")
-	add("/auth/v1/kv/ns/{ns}/values", "POST", "createKVNamespaceValue", valueBody, writeAdmin, adminWrite, false, "ns")
-	add("/auth/v1/kv/ns/{ns}/values", "PUT", "updateKVNamespaceValue", valueBody, writeAdmin, adminWrite, false, "ns")
-	add("/auth/v1/kv/ns/{ns}/values/{key}", "DELETE", "deleteKVNamespaceValue", nil, readAdmin, adminWrite, false, "ns", "key")
-	add("/auth/v1/kv/pub/{ns}/{key}", "GET", "getPublicKVValue", nil, []int{http.StatusOK, http.StatusBadRequest, http.StatusNotFound, http.StatusUnauthorized, http.StatusServiceUnavailable}, public, false, "ns", "key")
-	add("/auth/v1/kv/keys", "GET", "listKVKeys", nil, readBearer, bearer, true)
-	add("/auth/v1/kv/keys", "PUT", "setKVValue", valueBody, writeBearer, bearer, false)
-	add("/auth/v1/kv/keys/{key}", "GET", "getKVValue", nil, readBearer, bearer, false, "key")
-	add("/auth/v1/kv/keys/{key}", "DELETE", "deleteKVValue", nil, readBearer, bearer, false, "key")
-	add("/auth/v1/kv/values", "GET", "listKVValues", nil, readBearer, bearer, true)
-	add("/auth/v1/kv/test", "GET", "testKVAccess", nil, []int{http.StatusOK, http.StatusBadRequest, http.StatusUnauthorized, http.StatusServiceUnavailable}, bearer, false)
+	add("/auth/v1/kv/ns", "GET", "listKVNamespaces", nil, readAdmin, adminRead, true, false)
+	add("/auth/v1/kv/ns", "POST", "createKVNamespace", nsBody, writeAdmin, adminWrite, false, false)
+	add("/auth/v1/kv/ns/{ns}", "PUT", "updateKVNamespace", nsBody, writeAdmin, adminWrite, false, false, "ns")
+	add("/auth/v1/kv/ns/{ns}", "DELETE", "deleteKVNamespace", nil, readAdmin, adminWrite, false, false, "ns")
+	add("/auth/v1/kv/ns/{ns}/access", "GET", "listKVAccess", nil, readAdmin, adminRead, true, false, "ns")
+	add("/auth/v1/kv/ns/{ns}/access", "POST", "createKVAccess", accessBody, []int{http.StatusCreated, http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable}, adminWrite, false, false, "ns")
+	add("/auth/v1/kv/ns/{ns}/access/{id}", "PUT", "updateKVAccess", accessBody, readAdmin, adminWrite, false, false, "ns", "id")
+	add("/auth/v1/kv/ns/{ns}/access/{id}", "DELETE", "deleteKVAccess", nil, readAdmin, adminWrite, false, false, "ns", "id")
+	add("/auth/v1/kv/ns/{ns}/access/{id}/secret", "POST", "rotateKVAccessSecret", nil, readAdmin, adminWrite, false, false, "ns", "id")
+	add("/auth/v1/kv/ns/{ns}/values", "GET", "listKVNamespaceValues", nil, readAdmin, adminRead, true, true, "ns")
+	add("/auth/v1/kv/ns/{ns}/values", "POST", "createKVNamespaceValue", valueBody, writeAdmin, adminWrite, false, false, "ns")
+	add("/auth/v1/kv/ns/{ns}/values", "PUT", "updateKVNamespaceValue", valueBody, writeAdmin, adminWrite, false, false, "ns")
+	add("/auth/v1/kv/ns/{ns}/values/{key}", "DELETE", "deleteKVNamespaceValue", nil, readAdmin, adminWrite, false, false, "ns", "key")
+	add("/auth/v1/kv/pub/{ns}/{key}", "GET", "getPublicKVValue", nil, []int{http.StatusOK, http.StatusBadRequest, http.StatusNotFound, http.StatusUnauthorized, http.StatusServiceUnavailable}, public, false, false, "ns", "key")
+	add("/auth/v1/kv/keys", "GET", "listKVKeys", nil, readBearer, bearer, true, true)
+	add("/auth/v1/kv/keys", "PUT", "setKVValue", valueBody, writeBearer, bearer, false, false)
+	add("/auth/v1/kv/keys/{key}", "GET", "getKVValue", nil, readBearer, bearer, false, false, "key")
+	add("/auth/v1/kv/keys/{key}", "DELETE", "deleteKVValue", nil, readBearer, bearer, false, false, "key")
+	add("/auth/v1/kv/values", "GET", "listKVValues", nil, readBearer, bearer, true, true)
+	add("/auth/v1/kv/test", "GET", "testKVAccess", nil, []int{http.StatusOK, http.StatusBadRequest, http.StatusUnauthorized, http.StatusServiceUnavailable}, bearer, false, false)
 	return nil
 }

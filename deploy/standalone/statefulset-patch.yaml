@@ -6,9 +6,6 @@ metadata:
 spec:
   replicas: 1
   template:
-    metadata:
-      labels:
-        app.kubernetes.io/component: standalone
     spec:
       containers:
         - name: goauthy

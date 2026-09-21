@@ -189,6 +189,13 @@ func TestHTTPKVStrictNegativeAndCallbackBoundary(t *testing.T) {
 			t.Errorf("%s=%d want %d", tc.path, w.Code, tc.want)
 		}
 	}
+	// GA80-KV-001: the namespace and access listings have no search filter, so
+	// a nonempty term must be rejected rather than silently discarded.
+	for _, path := range []string{"/auth/v1/kv/ns?search=alpha", "/auth/v1/kv/ns/strict-ns/access?search=alpha"} {
+		if w := req(t, m, "GET", path, "", map[string]string{"X-CSRF-Token": "ok"}); w.Code != 400 {
+			t.Errorf("%s=%d want 400", path, w.Code)
+		}
+	}
 	if w := req(t, m, "POST", "/auth/v1/kv/ns", strings.Repeat("x", int(bodyLimit+1)), merge(ct, map[string]string{"X-CSRF-Token": "ok"})); w.Code != 400 {
 		t.Fatalf("oversize=%d", w.Code)
 	}

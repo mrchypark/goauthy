@@ -491,14 +491,10 @@ func run() (err error) {
 		cancelWorker()
 		workers.Wait()
 	}()
-	hmacSecret, err := oauth.LoadSecret(env("GOAUTHY_OAUTH_HMAC_SECRET_FILE", "./secrets/oauth-hmac"))
-	if err != nil {
-		return err
-	}
-	clientSecret, err := oauth.LoadClientSecret(env("GOAUTHY_BOOTSTRAP_CLIENT_SECRET_FILE", "./secrets/bootstrap-client"))
-	if err != nil {
-		return err
-	}
+	// GA-CONFIG-001: the preflight already loaded and validated both deployment
+	// secrets, so startup serves those values instead of re-reading the files
+	// after the storage side effects above.
+	hmacSecret, clientSecret := appConfig.HMACSecret, appConfig.ClientSecret
 	defaultAudience, err := bootstrapDefaultAudience(os.Getenv)
 	if err != nil {
 		return err
@@ -530,7 +526,7 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
-	backchannelURI, allowPrivateBackchannel, allowHTTPBackchannel, retryBase, err := backchannelSettings(os.Getenv)
+	backchannelURI, allowPrivateBackchannel, allowHTTPBackchannel, _, err := backchannelSettings(os.Getenv)
 	if err != nil {
 		return err
 	}
@@ -642,24 +638,14 @@ func run() (err error) {
 			return recordTokenIssued(ctx, db, identityStore, tokenEventLevel, flow, clientID, subject)
 		})
 	}
-	if backchannelURI != "" {
-		deliveryWorker := backchannel.Worker{
-			DB: db, Issuer: issuer, WorkerID: rhizaConfig.NodeID, RetryBase: retryBase,
-			TickInterval: max(time.Second, min(retryBase/4, 5*time.Second)), LeaseDuration: 30 * time.Second,
-			RequestTimeout: 10 * time.Second, MaxAttempts: 100, TokenLifetime: 30 * time.Second, RootCAReloader: backchannelRootCAReloader,
-			AllowPrivate: allowPrivateBackchannel, AllowHTTP: allowHTTPBackchannel,
-			LoadSigningKey: func(ctx context.Context) (oidc.SigningKey, error) {
-				return oidc.LoadActiveSigningKey(ctx, db, keyring, issuer)
-			},
-			OnError: func(err error) { slog.Error("back-channel logout delivery failed", "error", err) },
-		}
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			if err := deliveryWorker.Run(workerCtx); err != nil {
-				slog.Error("back-channel logout worker stopped", "error", err)
-			}
-		}()
+	// GA-FED-005: delivery is started for every configuration. Deliveries are
+	// enqueued for any client with a registered logout URI, so an unset bootstrap
+	// logout URI does not mean an empty queue, and an empty queue is a no-op.
+	// backchannelURI above only seeds the bootstrap client.
+	if err := startBackchannelDelivery(workerCtx, &workers, os.Getenv, db, issuer, rhizaConfig.NodeID, backchannelRootCAReloader, func(ctx context.Context) (oidc.SigningKey, error) {
+		return oidc.LoadActiveSigningKey(ctx, db, keyring, issuer)
+	}); err != nil {
+		return err
 	}
 	browserStore, err := browser.NewStore(db, idleTimeout)
 	if err != nil {
@@ -2321,6 +2307,32 @@ func clientCredentialsMapSubFromEnv(getenv func(string) string) (bool, error) {
 		return false, errors.New("GOAUTHY_CLIENT_CREDENTIALS_MAP_SUB must be a boolean")
 	}
 	return value, nil
+}
+
+// startBackchannelDelivery starts the back-channel logout delivery worker. It
+// runs for every configuration and the worker ignores an empty queue: managed
+// clients register their logout URIs through the API and enqueue deliveries
+// independently of the bootstrap client's endpoint.
+func startBackchannelDelivery(ctx context.Context, workers *sync.WaitGroup, getenv func(string) string, db *rhiza.DB, issuer, workerID string, rootCAReloader *backchannel.RootCAReloader, loadSigningKey func(context.Context) (oidc.SigningKey, error)) error {
+	_, allowPrivate, allowHTTP, retryBase, err := backchannelSettings(getenv)
+	if err != nil {
+		return err
+	}
+	worker := backchannel.Worker{
+		DB: db, Issuer: issuer, WorkerID: workerID, RetryBase: retryBase,
+		TickInterval: max(time.Second, min(retryBase/4, 5*time.Second)), LeaseDuration: 30 * time.Second,
+		RequestTimeout: 10 * time.Second, MaxAttempts: 100, TokenLifetime: 30 * time.Second, RootCAReloader: rootCAReloader,
+		AllowPrivate: allowPrivate, AllowHTTP: allowHTTP, LoadSigningKey: loadSigningKey,
+		OnError: func(err error) { slog.Error("back-channel logout delivery failed", "error", err) },
+	}
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		if err := worker.Run(ctx); err != nil {
+			slog.Error("back-channel logout worker stopped", "error", err)
+		}
+	}()
+	return nil
 }
 
 func backchannelSettings(getenv func(string) string) (string, bool, bool, time.Duration, error) {

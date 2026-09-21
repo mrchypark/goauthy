@@ -10,7 +10,9 @@ import (
 
 // beginPasswordTX retains the generations read before password verification.
 // A subsequent credential change must not authorize tokens for the old proof.
-func (s *Store) beginPasswordTX(ctx context.Context, subject string, passwordGeneration, authenticationGeneration int64) (context.Context, error) {
+// accountHash is the credential-stuffing account key the admission check used;
+// the same key is re-checked when the token write commits.
+func (s *Store) beginPasswordTX(ctx context.Context, subject string, passwordGeneration, authenticationGeneration int64, accountHash string) (context.Context, error) {
 	if subject == "" || passwordGeneration < 1 || authenticationGeneration < 1 {
 		return ctx, errors.New("invalid password authentication snapshot")
 	}
@@ -24,6 +26,7 @@ func (s *Store) beginPasswordTX(ctx context.Context, subject string, passwordGen
 	}
 	tx.kind, tx.principalSubject = "password", subject
 	tx.passwordGeneration, tx.authenticationGeneration = passwordGeneration, authenticationGeneration
+	tx.accountHash = accountHash
 	return ctx, nil
 }
 
