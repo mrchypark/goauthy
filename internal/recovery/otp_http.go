@@ -36,11 +36,11 @@ func (h *OTPHandler) SendOTP(ctx context.Context, subject, lang string, expiresA
 	return h.sender.SendOTP(ctx, subject, code, lang, expiresAt)
 }
 
-func (h *OTPHandler) StoreInteraction(sessionDigest, subject, interactionToken string, expiresAt time.Time) error {
+func (h *OTPHandler) StoreInteraction(sessionDigest, subject, interactionToken string, passwordGeneration, authenticationGeneration int64, expiresAt time.Time) error {
 	if h.interacts == nil {
 		return errors.New("OTP interaction store unavailable")
 	}
-	return h.interacts.Store(sessionDigest, subject, interactionToken, expiresAt)
+	return h.interacts.Store(sessionDigest, subject, interactionToken, passwordGeneration, authenticationGeneration, expiresAt)
 }
 
 func (h *OTPHandler) ConsumeInteraction(sessionDigest string) (string, string, error) {

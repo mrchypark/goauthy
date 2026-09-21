@@ -213,7 +213,14 @@ func resolveFedCMCurrent(ctx context.Context, r *http.Request, sessions *browser
 	if err != nil || session.PeerIP == "" || !session.Authenticated() {
 		return fedcm.Account{}, errors.New("FedCM session unavailable")
 	}
-	return resolveFedCMSubject(ctx, session.Subject, identities)
+	account, err := resolveFedCMSubject(ctx, session.Subject, identities)
+	if err != nil {
+		return fedcm.Account{}, err
+	}
+	// The session records when authentication actually happened. Account
+	// selection must not be presented as a fresh authentication event.
+	account.AuthTime = session.CreatedAt
+	return account, nil
 }
 
 func fedCMSessionCookie(r *http.Request) (*http.Cookie, bool) {

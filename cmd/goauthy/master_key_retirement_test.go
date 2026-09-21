@@ -13,6 +13,7 @@ import (
 
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/passkey"
+	"github.com/mrchypark/goauthy/internal/recovery"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -72,6 +73,48 @@ func TestAdmitMasterKeyRuntimeFencesOldAndAllowsReplacement(t *testing.T) {
 	}
 	if err := admitMasterKeyRuntime(ctx, db, replacement); err != nil {
 		t.Fatalf("replacement rejected after ready: %v", err)
+	}
+}
+
+// GA66-RETIRE-001: runtime admission keeps rejecting a retired key once the
+// next epoch is prepared or aborted, when the barrier row no longer names it.
+func TestMasterKeyRetirementRuntimeAdmissionRejectsRetiredKeyAfterNextEpoch(t *testing.T) {
+	ctx := context.Background()
+	db := retirementCmdDB(t, true)
+	old, current := retirementCmdKeyring(t, "key-a"), retirementCmdKeyring(t, "key-b")
+	now := time.UnixMilli(1_800_000_000_000).UTC()
+	if _, err := storage.PrepareMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementPrepareRequest{Epoch: 1, OldKeyID: "key-a", ReplacementKeyID: "key-b", MemberIDs: []string{"node-0"}, PreparedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.FenceMasterKeyRetirement(ctx, db, 1, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.AttestMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementAttestationRequest{Epoch: 1, NodeID: "node-0", BootID: "boot-0", ActiveKeyID: "key-b", AttestationSequence: 1, AttestedAt: now.Add(2 * time.Second), Status: storage.MasterKeyRetirementStatus{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.ReadyMasterKeyRetirement(ctx, db, 1, now.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := admitMasterKeyRuntime(ctx, db, current); err != nil {
+		t.Fatalf("replacement rejected while its epoch was ready: %v", err)
+	}
+	if _, err := storage.PrepareMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementPrepareRequest{Epoch: 2, OldKeyID: "key-b", ReplacementKeyID: "key-c", MemberIDs: []string{"node-0"}, PreparedAt: now.Add(4 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := admitMasterKeyRuntime(ctx, db, old); err == nil {
+		t.Fatal("retired key admitted while the next epoch was prepared")
+	}
+	if err := admitMasterKeyRuntime(ctx, db, current); err != nil {
+		t.Fatalf("replacement rejected while the next epoch was prepared: %v", err)
+	}
+	if _, err := storage.AbortMasterKeyRetirement(ctx, db, 2, now.Add(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := admitMasterKeyRuntime(ctx, db, old); err == nil {
+		t.Fatal("retired key admitted after the next epoch was aborted")
+	}
+	if err := admitMasterKeyRuntime(ctx, db, current); err != nil {
+		t.Fatalf("replacement rejected after the next epoch was aborted: %v", err)
 	}
 }
 
@@ -136,6 +179,44 @@ func TestInspectMasterKeyRetirementPasskeyDisabledIsExplicitZero(t *testing.T) {
 	}
 }
 
+// GA-STOR-001: with passkeys disabled the passkey families cannot be inspected
+// or rewrapped, so retained rows must block retirement instead of reporting
+// zero passkey references.
+func TestMasterKeyRetirementRejectsRetainedPasskeyRowsWhenDisabled(t *testing.T) {
+	ctx := context.Background()
+	db := retirementCmdDB(t, true)
+	keyring := retirementCmdKeyring(t, "key-b")
+	now := time.UnixMilli(1_800_000_000_000).UTC()
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "retirement-disabled-passkey-credential", SQL: `INSERT INTO identity_webauthn_credentials (credential_id,subject,name,credential_json,sign_count,user_verified,registered_at_unix_ms,last_used_at_unix_ms) VALUES (?,?,?,?,?,?,?,?)`, Args: []any{"credential-id", "subject", "privacy", "sealed-under-key-a", int64(0), int64(1), now.UnixMilli(), now.UnixMilli()}}); err != nil {
+		t.Fatal(err)
+	}
+	status, err := inspectMasterKeyRetirement(ctx, db, keyring, "http://localhost:8080", nil, "key-a", now)
+	if err == nil || status.PasskeyEnabled || status.PasskeyReferences != 0 {
+		t.Fatalf("retained passkey rows were not rejected: status=%#v err=%v", status, err)
+	}
+	if _, err := storage.PrepareMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementPrepareRequest{Epoch: 1, OldKeyID: "key-a", ReplacementKeyID: "key-b", MemberIDs: []string{"node-0"}, PreparedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.FenceMasterKeyRetirement(ctx, db, 1, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := newMasterKeyRetirementWorker(db, keyring, "http://localhost:8080", "node-0", "boot-0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker.now = func() time.Time { return now.Add(2 * time.Second) }
+	if err := worker.Step(ctx); err == nil {
+		t.Fatal("worker attested while uninspected passkey rows were retained")
+	}
+	barrier, err := storage.LoadMasterKeyRetirement(ctx, db)
+	if err != nil || barrier.State != storage.MasterKeyRetirementFenced || len(barrier.Attestations) != 0 {
+		t.Fatalf("retirement advanced past uninspected passkey rows: %#v err=%v", barrier, err)
+	}
+	if !keyring.HasKey("key-a") {
+		t.Fatal("old key was retired while uninspected passkey rows remained")
+	}
+}
+
 func TestInspectMasterKeyRetirementIncludesLoginRevoke(t *testing.T) {
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
@@ -162,6 +243,40 @@ func TestInspectMasterKeyRetirementIncludesLoginRevoke(t *testing.T) {
 	status, err = inspectMasterKeyRetirement(ctx, db, active, "http://localhost:8080", nil, "key-a", now)
 	if err != nil || status.OldReferences != 0 || status.NonActiveReferences != 0 || status.TamperReferences != 0 {
 		t.Fatalf("rewrapped login-revoke retirement=%#v err=%v", status, err)
+	}
+}
+
+func TestInspectMasterKeyRetirementIncludesEmailOutbox(t *testing.T) {
+	ctx := context.Background()
+	db := retirementCmdDB(t, true)
+	old, active := retirementCmdKeyring(t, "key-a"), retirementCmdKeyring(t, "key-b")
+	writer, err := recovery.NewEmailOutbox(db, func(context.Context, string, string, string, string) error { return nil }, recovery.WithEnvelopeKeyring(old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Enqueue(ctx, "user@example.test", "password reset", "Reset", "<p>html</p>", "text body"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.UnixMilli(1_800_000_000_000).UTC()
+	status, err := inspectMasterKeyRetirement(ctx, db, active, "http://localhost:8080", nil, "key-a", now)
+	if err != nil || status.OldReferences != 2 || status.NonActiveReferences != 0 {
+		t.Fatalf("old email outbox retirement=%#v err=%v", status, err)
+	}
+
+	worker, err := newMasterKeyRewrapWorker(db, active, "http://localhost:8080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worker.rewrapEmailOutbox == nil {
+		t.Fatal("email outbox rewrap is not registered in the master-key rewrap worker")
+	}
+	result, err := worker.rewrapEmailOutbox(ctx, "")
+	if err != nil || result.Rewrapped != 2 || !result.Done {
+		t.Fatalf("email outbox rewrap=%#v err=%v", result, err)
+	}
+	status, err = inspectMasterKeyRetirement(ctx, db, active, "http://localhost:8080", nil, "key-a", now)
+	if err != nil || status.OldReferences != 0 || status.NonActiveReferences != 0 || status.TamperReferences != 0 {
+		t.Fatalf("rewrapped email outbox retirement=%#v status=%#v err=%v", result, status, err)
 	}
 }
 
@@ -230,7 +345,10 @@ func TestMasterKeyRetirementWorkerRunReportsInjectedError(t *testing.T) {
 	}
 }
 
-func TestMasterKeyRetirementWorkerRemovesOldKeyOnReady(t *testing.T) {
+// The worker must never delete a retired key: the housekeeping cleanup owner
+// is the only path, and it waits out the overlap period and requires an
+// acknowledged archival receipt (GA-STOR-002).
+func TestMasterKeyRetirementWorkerLeavesRetiredKeyToCleanupOwner(t *testing.T) {
 	db := retirementCmdDB(t, false)
 	keyring := retirementCmdKeyring(t, "key-b")
 	barrier := storage.MasterKeyRetirement{Epoch: 3, OldKeyID: "key-a", ReplacementKeyID: "key-b", State: storage.MasterKeyRetirementReady}
@@ -251,8 +369,8 @@ func TestMasterKeyRetirementWorkerRemovesOldKeyOnReady(t *testing.T) {
 	if err := worker.Step(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if keyring.HasKey("key-a") {
-		t.Fatal("key-a still in keyring after ready step")
+	if !keyring.HasKey("key-a") {
+		t.Fatal("worker deleted the retired key outside the acknowledged-archival cleanup owner")
 	}
 }
 
@@ -274,7 +392,7 @@ func retirementCmdDB(t *testing.T, migrate bool) *rhiza.DB {
 func retirementCmdKeyring(t *testing.T, active string) *oidc.Keyring {
 	t.Helper()
 	dir := t.TempDir()
-	for _, id := range []string{"key-a", "key-b"} {
+	for _, id := range []string{"key-a", "key-b", "key-c"} {
 		path := filepath.Join(dir, id)
 		value := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{byte(id[len(id)-1])}, 32))
 		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {

@@ -11,6 +11,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"strconv"
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/eventlog"
@@ -60,8 +61,10 @@ func (s *Store) RecordAccountFailure(ctx context.Context, accountHash, ip string
 	now = now.UTC().Truncate(time.Millisecond)
 	windowStart := now.UnixMilli() / StuffingWindow.Milliseconds() * StuffingWindow.Milliseconds()
 
-	// Step 1: Upsert the IP failure record for this account+IP+window.
-	ipKey := accountStuffingIPDigest(accountHash, ip)
+	// Step 1: Upsert the IP failure record for this account+IP+window. The window
+	// is part of the row identity so a source that returns in a later window is
+	// counted there instead of staying attributed to the window it first failed in.
+	ipKey := accountStuffingIPDigest(accountHash, ip, windowStart)
 	requestID, err := randomRequestID("stuffing-failure")
 	if err != nil {
 		return AccountStatus{}, false, err
@@ -123,7 +126,7 @@ func (s *Store) RecordAccountFailure(ctx context.Context, accountHash, ip string
 			event := eventlog.CredentialStuffingEvent(eventRequestID, accountHash, ip, int64(status.DistinctIPs), now)
 			if stmt, err := event.Statement("1=1"); err == nil {
 				storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
-					RequestID: eventRequestID,
+					RequestID:  eventRequestID,
 					Statements: []rhiza.SQLStatement{stmt},
 				})
 			}
@@ -216,8 +219,8 @@ func AccountStuffingDigest(subject string) string {
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
-func accountStuffingIPDigest(accountHash, ip string) string {
-	sum := sha256.Sum256([]byte("stuffing-ip/" + accountHash + "/" + ip))
+func accountStuffingIPDigest(accountHash, ip string, windowStartUnixMilli int64) string {
+	sum := sha256.Sum256([]byte("stuffing-ip/" + accountHash + "/" + ip + "/" + strconv.FormatInt(windowStartUnixMilli, 10)))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 

@@ -253,7 +253,7 @@ func TestMigrationV97LegacyCustomToOidcAllowed(t *testing.T) {
 	}
 }
 
-func TestMigrationV97ReplayMigrateReadyMax102(t *testing.T) {
+func TestMigrationV97ReplayMigrateReadyMaxVersion(t *testing.T) {
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v97-replay", DataDir: t.TempDir()})
 	if err != nil {
@@ -268,8 +268,8 @@ func TestMigrationV97ReplayMigrateReadyMax102(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := queryInt64(t, db, "SELECT MAX(version) FROM goauthy_schema_migrations"); got != 102 {
-		t.Fatalf("schema version=%d want=102", got)
+	if got := queryInt64(t, db, "SELECT MAX(version) FROM goauthy_schema_migrations"); got != schemaVersion {
+		t.Fatalf("schema version=%d want=%d", got, schemaVersion)
 	}
 }
 

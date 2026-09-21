@@ -44,6 +44,10 @@ const (
 var (
 	ErrOutboxInvalid = errors.New("scim: invalid outbox configuration or request")
 	ErrOutboxLease   = errors.New("scim: outbox lease was lost")
+	// ErrOutboxStale reports a group projection that was refused because the
+	// local RBAC entity it describes no longer exists. The deletion that
+	// removed the entity owns the queued row's outcome.
+	ErrOutboxStale = errors.New("scim: the local entity for this projection no longer exists")
 )
 
 // Reconciler is deliberately narrower than Client: Step only needs one
@@ -156,6 +160,11 @@ func (o *Outbox) defaults() {
 // Enqueue coalesces work by client ID and immutable externalId. A desired
 // update arriving during an in-flight attempt bumps revision; the old attempt
 // then releases the row back to pending instead of acknowledging new data.
+//
+// A group projection is admitted only while the local RBAC entity it describes
+// still exists, so a projection captured before that entity was removed cannot
+// recreate the row or repoint it away from the removal. A refused projection
+// reports ErrOutboxStale and leaves the row exactly as the removal wrote it.
 func (o *Outbox) Enqueue(ctx context.Context, clientID string, request Request, now time.Time) (Job, error) {
 	if err := o.valid(); err != nil || !validOutboxClientID(clientID) || ctx == nil {
 		return Job{}, ErrOutboxInvalid
@@ -194,9 +203,19 @@ func (o *Outbox) Enqueue(ctx context.Context, clientID string, request Request, 
 	}
 	jobID := outboxJobID(clientID, externalID)
 	requestID := o.mutationID("sco/e", jobID, digest, fmt.Sprint(now.UnixMilli()))
+	// A group projection writes its row only from a SELECT that proves the
+	// local entity is still there. The row a deletion leaves behind is then
+	// untouchable, because the same statement is what would repoint it.
+	source := "VALUES (?,?,?,?,?,'pending',0,?,1,?,?)"
+	args := []any{jobID, clientID, externalID, encoded, digest, now.UnixMilli(), now.UnixMilli(), now.UnixMilli()}
+	admission, admissionArgs := groupAdmission(request.Group.ExternalID)
+	if admission != "" {
+		source = "SELECT ?,?,?,?,?,'pending',0,?,1,?,? WHERE " + admission
+		args = append(args, admissionArgs...)
+	}
 	_, writeErr := storage.Execute(ctx, o.DB, rhiza.ExecuteRequest{RequestID: requestID, SQL: `INSERT INTO scim_user_outbox
 		(job_id,client_id,external_id,request_json,request_digest,status,attempts,next_attempt_at_unix_ms,revision,created_at_unix_ms,updated_at_unix_ms)
-		VALUES (?,?,?,?,?,'pending',0,?,1,?,?)
+		` + source + `
 		ON CONFLICT(client_id,external_id) DO UPDATE SET
 			request_json=excluded.request_json, request_digest=excluded.request_digest,
 			revision=scim_user_outbox.revision+1,
@@ -206,7 +225,7 @@ func (o *Outbox) Enqueue(ctx context.Context, clientID string, request Request, 
 			lease_token=CASE WHEN scim_user_outbox.status='processing' THEN scim_user_outbox.lease_token ELSE NULL END,
 			lease_until_unix_ms=CASE WHEN scim_user_outbox.status='processing' THEN scim_user_outbox.lease_until_unix_ms ELSE NULL END,
 			last_error=NULL, completed_at_unix_ms=NULL, updated_at_unix_ms=excluded.updated_at_unix_ms
-			WHERE scim_user_outbox.request_digest <> excluded.request_digest`, Args: []any{jobID, clientID, externalID, encoded, digest, now.UnixMilli(), now.UnixMilli(), now.UnixMilli()}})
+			WHERE scim_user_outbox.request_digest <> excluded.request_digest`, Args: args})
 	if writeErr != nil {
 		return Job{}, writeErr
 	}
@@ -215,7 +234,18 @@ func (o *Outbox) Enqueue(ctx context.Context, clientID string, request Request, 
 		return Job{}, readErr
 	}
 	if !found {
+		if admission != "" {
+			return Job{}, ErrOutboxStale
+		}
 		return Job{}, errors.New("scim outbox enqueue committed without a row")
+	}
+	// A projection whose write did not land now reads a row that is not the one
+	// it offered. That is a refusal only when the row is a deletion: Enqueue
+	// never writes a deletion, so the only other writer of this job key is the
+	// removal that took the local entity away. A concurrent projection of a
+	// live entity is ordinary coalescing and returns the row.
+	if admission != "" && job.requestDigest != digest && job.Request.Delete {
+		return Job{}, ErrOutboxStale
 	}
 	return job, nil
 }
@@ -227,6 +257,45 @@ func (o *Outbox) EnqueueUser(ctx context.Context, clientID string, user User, no
 
 func (o *Outbox) EnqueueGroup(ctx context.Context, clientID string, group Group, now time.Time) (Job, error) {
 	return o.Enqueue(ctx, clientID, Request{Group: group}, now)
+}
+
+// SupersedeGroupProjection returns the statement that repoints every queued
+// projection of one removed local group at a provider-scoped delete. The job
+// key is unchanged, so the delete supersedes a pending or in-flight sync for
+// the same provider while the row that proves a remote group exists is kept.
+// guard is the caller's local-deletion predicate; it is ANDed into the rewrite
+// so a projection is superseded only when that deletion commits, and guardArgs
+// follows this statement's own arguments in predicate order.
+//
+// A group removal is always DeleteRemote: unlinking a remote group without
+// removing it stays a separate, explicit operation.
+func SupersedeGroupProjection(externalID, displayName, guard string, guardArgs []any, now time.Time) (rhiza.SQLStatement, error) {
+	if !validIdentifier(externalID) || !validIdentifier(displayName) || strings.TrimSpace(guard) == "" || !validOutboxTime(now.UTC()) {
+		return rhiza.SQLStatement{}, ErrOutboxInvalid
+	}
+	encoded, digest, err := encodeRequest(Request{Group: Group{ExternalID: externalID, DisplayName: displayName}, Delete: true, DeletePolicy: DeleteRemote})
+	if err != nil {
+		return rhiza.SQLStatement{}, err
+	}
+	now = now.UTC().Truncate(time.Millisecond)
+	// The release semantics mirror Enqueue: an in-flight attempt keeps its
+	// lease but loses the CAS on the bumped revision, so it returns the row to
+	// pending with the delete instead of acknowledging the superseded sync.
+	// ponytail: request_digest<>? skips a queued row whose digest already equals
+	// this delete. A sync and a delete never encode to the same bytes, so the
+	// only collision is a replay of this exact delete, which is already the
+	// desired state. Upgrade path: if a projection could ever encode equal to
+	// its removal, drop the digest clause and rely on the row's own kind.
+	sql := `UPDATE scim_user_outbox SET request_json=?,request_digest=?,revision=revision+1,
+		status=CASE WHEN status='processing' THEN 'processing' ELSE 'pending' END,
+		attempts=CASE WHEN status='processing' THEN attempts ELSE 0 END,
+		next_attempt_at_unix_ms=CASE WHEN status='processing' THEN next_attempt_at_unix_ms ELSE ? END,
+		lease_token=CASE WHEN status='processing' THEN lease_token ELSE NULL END,
+		lease_until_unix_ms=CASE WHEN status='processing' THEN lease_until_unix_ms ELSE NULL END,
+		last_error=NULL,completed_at_unix_ms=NULL,updated_at_unix_ms=?
+		WHERE json_type(request_json,'$.group')='object' AND json_extract(request_json,'$.group.externalId')=? AND request_digest<>? AND ` + guard
+	args := append([]any{encoded, digest, now.UnixMilli(), now.UnixMilli(), externalID, digest}, guardArgs...)
+	return rhiza.SQLStatement{SQL: sql, Args: args}, nil
 }
 
 // EnqueueTombstoneDelete admits a delete only while its exact tombstone
@@ -352,7 +421,10 @@ func (o *Outbox) Step(ctx context.Context, now time.Time) error {
 
 // Cleanup removes at most limit terminal rows older than Retention. Completed
 // user deletes stay until their tombstone is gone so the tombstone remains the
-// durable record of the associated remote-delete outcome.
+// durable record of the associated remote-delete outcome. A group projection
+// stays while its local group or role exists, because that row is the durable
+// evidence a remote group exists and a later local deletion turns it into a
+// provider-scoped delete.
 func (o *Outbox) Cleanup(ctx context.Context, now time.Time, limit int) (int, error) {
 	if err := o.valid(); err != nil {
 		return 0, err
@@ -380,6 +452,9 @@ func (o *Outbox) Cleanup(ctx context.Context, now time.Time, limit int) (int, er
 		(SELECT job_id FROM scim_user_outbox WHERE status IN ('succeeded','dead') AND completed_at_unix_ms <= ?
 			AND NOT (json_type(request_json,'$.group') IS NULL AND json_extract(request_json,'$.delete')=1
 				AND EXISTS (SELECT 1 FROM scim_user_tombstones WHERE local_external_id=json_extract(request_json,'$.user.externalId')))
+			AND NOT (json_type(request_json,'$.group')='object' AND (
+				EXISTS (SELECT 1 FROM rbac_groups g WHERE json_extract(request_json,'$.group.externalId')='group:'||g.id)
+				OR EXISTS (SELECT 1 FROM rbac_roles r WHERE json_extract(request_json,'$.group.externalId')='role:'||r.id)))
 			ORDER BY completed_at_unix_ms,job_id LIMIT ?)`, Args: []any{cutoff, int64(limit)}})
 	if err != nil {
 		return 0, err
@@ -794,7 +869,15 @@ func encodeRequestWithTombstoneGenerationVersion(request Request, generation str
 		}
 	}
 	b, err := json.Marshal(encodedRequest{Operation: op, User: request.User, Group: group, Delete: request.Delete, DeletePolicy: request.DeletePolicy, TombstoneGeneration: generation})
-	if err != nil || len(b) > 16384 {
+	if err != nil {
+		return "", "", ErrOutboxInvalid
+	}
+	if len(b) > 16384 {
+		if group != nil {
+			// Only a group projection grows with the size of its local
+			// membership, so the oversize request is a group size failure.
+			return "", "", fmt.Errorf("%w: %w", ErrOutboxInvalid, ErrGroupTooLarge)
+		}
 		return "", "", ErrOutboxInvalid
 	}
 	return string(b), digestString(string(b)), nil
@@ -850,6 +933,19 @@ func requestExternalID(request Request) string {
 		return groupStorageKey(request.Group.ExternalID)
 	}
 	return userStorageKey(request.User.ExternalID)
+}
+
+// groupAdmission returns the predicate and arguments that admit a projection
+// only while the local RBAC entity it describes still exists. Roles project as
+// SCIM groups, so both local kinds are admitted here. An externalId outside the
+// local namespaces names no local entity and returns no predicate.
+func groupAdmission(externalID string) (string, []any) {
+	for _, local := range []struct{ prefix, table string }{{"group:", "rbac_groups"}, {"role:", "rbac_roles"}} {
+		if id, found := strings.CutPrefix(externalID, local.prefix); found {
+			return fmt.Sprintf("EXISTS (SELECT 1 FROM %s e WHERE e.id=?)", local.table), []any{id}
+		}
+	}
+	return "", nil
 }
 
 func userStorageKey(externalID string) string { return storageKey("user:", externalID) }

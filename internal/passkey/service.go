@@ -578,8 +578,16 @@ func (s *Service) Delete(ctx context.Context, subject, name string) error {
 	}
 	// The predicate is evaluated by the same replicated mutation as the delete:
 	// conversion cannot make the final verified passkey disappear between a read
-	// and this write.
-	res, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: rid("passkey-delete", subject, id, strconv.FormatInt(version, 10)), SQL: `DELETE FROM identity_webauthn_credentials WHERE subject=? AND credential_id=? AND credential_version=? AND (NOT EXISTS (SELECT 1 FROM identity_authentication_modes WHERE subject=? AND mode='passkey') OR EXISTS (SELECT 1 FROM identity_webauthn_credentials AS retained WHERE retained.subject=? AND retained.credential_id<>? AND retained.user_verified=1))`, Args: []any{subject, id, version, subject, subject, id}})
+	// and this write. The receipt is keyed by request ID, so a rejection must
+	// carry its own operation identity: reusing the credential CAS version alone
+	// would replay the stored zero-row receipt once the final-key protection
+	// stops applying, and enrolling another credential need not bump this one's
+	// version. The CAS predicate itself stays pinned to the version read here.
+	attempt, err := s.token(16)
+	if err != nil {
+		return ErrInvalid
+	}
+	res, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: rid("passkey-delete", subject, id, strconv.FormatInt(version, 10), attempt), SQL: `DELETE FROM identity_webauthn_credentials WHERE subject=? AND credential_id=? AND credential_version=? AND (NOT EXISTS (SELECT 1 FROM identity_authentication_modes WHERE subject=? AND mode='passkey') OR EXISTS (SELECT 1 FROM identity_webauthn_credentials AS retained WHERE retained.subject=? AND retained.credential_id<>? AND retained.user_verified=1))`, Args: []any{subject, id, version, subject, subject, id}})
 	if err != nil {
 		return err
 	}

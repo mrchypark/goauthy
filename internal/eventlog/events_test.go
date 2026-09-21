@@ -79,13 +79,16 @@ func TestListGuardedUsesFixedTimeAndDistinctDeniedMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := eventlog.Query{From: 1_719_784_800, Level: eventlog.Info}
-	rows, authorized, err := store.ListGuarded(ctx, q, time.UnixMilli(1_800_000_001_000), "1=1")
+	rows, next, authorized, err := store.ListGuarded(ctx, q, time.UnixMilli(1_800_000_001_000), nil, eventlog.MaxPageSize, "1=1")
 	if err != nil || !authorized || len(rows) != 1 || rows[0].ID != e.ID {
 		t.Fatalf("rows=%#v authorized=%v err=%v", rows, authorized, err)
 	}
-	rows, authorized, err = store.ListGuarded(ctx, q, time.UnixMilli(1_800_000_001_000), "0=1")
-	if err != nil || authorized || rows == nil || len(rows) != 0 {
-		t.Fatalf("denied rows=%#v authorized=%v err=%v", rows, authorized, err)
+	if next != nil {
+		t.Fatalf("partial page returned a continuation: %#v", next)
+	}
+	rows, next, authorized, err = store.ListGuarded(ctx, q, time.UnixMilli(1_800_000_001_000), nil, eventlog.MaxPageSize, "0=1")
+	if err != nil || authorized || rows == nil || len(rows) != 0 || next != nil {
+		t.Fatalf("denied rows=%#v next=%#v authorized=%v err=%v", rows, next, authorized, err)
 	}
 }
 
@@ -117,25 +120,25 @@ func TestListGuardedBoundariesOrderingThresholdAndType(t *testing.T) {
 	}
 	until := base.Unix()
 	q := eventlog.Query{From: base.Unix(), Until: &until, Level: eventlog.Info}
-	rows, ok, err := store.ListGuarded(ctx, q, base.Add(999*time.Millisecond), "1=1")
+	rows, _, ok, err := store.ListGuarded(ctx, q, base.Add(999*time.Millisecond), nil, eventlog.MaxPageSize, "1=1")
 	ids := []string{items[1].ID, items[2].ID}
 	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
 	if err != nil || !ok || len(rows) != 2 || rows[0].ID != ids[0] || rows[1].ID != ids[1] {
 		t.Fatalf("inclusive/tie rows=%#v ok=%v err=%v", rows, ok, err)
 	}
 	q.Level = eventlog.Notice
-	rows, ok, err = store.ListGuarded(ctx, q, base.Add(999*time.Millisecond), "1=1")
+	rows, _, ok, err = store.ListGuarded(ctx, q, base.Add(999*time.Millisecond), nil, eventlog.MaxPageSize, "1=1")
 	if err != nil || !ok || len(rows) != 0 {
 		t.Fatalf("threshold rows=%#v ok=%v err=%v", rows, ok, err)
 	}
 	q.Level = eventlog.Info
 	typ := eventlog.NewRauthyAdmin
 	q.Type = &typ
-	rows, ok, err = store.ListGuarded(ctx, eventlog.Query{From: base.Unix() - 1, Until: ptr(base.Unix() + 1), Level: eventlog.Info, Type: &typ}, base.Add(999*time.Millisecond), "1=1")
+	rows, _, ok, err = store.ListGuarded(ctx, eventlog.Query{From: base.Unix() - 1, Until: ptr(base.Unix() + 1), Level: eventlog.Info, Type: &typ}, base.Add(999*time.Millisecond), nil, eventlog.MaxPageSize, "1=1")
 	if err != nil || !ok || len(rows) != 1 || rows[0].Type != typ {
 		t.Fatalf("exact type/time rows=%#v ok=%v err=%v", rows, ok, err)
 	}
-	rows, ok, err = store.ListGuarded(ctx, eventlog.Query{From: base.Unix(), Level: eventlog.Info}, base.Add(2999*time.Millisecond), "1=1")
+	rows, _, ok, err = store.ListGuarded(ctx, eventlog.Query{From: base.Unix(), Level: eventlog.Info}, base.Add(2999*time.Millisecond), nil, eventlog.MaxPageSize, "1=1")
 	if err != nil || !ok || len(rows) != 4 {
 		t.Fatalf("default until must truncate fractional second: rows=%#v ok=%v err=%v", rows, ok, err)
 	}

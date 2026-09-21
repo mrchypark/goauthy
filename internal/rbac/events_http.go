@@ -14,10 +14,12 @@ import (
 )
 
 type eventQueryJSON struct {
-	From  *int64          `json:"from"`
-	Until *int64          `json:"until"`
-	Level *eventlog.Level `json:"level"`
-	Type  *eventlog.Type  `json:"typ"`
+	From              *int64          `json:"from"`
+	Until             *int64          `json:"until"`
+	Level             *eventlog.Level `json:"level"`
+	Type              *eventlog.Type  `json:"typ"`
+	Limit             *int64          `json:"limit"`
+	ContinuationToken *string         `json:"continuation_token"`
 }
 
 // EventsQuery returns the public lifecycle event slice under an API-key or
@@ -60,7 +62,7 @@ func (h *Handler) EventsQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for name := range fields {
-		if name != "from" && name != "until" && name != "level" && name != "typ" {
+		if name != "from" && name != "until" && name != "level" && name != "typ" && name != "limit" && name != "continuation_token" {
 			h.badRequest(w)
 			return
 		}
@@ -81,6 +83,26 @@ func (h *Handler) EventsQuery(w http.ResponseWriter, r *http.Request) {
 	if err := query.Validate(); err != nil {
 		h.badRequest(w)
 		return
+	}
+	// Pages stay inside the Rhiza 10,000-row and 16 MiB result budgets, so an
+	// oversized range returns a first page plus its continuation instead of a
+	// generic 503.
+	limit := eventlog.MaxPageSize
+	if input.Limit != nil {
+		if *input.Limit < 1 || *input.Limit > eventlog.MaxPageSize {
+			h.badRequest(w)
+			return
+		}
+		limit = int(*input.Limit)
+	}
+	var cursor *eventlog.Cursor
+	if input.ContinuationToken != nil {
+		parsed, err := eventlog.ParseCursor(*input.ContinuationToken)
+		if err != nil {
+			h.badRequest(w)
+			return
+		}
+		cursor = parsed
 	}
 	guard, args := "", []any(nil)
 	if key != nil {
@@ -114,7 +136,7 @@ func (h *Handler) EventsQuery(w http.ResponseWriter, r *http.Request) {
 		h.unavailable(w)
 		return
 	}
-	events, authorized, err := store.ListGuarded(r.Context(), query, h.store.now(), guard, args...)
+	events, next, authorized, err := store.ListGuarded(r.Context(), query, h.store.now(), cursor, limit, guard, args...)
 	if err != nil {
 		h.unavailable(w)
 		return
@@ -124,5 +146,9 @@ func (h *Handler) EventsQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if next != nil {
+		w.Header().Set("X-Continuation-Token", next.Token())
+		w.WriteHeader(http.StatusPartialContent)
+	}
 	_ = json.NewEncoder(w).Encode(events)
 }

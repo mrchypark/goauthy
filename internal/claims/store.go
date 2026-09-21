@@ -21,8 +21,9 @@ import (
 const maxJSON = 8192
 
 var (
-	attributeNamePattern = regexp.MustCompile(`^[A-Za-z0-9-_/]{2,32}$`)
-	scopeNamePattern     = regexp.MustCompile(`^[A-Za-z0-9-_/,:*.]{2,64}$`)
+	attributeNamePattern       = regexp.MustCompile(`^[A-Za-z0-9-_/]{2,32}$`)
+	scopeNamePattern           = regexp.MustCompile(`^[A-Za-z0-9-_/,:*.]{2,64}$`)
+	one                  int64 = 1
 )
 
 type Store struct {
@@ -65,10 +66,10 @@ func (s *Store) authorize(ctx context.Context, actor string, key *apikey.Princip
 	return s.admin(ctx, actor)
 }
 
-func (s *Store) run(ctx context.Context, key *apikey.Principal, group string, right apikey.Right, id string, statements []rhiza.SQLStatement) error {
+func (s *Store) run(ctx context.Context, actor string, key *apikey.Principal, group string, right apikey.Right, id string, statements []rhiza.SQLStatement) error {
 	if key == nil {
 		_, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: id, Statements: statements})
-		return err
+		return s.classifyAdmission(ctx, actor, nil, group, right, err)
 	}
 	if s.apiKeys == nil {
 		return ErrUnauthorized
@@ -85,12 +86,42 @@ func (s *Store) run(ctx context.Context, key *apikey.Principal, group string, ri
 	}
 	_, ok, err := s.apiKeys.RunMutation(ctx, key, group, right, id, guarded)
 	if err != nil {
-		return err
+		return s.classifyAdmission(ctx, actor, key, group, right, err)
 	}
 	if !ok {
 		return ErrUnauthorized
 	}
 	return nil
+}
+
+// classifyAdmission reports a rejected admission precondition as the outcome the
+// caller documents: an authorization denial when the actor or key has since lost
+// its grant, otherwise a stale-revision conflict. Precondition rejection is
+// identified positively so unrelated failures — request-fingerprint conflicts,
+// execution errors and indeterminate commit outcomes — keep their own identity.
+func (s *Store) classifyAdmission(ctx context.Context, actor string, key *apikey.Principal, group string, right apikey.Right, err error) error {
+	if !isPreconditionRejection(err) {
+		return err
+	}
+	if authErr := s.authorize(ctx, actor, key, group, right); errors.Is(authErr, ErrUnauthorized) {
+		return ErrUnauthorized
+	}
+	return ErrConflict
+}
+
+func isPreconditionRejection(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "error_code="+string(rhiza.MutationErrorCodePreconditionFailed))
+}
+
+// admissionConflict maps a rejected statement precondition onto ErrConflict.
+// The admission statement is the catalog CAS that every caller already reports
+// as a conflict, so the store keeps that contract instead of leaking the raw
+// rejection text after preconditions replaced the old zero-row fallthrough.
+func admissionConflict(err error) error {
+	if isPreconditionRejection(err) {
+		return ErrConflict
+	}
+	return err
 }
 
 // EditableAttribute is the public, self-service view of one custom attribute.
@@ -171,8 +202,8 @@ func (s *Store) createAttribute(ctx context.Context, actor string, key *apikey.P
 	}
 	def := nullable(value.Default)
 	id := requestID("attr-create", actor, fmt.Sprint(expected), value.Name, jsonKey(def))
-	err := s.run(ctx, key, "UserAttributes", apikey.Create, id, []rhiza.SQLStatement{
-		{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND NOT EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND ` + adminGuard(), Args: []any{expected, value.Name, actor}},
+	err := s.run(ctx, actor, key, "UserAttributes", apikey.Create, id, []rhiza.SQLStatement{
+		{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND NOT EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND ` + adminGuard(), Args: []any{expected, value.Name, actor}, ExpectedRowsAffected: &one},
 		{SQL: `INSERT INTO user_attribute_configs (name,desc,default_value_json,typ,user_editable,revision,created_at_unix_ms,updated_at_unix_ms) SELECT ?,?,?,?,?,1,0,0 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{value.Name, nullableString(value.Description), def, nullableString(value.Type), boolInt(value.UserEditable), expected + 1}},
 	})
 	if err != nil {
@@ -204,8 +235,8 @@ func (s *Store) updateAttribute(ctx context.Context, actor string, key *apikey.P
 	}
 	def := nullable(value.Default)
 	id := requestID("attr-update", actor, name, value.Name, fmt.Sprint(expected), jsonKey(def))
-	err := s.run(ctx, key, "UserAttributes", apikey.Update, id, []rhiza.SQLStatement{
-		{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND (?=? OR NOT EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?)) AND ` + adminGuard(), Args: []any{expected, name, name, value.Name, value.Name, actor}},
+	err := s.run(ctx, actor, key, "UserAttributes", apikey.Update, id, []rhiza.SQLStatement{
+		{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND (?=? OR NOT EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?)) AND ` + adminGuard(), Args: []any{expected, name, name, value.Name, value.Name, actor}, ExpectedRowsAffected: &one},
 		{SQL: `UPDATE user_attribute_configs SET name=?,desc=?,default_value_json=?,typ=?,user_editable=?,revision=revision+1,updated_at_unix_ms=0 WHERE name=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{value.Name, nullableString(value.Description), def, nullableString(value.Type), boolInt(value.UserEditable), name, expected + 1}},
 		{SQL: `UPDATE user_attribute_values SET key=? WHERE key=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{value.Name, name, expected + 1}},
 		{SQL: `UPDATE custom_scopes SET attr_include_access_json=coalesce((SELECT json_group_array(CASE WHEN value=? THEN ? ELSE value END) FROM json_each(attr_include_access_json)), '[]'),attr_include_id_json=coalesce((SELECT json_group_array(CASE WHEN value=? THEN ? ELSE value END) FROM json_each(attr_include_id_json)), '[]'),revision=revision+1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?) AND (attr_include_access_json LIKE ? OR attr_include_id_json LIKE ?)`, Args: []any{name, value.Name, name, value.Name, expected + 1, "%\"" + name + "\"%", "%\"" + name + "\"%"}},
@@ -235,8 +266,8 @@ func (s *Store) deleteAttribute(ctx context.Context, actor string, key *apikey.P
 		return ErrInvalid
 	}
 	id := requestID("attr-delete", actor, name, fmt.Sprint(expected))
-	err := s.run(ctx, key, "UserAttributes", apikey.Delete, id, []rhiza.SQLStatement{
-		{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND ` + adminGuard(), Args: []any{expected, name, actor}},
+	err := s.run(ctx, actor, key, "UserAttributes", apikey.Delete, id, []rhiza.SQLStatement{
+		{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND ` + adminGuard(), Args: []any{expected, name, actor}, ExpectedRowsAffected: &one},
 		{SQL: `DELETE FROM user_attribute_values WHERE key=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{name, expected + 1}},
 		{SQL: `DELETE FROM user_attribute_configs WHERE name=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{name, expected + 1}},
 		{SQL: `UPDATE custom_scopes SET attr_include_access_json=coalesce((SELECT json_group_array(value) FROM json_each(attr_include_access_json) WHERE value<>?), '[]'),attr_include_id_json=coalesce((SELECT json_group_array(value) FROM json_each(attr_include_id_json) WHERE value<>?), '[]'),revision=revision+1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?) AND (attr_include_access_json LIKE ? OR attr_include_id_json LIKE ?)`, Args: []any{name, name, expected + 1, "%\"" + name + "\"%", "%\"" + name + "\"%"}},
@@ -287,7 +318,7 @@ func (s *Store) createScope(ctx context.Context, actor string, key *apikey.Princ
 	}
 	a, b := scopeJSON(value)
 	id := requestID("scope-create", actor, fmt.Sprint(expected), value.Name, a, b)
-	err := s.run(ctx, key, "Scopes", apikey.Create, id, []rhiza.SQLStatement{{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND NOT EXISTS (SELECT 1 FROM custom_scopes WHERE name=?) AND ` + adminGuard(), Args: []any{expected, value.Name, actor}}, {SQL: `INSERT INTO custom_scopes (name,attr_include_access_json,attr_include_id_json,claims_at_root,revision) SELECT ?,?,?,?,1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{value.Name, a, b, boolInt(value.ClaimsAtRoot), expected + 1}}})
+	err := s.run(ctx, actor, key, "Scopes", apikey.Create, id, []rhiza.SQLStatement{{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND NOT EXISTS (SELECT 1 FROM custom_scopes WHERE name=?) AND ` + adminGuard(), Args: []any{expected, value.Name, actor}, ExpectedRowsAffected: &one}, {SQL: `INSERT INTO custom_scopes (name,attr_include_access_json,attr_include_id_json,claims_at_root,revision) SELECT ?,?,?,?,1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{value.Name, a, b, boolInt(value.ClaimsAtRoot), expected + 1}}})
 	if err != nil {
 		return Scope{}, err
 	}
@@ -314,7 +345,7 @@ func (s *Store) updateScope(ctx context.Context, actor string, key *apikey.Princ
 	}
 	a, b := scopeJSON(value)
 	id := requestID("scope-update", actor, name, value.Name, fmt.Sprint(expected), a, b)
-	err := s.run(ctx, key, "Scopes", apikey.Update, id, []rhiza.SQLStatement{{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM custom_scopes WHERE name=?) AND (?=? OR NOT EXISTS (SELECT 1 FROM custom_scopes WHERE name=?)) AND ` + adminGuard(), Args: []any{expected, name, name, value.Name, value.Name, actor}}, {SQL: `UPDATE custom_scopes SET name=?,attr_include_access_json=?,attr_include_id_json=?,claims_at_root=?,revision=revision+1 WHERE name=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{value.Name, a, b, boolInt(value.ClaimsAtRoot), name, expected + 1}}, {SQL: `UPDATE bootstrap_client_claim_scopes SET allowed_scopes_json=coalesce((SELECT json_group_array(CASE WHEN value=? THEN ? ELSE value END) FROM json_each(allowed_scopes_json)), '[]'),default_scopes_json=coalesce((SELECT json_group_array(CASE WHEN value=? THEN ? ELSE value END) FROM json_each(default_scopes_json)), '[]'),revision=revision+1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?) AND (allowed_scopes_json LIKE ? OR default_scopes_json LIKE ?)`, Args: []any{name, value.Name, name, value.Name, expected + 1, "%\"" + name + "\"%", "%\"" + name + "\"%"}}})
+	err := s.run(ctx, actor, key, "Scopes", apikey.Update, id, []rhiza.SQLStatement{{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM custom_scopes WHERE name=?) AND (?=? OR NOT EXISTS (SELECT 1 FROM custom_scopes WHERE name=?)) AND ` + adminGuard(), Args: []any{expected, name, name, value.Name, value.Name, actor}, ExpectedRowsAffected: &one}, {SQL: `UPDATE custom_scopes SET name=?,attr_include_access_json=?,attr_include_id_json=?,claims_at_root=?,revision=revision+1 WHERE name=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{value.Name, a, b, boolInt(value.ClaimsAtRoot), name, expected + 1}}, {SQL: `UPDATE bootstrap_client_claim_scopes SET allowed_scopes_json=coalesce((SELECT json_group_array(CASE WHEN value=? THEN ? ELSE value END) FROM json_each(allowed_scopes_json)), '[]'),default_scopes_json=coalesce((SELECT json_group_array(CASE WHEN value=? THEN ? ELSE value END) FROM json_each(default_scopes_json)), '[]'),revision=revision+1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?) AND (allowed_scopes_json LIKE ? OR default_scopes_json LIKE ?)`, Args: []any{name, value.Name, name, value.Name, expected + 1, "%\"" + name + "\"%", "%\"" + name + "\"%"}}})
 	if err != nil {
 		return Scope{}, err
 	}
@@ -340,7 +371,7 @@ func (s *Store) deleteScope(ctx context.Context, actor string, key *apikey.Princ
 		return ErrInvalid
 	}
 	id := requestID("scope-delete", actor, name, fmt.Sprint(expected))
-	err := s.run(ctx, key, "Scopes", apikey.Delete, id, []rhiza.SQLStatement{{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM custom_scopes WHERE name=?) AND ` + adminGuard(), Args: []any{expected, name, actor}}, {SQL: `UPDATE bootstrap_client_claim_scopes SET allowed_scopes_json=coalesce((SELECT json_group_array(value) FROM json_each(allowed_scopes_json) WHERE value<>?), '[]'),default_scopes_json=coalesce((SELECT json_group_array(value) FROM json_each(default_scopes_json) WHERE value<>?), '[]'),revision=revision+1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?) AND (allowed_scopes_json LIKE ? OR default_scopes_json LIKE ?)`, Args: []any{name, name, expected + 1, "%\"" + name + "\"%", "%\"" + name + "\"%"}}, {SQL: `DELETE FROM custom_scopes WHERE name=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{name, expected + 1}}})
+	err := s.run(ctx, actor, key, "Scopes", apikey.Delete, id, []rhiza.SQLStatement{{SQL: `UPDATE claims_catalog SET revision=revision+1 WHERE id=1 AND revision=? AND EXISTS (SELECT 1 FROM custom_scopes WHERE name=?) AND ` + adminGuard(), Args: []any{expected, name, actor}, ExpectedRowsAffected: &one}, {SQL: `UPDATE bootstrap_client_claim_scopes SET allowed_scopes_json=coalesce((SELECT json_group_array(value) FROM json_each(allowed_scopes_json) WHERE value<>?), '[]'),default_scopes_json=coalesce((SELECT json_group_array(value) FROM json_each(default_scopes_json) WHERE value<>?), '[]'),revision=revision+1 WHERE EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?) AND (allowed_scopes_json LIKE ? OR default_scopes_json LIKE ?)`, Args: []any{name, name, expected + 1, "%\"" + name + "\"%", "%\"" + name + "\"%"}}, {SQL: `DELETE FROM custom_scopes WHERE name=? AND EXISTS (SELECT 1 FROM claims_catalog WHERE id=1 AND revision=?)`, Args: []any{name, expected + 1}}})
 	if err != nil {
 		return err
 	}
@@ -484,7 +515,7 @@ func (s *Store) PutSelfUserValues(ctx context.Context, actor, subject string, ex
 	for _, name := range names {
 		args = append(args, name)
 	}
-	stmts := []rhiza.SQLStatement{{SQL: `UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=updated_at_unix_ms+1 WHERE subject=? AND revision=? AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0) AND ?=? AND EXISTS (SELECT 1 FROM user_attribute_configs WHERE user_editable=1 AND name IN (` + placeholders + `))`, Args: args}}
+	stmts := []rhiza.SQLStatement{{SQL: `UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=updated_at_unix_ms+1 WHERE subject=? AND revision=? AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0) AND ?=? AND EXISTS (SELECT 1 FROM user_attribute_configs WHERE user_editable=1 AND name IN (` + placeholders + `))`, Args: args, ExpectedRowsAffected: &one}}
 	for _, name := range names {
 		if encoded := canon[name]; encoded != "null" {
 			stmts = append(stmts, rhiza.SQLStatement{SQL: `INSERT INTO user_attribute_values (subject,key,value_json,updated_at_unix_ms) SELECT ?,?,?,0 WHERE EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=? AND user_editable=1) AND EXISTS (SELECT 1 FROM rbac_principal_versions WHERE subject=? AND revision=?) ON CONFLICT(subject,key) DO UPDATE SET value_json=excluded.value_json,updated_at_unix_ms=user_attribute_values.updated_at_unix_ms+1`, Args: []any{subject, name, encoded, name, subject, expected + 1}})
@@ -493,7 +524,7 @@ func (s *Store) PutSelfUserValues(ctx context.Context, actor, subject string, ex
 		}
 	}
 	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: requestID("self-values", actor, subject, fmt.Sprint(expected), strings.Join(names, "\x00")), Statements: stmts}); err != nil {
-		return 0, err
+		return 0, admissionConflict(err)
 	}
 	_, revision, err = s.selfUserValues(ctx, actor, subject)
 	if err != nil {
@@ -540,7 +571,7 @@ func (s *Store) putUserValues(ctx context.Context, actor string, key *apikey.Pri
 	if current != expected {
 		return 0, ErrConflict
 	}
-	stmts := []rhiza.SQLStatement{{SQL: `UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=updated_at_unix_ms+1 WHERE subject=? AND revision=? AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0) AND ` + adminGuard(), Args: []any{subject, expected, subject, actor}}}
+	stmts := []rhiza.SQLStatement{{SQL: `UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=updated_at_unix_ms+1 WHERE subject=? AND revision=? AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0) AND ` + adminGuard(), Args: []any{subject, expected, subject, actor}, ExpectedRowsAffected: &one}}
 	for _, n := range names {
 		if c, ok := canon[n]; ok {
 			stmts = append(stmts, rhiza.SQLStatement{SQL: `INSERT INTO user_attribute_values (subject,key,value_json,updated_at_unix_ms) SELECT ?,?,?,0 WHERE EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND EXISTS (SELECT 1 FROM rbac_principal_versions WHERE subject=? AND revision=?) ON CONFLICT(subject,key) DO UPDATE SET value_json=excluded.value_json,updated_at_unix_ms=user_attribute_values.updated_at_unix_ms+1`, Args: []any{subject, n, c, n, subject, expected + 1}})
@@ -549,7 +580,7 @@ func (s *Store) putUserValues(ctx context.Context, actor string, key *apikey.Pri
 		}
 	}
 	id := requestID("values", actor, subject, fmt.Sprint(expected), strings.Join(names, "\x00"))
-	e = s.run(ctx, key, "Users", apikey.Update, id, stmts)
+	e = s.run(ctx, actor, key, "Users", apikey.Update, id, stmts)
 	if e != nil {
 		return 0, e
 	}
@@ -644,7 +675,7 @@ func (s *Store) updateBootstrapClientScopes(ctx context.Context, actor string, k
 		statements = append(statements, rhiza.SQLStatement{SQL: `INSERT INTO bootstrap_client_claim_scopes (client_id,allowed_scopes_json,default_scopes_json,revision) SELECT ?,?,?,1 WHERE NOT EXISTS (SELECT 1 FROM bootstrap_client_claim_scopes WHERE client_id=?) AND ` + adminGuard(), Args: []any{clientID, string(a), string(d), clientID, actor}})
 	}
 	id := requestID("client-scopes", actor, clientID, fmt.Sprint(expected), string(a), string(d))
-	e = s.run(ctx, key, "Clients", apikey.Update, id, statements)
+	e = s.run(ctx, actor, key, "Clients", apikey.Update, id, statements)
 	if e != nil {
 		return ClientScopes{}, fmt.Errorf("update bootstrap client scopes: %w", e)
 	}
@@ -726,7 +757,7 @@ func (s *Store) updateBootstrapClientCredentialsClaims(ctx context.Context, acto
 		statements = append(statements, rhiza.SQLStatement{SQL: `INSERT INTO bootstrap_client_credentials_claims (client_id,claims_json,claims_at_root,revision,updated_at_unix_ms) SELECT ?,?,?,1,0 WHERE NOT EXISTS (SELECT 1 FROM bootstrap_client_credentials_claims WHERE client_id=?) AND ` + adminGuard(), Args: []any{clientID, claims, boolInt(atRoot), clientID, actor}})
 	}
 	id := requestID("client-credentials-claims", actor, clientID, fmt.Sprint(expected), fmt.Sprint(claims), fmt.Sprint(atRoot))
-	if err := s.run(ctx, key, "Clients", apikey.Update, id, statements); err != nil {
+	if err := s.run(ctx, actor, key, "Clients", apikey.Update, id, statements); err != nil {
 		return ClientCredentialsClaims{}, fmt.Errorf("update bootstrap client credentials claims: %w", err)
 	}
 	out, err := s.BootstrapClientCredentialsClaims(ctx, clientID)

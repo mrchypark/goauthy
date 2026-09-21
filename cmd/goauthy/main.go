@@ -305,23 +305,11 @@ func run() (err error) {
 			return senderErr
 		}
 		var outboxErr error
-		emailOutbox, outboxErr = recovery.NewEmailOutbox(db, recovery.SMTPSendFunc(sender))
+		emailOutbox, outboxErr = recovery.NewEmailOutbox(db, recovery.SMTPSendFunc(sender), recovery.WithEnvelopeKeyring(keyring))
 		if outboxErr != nil {
 			return fmt.Errorf("configure email outbox: %w", outboxErr)
 		}
-		sender.OnDeliveryFailure = func(recipient, mailType, subject, textBody, htmlBody string, err error) {
-			slog.Error("email delivery failed", "mail_type", mailType, "recipient", recipient, "error", err)
-			operation := "email-error/" + rand.Text()
-			event := eventlog.EmailSendErrorEvent(operation, mailType, recipient, time.Now())
-			if stmt, stmtErr := event.Statement("1=1"); stmtErr == nil {
-				storage.Execute(ctx, db, rhiza.ExecuteRequest{Statements: []rhiza.SQLStatement{stmt}})
-			}
-			if emailOutbox != nil {
-				if qErr := emailOutbox.Enqueue(ctx, recipient, mailType, subject, htmlBody, textBody); qErr != nil {
-					slog.Error("email outbox enqueue failed", "error", qErr)
-				}
-			}
-		}
+		sender.OnDeliveryFailure = newEmailDeliveryFailureHandler(ctx, db, emailOutbox)
 		loginLocationSender = sender
 		powDifficulty, powTTL, powErr := passwordProofConfig(os.Getenv)
 		if powErr != nil {
@@ -491,19 +479,7 @@ func run() (err error) {
 			}
 		}()
 	}
-	housekeepingJobs := buildHousekeepingJobs(
-		eventStore,
-		eventRetention,
-		identityStore,
-		userExpiryConfig,
-		db,
-		dcrAnonymous,
-		dcrCleanupConfig,
-		recoveryService,
-		loginPolicyStore,
-		keyring,
-		emailOutbox,
-	)
+	housekeepingJobs := buildHousekeepingJobs(db, recoveryService, loginPolicyStore, keyring, emailOutbox)
 	if scheduler := housekeeping.New(housekeepingJobs, housekeepingErrorHandler); len(housekeepingJobs) > 0 {
 		workers.Add(1)
 		go func() {
@@ -951,19 +927,7 @@ func run() (err error) {
 		if err != nil {
 			return err
 		}
-		loginLocationSender.OnDeliveryFailure = func(recipient, mailType, subject, textBody, htmlBody string, err error) {
-			slog.Error("email delivery failed", "mail_type", mailType, "recipient", recipient, "error", err)
-			operation := "email-error/" + rand.Text()
-			event := eventlog.EmailSendErrorEvent(operation, mailType, recipient, time.Now())
-			if stmt, stmtErr := event.Statement("1=1"); stmtErr == nil {
-				storage.Execute(ctx, db, rhiza.ExecuteRequest{Statements: []rhiza.SQLStatement{stmt}})
-			}
-			if emailOutbox != nil {
-				if qErr := emailOutbox.Enqueue(ctx, recipient, mailType, subject, htmlBody, textBody); qErr != nil {
-					slog.Error("email outbox enqueue failed", "error", qErr)
-				}
-			}
-		}
+		loginLocationSender.OnDeliveryFailure = newEmailDeliveryFailureHandler(ctx, db, emailOutbox)
 	}
 	emailSubjectPrefix, prefixConfigured := os.LookupEnv("GOAUTHY_EMAIL_SUB_PREFIX")
 	if !prefixConfigured {
@@ -992,7 +956,7 @@ func run() (err error) {
 		if otpErr != nil {
 			return fmt.Errorf("configure email OTP: %w", otpErr)
 		}
-		interactStore := recovery.NewOTPInteractionStore()
+		interactStore := recovery.NewOTPInteractionStore(db)
 		otpHandler = recovery.NewOTPHandler(otpService, loginLocationSender, true, interactStore)
 		loginHandler.SetOTPHandler(otpHandler)
 	}
@@ -2449,6 +2413,42 @@ func cleanupOpenRegistrationTick(ctx context.Context, store *identity.Store, now
 		return errors.New("open registration cleanup requires store and time")
 	}
 	return store.CleanupExpiredOpenRegistrations(ctx, now.UTC())
+}
+
+// newEmailDeliveryFailureHandler builds the SMTP failure callback shared by
+// both sender initialization branches so they cannot diverge (GA-MAIL-005). A
+// failed authentication notification produces one durable audit event and, when
+// the outbox is configured, a retry entry. The audit write failure is logged
+// instead of being dropped, which is also why it never generates more mail.
+func newEmailDeliveryFailureHandler(ctx context.Context, db *rhiza.DB, outbox *recovery.EmailOutbox) func(recipient, mailType, subject, textBody, htmlBody string, err error) {
+	return func(recipient, mailType, subject, textBody, htmlBody string, err error) {
+		slog.Error("email delivery failed", "mail_type", mailType, "recipient", recipient, "error", err)
+		if writeErr := recordEmailSendFailure(ctx, db, mailType, recipient, time.Now()); writeErr != nil {
+			slog.Error("email delivery failure event was not written", "mail_type", mailType, "error", writeErr)
+		}
+		if outbox != nil {
+			if queueErr := outbox.Enqueue(ctx, recipient, mailType, subject, htmlBody, textBody); queueErr != nil {
+				slog.Error("email outbox enqueue failed", "error", queueErr)
+			}
+		}
+	}
+}
+
+// recordEmailSendFailure writes one EmailSendError event. The operation ID is
+// also the mutation request ID, without which the replicated store rejects the
+// statement and the failure stays invisible to the audit trail.
+func recordEmailSendFailure(ctx context.Context, db *rhiza.DB, mailType, recipient string, at time.Time) error {
+	if db == nil {
+		return errors.New("email failure event requires a database")
+	}
+	operation := "email-error/" + rand.Text()
+	event := eventlog.EmailSendErrorEvent(operation, mailType, recipient, at)
+	statement, err := event.Statement("1=1")
+	if err != nil {
+		return err
+	}
+	_, err = storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: operation, Statements: []rhiza.SQLStatement{statement}})
+	return err
 }
 
 // shutdownServer gracefully shuts down an http.Server with a 10-second

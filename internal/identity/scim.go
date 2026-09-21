@@ -29,6 +29,11 @@ type SCIMGroup struct {
 	Members     []string
 }
 
+// SCIMGroupExternalID is the projection key of one local RBAC entity. Roles
+// and groups both project as SCIM groups, so a local removal addresses the
+// queued projection of either kind by the same key.
+func SCIMGroupExternalID(kind, id string) string { return kind + ":" + id }
+
 // ListSCIMGroups projects the live RBAC graph, including roles as groups.
 // Rows are ordered by kind/name/id and members by subject for stable digests.
 func (s *Store) ListSCIMGroups(ctx context.Context) ([]SCIMGroup, error) {
@@ -54,7 +59,7 @@ func (s *Store) ListSCIMGroups(ctx context.Context) ([]SCIMGroup, error) {
 		if !ok1 || !ok2 || !ok3 || (kind != "role" && kind != "group") || !validSCIMProjectionIdentifier(id) || !validSCIMProjectionIdentifier(name) {
 			return nil, errors.New("invalid identity SCIM group row")
 		}
-		external := kind + ":" + id
+		external := SCIMGroupExternalID(kind, id)
 		if len(groups) == 0 || groups[len(groups)-1].ExternalID != external {
 			groups = append(groups, SCIMGroup{ExternalID: external, DisplayName: name})
 		}

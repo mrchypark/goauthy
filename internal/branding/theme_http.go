@@ -91,7 +91,12 @@ func (h *ThemeHandler) get(w http.ResponseWriter, r *http.Request, clientID stri
 		return
 	}
 	w.Header().Set("Content-Type", "text/css")
-	w.Header().Set("Content-Encoding", encoding)
+	if encoding != "" {
+		w.Header().Set("Content-Encoding", encoding)
+	}
+	// The representation depends on Accept-Encoding, so a shared cache must key
+	// on it before serving an encoded or identity copy to another client.
+	w.Header().Set("Vary", "Accept-Encoding")
 	w.Header().Set("Cache-Control", "max-age=31104000, public")
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	if r.Method == http.MethodHead {
@@ -228,15 +233,11 @@ func validThemeTimestamp(value string) bool {
 
 func encodeThemeCSS(css, acceptEncoding string) ([]byte, string, error) {
 	// The pinned preference is br, then gzip. The pinned Rust helper uses
-	// Brotli's default parameters, whose quality is 11.
-	encoding := "none"
-	if strings.Contains(acceptEncoding, "br") {
-		encoding = "br"
-	} else if strings.Contains(acceptEncoding, "gzip") {
-		encoding = "gzip"
-	}
-	if encoding == "none" {
-		return []byte(css), encoding, nil
+	// Brotli's default parameters, whose quality is 11. An empty encoding is
+	// identity, which carries no Content-Encoding header.
+	encoding := themeEncoding(acceptEncoding)
+	if encoding == "" {
+		return []byte(css), "", nil
 	}
 	var body bytes.Buffer
 	var writer io.WriteCloser
@@ -252,4 +253,55 @@ func encodeThemeCSS(css, acceptEncoding string) ([]byte, string, error) {
 		return nil, "", err
 	}
 	return body.Bytes(), encoding, nil
+}
+
+// themeEncoding returns the best acceptable coding, or "" for identity.
+// A coding is unacceptable when the header gives it q=0, and a coding the
+// header never mentions is unacceptable unless a wildcard covers it; identity
+// stays acceptable by default but loses to a coding of equal quality.
+func themeEncoding(acceptEncoding string) string {
+	quality := make(map[string]float64, 4)
+	wildcard, hasWildcard := 0.0, false
+	for _, part := range strings.Split(acceptEncoding, ",") {
+		coding, params, _ := strings.Cut(part, ";")
+		coding = strings.ToLower(strings.TrimSpace(coding))
+		if coding == "" {
+			continue
+		}
+		q := 1.0
+		for _, param := range strings.Split(params, ";") {
+			name, value, ok := strings.Cut(param, "=")
+			if !ok || !strings.EqualFold(strings.TrimSpace(name), "q") {
+				continue
+			}
+			parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+			if err != nil || parsed < 0 || parsed > 1 {
+				parsed = 0
+			}
+			q = parsed
+		}
+		if coding == "*" {
+			wildcard, hasWildcard = q, true
+		} else if previous, ok := quality[coding]; !ok || q > previous {
+			quality[coding] = q
+		}
+	}
+	best, bestQuality := "", 0.0
+	for _, coding := range []string{"br", "gzip", "identity"} {
+		q, listed := quality[coding]
+		if !listed && hasWildcard {
+			q = wildcard
+		} else if !listed && coding == "identity" {
+			q = 1
+		} else if !listed {
+			q = 0
+		}
+		if q > bestQuality {
+			best, bestQuality = coding, q
+		}
+	}
+	if best == "identity" {
+		return ""
+	}
+	return best
 }

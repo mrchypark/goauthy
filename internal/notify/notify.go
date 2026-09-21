@@ -21,6 +21,9 @@ const (
 	DefaultBatch = 1
 	DefaultLease = time.Minute
 	MaxBackoff   = 24 * time.Hour
+	// DefaultRetention bounds a delivery snapshot once it is terminal and how
+	// long an undeliverable one is retried before it is aged out.
+	DefaultRetention = 31 * 24 * time.Hour
 )
 
 type Target struct {
@@ -50,7 +53,33 @@ type Runtime struct {
 	Factory SenderFactory
 	Batch   int
 	Lease   time.Duration
-	Now     func() time.Time
+	// Retention overrides DefaultRetention for Maintain.
+	Retention time.Duration
+	Now       func() time.Time
+}
+
+// Maintain ages out delivery snapshots and reports whether cleanup work remains.
+// One call spends at most one replicated batch, so a caller that shares its
+// goroutine with delivery can resume the backlog between delivery steps instead
+// of blocking every warning behind the whole backlog (GA66-NOTIFY-002).
+// Terminal rows, rows below the configured threshold, and rows that stayed
+// undelivered past retention are removed; live leases and snapshots whose source
+// event is already gone are kept, because a pending delivery must not lose the
+// payload it still owes a destination.
+func (r *Runtime) Maintain(ctx context.Context, now time.Time) (bool, error) {
+	if r == nil || r.Queue == nil || ctx == nil || now.IsZero() {
+		return false, errors.New("notifications are not configured")
+	}
+	retention := r.Retention
+	if retention <= 0 {
+		retention = DefaultRetention
+	}
+	removed, err := r.Queue.Cleanup(ctx, now, retention)
+	if err != nil {
+		return false, err
+	}
+	// A full batch means the backlog is not exhausted; the caller resumes it.
+	return removed == cleanupBatchSize, ctx.Err()
 }
 
 func (r *Runtime) Step(ctx context.Context, now time.Time) error {
@@ -87,6 +116,9 @@ func (r *Runtime) Step(ctx context.Context, now time.Time) error {
 			return err
 		}
 		for _, d := range deliveries {
+			// The claim already filters on the persisted threshold; this keeps a
+			// threshold another instance changed after Targets was read from
+			// reaching the destination.
 			if d.Event.Type != eventlog.Test && d.Event.Level.Rank() < target.Level.Rank() {
 				if err := r.Queue.Ack(ctx, target.Name, d.Event.ID, d.Lease, now); err != nil {
 					return err

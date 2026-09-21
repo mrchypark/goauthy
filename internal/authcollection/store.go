@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,7 +28,67 @@ var (
 	providerIDPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 )
 
-const maxList = 1000 // bounded result; callers receive ErrConflict when exceeded.
+// maxList bounds every list result; callers receive ErrConflict when exceeded.
+// Create methods enforce the same bound so a list can never be defeated by
+// accepted state: creation is refused once the table holds maxList rows, and a
+// bounded list of exactly maxList rows always succeeds.
+const maxList = 1000
+
+// maxListPageBytes bounds one list page. Rhiza rejects any single query whose
+// JSON-encoded result exceeds 16 MiB, and maxList accepted rows can total far
+// more than that, so a list reads keyset pages inside this budget instead of
+// asking for every row at once.
+const maxListPageBytes = 8 << 20
+
+// listRows enumerates every row matching fromWhere in id order. Pages are
+// bounded by maxListPageBytes so listing keeps working once accepted rows
+// aggregate past Rhiza's per-query result budget, and the read stops as soon
+// as maxList+1 rows are known so callers can report the documented conflict.
+//
+// ponytail: each page is its own linearizable read, so a concurrent write can
+// move the page boundary and hide a row inserted behind the cursor. Upgrade
+// path: pin every page to one read snapshot when the pinned Rhiza API exposes
+// one.
+func listRows[T any](ctx context.Context, db *rhiza.DB, columns, fromWhere string, args []any, decode func([]any) (T, error)) ([]T, error) {
+	sizes := make([]string, 0, 7)
+	for _, column := range strings.Split(columns, ",") {
+		sizes = append(sizes, "COALESCE(octet_length("+column+"),0)")
+	}
+	// Every stored byte can expand into a 6-byte JSON escape, so this
+	// over-estimates the encoded row; 64 more bytes cover its quotes and
+	// separators. The first row of a page is always kept so a row larger than
+	// the budget cannot stall the enumeration.
+	cost := "((" + strings.Join(sizes, "+") + ")*6+64)"
+	run := "SUM(" + cost + ") OVER (ORDER BY id ROWS UNBOUNDED PRECEDING)"
+	page := "SELECT " + columns + " FROM (SELECT " + columns + ", " + run + " AS run, " + run + "-" + cost + " AS spent FROM (SELECT " + columns + " FROM " + fromWhere + " AND id>? ORDER BY id LIMIT ?)) WHERE spent=0 OR run<=" + strconv.Itoa(maxListPageBytes) + " ORDER BY id"
+	out := []T{}
+	cursor := ""
+	for {
+		pageArgs := append(append([]any{}, args...), cursor, int64(maxList+1-len(out)))
+		r, err := db.Query(ctx, rhiza.QueryRequest{SQL: page, Args: pageArgs, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil {
+			return nil, err
+		}
+		if len(r.Rows) == 0 {
+			return out, nil
+		}
+		for _, row := range r.Rows {
+			item, err := decode(row)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, item)
+		}
+		id, ok := r.Rows[len(r.Rows)-1][0].(string)
+		if !ok {
+			return nil, ErrInvalid
+		}
+		cursor = id
+		if len(out) > maxList {
+			return nil, ErrConflict
+		}
+	}
+}
 
 type Field struct {
 	Name      string   `json:"name"`
@@ -107,7 +168,10 @@ func (s *Store) CreateDefinition(ctx context.Context, in DefinitionInput, author
 		return Definition{}, ErrInvalid
 	}
 	q := append([]any{in.ID, in.Name, in.AuthMethod, boolInt(in.Enabled), int64(1), gen, string(fields), string(providers), in.ID}, a...)
-	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "auth-collection-definition-create-" + gen, SQL: `INSERT INTO auth_collection_definitions(id,name,auth_method,enabled,revision,generation,fields_json,providers_json) SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM auth_collection_definitions WHERE id=?) AND (` + g + `)`, Args: q})
+	// The capacity predicate is evaluated inside the writing statement, so
+	// concurrent creates cannot push the table past maxList. Soft-deleted
+	// tombstones count toward the bound because they still occupy the table.
+	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "auth-collection-definition-create-" + gen, SQL: `INSERT INTO auth_collection_definitions(id,name,auth_method,enabled,revision,generation,fields_json,providers_json) SELECT ?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM auth_collection_definitions WHERE id=?) AND (SELECT COUNT(*) FROM auth_collection_definitions) < ` + strconv.Itoa(maxList) + ` AND (` + g + `)`, Args: q})
 	if err != nil {
 		return Definition{}, err
 	}
@@ -187,22 +251,7 @@ func (s *Store) ListDefinitions(ctx context.Context, authority func() (string, [
 	if g == "0" {
 		return nil, ErrUnauthorized
 	}
-	r, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT id,name,auth_method,enabled,revision,fields_json,providers_json FROM auth_collection_definitions WHERE deleted=0 AND (` + g + `) ORDER BY id LIMIT ?`, Args: append(a, int64(maxList+1)), Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil {
-		return nil, err
-	}
-	if len(r.Rows) > maxList {
-		return nil, ErrConflict
-	}
-	out := make([]Definition, 0, len(r.Rows))
-	for _, row := range r.Rows {
-		d, e := decodeDefinition(row)
-		if e != nil {
-			return nil, e
-		}
-		out = append(out, d)
-	}
-	return out, nil
+	return listRows(ctx, s.db, `id,name,auth_method,enabled,revision,fields_json,providers_json`, `auth_collection_definitions WHERE deleted=0 AND (`+g+`)`, a, decodeDefinition)
 }
 
 func (s *Store) CreateConnection(ctx context.Context, owner, collectionID string, definitionRevision int64, metadata json.RawMessage, authority func() (string, []any)) (Connection, error) {
@@ -227,8 +276,10 @@ func (s *Store) CreateConnection(ctx context.Context, owner, collectionID string
 	if id == "" || gen == "" {
 		return Connection{}, ErrInvalid
 	}
-	q := append([]any{id, collectionID, owner, definitionRevision, string(metadata), gen, collectionID, definitionRevision, owner, s.now().UnixMilli()}, a...)
-	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "auth-collection-connection-create-" + gen, SQL: `INSERT INTO auth_collection_connections(id,collection_id,owner_subject,state,revision,definition_revision,metadata_json,generation) SELECT ?,?,?, 'draft',1,?,?,? WHERE EXISTS(SELECT 1 FROM auth_collection_definitions d WHERE d.id=? AND d.enabled=1 AND d.revision=? ) AND EXISTS(SELECT 1 FROM identity_users u WHERE u.subject=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?)) AND (` + g + `)`, Args: q})
+	q := append([]any{id, collectionID, owner, definitionRevision, string(metadata), gen, collectionID, definitionRevision, owner, s.now().UnixMilli(), owner, collectionID}, a...)
+	// Connections are hard-deleted, so this per-owner-per-collection row count
+	// is exactly the live count the matching ListConnections read returns.
+	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "auth-collection-connection-create-" + gen, SQL: `INSERT INTO auth_collection_connections(id,collection_id,owner_subject,state,revision,definition_revision,metadata_json,generation) SELECT ?,?,?, 'draft',1,?,?,? WHERE EXISTS(SELECT 1 FROM auth_collection_definitions d WHERE d.id=? AND d.enabled=1 AND d.revision=? ) AND EXISTS(SELECT 1 FROM identity_users u WHERE u.subject=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?)) AND (SELECT COUNT(*) FROM auth_collection_connections c WHERE c.owner_subject=? AND c.collection_id=?) < ` + strconv.Itoa(maxList) + ` AND (` + g + `)`, Args: q})
 	if err != nil {
 		return Connection{}, err
 	}
@@ -294,22 +345,8 @@ func (s *Store) ListConnections(ctx context.Context, owner, collectionID string,
 	if g == "0" {
 		return nil, ErrUnauthorized
 	}
-	r, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT id,collection_id,owner_subject,state,revision,definition_revision,metadata_json FROM auth_collection_connections WHERE owner_subject=? AND collection_id=? AND EXISTS(SELECT 1 FROM identity_users u WHERE u.subject=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?)) AND (` + g + `) ORDER BY id LIMIT ?`, Args: append(append([]any{owner, collectionID, owner, s.now().UnixMilli()}, a...), int64(maxList+1)), Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil {
-		return nil, err
-	}
-	if len(r.Rows) > maxList {
-		return nil, ErrConflict
-	}
-	out := make([]Connection, 0, len(r.Rows))
-	for _, row := range r.Rows {
-		c, e := decodeConnection(row)
-		if e != nil {
-			return nil, e
-		}
-		out = append(out, c)
-	}
-	return out, nil
+	args := append([]any{owner, collectionID, owner, s.now().UnixMilli()}, a...)
+	return listRows(ctx, s.db, `id,collection_id,owner_subject,state,revision,definition_revision,metadata_json`, `auth_collection_connections WHERE owner_subject=? AND collection_id=? AND EXISTS(SELECT 1 FROM identity_users u WHERE u.subject=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?)) AND (`+g+`)`, args, decodeConnection)
 }
 
 func (s *Store) getConnection(ctx context.Context, owner, collectionID, id string, authority func() (string, []any)) (Connection, error) {

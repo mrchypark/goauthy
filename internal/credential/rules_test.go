@@ -41,6 +41,40 @@ func TestRulesValidate(t *testing.T) {
 	}
 }
 
+func TestRulesValidateRejectsImpossibleClassMinimums(t *testing.T) {
+	// A class minimum is satisfied by a character that cannot satisfy any other
+	// class, so required classes above the maximum length describe a policy no
+	// password can meet (GA-CONFIG-002).
+	for _, rules := range []Rules{
+		{LengthMin: 8, LengthMax: 14, LowerCase: 8, UpperCase: 8},
+		{LengthMin: 8, LengthMax: 8, LowerCase: 1, UpperCase: 1, Digits: 1, Special: 6},
+		{LengthMin: 8, LengthMax: 8, Special: 9},
+	} {
+		if err := rules.Validate(); !errors.Is(err, ErrInvalidPasswordRules) {
+			t.Errorf("impossible rules=%+v err=%v", rules, err)
+		}
+	}
+}
+
+func TestRulesValidateAcceptsExactFitClassMinimums(t *testing.T) {
+	exactFit := Rules{LengthMin: 8, LengthMax: 8, LowerCase: 1, UpperCase: 1, Digits: 1, Special: 5}
+	for _, rules := range []Rules{
+		exactFit,
+		{LengthMin: 8, LengthMax: 128, LowerCase: 1, UpperCase: 1, Digits: 1},
+		{LengthMin: 8, LengthMax: 128},
+	} {
+		if err := rules.Validate(); err != nil {
+			t.Errorf("satisfiable rules=%+v err=%v", rules, err)
+		}
+	}
+	if err := exactFit.ValidatePassword([]byte("Ab1!!!!!")); err != nil {
+		t.Fatalf("exact-fit password rejected: %v", err)
+	}
+	if err := exactFit.ValidatePassword([]byte("Ab1!!!!")); !errors.Is(err, ErrPasswordRejected) {
+		t.Fatalf("short password accepted: %v", err)
+	}
+}
+
 func TestRulesValidDaysBoundaries(t *testing.T) {
 	for _, days := range []int{0, 1, 3650} {
 		rules := Rules{LengthMin: 8, LengthMax: 128, ValidDays: days}

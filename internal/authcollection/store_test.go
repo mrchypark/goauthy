@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -315,5 +316,170 @@ func TestDecodeDefinitionRejectsMalformedRows(t *testing.T) {
 	got, err := decodeDefinition(valid)
 	if err != nil || got.ProviderIDs == nil || got.Fields == nil {
 		t.Fatalf("valid definition=%+v err=%v", got, err)
+	}
+}
+
+// seedDefinitions fills the definition table to an exact row count without a
+// create loop, the state an accumulated deployment reaches. deleted marks the
+// seeded rows as tombstones so a capacity test does not also count them live.
+func seedDefinitions(t *testing.T, ctx context.Context, s *Store, n int, deleted bool) {
+	t.Helper()
+	values := make([]string, n)
+	args := make([]any, 0, n*9)
+	d := int64(0)
+	if deleted {
+		d = 1
+	}
+	for i := 0; i < n; i++ {
+		values[i] = "(?,?,?,?,?,?,?,?,?)"
+		id := "seed-" + strconv.Itoa(i)
+		args = append(args, id, id, "oauth2", int64(1), int64(1), "generation", "[]", "[]", d)
+	}
+	// The engine caps one statement at 999 bound arguments, so seed in batches.
+	const perStatement = 999 / 9
+	for start, batch := 0, 0; start < n; start, batch = start+perStatement, batch+1 {
+		end := start + perStatement
+		if end > n {
+			end = n
+		}
+		request := rhiza.ExecuteRequest{RequestID: "auth-collection-seed-" + strconv.Itoa(n) + "-" + strconv.Itoa(batch), SQL: "INSERT INTO auth_collection_definitions(id,name,auth_method,enabled,revision,generation,fields_json,providers_json,deleted) VALUES " + strings.Join(values[start:end], ","), Args: args[start*9 : end*9]}
+		if _, err := storage.Execute(ctx, s.db, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// Every accepted state keeps a supported enumeration path: creation stops
+// exactly where the bounded list read would start failing.
+func TestDefinitionCapacityKeepsListEnumerable(t *testing.T) {
+	s, ctx := collectionFixture(t)
+	// A full table may already exist from earlier releases, so records that
+	// predate the bound must stay listable even though no new create fits.
+	seedDefinitions(t, ctx, s, maxList, true)
+	if _, err := s.CreateDefinition(ctx, DefinitionInput{ID: "over-capacity", Name: "N", AuthMethod: "api_key", Enabled: true}, allow()); !errors.Is(err, ErrConflict) {
+		t.Fatalf("create past definition capacity=%v", err)
+	}
+	// The list still answers; the seeded rows are tombstones, so it is empty.
+	if list, err := s.ListDefinitions(ctx, allow()); err != nil || len(list) != 0 {
+		t.Fatalf("definition list at capacity=%d err=%v", len(list), err)
+	}
+}
+
+// The bound is exclusive, so the accepted ceiling lists in full.
+func TestDefinitionCapacityBoundIsExclusive(t *testing.T) {
+	s, ctx := collectionFixture(t)
+	seedDefinitions(t, ctx, s, maxList-1, false)
+	if _, err := s.CreateDefinition(ctx, DefinitionInput{ID: "capacity-one", Name: "N", AuthMethod: "api_key", Enabled: true}, allow()); err != nil {
+		t.Fatalf("create below definition capacity=%v", err)
+	}
+	if list, err := s.ListDefinitions(ctx, allow()); err != nil || len(list) != maxList {
+		t.Fatalf("definition list at accepted ceiling=%d err=%v", len(list), err)
+	}
+	if _, err := s.CreateDefinition(ctx, DefinitionInput{ID: "capacity-two", Name: "N", AuthMethod: "api_key", Enabled: true}, allow()); !errors.Is(err, ErrConflict) {
+		t.Fatalf("create at definition capacity=%v", err)
+	}
+}
+
+// seedLargeDefinitions stores rows whose aggregate size exceeds Rhiza's
+// 16-MiB encoded-result budget: each fields_json is the largest definition the
+// 8-KiB HTTP limit can produce once <, > and & expand to six-byte escapes.
+func seedLargeDefinitions(t *testing.T, ctx context.Context, s *Store, n int) int64 {
+	t.Helper()
+	options := make([]string, 64)
+	for i := range options {
+		options[i] = strings.Repeat("<", 100) + strconv.Itoa(i)
+	}
+	payload, err := json.Marshal([]Field{{Name: "tenant", Type: "enum", Options: options}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A 128-KiB encoded-command ceiling caps how many large rows fit in one
+	// statement, so seed in pairs instead of the 111 rows seedDefinitions uses.
+	const perStatement = 2
+	for start, batch := 0, 0; start < n; start, batch = start+perStatement, batch+1 {
+		end := start + perStatement
+		if end > n {
+			end = n
+		}
+		values := make([]string, 0, end-start)
+		args := make([]any, 0, (end-start)*9)
+		for i := start; i < end; i++ {
+			id := "large-" + strconv.Itoa(i)
+			values = append(values, "(?,?,?,?,?,?,?,?,0)")
+			args = append(args, id, id, "api_key", int64(1), int64(1), "generation", string(payload), "[]")
+		}
+		request := rhiza.ExecuteRequest{RequestID: "auth-collection-large-seed-" + strconv.Itoa(batch), SQL: "INSERT INTO auth_collection_definitions(id,name,auth_method,enabled,revision,generation,fields_json,providers_json,deleted) VALUES " + strings.Join(values, ","), Args: args}
+		if _, err := storage.Execute(ctx, s.db, request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return int64(len(payload))
+}
+
+// Accepted rows can aggregate past the per-query result budget Rhiza enforces,
+// so listing must page internally instead of failing once the table grows.
+func TestDefinitionListPagesPastResultBudget(t *testing.T) {
+	s, ctx := collectionFixture(t)
+	// Stored escapes re-expand (a stored backslash becomes two bytes), so this
+	// many rows can no longer be returned by a single unpaged query: the same
+	// fixture reproduced "result exceeds 16777216 encoded bytes" before the
+	// store paged internally.
+	const rows = 400
+	seedLargeDefinitions(t, ctx, s, rows)
+	list, err := s.ListDefinitions(ctx, allow())
+	if err != nil {
+		t.Fatalf("list oversized definitions=%v", err)
+	}
+	if len(list) != rows {
+		t.Fatalf("list oversized definitions rows=%d want %d", len(list), rows)
+	}
+	// Rows come back in id order, which is lexicographic here.
+	seen := map[string]bool{}
+	for i, d := range list {
+		if len(d.Fields) != 1 || d.Fields[0].Type != "enum" || len(d.Fields[0].Options) != 64 {
+			t.Fatalf("row %d has wrong fields", i)
+		}
+		if seen[d.ID] {
+			t.Fatalf("row %d repeats %q", i, d.ID)
+		}
+		seen[d.ID] = true
+	}
+	for i := 0; i < rows; i++ {
+		if id := "large-" + strconv.Itoa(i); !seen[id] {
+			t.Fatalf("list omitted %q", id)
+		}
+	}
+}
+
+func TestConnectionCapacityKeepsListEnumerable(t *testing.T) {
+	s, ctx := collectionFixture(t)
+	d, err := s.CreateDefinition(ctx, definition(), allow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := json.RawMessage(`{"label":"x","kind":"work"}`)
+	first, err := s.CreateConnection(ctx, "owner-1", d.ID, d.Revision, meta, allow())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < maxList; i++ {
+		if _, err := s.CreateConnection(ctx, "owner-1", d.ID, d.Revision, meta, allow()); err != nil {
+			t.Fatalf("connection %d: %v", i, err)
+		}
+	}
+	if _, err := s.CreateConnection(ctx, "owner-1", d.ID, d.Revision, meta, allow()); !errors.Is(err, ErrConflict) {
+		t.Fatalf("create past connection capacity=%v", err)
+	}
+	if list, err := s.ListConnections(ctx, "owner-1", d.ID, allow()); err != nil || len(list) != maxList {
+		t.Fatalf("connection list at capacity=%d err=%v", len(list), err)
+	}
+	if _, err := s.CreateConnection(ctx, "owner-2", d.ID, d.Revision, meta, allow()); err != nil {
+		t.Fatalf("another owner at capacity=%v", err)
+	}
+	if err := s.DeleteConnection(ctx, "owner-1", d.ID, first.ID, first.Revision, allow()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateConnection(ctx, "owner-1", d.ID, d.Revision, meta, allow()); err != nil {
+		t.Fatalf("create after freeing capacity=%v", err)
 	}
 }

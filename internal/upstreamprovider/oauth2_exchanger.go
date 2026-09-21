@@ -169,7 +169,9 @@ func (e *OAuth2TokenExchanger) exchangeCodeExplicit(ctx context.Context, provide
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 	if proto.ClientSecretBasic {
-		req.SetBasicAuth(cfg.ClientID, secret)
+		// RFC 6749 section 2.3.1: both components are form-encoded before Basic
+		// construction. Matches the legacy x/oauth2 path (url.QueryEscape).
+		req.SetBasicAuth(url.QueryEscape(cfg.ClientID), url.QueryEscape(secret))
 	}
 
 	resp, err := e.client.Do(req)
@@ -224,11 +226,9 @@ func (e *OAuth2TokenExchanger) exchangeCodeExplicit(ctx context.Context, provide
 		return e.exchangeOAuthUserInfo(ctx, providerID, cfg, tokenResp.AccessToken)
 	}
 
-	// OIDC: try id_token first, fall back to userinfo if available.
+	// OIDC requires an id_token; userinfo-only is only valid for
+	// ProviderKindOAuthUserInfo which explicitly declares that contract.
 	if cfg.NormalizedKind() == ProviderKindOIDC && tokenResp.IDToken == "" {
-		if cfg.UserInfoEndpoint != "" && tokenResp.AccessToken != "" {
-			return e.exchangeOAuthUserInfo(ctx, providerID, cfg, tokenResp.AccessToken)
-		}
 		return nil, errTokenExchange
 	}
 	return &TokenExchangeResult{IDToken: tokenResp.IDToken}, nil

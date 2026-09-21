@@ -257,7 +257,103 @@ func TestThemeHandlerIgnoresNonTextAcceptEncoding(t *testing.T) {
 	request.Header.Set("Accept-Encoding", "br, \u0080")
 	response := httptest.NewRecorder()
 	handler.Theme(response, request)
-	if response.Code != http.StatusOK || response.Header().Get("Content-Encoding") != "none" || response.Body.String() != DefaultTheme("rauthy").CSS() {
+	if response.Code != http.StatusOK || len(response.Header().Values("Content-Encoding")) != 0 || response.Body.String() != DefaultTheme("rauthy").CSS() {
 		t.Fatal("invalid header text selected compressed encoding")
 	}
+}
+
+// TestThemeEncodingNegotiationAndCacheVariation covers GA-BRANDING-001: q=0
+// forbids a coding, identity carries no Content-Encoding, and every cacheable
+// representation varies on Accept-Encoding so a shared cache cannot serve an
+// incompatible copy that breaks login-page styling.
+func TestThemeEncodingNegotiationAndCacheVariation(t *testing.T) {
+	_, db := clientFaviconDB(t)
+	store, err := NewThemeStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := apikey.NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewThemeHandler(store, keys, nil, func(context.Context, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := DefaultTheme("rauthy").CSS()
+	fetch := func(acceptEncoding string) *httptest.ResponseRecorder {
+		request := themeRequest(http.MethodGet, "/auth/v1/theme/missing/1", nil, "missing", "1")
+		if acceptEncoding != "" {
+			request.Header.Set("Accept-Encoding", acceptEncoding)
+		}
+		response := httptest.NewRecorder()
+		handler.Theme(response, request)
+		return response
+	}
+	for _, test := range []struct {
+		name   string
+		accept string
+		want   string
+	}{
+		{"absent header is identity", "", ""},
+		{"identity", "identity", ""},
+		{"gzip only", "gzip", "gzip"},
+		{"equal qualities keep the brotli preference", "gzip;q=1.0, br;q=1.0", "br"},
+		{"zero quality forbids brotli", "br;q=0, gzip", "gzip"},
+		{"zero quality for brotli only is identity", "br;q=0", ""},
+		{"zero quality everywhere is identity", "br;q=0, gzip;q=0", ""},
+		{"wildcard allows brotli", "*", "br"},
+		{"zero wildcard is identity", "*;q=0", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := fetch(test.accept)
+			encoding := response.Header().Get("Content-Encoding")
+			if response.Code != http.StatusOK || encoding != test.want || response.Header().Get("Vary") != "Accept-Encoding" {
+				t.Fatalf("accept=%q status=%d encoding=%q vary=%q cache-control=%q", test.accept, response.Code, encoding, response.Header().Get("Vary"), response.Header().Get("Cache-Control"))
+			}
+			if got := decodedThemeCSS(t, encoding, response.Body.Bytes()); got != css {
+				t.Fatalf("accept=%q body does not round trip", test.accept)
+			}
+			if test.want != "" && response.Body.Len() >= len(css) {
+				t.Fatalf("accept=%q body was not compressed: %d bytes", test.accept, response.Body.Len())
+			}
+		})
+	}
+
+	// A shared cache sees one URL with two representations: both must declare the
+	// variation, and the encodings must differ so one cannot be reused for the other.
+	brResponse := fetch("br")
+	gzipResponse := fetch("gzip")
+	if brResponse.Header().Get("Vary") != "Accept-Encoding" || gzipResponse.Header().Get("Vary") != "Accept-Encoding" || bytes.Equal(brResponse.Body.Bytes(), gzipResponse.Body.Bytes()) {
+		t.Fatalf("shared-cache representations vary=%q/%q equal=%t", brResponse.Header().Get("Vary"), gzipResponse.Header().Get("Vary"), bytes.Equal(brResponse.Body.Bytes(), gzipResponse.Body.Bytes()))
+	}
+}
+
+func decodedThemeCSS(t *testing.T, encoding string, body []byte) string {
+	t.Helper()
+	switch encoding {
+	case "":
+		return string(body)
+	case "gzip":
+		reader, err := gzip.NewReader(bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := io.ReadAll(reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := reader.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return string(decoded)
+	case "br":
+		decoded, err := io.ReadAll(brotli.NewReader(bytes.NewReader(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(decoded)
+	}
+	t.Fatalf("unexpected content encoding %q", encoding)
+	return ""
 }

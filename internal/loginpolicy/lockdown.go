@@ -37,6 +37,7 @@ func (s *LockdownStore) SetLockdown(ctx context.Context, enabled bool, reason st
 	}
 
 	var sql string
+	args := []any{reasonB64, untilMs, nowMs, nowMs}
 	if enabled {
 		sql = `INSERT INTO system_lockdown (id,enabled,reason,until_unix_ms,created_at_unix_ms,updated_at_unix_ms)
 			VALUES (1, 1, ?, ?, ?, ?)
@@ -53,12 +54,13 @@ func (s *LockdownStore) SetLockdown(ctx context.Context, enabled bool, reason st
 				reason = '',
 				until_unix_ms = 0,
 				updated_at_unix_ms = excluded.updated_at_unix_ms`
+		args = []any{nowMs, nowMs}
 	}
 
 	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID: requestID,
 		Statements: []rhiza.SQLStatement{
-			{SQL: sql, Args: []any{reasonB64, untilMs, nowMs, nowMs}},
+			{SQL: sql, Args: args},
 		},
 	})
 	return err
@@ -69,7 +71,7 @@ func (s *LockdownStore) IsLockedDown(ctx context.Context) (bool, string, time.Ti
 		return false, "", time.Time{}, errors.New("lockdown store is not configured")
 	}
 	result, err := s.db.Query(ctx, rhiza.QueryRequest{
-		SQL:       `SELECT enabled, reason, until_unix_ms FROM system_lockdown WHERE id = 1`,
+		SQL:         `SELECT enabled, reason, until_unix_ms FROM system_lockdown WHERE id = 1`,
 		Consistency: rhiza.ConsistencyLinearizable,
 	})
 	if err != nil {
@@ -98,7 +100,7 @@ func (s *LockdownStore) IsLockedDown(ctx context.Context) (bool, string, time.Ti
 
 	reasonBytes, err := base64.RawURLEncoding.DecodeString(reasonB64)
 	if err != nil {
-		return false, "", time.Time{}, nil
+		return false, "", time.Time{}, fmt.Errorf("invalid lockdown reason encoding: %w", err)
 	}
 
 	var until time.Time
@@ -132,8 +134,8 @@ func (s *LockdownStore) IsAdmin(ctx context.Context, subject string) (bool, erro
 		return false, errors.New("invalid input")
 	}
 	result, err := s.db.Query(ctx, rhiza.QueryRequest{
-		SQL:       `SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.subject = ? AND u.disabled = 0 AND r.name = 'rauthy_admin'`,
-		Args:      []any{subject},
+		SQL:         `SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.subject = ? AND u.disabled = 0 AND r.name = 'rauthy_admin'`,
+		Args:        []any{subject},
 		Consistency: rhiza.ConsistencyLinearizable,
 	})
 	if err != nil {
@@ -147,8 +149,8 @@ func (s *LockdownStore) IsAdminByUsername(ctx context.Context, username string) 
 		return false, errors.New("invalid input")
 	}
 	result, err := s.db.Query(ctx, rhiza.QueryRequest{
-		SQL:       `SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.username = ? AND u.disabled = 0 AND r.name = 'rauthy_admin'`,
-		Args:      []any{username},
+		SQL:         `SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.username = ? AND u.disabled = 0 AND r.name = 'rauthy_admin'`,
+		Args:        []any{username},
 		Consistency: rhiza.ConsistencyLinearizable,
 	})
 	if err != nil {

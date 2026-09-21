@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,9 +14,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	jose "github.com/go-jose/go-jose/v4"
 	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/oauth"
@@ -478,4 +483,74 @@ func TestDynamicDispatcherConsumeRejectsClosedDB(t *testing.T) {
 	if err == nil {
 		t.Fatal("Consume(closed DB): expected error, got nil")
 	}
+}
+
+// TestDynamicDispatcherReusesManagedJWKSCache covers the public managed
+// backchannel endpoint: sequential dispatches of one provider version must share
+// a verifier so an invalid logout token cannot drive a fresh JWKS fetch per
+// request, and a configuration change must select a new cache identity.
+func TestDynamicDispatcherReusesManagedJWKSCache(t *testing.T) {
+	f := drtNewFixture(t)
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: privateKey.Public(), KeyID: "k1", Algorithm: "EdDSA", Use: "sig"}}}
+	var fetches atomic.Int64
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches.Add(1)
+		w.Header().Set("Content-Type", "application/jwk-set+json")
+		_ = json.NewEncoder(w).Encode(keys)
+	}))
+	defer server.Close()
+
+	seed := drtValidRequest()
+	seed.JWKS = &server.URL
+	if _, err := f.store.CreateAuthorized(f.ctx, drtProviderID, "seed/jwks-cache", seed, f.keys, f.principal); err != nil {
+		t.Fatal(err)
+	}
+	d := drtDispatcher(t, f, nil)
+	d.client = server.Client()
+	mux := http.NewServeMux()
+	mountDynamicUpstreamRoutes(mux, d, nil)
+
+	token := unknownKeyLogoutToken()
+	dispatch := func() int64 {
+		t.Helper()
+		form := url.Values{"logout_token": {token}}
+		req := httptest.NewRequest(http.MethodPost, "/upstream/"+drtProviderID+"/backchannel-logout", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("logout dispatch: got %d, want 400; body=%s", rec.Code, rec.Body.String())
+		}
+		return fetches.Load()
+	}
+
+	first := dispatch()
+	second := dispatch()
+	if second != first {
+		t.Fatalf("second dispatch refetched JWKS: %d then %d", first, second)
+	}
+	if first == 0 {
+		t.Fatal("dispatches did not reach the JWKS endpoint through the dispatcher's shared client")
+	}
+
+	// A configuration change must not reuse keys fetched under the old version.
+	seed.Name = "Updated Provider"
+	if _, err := f.store.UpdateAuthorized(f.ctx, drtProviderID, "bump/jwks-cache", seed, f.keys, f.principal); err != nil {
+		t.Fatal(err)
+	}
+	if bumped := dispatch(); bumped <= first {
+		t.Fatalf("provider version change reused the previous JWKS cache: %d then %d", first, bumped)
+	}
+}
+
+// unknownKeyLogoutToken is a well-formed compact JWS whose kid is absent from
+// the fetched key set, which also exercises the verifier's miss refresh.
+func unknownKeyLogoutToken() string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","kid":"unknown-key"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + drtUpstreamIssuer + `"}`))
+	return header + "." + payload + "." + base64.RawURLEncoding.EncodeToString([]byte("signature"))
 }

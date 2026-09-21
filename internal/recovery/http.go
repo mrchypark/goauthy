@@ -405,12 +405,6 @@ type passkeyRegistrationStartRequest struct {
 	CaptchaResponse   string      `json:"captcha_response,omitempty"`
 }
 
-type passkeyRegistrationStartResponse struct {
-	CredentialCreation interface{} `json:"credential_creation"`
-	Code               string      `json:"code"`
-	ExpiresAt          string      `json:"expires_at"`
-}
-
 type passkeyRegistrationFinishRequest struct {
 	Code         string `json:"code"`
 	PasskeyName  string `json:"passkey_name"`
@@ -503,46 +497,14 @@ func (s *Service) RegisterPasskeyStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
 		return
 	}
-	values, err := canonicalUserValues(request.UserValues)
-	if err != nil {
-		unavailable(w)
-		return
-	}
-	preferredUsername := ""
-	if request.PreferredUsername != nil {
-		preferredUsername = *request.PreferredUsername
-	}
-	subject, err := s.identity.RegisterPasskeyUser(r.Context(), identity.OpenRegistration{
-		Language:                i18n.UserLanguageFromRequest(r),
-		Email:                   request.Email,
-		PreferredUsername:       preferredUsername,
-		PreferredUsernamePolicy: config.UserValuesPolicy.PreferredUsername,
-		GivenName:               request.GivenName,
-		FamilyName:              request.FamilyName,
-		UserValuesJSON:          values,
-		RedirectURI:             request.RedirectURI,
-		TTL:                     s.registration.ttl,
-		SourceIP:                ip,
-	})
-	if err != nil {
-		unavailable(w)
-		return
-	}
-	if s.OnUserCreated != nil {
-		s.OnUserCreated()
-	}
-	sessionDigest := request.PasskeyName
-	opts, code, exp, err := s.passkeys.BeginRegistration(r.Context(), subject, request.Email, request.PasskeyName, sessionDigest)
-	if err != nil {
-		unavailable(w)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(passkeyRegistrationStartResponse{
-		CredentialCreation: opts,
-		Code:               code,
-		ExpiresAt:          exp.UTC().Format("2006-01-02T15:04:05Z"),
-	})
+	// GA-BR-02: this endpoint cannot build the ceremony it reports. Passkey-first
+	// enrollment needs a persisted enrollment binding (subject, expiry, and a
+	// separate bounded attestation payload) that does not exist yet, and no
+	// passkey name can satisfy the canonical 32-byte session digest
+	// BeginRegistration requires. Fail closed before reserving the passkey-only
+	// identity, so a start that cannot complete leaves no account behind and can
+	// never authorize enrollment onto an existing account.
+	unavailable(w)
 }
 
 // RegisterPasskeyFinish implements POST /auth/v1/register/passkey/finish.
@@ -569,12 +531,9 @@ func (s *Service) RegisterPasskeyFinish(w http.ResponseWriter, r *http.Request) 
 		badRegistration(w)
 		return
 	}
-	sessionDigest := request.PasskeyName
-	cred, err := s.passkeys.FinishPasskeyRegistration(r.Context(), "", request.PasskeyName, sessionDigest, request.Code, r)
-	if err != nil {
-		badRegistration(w)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(cred)
+	// GA-BR-02: the same missing enrollment binding applies here, and this path
+	// also handed the already-decoded request body to WebAuthn and carried no
+	// attestation payload, so it could never verify the credential. No ceremony
+	// can exist while start fails closed; reject before loading one anyway.
+	badRegistration(w)
 }

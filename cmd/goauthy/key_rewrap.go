@@ -32,6 +32,7 @@ type masterKeyRewrapWorker struct {
 	rewrapManaged                  func(context.Context, string) (oidc.SigningKeyRewrapBatchResult, error)
 	rewrapLoginRevoke              func(context.Context, string) (oidc.SigningKeyRewrapBatchResult, error)
 	rewrapGeneratedAPIKeyBootstrap func(context.Context) (oidc.SigningKeyRewrapBatchResult, error)
+	rewrapEmailOutbox              func(context.Context, string) (oidc.SigningKeyRewrapBatchResult, error)
 	rewrapSaaS                     func(context.Context, string) (oidc.SigningKeyRewrapBatchResult, error)
 	rewrapSaaSProvider             func(context.Context, string) (oidc.SigningKeyRewrapBatchResult, error)
 	rewrapSaaSAuthorization        func(context.Context, string) (oidc.SigningKeyRewrapBatchResult, error)
@@ -40,16 +41,17 @@ type masterKeyRewrapWorker struct {
 	onError                        func(error)
 	newFamilyContext               func(context.Context) (context.Context, context.CancelFunc)
 
-	signingCursor           string
-	idempotencyCursor       string
-	transactionCursor       string
-	passkeyCursor           string
-	kvCursor                string
-	managedCursor           string
-	loginRevokeCursor       string
-	saasCursor              string
-	saasProviderCursor      string
-	saasAuthorizationCursor string
+	signingCursor            string
+	idempotencyCursor        string
+	transactionCursor        string
+	passkeyCursor            string
+	kvCursor                 string
+	managedCursor            string
+	loginRevokeCursor        string
+	emailOutboxCursor        string
+	saasCursor               string
+	saasProviderCursor       string
+	saasAuthorizationCursor  string
 	authProviderSecretCursor string
 }
 
@@ -95,6 +97,9 @@ func newMasterKeyRewrapWorker(db *rhiza.DB, keyring *oidc.Keyring, issuer string
 		rewrapGeneratedAPIKeyBootstrap: func(ctx context.Context) (oidc.SigningKeyRewrapBatchResult, error) {
 			return oidc.RewrapGeneratedAPIKeyBootstrapEnvelope(ctx, db, keyring)
 		},
+		rewrapEmailOutbox: func(ctx context.Context, cursor string) (oidc.SigningKeyRewrapBatchResult, error) {
+			return oidc.RewrapEmailOutboxBatch(ctx, db, keyring, cursor)
+		},
 		now: func() time.Time { return time.Now().UTC() },
 	}, nil
 }
@@ -112,6 +117,10 @@ func noopManagedRewrap(context.Context, string) (oidc.SigningKeyRewrapBatchResul
 }
 
 func noopLoginRevokeRewrap(context.Context, string) (oidc.SigningKeyRewrapBatchResult, error) {
+	return oidc.SigningKeyRewrapBatchResult{Done: true}, nil
+}
+
+func noopEmailOutboxRewrap(context.Context, string) (oidc.SigningKeyRewrapBatchResult, error) {
 	return oidc.SigningKeyRewrapBatchResult{Done: true}, nil
 }
 
@@ -226,6 +235,20 @@ func (w *masterKeyRewrapWorker) Step(ctx context.Context) error {
 		w.loginRevokeCursor = ""
 	} else {
 		w.loginRevokeCursor = loginRevoke.Cursor
+	}
+	emailOutboxRewrap := w.rewrapEmailOutbox
+	if emailOutboxRewrap == nil {
+		emailOutboxRewrap = noopEmailOutboxRewrap
+	}
+	emailOutboxCtx, cancel := w.familyContext(ctx)
+	emailOutbox, err := emailOutboxRewrap(emailOutboxCtx, w.emailOutboxCursor)
+	cancel()
+	if err != nil {
+		errs = append(errs, fmt.Errorf("rewrap email outbox: %w", err))
+	} else if emailOutbox.Done {
+		w.emailOutboxCursor = ""
+	} else {
+		w.emailOutboxCursor = emailOutbox.Cursor
 	}
 	if w.rewrapGeneratedAPIKeyBootstrap != nil {
 		generatedCtx, cancel := w.familyContext(ctx)

@@ -2,6 +2,7 @@ package ipblacklist
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -311,6 +312,14 @@ func requestID(r *http.Request, mutation ...string) string {
 		return ""
 	}
 	v := r.Header.Get("X-Request-ID")
+	// A mutating request without an explicit client key is a new operation: a
+	// stable ID derived from method and path shares a receipt between independent
+	// requests, so delete-recreate-delete replays the first delete and reports
+	// success while the prefix stays blocked. An explicit valid X-Request-ID
+	// remains an idempotency key below, replaying its recorded outcome.
+	if len(mutation) > 0 && !validRequestID(v) {
+		return rand.Text()
+	}
 	if len(mutation) == 0 && validRequestID(v) {
 		return v
 	}

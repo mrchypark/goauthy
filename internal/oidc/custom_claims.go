@@ -32,7 +32,7 @@ var reservedIDTokenClaimNames = map[string]struct{}{
 	"acr": {}, "roles": {}, "groups": {}, "custom": {}, "cnf": {}, "typ": {}, "scope": {},
 	"did": {}, "act": {}, "allowed_origins": {}, "webid": {}, "email": {}, "email_verified": {},
 	"preferred_username": {}, "given_name": {}, "family_name": {}, "birthdate": {}, "address": {},
-	"phone_number": {}, "phone_number_verified": {}, "zoneinfo": {},
+	"phone_number": {}, "phone_number_verified": {}, "zoneinfo": {}, "locale": {},
 }
 
 // NormalizeCustomClaims validates, copies, and canonicalizes custom JSON

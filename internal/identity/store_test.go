@@ -248,6 +248,12 @@ func TestConvertToPasskeyOnlyErasesPasswordAdmissionAndArtifacts(t *testing.T) {
 	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "conversion-mfa-proof-purpose", SQL: `INSERT INTO identity_webauthn_service_proof_purposes (code_digest,purpose) VALUES (?,?)`, Args: []any{strings.Repeat("p", 43), "MfaModToken"}}); err != nil {
 		t.Fatal(err)
 	}
+	// A pending password-plus-OTP binding continues the password proof this
+	// conversion revokes, so it is cleaned up with the other ceremonies
+	// (GA66-OTP-002).
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "conversion-otp-interaction", SQL: `INSERT INTO identity_email_otp_interactions (session_digest,subject,interaction_digest,password_generation,authentication_generation,expires_at_unix_ms) VALUES (?,?,?,?,?,?)`, Args: []any{strings.Repeat("b", 43), "subject-1", strings.Repeat("d", 43), int64(2), int64(1), now.Add(time.Minute).UnixMilli()}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.ConvertToPasskeyOnly(ctx, "subject-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -269,6 +275,7 @@ func TestConvertToPasskeyOnlyErasesPasswordAdmissionAndArtifacts(t *testing.T) {
 		`SELECT count(*) FROM identity_webauthn_mfa_ceremonies WHERE subject = 'subject-1'`,
 		`SELECT count(*) FROM identity_webauthn_service_proof_purposes WHERE code_digest = '` + strings.Repeat("p", 43) + `'`,
 		`SELECT count(*) FROM identity_webauthn_mfa_proofs WHERE subject = 'subject-1'`,
+		`SELECT count(*) FROM identity_email_otp_interactions WHERE subject = 'subject-1'`,
 		`SELECT count(*) FROM identity_users WHERE subject = 'subject-1' AND password_phc <> ''`,
 	} {
 		assertCount(t, store, sql, 0)

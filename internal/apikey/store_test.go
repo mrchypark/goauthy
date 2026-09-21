@@ -434,3 +434,75 @@ func TestDeleteMissingKeyReturnsNotFound(t *testing.T) {
 		t.Fatalf("missing delete err=%v", err)
 	}
 }
+
+// TestUpdateRevertsToEarlierConfigurationAndReplaysExactRetry pins
+// GA-APIKEY-001: the update request ID identifies the prepared mutation rather
+// than the configuration it applies, so reverting to a configuration that an
+// earlier update already applied is an independent update. Replaying one exact
+// prepared mutation still deduplicates on its retained receipt.
+func TestUpdateRevertsToEarlierConfigurationAndReplaysExactRetry(t *testing.T) {
+	ctx := context.Background()
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "apikey-operation-identity", DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := storage.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2032, 1, 1, 0, 0, 0, 0, time.UTC)
+	s.now = func() time.Time { return now }
+	_, token, err := s.Create(ctx, nil, Request{Name: "manager", Access: []Access{{Group: GroupAPIKeys, AccessRights: []Right{Create, Update}}, {Group: "Events", AccessRights: []Right{Read}}, {Group: "Groups", AccessRights: []Right{Read}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := s.Authenticate(ctx, "API-Key "+token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configA := Request{Name: "target", Access: []Access{{Group: "Events", AccessRights: []Right{Read}}}}
+	configB := Request{Name: "target", Access: []Access{{Group: "Groups", AccessRights: []Right{Read}}}}
+	if _, _, err := s.Create(ctx, &manager, configB); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	if _, err := s.Update(ctx, &manager, "target", configA); err != nil {
+		t.Fatalf("apply A: %v", err)
+	}
+	now = now.Add(time.Second)
+	if _, err := s.Update(ctx, &manager, "target", configB); err != nil {
+		t.Fatalf("apply B: %v", err)
+	}
+	var submitted rhiza.ExecuteRequest
+	s.beforeSubmit = func(request rhiza.ExecuteRequest) {
+		s.beforeSubmit = nil
+		submitted = request
+	}
+	now = now.Add(time.Second)
+	reverted, err := s.Update(ctx, &manager, "target", configA)
+	if err != nil {
+		t.Fatalf("revert to A: %v", err)
+	}
+	if len(reverted.Access) != 1 || reverted.Access[0].Group != "Events" || len(reverted.Access[0].AccessRights) != 1 || reverted.Access[0].AccessRights[0] != Read {
+		t.Fatalf("reverted access=%+v", reverted.Access)
+	}
+	if submitted.RequestID == "" {
+		t.Fatal("revert submitted no request")
+	}
+	response, err := storage.Execute(ctx, db, submitted)
+	if err != nil || response.Status != "committed" {
+		t.Fatalf("exact retry response=%+v err=%v", response, err)
+	}
+	events, _, err := s.ListAuditEvents(ctx, manager, nil, 32)
+	if err != nil || len(events) != 5 {
+		t.Fatalf("audit events after exact retry=%d err=%v", len(events), err)
+	}
+	guards, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(*) FROM api_key_mutation_guards`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || guards.Rows[0][0] != int64(0) {
+		t.Fatalf("guards=%#v err=%v", guards.Rows, err)
+	}
+}

@@ -669,6 +669,21 @@ func TestUpdateConcurrentChangesYieldOneWinnerAndOneConflict(t *testing.T) {
 	first.Name = "First winner"
 	second := validRequest(created.ClientID, TokenEndpointAuthClientBasic)
 	second.Name = "Second winner"
+	replica := NewStore(store.db)
+	// Hold both updates at their first snapshot read until each has authenticated
+	// the same token. A serialized schedule instead leaves the loser holding a
+	// rotated-away token, which is unauthorized rather than conflicting.
+	var reads sync.WaitGroup
+	reads.Add(2)
+	rendezvous := func(peer *Store) {
+		peer.afterRegistrationSnapshot = func() {
+			peer.afterRegistrationSnapshot = nil
+			reads.Done()
+			reads.Wait()
+		}
+	}
+	rendezvous(store)
+	rendezvous(replica)
 	start := make(chan struct{})
 	type outcome struct {
 		registration Registration
@@ -682,7 +697,7 @@ func TestUpdateConcurrentChangesYieldOneWinnerAndOneConflict(t *testing.T) {
 	}()
 	go func() {
 		<-start
-		registration, err := NewStore(store.db).Update(ctx, created.ClientID, created.RegistrationAccessToken, second)
+		registration, err := replica.Update(ctx, created.ClientID, created.RegistrationAccessToken, second)
 		results <- outcome{registration, err}
 	}()
 	close(start)
@@ -715,6 +730,54 @@ func TestUpdateConcurrentChangesYieldOneWinnerAndOneConflict(t *testing.T) {
 	}
 	if replay, err := store.Update(ctx, created.ClientID, won.RegistrationAccessToken, winnerRequest); err != nil || replay.RegistrationAccessToken == won.RegistrationAccessToken {
 		t.Fatalf("same desired request with rotated token replay=%#v err=%v", replay, err)
+	}
+}
+
+func TestUpdateSerializedRotationRejectsOldToken(t *testing.T) {
+	ctx, store, _ := testStore(t)
+	created, err := store.Create(ctx, validRequest("update-serialized-rotation", TokenEndpointAuthNone))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replica := NewStore(store.db)
+	request := validRequest(created.ClientID, TokenEndpointAuthNone)
+	// The second update reads the registration only after the first rotation
+	// committed. That legal schedule surfaces as unauthorized, which is why the
+	// conflict case pins both reads to one snapshot instead.
+	start := make(chan struct{})
+	rotated := make(chan struct{})
+	type outcome struct {
+		registration Registration
+		err          error
+	}
+	winner := make(chan outcome, 1)
+	loser := make(chan outcome, 1)
+	go func() {
+		<-start
+		registration, err := store.Update(ctx, created.ClientID, created.RegistrationAccessToken, request)
+		winner <- outcome{registration, err}
+		close(rotated)
+	}()
+	go func() {
+		<-start
+		<-rotated
+		registration, err := replica.Update(ctx, created.ClientID, created.RegistrationAccessToken, request)
+		loser <- outcome{registration, err}
+	}()
+	close(start)
+	won := <-winner
+	lost := <-loser
+	if won.err != nil {
+		t.Fatalf("serialized rotation err=%v", won.err)
+	}
+	if !errors.Is(lost.err, ErrUnauthorized) {
+		t.Fatalf("old token after serialized rotation err=%v", lost.err)
+	}
+	if _, err := store.GetRegistration(ctx, created.ClientID, created.RegistrationAccessToken); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("old token err=%v", err)
+	}
+	if _, err := store.GetRegistration(ctx, created.ClientID, won.registration.RegistrationAccessToken); err != nil {
+		t.Fatalf("rotated token err=%v", err)
 	}
 }
 

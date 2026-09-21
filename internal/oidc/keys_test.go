@@ -352,6 +352,143 @@ func fixedKeyring(active string) *Keyring {
 	return &Keyring{active: active, keys: map[string][32]byte{"master-a": oldKey, "master-b": newKey}}
 }
 
+func TestRemoveKeyRaceAndFileError(t *testing.T) {
+	// (b) Injected unlink failure: RemoveKey returns error and keeps the key
+	// when os.Remove fails, making cleanup retryable.
+	directory := t.TempDir()
+	for _, id := range []string{"key-old", "key-active"} {
+		encoded := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
+		if err := os.WriteFile(filepath.Join(directory, id), []byte(encoded), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	keyring, err := LoadKeyring(directory, "key-active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Block the unlink with a non-empty directory at the key path so the failure
+	// is a genuine filesystem error rather than an already-absent file.
+	blocked := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(blocked, "key-old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blocked, "key-old", "keep"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keyring.directory = blocked
+	if err := keyring.RemoveKey("key-old"); err == nil {
+		t.Fatal("expected error from failed unlink")
+	}
+	if !keyring.HasKey("key-old") {
+		t.Fatal("key should remain in map after failed unlink")
+	}
+	// Restore directory; the original file still exists on disk.
+	keyring.directory = directory
+	if err := keyring.RemoveKey("key-old"); err != nil {
+		t.Fatalf("retry failed: %v", err)
+	}
+	if keyring.HasKey("key-old") {
+		t.Fatal("key should be gone after successful removal")
+	}
+	if _, err := os.Stat(filepath.Join(directory, "key-old")); !os.IsNotExist(err) {
+		t.Fatal("key file should be removed from disk")
+	}
+
+	// A second instance loaded from the same directory must still complete its
+	// own in-memory removal after another process deleted the file.
+	shared := t.TempDir()
+	for _, id := range []string{"key-old", "key-active"} {
+		encoded := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32))
+		if err := os.WriteFile(filepath.Join(shared, id), []byte(encoded), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := LoadKeyring(shared, "key-active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := LoadKeyring(shared, "key-active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.RemoveKey("key-old"); err != nil {
+		t.Fatalf("first removal: %v", err)
+	}
+	if err := second.RemoveKey("key-old"); err != nil {
+		t.Fatalf("removal after external unlink: %v", err)
+	}
+	if second.HasKey("key-old") {
+		t.Fatal("second keyring should drop a key whose file is already gone")
+	}
+
+	// (a) Race test: concurrent seal/open with removal of both the same and a
+	// different key. The -race flag catches unsynchronized map access.
+	dir := t.TempDir()
+	for _, id := range []string{"key-a", "key-b", "key-active"} {
+		encoded := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{id[4]}, 32))
+		if err := os.WriteFile(filepath.Join(dir, id), []byte(encoded), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	kr, err := LoadKeyring(dir, "key-active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plaintext := []byte("concurrent-race-payload")
+	env, err := kr.SealEnvelope("test/purpose", plaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	done := make(chan struct{})
+	// Concurrent seal and open readers.
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					if _, err := kr.SealEnvelope("test/purpose", plaintext); err != nil {
+						t.Error(err)
+						return
+					}
+					if got, err := kr.OpenEnvelope("test/purpose", env); err != nil || !bytes.Equal(got, plaintext) {
+						t.Errorf("open: got=%x err=%v", got, err)
+						return
+					}
+				}
+			}
+		}()
+	}
+	// Concurrent removal of a different key and the same key (idempotent).
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = kr.RemoveKey("key-a")
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = kr.RemoveKey("key-a")
+		}()
+	}
+	// Removal of a non-existent key while readers run.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_ = kr.RemoveKey("key-b")
+	}()
+	close(done)
+	wg.Wait()
+	// Active key must survive all concurrent operations.
+	if _, err := kr.ActiveMasterKeyID(); err != nil {
+		t.Fatalf("active key lost after concurrent removal: %v", err)
+	}
+}
 func TestRemoveKeyDeletesFromMap(t *testing.T) {
 	keyring := fixedKeyring("master-b")
 	if _, ok := keyring.keys["master-a"]; !ok {

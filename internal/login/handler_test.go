@@ -540,6 +540,108 @@ func TestLoginFailureExtendsWriteDeadlineForEveryDelayTier(t *testing.T) {
 	}
 }
 
+func TestCancelledLoginKeepsAccountFailureAccounting(t *testing.T) {
+	t.Run("delay", func(t *testing.T) {
+		h, db := testHandlerWithDB(t, false)
+		request := postLoginViaAuthorize(t, h, "alice", "wrong password")
+		requestCtx, cancel := context.WithCancel(request.Context())
+		defer cancel()
+		request = request.WithContext(requestCtx)
+		// Simulate the caller disconnecting while the punitive delay runs.
+		h.wait = func(ctx context.Context, _ time.Duration) error {
+			cancel()
+			return ctx.Err()
+		}
+
+		response := httptest.NewRecorder()
+		h.Login(response, request)
+		if response.Body.Len() != 0 {
+			t.Fatalf("cancelled login wrote a response: status=%d body=%q", response.Code, response.Body.String())
+		}
+		if count := accountFailureCount(t, db, loginpolicy.AccountStuffingDigest("alice")); count != 1 {
+			t.Fatalf("account failures after cancellation=%d want=1", count)
+		}
+	})
+
+	t.Run("newly blocked ip", func(t *testing.T) {
+		h, db := testHandlerWithDB(t, false)
+		now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+		h.now = func() time.Time { return now }
+		// Six prior failures leave the block transition to this request.
+		for range 6 {
+			if _, err := h.policy.Failure(context.Background(), "192.0.2.1", now); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		response := httptest.NewRecorder()
+		h.Login(response, postLoginViaAuthorize(t, h, "alice", "wrong password"))
+		if response.Code != http.StatusTooManyRequests {
+			t.Fatalf("blocked login status=%d body=%q", response.Code, response.Body.String())
+		}
+		if count := accountFailureCount(t, db, loginpolicy.AccountStuffingDigest("alice")); count != 1 {
+			t.Fatalf("account failures after the ip block=%d want=1", count)
+		}
+	})
+
+	t.Run("account write failure", func(t *testing.T) {
+		h, db := testHandlerWithDB(t, false)
+		if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{
+			RequestID: "login-test-drop-account-failures",
+			SQL:       "DROP TABLE login_account_ip_failures",
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		response := httptest.NewRecorder()
+		h.Login(response, postLoginViaAuthorize(t, h, "alice", "wrong password"))
+		if response.Code != http.StatusServiceUnavailable {
+			t.Fatalf("status=%d body=%q want %d", response.Code, response.Body.String(), http.StatusServiceUnavailable)
+		}
+	})
+}
+
+func accountFailureCount(t *testing.T, db *rhiza.DB, accountHash string) int64 {
+	t.Helper()
+	result, err := db.Query(context.Background(), rhiza.QueryRequest{
+		SQL:         "SELECT COUNT(*) FROM login_account_ip_failures WHERE account_hash = ?",
+		Args:        []any{accountHash},
+		Consistency: rhiza.ConsistencyLinearizable,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
+		t.Fatalf("unexpected count result %#v", result.Rows)
+	}
+	count, ok := result.Rows[0][0].(int64)
+	if !ok {
+		t.Fatalf("unexpected count type %#v", result.Rows[0][0])
+	}
+	return count
+}
+
+func TestLoginPageOmitsUnverifiableCaptchaField(t *testing.T) {
+	h := testHandler(t)
+	h.SetCaptchaSiteKey("captcha-site-key")
+	page := httptest.NewRecorder()
+	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
+	body := page.Body.String()
+	if page.Code != http.StatusOK {
+		t.Fatalf("authorize status=%d", page.Code)
+	}
+	// The login POST accepts exactly interaction, username and password. A
+	// rendered challenge field would make every browser submission a 400.
+	if strings.Contains(body, "captcha") {
+		t.Fatalf("login page renders an unverifiable captcha field: %s", body)
+	}
+	for _, field := range []string{"name=\"interaction\"", "name=\"username\"", "name=\"password\""} {
+		if !strings.Contains(body, field) {
+			t.Fatalf("login page is missing %s: %s", field, body)
+		}
+	}
+}
+
 func TestAuthorizePromptNoneAndRejectsCrossSiteOrAmbiguousForms(t *testing.T) {
 	h := testHandler(t)
 	values := authorizeValues()

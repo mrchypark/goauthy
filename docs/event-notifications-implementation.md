@@ -25,6 +25,15 @@ raw webhook secrets. A newly configured destination never receives historical
 events. Local workers only select their own configured destination identities;
 one node does not globally disable another node's destinations.
 
+Schema v107 adds `event_notification_config_generation`, the authoritative
+configuration generation for destination reconciliation (GA66-NOTIFY-003).
+`GOAUTHY_EVENT_NOTIFICATION_CONFIG_GENERATION` defaults to 1 and is claimed
+with the destination writes in one replicated request, so a pod that restarts on
+a superseded configuration cannot re-enable a destination the current generation
+retired or roll a level back. Raise the variable whenever the destination set or
+a per-target level changes; a rolling deployment that changes configuration
+without raising it keeps the old last-writer-wins behaviour.
+
 The worker reuses Rhiza atomic leases, lease-token acknowledgements and retry
 timestamps. `Runtime.Step(ctx, now)` supports fixed-clock tests. Retries back
 off from one second to 24 hours; normal delivery is at-least-once, not exactly
@@ -50,8 +59,5 @@ Verification:
 - Current HA/Pod-replacement result is recorded in [status](status.md), rather
   than inferred from the queue tests.
 
-Remaining: removed-target retirement, delivered/orphan-row retention, destination
-configuration-change policy across nodes, delivery metrics, full upstream event
-emitter/configuration parity and deployed Slack/Matrix TLS-fixture E2E. Removed
-destinations currently remain enabled in Rhiza and accumulate snapshots; this
-operational gap prevents marking the complete notifications feature done.
+Remaining: delivered/orphan-row retention, delivery metrics, full upstream event
+emitter/configuration parity and deployed Slack/Matrix TLS-fixture E2E.

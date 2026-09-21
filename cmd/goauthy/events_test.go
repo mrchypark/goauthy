@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -196,5 +200,54 @@ func TestRecordTokenIssuedPersistenceFailure(t *testing.T) {
 	rows, err = db.Query(ctx, rhiza.QueryRequest{SQL: "SELECT COUNT(*) FROM event_log WHERE typ='TokenIssued'", Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil || len(rows.Rows) != 1 || rows.Rows[0][0] != int64(1) {
 		t.Fatal("rejected event left an artifact")
+	}
+}
+
+func emailFailureTestStore(t *testing.T, nodeID string) (*rhiza.DB, context.Context) {
+	t.Helper()
+	ctx := t.Context()
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: nodeID, DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := storage.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	return db, ctx
+}
+
+// GA-MAIL-005: an SMTP failure must reach the audit trail through the shared
+// callback, which the replicated store only accepts with a mutation request ID.
+func TestEmailDeliveryFailureHandlerWritesDurableEvent(t *testing.T) {
+	db, ctx := emailFailureTestStore(t, "email-failure-event-test")
+	newEmailDeliveryFailureHandler(ctx, db, nil)("user@example.com", "password reset", "subject", "text body", "<p>body</p>", errors.New("smtp down"))
+	rows, err := db.Query(ctx, rhiza.QueryRequest{SQL: "SELECT level,typ,text FROM event_log WHERE typ='EmailSendError'", Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(rows.Rows) != 1 {
+		t.Fatalf("rows=%#v err=%v", rows.Rows, err)
+	}
+	if rows.Rows[0][0] != int64(eventlog.Critical.Rank()) || rows.Rows[0][1] != "EmailSendError" || rows.Rows[0][2] != "password reset / user@example.com" {
+		t.Fatalf("email failure event=%#v", rows.Rows[0])
+	}
+}
+
+// GA-MAIL-005: a rejected audit write stays observable in the log instead of
+// being discarded, and it must not turn into another delivery attempt.
+func TestEmailDeliveryFailureHandlerReportsRejectedAuditWrite(t *testing.T) {
+	db, ctx := emailFailureTestStore(t, "email-failure-rejected-test")
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "reject-email-failure-event", Statements: []rhiza.SQLStatement{{SQL: "CREATE TRIGGER reject_email_failure_event BEFORE INSERT ON event_log WHEN NEW.typ='EmailSendError' BEGIN SELECT RAISE(ABORT, 'test event failure'); END"}}}); err != nil {
+		t.Fatal(err)
+	}
+	var logged bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	newEmailDeliveryFailureHandler(ctx, db, nil)("user@example.com", "password reset", "subject", "text body", "<p>body</p>", errors.New("smtp down"))
+	if !strings.Contains(logged.String(), "email delivery failure event was not written") {
+		t.Fatalf("rejected audit write was not reported: %s", logged.String())
+	}
+	rows, err := db.Query(ctx, rhiza.QueryRequest{SQL: "SELECT COUNT(*) FROM event_log WHERE typ='EmailSendError'", Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(rows.Rows) != 1 || rows.Rows[0][0] != int64(0) {
+		t.Fatalf("rejected event left an artifact: rows=%#v err=%v", rows.Rows, err)
 	}
 }

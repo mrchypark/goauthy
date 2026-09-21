@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
@@ -37,6 +38,7 @@ var (
 )
 
 type Keyring struct {
+	mu        sync.RWMutex
 	active    string
 	keys      map[string][32]byte
 	directory string
@@ -54,6 +56,8 @@ func (keyring *Keyring) ActiveMasterKeyID() (string, error) {
 	if keyring == nil || !validKeyID(keyring.active) {
 		return "", errors.New("active master key is unavailable")
 	}
+	keyring.mu.RLock()
+	defer keyring.mu.RUnlock()
 	if _, ok := keyring.keys[keyring.active]; !ok {
 		return "", errors.New("active master key is unavailable")
 	}
@@ -70,13 +74,19 @@ func (keyring *Keyring) RemoveKey(id string) error {
 	if id == keyring.active {
 		return errors.New("cannot remove active master key")
 	}
+	keyring.mu.Lock()
+	defer keyring.mu.Unlock()
 	if _, ok := keyring.keys[id]; !ok {
 		return nil
 	}
-	delete(keyring.keys, id)
 	if keyring.directory != "" {
-		_ = os.Remove(filepath.Join(keyring.directory, id))
+		// An already-absent file satisfies disk removal: another process (or an
+		// operator) may have deleted it, and the in-memory entry must still go.
+		if err := os.Remove(filepath.Join(keyring.directory, id)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
+	delete(keyring.keys, id)
 	return nil
 }
 
@@ -85,8 +95,19 @@ func (keyring *Keyring) HasKey(id string) bool {
 	if keyring == nil || !validKeyID(id) {
 		return false
 	}
+	keyring.mu.RLock()
+	defer keyring.mu.RUnlock()
 	_, ok := keyring.keys[id]
 	return ok
+}
+
+// keyCopy returns a snapshot of the named master key. The returned value is
+// safe to use after the lock is released.
+func (keyring *Keyring) keyCopy(id string) ([32]byte, bool) {
+	keyring.mu.RLock()
+	defer keyring.mu.RUnlock()
+	k, ok := keyring.keys[id]
+	return k, ok
 }
 
 func NormalizeIssuer(raw string) (string, error) {
@@ -323,7 +344,7 @@ func sealEnvelopeWithKeyID(keyring *Keyring, masterID, issuer, kid string, seed 
 	if !validKeyID(masterID) {
 		return nil, errors.New("active master key is unavailable")
 	}
-	masterKey, ok := keyring.keys[masterID]
+	masterKey, ok := keyring.keyCopy(masterID)
 	if !ok {
 		return nil, errors.New("active master key is unavailable")
 	}
@@ -352,7 +373,7 @@ func openEnvelope(keyring *Keyring, issuer, kid string, envelope []byte) ([]byte
 	if err != nil {
 		return nil, err
 	}
-	masterKey, ok := keyring.keys[masterID]
+	masterKey, ok := keyring.keyCopy(masterID)
 	if !ok {
 		return nil, fmt.Errorf("unknown master key %q", masterID)
 	}
@@ -379,7 +400,7 @@ func (keyring *Keyring) SealEnvelope(purpose string, plaintext []byte) ([]byte, 
 	if !validEnvelopePurpose(purpose) || keyring == nil {
 		return nil, errors.New("invalid envelope configuration")
 	}
-	masterKey, ok := keyring.keys[keyring.active]
+	masterKey, ok := keyring.keyCopy(keyring.active)
 	if !ok {
 		return nil, errors.New("active master key is unavailable")
 	}
@@ -409,7 +430,7 @@ func (keyring *Keyring) OpenEnvelope(purpose string, envelope []byte) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	masterKey, ok := keyring.keys[masterID]
+	masterKey, ok := keyring.keyCopy(masterID)
 	if !ok {
 		return nil, errors.New("unknown purpose envelope master key")
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-const schemaVersion = 102
+const schemaVersion = 109
 
 // migrateThroughV97 applies schema versions v1 through v97. It is the
 // unchanged prefix of Migrate, extracted so tests can reach a clean v97
@@ -396,6 +396,27 @@ func Migrate(ctx context.Context, db *rhiza.DB) error {
 	}
 	if err := migrateSchemaV102(ctx, db); err != nil {
 		return fmt.Errorf("migrate schema v102: %w", err)
+	}
+	if err := migrateSchemaV103(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v103: %w", err)
+	}
+	if err := migrateSchemaV104(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v104: %w", err)
+	}
+	if err := migrateSchemaV105(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v105: %w", err)
+	}
+	if err := migrateSchemaV106(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v106: %w", err)
+	}
+	if err := migrateSchemaV107(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v107: %w", err)
+	}
+	if err := migrateSchemaV108(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v108: %w", err)
+	}
+	if err := migrateSchemaV109(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v109: %w", err)
 	}
 	return nil
 }
@@ -999,7 +1020,7 @@ func migrateSchemaV62(ctx context.Context, db *rhiza.DB) error {
 		{SQL: `CREATE TABLE event_notification_targets (target TEXT PRIMARY KEY NOT NULL, level INTEGER NOT NULL CHECK(level BETWEEN 0 AND 3), enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1))) STRICT`},
 		{SQL: `CREATE TABLE event_notification_deliveries (target TEXT NOT NULL, event_id TEXT NOT NULL, timestamp INTEGER NOT NULL, level INTEGER NOT NULL, typ TEXT NOT NULL, ip TEXT, data INTEGER, text TEXT, attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at_unix_ms INTEGER NOT NULL, lease_token TEXT, lease_until_unix_ms INTEGER, delivered_at_unix_ms INTEGER, last_error TEXT, PRIMARY KEY(target,event_id)) STRICT`},
 		{SQL: `CREATE INDEX event_notification_due ON event_notification_deliveries(target,next_attempt_at_unix_ms,delivered_at_unix_ms)`},
-		{SQL: `CREATE TRIGGER event_notification_enqueue AFTER INSERT ON event_log BEGIN INSERT OR IGNORE INTO event_notification_deliveries(target,event_id,timestamp,level,typ,ip,data,text,next_attempt_at_unix_ms) SELECT target,NEW.id,NEW.timestamp,NEW.level,NEW.typ,NEW.ip,NEW.data,NEW.text,NEW.timestamp FROM event_notification_targets WHERE enabled=1; END`},
+		{SQL: `CREATE TRIGGER event_notification_enqueue AFTER INSERT ON event_log BEGIN INSERT OR IGNORE INTO event_notification_deliveries(target,event_id,timestamp,level,typ,ip,data,text,next_attempt_at_unix_ms) SELECT target,NEW.id,NEW.timestamp,NEW.level,NEW.typ,NEW.ip,NEW.data,NEW.text,NEW.timestamp FROM event_notification_targets WHERE enabled=1 AND (NEW.typ='Test' OR NEW.level>=level); END`},
 		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(62)`},
 	}})
 	return err
@@ -3604,6 +3625,255 @@ func migrateSchemaV102(ctx context.Context, db *rhiza.DB) error {
 		{SQL: `ALTER TABLE event_log ADD COLUMN prev_hash TEXT NOT NULL DEFAULT ''`},
 		{SQL: `ALTER TABLE event_log ADD COLUMN integrity_hash TEXT NOT NULL DEFAULT ''`},
 		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(102)`},
+	}})
+	return err
+}
+
+// migrateSchemaV103 adds the recovery email outbox. The DDL mirrors
+// recovery.SchemaStatements, which storage cannot import, and every queued
+// body is sealed by the outbox before it reaches this table.
+func migrateSchemaV103(ctx context.Context, db *rhiza.DB) error {
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=103)`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 1 {
+		return errors.New("invalid schema 103 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v103", Statements: []rhiza.SQLStatement{
+		{SQL: `CREATE TABLE IF NOT EXISTS email_outbox (
+			id TEXT PRIMARY KEY NOT NULL,
+			recipient TEXT NOT NULL CHECK (length(recipient) BETWEEN 3 AND 254),
+			mail_type TEXT NOT NULL CHECK (length(mail_type) BETWEEN 1 AND 256),
+			subject TEXT NOT NULL CHECK (length(subject) BETWEEN 1 AND 512),
+			body_html TEXT NOT NULL DEFAULT '',
+			body_text TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL CHECK (status IN ('pending','sent','failed')) DEFAULT 'pending',
+			attempts INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at_unix_ms INTEGER NOT NULL,
+			updated_at_unix_ms INTEGER NOT NULL,
+			next_retry_at_unix_ms INTEGER NOT NULL DEFAULT 0,
+			lease_token TEXT,
+			lease_until_unix_ms INTEGER
+		) STRICT`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(103)`},
+	}})
+	return err
+}
+
+// migrateSchemaV104 replaces the notification enqueue trigger with a filtered
+// one, so an installed database stops queueing below-threshold events that
+// would otherwise delay security notifications behind an ever-growing backlog
+// (GA-NOTIFY-001). Fresh databases get the same body from the earlier trigger
+// definition; this version exists for databases created before it.
+func migrateSchemaV104(ctx context.Context, db *rhiza.DB) error {
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=104)`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 1 {
+		return errors.New("invalid schema 104 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v104", Statements: []rhiza.SQLStatement{
+		{SQL: `DROP TRIGGER IF EXISTS event_notification_enqueue`},
+		{SQL: `CREATE TRIGGER event_notification_enqueue AFTER INSERT ON event_log BEGIN INSERT OR IGNORE INTO event_notification_deliveries(target,event_id,timestamp,level,typ,ip,data,text,next_attempt_at_unix_ms) SELECT target,NEW.id,NEW.timestamp,NEW.level,NEW.typ,NEW.ip,NEW.data,NEW.text,NEW.timestamp FROM event_notification_targets WHERE enabled=1 AND (NEW.typ='Test' OR NEW.level>=level); END`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(104)`},
+	}})
+	return err
+}
+
+// migrateSchemaV105 records every completed master-key retirement generation
+// durably, with its own ready time and removal receipt. The singleton barrier
+// row is rewritten by the next rotation, so without this table a retired key's
+// writer prohibition and its pending key-deletion obligation both disappear as
+// soon as a chained epoch starts (GA66-RETIRE-001, GA66-RETIRE-002). The
+// backfill carries forward a barrier that was already fenced or ready when this
+// version landed. It also drops the membership foreign key, because a completed
+// generation's evidence has to outlive the barrier row it was recorded against.
+// migrateSchemaV106 creates the replicated email-OTP interaction table so a
+// password-plus-OTP binding survives a restart and is visible to every replica
+// (GA-BR-16). The DDL mirrors recovery.SchemaStatements, which storage cannot
+// import.
+func migrateSchemaV106(ctx context.Context, db *rhiza.DB) error {
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=106)`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 1 {
+		return errors.New("invalid schema 106 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v106", Statements: []rhiza.SQLStatement{
+		{SQL: `CREATE TABLE IF NOT EXISTS identity_email_otp_interactions (
+			session_digest TEXT PRIMARY KEY NOT NULL CHECK (length(session_digest) = 43),
+			subject TEXT NOT NULL CHECK (length(subject) BETWEEN 1 AND 512),
+			interaction_token TEXT NOT NULL CHECK (length(interaction_token) = 43),
+			expires_at_unix_ms INTEGER NOT NULL CHECK (expires_at_unix_ms >= 0)
+		) STRICT`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(106)`},
+	}})
+	return err
+}
+
+// migrateSchemaV107 stores the newest accepted event-notification configuration
+// generation. Destination reconciliation claims that generation atomically, so a
+// pod restarting on a superseded configuration cannot re-enable a destination
+// the current generation retired (GA66-NOTIFY-003).
+func migrateSchemaV107(ctx context.Context, db *rhiza.DB) error {
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=107)`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 1 {
+		return errors.New("invalid schema 107 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v107", Statements: []rhiza.SQLStatement{
+		{SQL: `CREATE TABLE IF NOT EXISTS event_notification_config_generation (
+			config_id INTEGER PRIMARY KEY CHECK (config_id = 1),
+			generation INTEGER NOT NULL CHECK (generation >= 1)
+		) STRICT`},
+		{SQL: `INSERT OR IGNORE INTO event_notification_config_generation (config_id, generation) VALUES (1, 1)`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(107)`},
+	}})
+	return err
+}
+
+// migrateSchemaV108 replaces the v106 password-plus-OTP binding shape with the
+// digest and first-factor credential generations the continuation is bound to.
+// The v106 table stored the raw authorization-continuation token, which must not
+// live in replicated state (GA66-OTP-003), and it stored neither generation, so
+// a password reset could not revoke a pending OTP step-up (GA66-OTP-002). The
+// DDL mirrors recovery.SchemaStatements, which storage cannot import.
+//
+// Every existing row carries the raw legacy token and is bound to a process-local
+// map that no longer exists, so those pending bindings are dropped: they fail
+// closed and the operator re-runs the step-up. That is also why the new digest
+// column can carry its own CHECK - a defaulted empty digest would be rejected by
+// the ADD COLUMN rewrite, and a defaulted digest without the CHECK would leave
+// the store unable to write a conforming row.
+func migrateSchemaV108(ctx context.Context, db *rhiza.DB) error {
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT
+		EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=108),
+		EXISTS(SELECT 1 FROM pragma_table_info('identity_email_otp_interactions') WHERE name='interaction_digest')`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 2 {
+		return errors.New("invalid schema 108 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	if state.Rows[0][1] == int64(1) {
+		return errors.New("schema 108 has an unrecorded OTP interaction digest column")
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v108", Statements: []rhiza.SQLStatement{
+		{SQL: `DELETE FROM identity_email_otp_interactions`},
+		{SQL: `ALTER TABLE identity_email_otp_interactions ADD COLUMN interaction_digest TEXT NOT NULL DEFAULT '' CHECK (length(interaction_digest)=43)`},
+		{SQL: `ALTER TABLE identity_email_otp_interactions ADD COLUMN password_generation INTEGER NOT NULL DEFAULT 0 CHECK (password_generation >= 0)`},
+		{SQL: `ALTER TABLE identity_email_otp_interactions ADD COLUMN authentication_generation INTEGER NOT NULL DEFAULT 0 CHECK (authentication_generation >= 0)`},
+		{SQL: `ALTER TABLE identity_email_otp_interactions DROP COLUMN interaction_token`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(108)`},
+	}})
+	return err
+}
+
+// migrateSchemaV109 records the configuration generation on every destination
+// row and rejects, at the database boundary, any write that does not carry the
+// stored generation. The application-side generation claim added in v107 only
+// fences writers that run the new code: a legacy binary's unconditional
+// destination upsert still reaches the table and can re-enable a retired
+// destination or roll its level back. A BEFORE trigger is the only fence a
+// legacy writer cannot route around, because the trigger body is evaluated from
+// the live generation table rather than from the writer's own predicates
+// (GA66-NOTIFY-003). Existing rows are stamped with the stored generation; a row
+// left behind at an older generation is rejected until its generation is
+// claimed, which fails closed for a destination table that no current
+// configuration owns.
+func migrateSchemaV109(ctx context.Context, db *rhiza.DB) error {
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT
+		EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=109),
+		EXISTS(SELECT 1 FROM pragma_table_info('event_notification_targets') WHERE name='generation')`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 2 {
+		return errors.New("invalid schema 109 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	if state.Rows[0][1] == int64(1) {
+		return errors.New("schema 109 has an unrecorded destination generation column")
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v109", Statements: []rhiza.SQLStatement{
+		{SQL: `ALTER TABLE event_notification_targets ADD COLUMN generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0)`},
+		{SQL: `UPDATE event_notification_targets SET generation=(SELECT generation FROM event_notification_config_generation WHERE config_id=1)`},
+		{SQL: `CREATE TRIGGER event_notification_targets_generation_insert BEFORE INSERT ON event_notification_targets WHEN NEW.generation IS NOT (SELECT generation FROM event_notification_config_generation WHERE config_id=1) BEGIN SELECT RAISE(ABORT, 'notification destination write must carry the current configuration generation'); END`},
+		{SQL: `CREATE TRIGGER event_notification_targets_generation_update BEFORE UPDATE ON event_notification_targets WHEN NEW.generation IS NOT (SELECT generation FROM event_notification_config_generation WHERE config_id=1) BEGIN SELECT RAISE(ABORT, 'notification destination write must carry the current configuration generation'); END`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(109)`},
+	}})
+	return err
+}
+
+func migrateSchemaV105(ctx context.Context, db *rhiza.DB) error {
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=105)`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 1 {
+		return errors.New("invalid schema 105 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v105", Statements: []rhiza.SQLStatement{
+		{SQL: `CREATE TABLE IF NOT EXISTS master_key_retirement_generations (
+			epoch INTEGER PRIMARY KEY CHECK (epoch > 0),
+			old_key_id TEXT NOT NULL CHECK (length(old_key_id) BETWEEN 1 AND 64 AND old_key_id NOT GLOB '*[^A-Za-z0-9._-]*'),
+			replacement_key_id TEXT NOT NULL CHECK (length(replacement_key_id) BETWEEN 1 AND 64 AND replacement_key_id NOT GLOB '*[^A-Za-z0-9._-]*' AND replacement_key_id <> old_key_id),
+			ready_at_unix_ms INTEGER CHECK (ready_at_unix_ms IS NULL OR ready_at_unix_ms >= 0),
+			removed_at_unix_ms INTEGER CHECK (removed_at_unix_ms IS NULL OR (ready_at_unix_ms IS NOT NULL AND removed_at_unix_ms >= ready_at_unix_ms))
+		) STRICT`},
+		{SQL: `INSERT INTO master_key_retirement_generations (epoch, old_key_id, replacement_key_id, ready_at_unix_ms) SELECT epoch, old_key_id, replacement_key_id, ready_at_unix_ms FROM master_key_retirement_barrier WHERE barrier_id=1 AND state IN ('fenced','ready') ON CONFLICT DO NOTHING`},
+		{SQL: `CREATE TABLE master_key_retirement_members_v105 (
+			epoch INTEGER NOT NULL,
+			node_id TEXT NOT NULL CHECK (length(node_id) BETWEEN 1 AND 128 AND node_id NOT GLOB '*[^A-Za-z0-9._:-]*'),
+			attestation_state TEXT NOT NULL DEFAULT 'pending' CHECK (attestation_state IN ('pending', 'attested')),
+			attestation_sequence INTEGER NOT NULL DEFAULT 0 CHECK (attestation_sequence >= 0),
+			boot_id TEXT NOT NULL DEFAULT '' CHECK (length(boot_id) <= 128 AND boot_id NOT GLOB '*[^A-Za-z0-9._:-]*'),
+			active_key_id TEXT NOT NULL DEFAULT '' CHECK (length(active_key_id) <= 64 AND active_key_id NOT GLOB '*[^A-Za-z0-9._-]*'),
+			attested_at_unix_ms INTEGER CHECK (attested_at_unix_ms IS NULL OR attested_at_unix_ms >= 0),
+			old_references INTEGER NOT NULL DEFAULT 0 CHECK (old_references >= 0),
+			non_active_references INTEGER NOT NULL DEFAULT 0 CHECK (non_active_references >= 0),
+			legacy_references INTEGER NOT NULL DEFAULT 0 CHECK (legacy_references >= 0),
+			tamper_references INTEGER NOT NULL DEFAULT 0 CHECK (tamper_references >= 0),
+			oidc_references INTEGER NOT NULL DEFAULT 0 CHECK (oidc_references >= 0),
+			dcr_references INTEGER NOT NULL DEFAULT 0 CHECK (dcr_references >= 0),
+			upstream_references INTEGER NOT NULL DEFAULT 0 CHECK (upstream_references >= 0),
+			passkey_enabled INTEGER NOT NULL DEFAULT 0 CHECK (passkey_enabled IN (0, 1)),
+			passkey_references INTEGER NOT NULL DEFAULT 0 CHECK (passkey_references >= 0),
+			PRIMARY KEY (epoch, node_id),
+			CHECK ((attestation_state = 'pending' AND attestation_sequence = 0 AND boot_id = '' AND active_key_id = '' AND attested_at_unix_ms IS NULL) OR
+			       (attestation_state = 'attested' AND attestation_sequence > 0 AND length(boot_id) BETWEEN 1 AND 128 AND length(active_key_id) BETWEEN 1 AND 64 AND attested_at_unix_ms IS NOT NULL))
+		) STRICT`},
+		{SQL: `INSERT INTO master_key_retirement_members_v105 (epoch, node_id, attestation_state, attestation_sequence, boot_id, active_key_id, attested_at_unix_ms, old_references, non_active_references, legacy_references, tamper_references, oidc_references, dcr_references, upstream_references, passkey_enabled, passkey_references) SELECT epoch, node_id, attestation_state, attestation_sequence, boot_id, active_key_id, attested_at_unix_ms, old_references, non_active_references, legacy_references, tamper_references, oidc_references, dcr_references, upstream_references, passkey_enabled, passkey_references FROM master_key_retirement_members`},
+		{SQL: `DROP TABLE master_key_retirement_members`},
+		{SQL: `ALTER TABLE master_key_retirement_members_v105 RENAME TO master_key_retirement_members`},
+		{SQL: `CREATE UNIQUE INDEX master_key_retirement_attested_boot ON master_key_retirement_members(epoch, boot_id) WHERE attestation_state = 'attested'`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(105)`},
 	}})
 	return err
 }

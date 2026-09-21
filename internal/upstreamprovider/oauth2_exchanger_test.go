@@ -229,7 +229,6 @@ func TestOAuth2TokenExchangerCancelsInFlightRequest(t *testing.T) {
 	}
 }
 
-
 func boolPtr(b bool) *bool { return &b }
 
 func testExchangerWithProtocol(t *testing.T, handler http.Handler, proto ProviderProtocol, secrets map[string]string) (*OAuth2TokenExchanger, string) {
@@ -241,11 +240,11 @@ func testExchangerWithProtocol(t *testing.T, handler http.Handler, proto Provide
 		t.Fatal(err)
 	}
 	configs := map[string]Config{"provider": {
-		Issuer: "https://issuer.example.test",
+		Issuer:                "https://issuer.example.test",
 		AuthorizationEndpoint: "https://issuer.example.test/auth",
-		TokenEndpoint: "https://issuer.example.test/token",
-		ClientID: "client",
-		Protocol: proto,
+		TokenEndpoint:         "https://issuer.example.test/token",
+		ClientID:              "client",
+		Protocol:              proto,
 	}}
 	if secrets == nil {
 		secrets = map[string]string{}
@@ -409,8 +408,8 @@ func TestExplicitAllowsEmptyVerifierWhenPKCEOff(t *testing.T) {
 
 func TestExplicitRejectsTokenErrors(t *testing.T) {
 	for name, response := range map[string]string{
-		"non-2xx":      "status",
-		"error field":  `{"access_token":"x","error":"invalid_grant"}`,
+		"non-2xx":     "status",
+		"error field": `{"access_token":"x","error":"invalid_grant"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -433,11 +432,11 @@ func TestExplicitRejectsTokenErrors(t *testing.T) {
 
 func TestExplicitConstructorAllowsNoSecretWhenBasic(t *testing.T) {
 	_, err := NewOAuth2TokenExchanger(map[string]Config{"p": {
-		Issuer: "https://issuer.example.test",
+		Issuer:                "https://issuer.example.test",
 		AuthorizationEndpoint: "https://issuer.example.test/auth",
-		TokenEndpoint: "https://issuer.example.test/token",
-		ClientID: "c",
-		Protocol: ProviderProtocol{ClientSecretBasic: boolPtr(true)},
+		TokenEndpoint:         "https://issuer.example.test/token",
+		ClientID:              "c",
+		Protocol:              ProviderProtocol{ClientSecretBasic: boolPtr(true)},
 	}}, map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("absent secret with basic (Rauthy-aligned): err = %v", err)
@@ -446,11 +445,11 @@ func TestExplicitConstructorAllowsNoSecretWhenBasic(t *testing.T) {
 
 func TestExplicitConstructorAllowsNoSecretForPublicClient(t *testing.T) {
 	_, err := NewOAuth2TokenExchanger(map[string]Config{"p": {
-		Issuer: "https://issuer.example.test",
+		Issuer:                "https://issuer.example.test",
 		AuthorizationEndpoint: "https://issuer.example.test/auth",
-		TokenEndpoint: "https://issuer.example.test/token",
-		ClientID: "c",
-		Protocol: ProviderProtocol{UsePKCE: boolPtr(true), ClientSecretBasic: boolPtr(false), ClientSecretPost: boolPtr(false)},
+		TokenEndpoint:         "https://issuer.example.test/token",
+		ClientID:              "c",
+		Protocol:              ProviderProtocol{UsePKCE: boolPtr(true), ClientSecretBasic: boolPtr(false), ClientSecretPost: boolPtr(false)},
 	}}, map[string]string{}, nil)
 	if err != nil {
 		t.Fatalf("public client no secret: err = %v", err)
@@ -460,10 +459,10 @@ func TestExplicitConstructorAllowsNoSecretForPublicClient(t *testing.T) {
 func TestExplicitConstructorClonesProtocolPointers(t *testing.T) {
 	trueVal := true
 	cfg := Config{
-		Issuer: "https://issuer.example.test",
+		Issuer:                "https://issuer.example.test",
 		AuthorizationEndpoint: "https://issuer.example.test/auth",
-		TokenEndpoint: "https://issuer.example.test/token",
-		ClientID: "c",
+		TokenEndpoint:         "https://issuer.example.test/token",
+		ClientID:              "c",
 		Protocol: ProviderProtocol{
 			UsePKCE:           &trueVal,
 			ClientSecretBasic: &trueVal,
@@ -756,4 +755,142 @@ func TestExplicitOIDCAcceptsIDTokenOnly(t *testing.T) {
 	if err != nil || result == nil || result.IDToken != "myid" {
 		t.Fatalf("ExchangeCode() = %#v, %v", result, err)
 	}
+}
+
+func TestOIDCProviderRejectsMissingIDTokenEvenWithUserInfo(t *testing.T) {
+	// OIDC providers must reject access-token-only responses even when a
+	// UserInfo endpoint is configured. Falling back to UserInfo bypasses
+	// id_token signature, issuer, audience, nonce, and time validation.
+	var userinfoHits int
+	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"at","token_type":"Bearer"}`))
+	}), ProviderProtocol{
+		UsePKCE: boolPtr(false), ClientSecretBasic: boolPtr(true), ClientSecretPost: boolPtr(false),
+	}, map[string]string{"provider": "secret"})
+	// Inject UserInfoEndpoint into the cloned config so the old fallback path is reachable.
+	cfg := exchanger.configs["provider"]
+	cfg.UserInfoEndpoint = "https://issuer.example.test/userinfo"
+	exchanger.configs["provider"] = cfg
+	_ = userinfoHits // UserInfo must never be called
+	_, err := exchanger.ExchangeCode(context.Background(), "provider", cb, "code", "")
+	if !errors.Is(err, errTokenExchange) {
+		t.Fatalf("OIDC with UserInfo missing id_token: err = %v, want errTokenExchange", err)
+	}
+}
+
+func TestOAuthUserInfoProviderAcceptsMissingIDToken(t *testing.T) {
+	// Control: ProviderKindOAuthUserInfo legitimately uses UserInfo and does
+	// not require an id_token.
+	var userinfoHits int
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"at","token_type":"Bearer"}`))
+	}))
+	t.Cleanup(server.Close)
+	userinfoServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userinfoHits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"sub":"ctrl-user"}`))
+	}))
+	t.Cleanup(userinfoServer.Close)
+	configs := map[string]Config{testPID: {
+		Kind:                  ProviderKindOAuthUserInfo,
+		Issuer:                "https://issuer.example.test",
+		AuthorizationEndpoint: "https://issuer.example.test/auth",
+		TokenEndpoint:         server.URL,
+		UserInfoEndpoint:      userinfoServer.URL,
+		ClientID:              "client",
+		Protocol: ProviderProtocol{
+			UsePKCE:           boolPtr(true),
+			ClientSecretBasic: boolPtr(true),
+			ClientSecretPost:  boolPtr(false),
+		},
+		ProviderSource: "registry",
+		RuntimeVersion: "v1",
+	}}
+	exchanger, err := NewOAuth2TokenExchanger(configs, map[string]string{testPID: ""}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := exchanger.ExchangeCode(context.Background(), testPID, "https://app.example.test/cb", "code", "verifier")
+	if err != nil {
+		t.Fatalf("OAuthUserInfo missing id_token: err = %v", err)
+	}
+	if result == nil || result.Subject == nil || result.Subject.Subject != "ctrl-user" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if userinfoHits != 1 {
+		t.Errorf("userinfo hits = %d, want 1", userinfoHits)
+	}
+}
+
+func TestExplicitBasicAuthFormEncodesCredentialComponents(t *testing.T) {
+	// RFC 6749 section 2.3.1: client_id and client_secret are
+	// application/x-www-form-urlencoded encoded before Basic construction.
+	const reservedID = "client:id/@"
+	const reservedSecret = "secret+/=&%:@ "
+
+	exchange := func(t *testing.T, clientID, secret string) (string, string, bool) {
+		t.Helper()
+		var user, pass string
+		var ok bool
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user, pass, ok = r.BasicAuth()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id_token":"id"}`))
+		}))
+		t.Cleanup(server.Close)
+		target, err := url.Parse(server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		configs := map[string]Config{"provider": {
+			Issuer:                "https://issuer.example.test",
+			AuthorizationEndpoint: "https://issuer.example.test/auth",
+			TokenEndpoint:         "https://issuer.example.test/token",
+			ClientID:              clientID,
+			Protocol: ProviderProtocol{
+				UsePKCE: boolPtr(false), ClientSecretBasic: boolPtr(true), ClientSecretPost: boolPtr(false),
+			},
+		}}
+		exchanger, err := NewOAuth2TokenExchanger(configs, map[string]string{"provider": secret}, &http.Client{Transport: rewriteTransport{target: target}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := exchanger.ExchangeCode(context.Background(), "provider", "https://app.example.test/callback", "code", "")
+		if err != nil || result == nil || result.IDToken != "id" {
+			t.Fatalf("ExchangeCode() = %#v, %v", result, err)
+		}
+		return user, pass, ok
+	}
+
+	t.Run("reserved characters round-trip through the endpoint", func(t *testing.T) {
+		user, pass, ok := exchange(t, reservedID, reservedSecret)
+		if !ok {
+			t.Fatal("expected Basic Auth header")
+		}
+		if user != url.QueryEscape(reservedID) || pass != url.QueryEscape(reservedSecret) {
+			t.Errorf("Basic auth = %q:%q, want %q:%q", user, pass, url.QueryEscape(reservedID), url.QueryEscape(reservedSecret))
+		}
+		// A conforming endpoint form-decodes each component and recovers the originals.
+		decodedUser, err := url.QueryUnescape(user)
+		if err != nil {
+			t.Fatalf("query-unescape username: %v", err)
+		}
+		decodedPass, err := url.QueryUnescape(pass)
+		if err != nil {
+			t.Fatalf("query-unescape password: %v", err)
+		}
+		if decodedUser != reservedID || decodedPass != reservedSecret {
+			t.Errorf("decoded Basic auth = %q:%q, want %q:%q", decodedUser, decodedPass, reservedID, reservedSecret)
+		}
+	})
+
+	t.Run("unreserved ascii is unchanged", func(t *testing.T) {
+		user, pass, ok := exchange(t, "client", "secret")
+		if !ok || user != "client" || pass != "secret" {
+			t.Errorf("Basic auth = %q:%q (present=%t), want \"client\":\"secret\"", user, pass, ok)
+		}
+	})
 }

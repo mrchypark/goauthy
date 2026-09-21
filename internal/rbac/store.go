@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/apikey"
+	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/scim"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -68,6 +70,7 @@ type Store struct {
 	now                           func() time.Time
 	random                        func([]byte) (int, error)
 	beforeMembershipExecute       func()
+	beforeDeleteExecute           func()
 	beforeLoginRestrictionExecute func()
 	apiKeys                       *apikey.Store
 }
@@ -538,7 +541,46 @@ func (s *Store) delete(ctx context.Context, actor string, key *apikey.Principal,
 	guard := fmt.Sprintf(`EXISTS (SELECT 1 FROM %s WHERE id=? AND revision=?%s) AND %s`, table, reserved, adminGuard())
 	now := s.now().UTC().Truncate(time.Millisecond).UnixMilli()
 	requestID := requestID("rbac-delete", table, actor, id, fmt.Sprint(revision))
-	executeErr := s.run(ctx, key, resource, apikey.Delete, requestID, []rhiza.SQLStatement{{SQL: fmt.Sprintf(`UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=? WHERE subject IN (SELECT subject FROM %s WHERE %s=?) AND %s`, members, column, guard), Args: []any{now, id, id, revision, actor}}, {SQL: fmt.Sprintf(`DELETE FROM %s WHERE %s=? AND %s`, members, column, guard), Args: []any{id, id, revision, actor}}, {SQL: fmt.Sprintf(`DELETE FROM %s WHERE id=? AND revision=?%s AND %s`, table, reserved, adminGuard()), Args: []any{id, revision, actor}}})
+	statements := []rhiza.SQLStatement{{SQL: fmt.Sprintf(`UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=? WHERE subject IN (SELECT subject FROM %s WHERE %s=?) AND %s`, members, column, guard), Args: []any{now, id, id, revision, actor}}, {SQL: fmt.Sprintf(`DELETE FROM %s WHERE %s=? AND %s`, members, column, guard), Args: []any{id, id, revision, actor}}}
+	// Roles and groups both project as SCIM groups, and a queued projection is
+	// the durable evidence that a remote group exists. Superseding it with a
+	// provider-scoped delete in this same transaction is what keeps a local
+	// removal from leaving the remote group and its memberships behind.
+	// The rewrite is unconditional and guarded by the deletion itself: a
+	// projection that arrives after this transaction is refused by the enqueue
+	// fence, so everything present when this commits must be superseded here.
+	// Reading the queue first and omitting the statement when it was empty
+	// would leave a projection admitted between that read and this commit.
+	current, exists, loadErr := s.get(ctx, table, id)
+	if loadErr != nil {
+		return loadErr
+	}
+	// The entity row still exists here, so the removal statement precedes its
+	// delete. The name only labels the request: the guard binds the statement
+	// to this id and revision, so a name read from a revision that a rename
+	// supersedes cannot commit.
+	// ponytail: the displayName is the live entity name rather than the name in
+	// the queued row. A provider-scoped delete matches on externalId only, so
+	// the two differ only as a label; reading the queued row instead would
+	// reintroduce the read-then-omit window this fix removes. Upgrade path: if a
+	// provider ever needs the projected name, carry it into the delete request
+	// from the row the rewrite already updates.
+	if exists {
+		kind := "group"
+		if role {
+			kind = "role"
+		}
+		projection, err := scim.SupersedeGroupProjection(identity.SCIMGroupExternalID(kind, id), current.Name, guard, []any{id, revision, actor}, time.UnixMilli(now).UTC())
+		if err != nil {
+			return err
+		}
+		statements = append(statements, projection)
+	}
+	statements = append(statements, rhiza.SQLStatement{SQL: fmt.Sprintf(`DELETE FROM %s WHERE id=? AND revision=?%s AND %s`, table, reserved, adminGuard()), Args: []any{id, revision, actor}})
+	if s.beforeDeleteExecute != nil {
+		s.beforeDeleteExecute()
+	}
+	executeErr := s.run(ctx, key, resource, apikey.Delete, requestID, statements)
 	entity, found, loadErr := s.get(ctx, table, id)
 	if loadErr != nil {
 		return loadErr
@@ -758,8 +800,9 @@ func (s *Store) replaceMembershipsMode(ctx context.Context, actor string, key *a
 	}
 	guard, guardArgs := membershipGuard(actor, key != nil, target, roles, groups, replaceRoles, replaceGroups, delegated)
 	change, changeArgs := membershipChangeGuard(target, roles, groups, replaceRoles, replaceGroups)
-	lastAdmin, lastAdminArgs := lastAdminGuard(target, roles, replaceRoles)
+	lastAdmin, lastAdminArgs := lastAdminGuard(target, roles, replaceRoles, now)
 	authGuard, authArgs := membershipAuthorizationGuard(actor, key != nil, target, groups, replaceRoles, replaceGroups, delegated)
+	one := int64(1)
 	statements := []rhiza.SQLStatement{{
 		SQL: `INSERT OR IGNORE INTO rbac_principal_versions (subject,revision,updated_at_unix_ms)
 			SELECT ?,1,? WHERE EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0) AND ` + authGuard,
@@ -768,6 +811,13 @@ func (s *Store) replaceMembershipsMode(ctx context.Context, actor string, key *a
 		SQL: `UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=?
 			WHERE subject=? AND revision=? AND updated_at_unix_ms=? AND ` + guard + ` AND (` + change + `) AND ` + lastAdmin,
 		Args: append(append(append([]any{newMarker, target, expected, oldMarker.updatedAt}, guardArgs...), changeArgs...), lastAdminArgs...),
+		// This CAS is the admission for the membership statements that follow.
+		// A predicted revision/marker alone cannot identify the admitted
+		// operation: two callers holding the same snapshot compute the same
+		// pair, so the loser would match the winner's row and rewrite
+		// memberships from its stale snapshot. Requiring one affected row
+		// rejects the whole command when admission is lost.
+		ExpectedRowsAffected: &one,
 	}}
 	if replaceRoles {
 		statements = append(statements, membershipStatements("rbac_roles", "rbac_user_roles", "role_id", target, expected+1, newMarker, roles, now)...)
@@ -779,7 +829,11 @@ func (s *Store) replaceMembershipsMode(ctx context.Context, actor string, key *a
 		s.beforeMembershipExecute()
 	}
 	id := requestID("rbac-membership", actor, target, fmt.Sprint(expected), strings.Join(roles, "\x00"), strings.Join(groups, "\x00"), fmt.Sprint(replaceRoles), fmt.Sprint(replaceGroups), attempt)
-	if err := s.run(ctx, key, "Users", apikey.Update, id, statements); err != nil {
+	err = s.run(ctx, key, "Users", apikey.Update, id, statements)
+	// A rejected admission precondition is a lost CAS, so fall through to the
+	// post-commit checks: they keep reporting a stale snapshot as a conflict and
+	// a caller whose authority was removed as unauthorized.
+	if err != nil && !admissionRejected(err) {
 		return Principal{}, err
 	}
 	principal, err := s.ResolvePrincipal(ctx, target)
@@ -926,11 +980,14 @@ func (s *Store) principalMarker(ctx context.Context, subject string) (principalV
 	return principalVersionMarker{revision: revision, updatedAt: updatedAt}, true, nil
 }
 
-func lastAdminGuard(target string, roles []string, replaceRoles bool) (string, []any) {
+// lastAdminGuard protects the final usable administrator. Expired accounts are
+// not usable for authentication, so an unswept expired administrator must not
+// count here, and demoting one is not a loss of administrative access.
+func lastAdminGuard(target string, roles []string, replaceRoles bool, now int64) (string, []any) {
 	if !replaceRoles || containsName(roles, AdminRole) {
 		return "1=1", nil
 	}
-	return `NOT (EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE r.name='rauthy_admin' AND u.subject=? AND u.disabled=0) AND (SELECT COUNT(DISTINCT u.subject) FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.disabled=0 AND r.name='rauthy_admin')=1)`, []any{target}
+	return `NOT (EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE r.name='rauthy_admin' AND u.subject=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?)) AND (SELECT COUNT(DISTINCT u.subject) FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name='rauthy_admin')=1)`, []any{target, now, now}
 }
 
 func (s *Store) ensureMembershipEntities(ctx context.Context, roles, groups []string) error {
@@ -952,8 +1009,17 @@ func (s *Store) ensureMembershipEntities(ctx context.Context, roles, groups []st
 }
 
 func (s *Store) isLastActiveAdmin(ctx context.Context, target string) bool {
-	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(DISTINCT u.subject) FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.disabled=0 AND r.name='rauthy_admin' AND EXISTS (SELECT 1 FROM identity_users tu JOIN rbac_user_roles tm ON tm.subject=tu.subject JOIN rbac_roles tr ON tr.id=tm.role_id WHERE tu.subject=? AND tu.disabled=0 AND tr.name='rauthy_admin')`, Args: []any{target}, Consistency: rhiza.ConsistencyLinearizable})
+	now := s.now().UTC().Truncate(time.Millisecond).UnixMilli()
+	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(DISTINCT u.subject) FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name='rauthy_admin' AND EXISTS (SELECT 1 FROM identity_users tu JOIN rbac_user_roles tm ON tm.subject=tu.subject JOIN rbac_roles tr ON tr.id=tm.role_id WHERE tu.subject=? AND tu.disabled=0 AND (tu.user_expires_at_unix_ms IS NULL OR tu.user_expires_at_unix_ms>?) AND tr.name='rauthy_admin')`, Args: []any{now, target, now}, Consistency: rhiza.ConsistencyLinearizable})
 	return err == nil && len(result.Rows) == 1 && len(result.Rows[0]) == 1 && result.Rows[0][0] == int64(1)
+}
+
+// admissionRejected reports whether a mutation was rejected because a
+// statement precondition was not satisfied. Rhiza rolls such a command back
+// completely, so only the admission CAS can report this after a membership
+// attempt.
+func admissionRejected(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "error_code="+string(rhiza.MutationErrorCodePreconditionFailed))
 }
 
 func entityNames(entities []Entity) []string {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +17,12 @@ import (
 type notificationsConfig struct {
 	Targets []notify.Target
 	HTTP    notify.HTTPFactory
+	// Generation is the operator's configuration generation for destination
+	// reconciliation. Raising it fences pods that still run an older
+	// configuration, so they cannot re-enable a retired destination
+	// (GA66-NOTIFY-003). The default keeps a single deployment working when the
+	// variable is unset.
+	Generation int64
 }
 
 func envOr(getenv func(string) string, keys ...string) string {
@@ -31,7 +38,11 @@ func notificationsFromEnv(getenv func(string) string) (notificationsConfig, erro
 	if getenv == nil {
 		return notificationsConfig{}, errors.New("notifications require environment reader")
 	}
-	var c notificationsConfig
+	generation, err := notificationGeneration(getenv("GOAUTHY_EVENT_NOTIFICATION_CONFIG_GENERATION"))
+	if err != nil {
+		return notificationsConfig{}, err
+	}
+	c := notificationsConfig{Generation: generation}
 	seenKind := map[string]bool{}
 	for _, name := range strings.Fields(getenv("GOAUTHY_EVENT_NOTIFICATION_TARGETS")) {
 		if name != "slack" && name != "matrix" && name != "email" {
@@ -80,27 +91,60 @@ func notificationsFromEnv(getenv func(string) string) (notificationsConfig, erro
 	return c, nil
 }
 
+// notificationGeneration parses the reconciliation generation. The bound keeps
+// the value inside the schema's INTEGER domain, so a typo fails at startup
+// instead of persisting a generation no later configuration can exceed.
+func notificationGeneration(raw string) (int64, error) {
+	if raw == "" {
+		return 1, nil
+	}
+	generation, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || generation < 1 {
+		return 0, errors.New("GOAUTHY_EVENT_NOTIFICATION_CONFIG_GENERATION must be a positive integer")
+	}
+	return generation, nil
+}
+
 func newNotificationRuntime(ctx context.Context, db *rhiza.DB, cfg notificationsConfig) (*notify.Runtime, error) {
-	if len(cfg.Targets) == 0 {
+	if db == nil {
 		return nil, nil
 	}
-	queue, err := notify.NewRhizaQueue(ctx, db, cfg.Targets)
+	// Reconcile even when nothing is configured: retiring the last destination
+	// must disable its persisted rows instead of queueing for it forever.
+	queue, err := notify.NewRhizaQueue(ctx, db, cfg.Targets, cfg.Generation)
 	if err != nil {
 		return nil, err
 	}
 	return &notify.Runtime{Queue: queue, Factory: cfg.HTTP}, nil
 }
 
+// notificationMaintenanceInterval paces delivery-snapshot retention so a
+// completed sweep does not add a replicated write to every delivery tick.
+const notificationMaintenanceInterval = time.Hour
+
 func runNotifications(ctx context.Context, runtime *notify.Runtime, now func() time.Time, onError func(error)) {
 	runtime.Now = now
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	var lastMaintenance time.Time
+	// A sweep that filled its batch resumes on the next turn, so one turn of
+	// cleanup can never delay the delivery step that shares this goroutine.
+	resumeMaintenance := false
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := runtime.Step(ctx, now()); err != nil && ctx.Err() == nil && onError != nil {
+		at := now()
+		if err := runtime.Step(ctx, at); err != nil && ctx.Err() == nil && onError != nil {
 			onError(err)
+		}
+		if resumeMaintenance || lastMaintenance.IsZero() || at.Before(lastMaintenance) || at.Sub(lastMaintenance) >= notificationMaintenanceInterval {
+			lastMaintenance = at
+			more, err := runtime.Maintain(ctx, at)
+			if err != nil && ctx.Err() == nil && onError != nil {
+				onError(err)
+			}
+			resumeMaintenance = more
 		}
 		select {
 		case <-ctx.Done():

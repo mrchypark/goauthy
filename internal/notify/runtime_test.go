@@ -29,7 +29,7 @@ func (s countingSender) Send(context.Context, eventlog.Event) error {
 func TestNotificationRuntimeStep(t *testing.T) {
 	db, ctx, now := queueFixture(t)
 	id := Identity("slack", "https://runtime.example")
-	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Warning}})
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Warning}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestNotificationRuntimeStep(t *testing.T) {
 func TestNotificationRuntimeCompetingAndCancel(t *testing.T) {
 	db, ctx, now := queueFixture(t)
 	id := Identity("slack", "https://runtime2.example")
-	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Info}})
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Info}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestNotificationRuntimeCompetingAndCancel(t *testing.T) {
 func TestNotificationRuntimeRetryBoundary(t *testing.T) {
 	db, ctx, now := queueFixture(t)
 	id := Identity("slack", "https://retry.example.test")
-	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Info}})
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Info}}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,5 +130,51 @@ func TestNotificationRuntimeRetryBoundary(t *testing.T) {
 	}
 	if f.n.Load() != 2 {
 		t.Fatal("acknowledged event was sent again")
+	}
+}
+
+// TestNotificationMaintenanceBudgetDoesNotBlockDelivery covers GA66-NOTIFY-002:
+// one maintenance turn spends a fixed cleanup batch, and a warning queued after
+// cleanup started is delivered before the backlog it shares a goroutine with is
+// exhausted.
+func TestNotificationMaintenanceBudgetDoesNotBlockDelivery(t *testing.T) {
+	db, ctx, now := queueFixture(t)
+	id := Identity("slack", "https://maintenance-budget.example.test")
+	q, err := NewRhizaQueue(ctx, db, []Target{{Name: id, Kind: "slack", Level: eventlog.Warning}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := now.Add(2 * time.Hour)
+	backlog := 2*cleanupBatchSize + 1
+	seedCleanupBacklog(t, ctx, db, id, now, backlog)
+
+	f := &countingFactory{}
+	r := Runtime{Queue: q, Factory: f}
+	more, err := r.Maintain(ctx, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remaining := deliveryCount(t, ctx, db, id)
+	if !more || remaining != backlog-cleanupBatchSize {
+		t.Fatalf("maintenance turn removed %d rows and reported more=%v, want one batch of %d", backlog-remaining, more, cleanupBatchSize)
+	}
+	putEvent(t, db, eventlog.IPBlacklisted("maintenance-warning", "192.0.2.1", 0, at))
+	if err := r.Step(ctx, at); err != nil {
+		t.Fatal(err)
+	}
+	if f.n.Load() != 1 {
+		t.Fatalf("warning sends=%d, want delivery before the cleanup backlog drained", f.n.Load())
+	}
+	if got := deliveryCount(t, ctx, db, id); got != remaining+1 {
+		t.Fatalf("deliveries after step=%d want=%d", got, remaining+1)
+	}
+	if more, err = r.Maintain(ctx, at); err != nil || !more {
+		t.Fatalf("resumed maintenance more=%v err=%v, want the backlog resumed", more, err)
+	}
+	if more, err = r.Maintain(ctx, at); err != nil || more {
+		t.Fatalf("drained maintenance more=%v err=%v", more, err)
+	}
+	if got := deliveryCount(t, ctx, db, id); got != 1 {
+		t.Fatalf("deliveries after drain=%d want only the delivered warning", got)
 	}
 }

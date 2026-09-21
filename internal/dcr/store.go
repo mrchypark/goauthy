@@ -954,6 +954,13 @@ func (s *Store) Update(ctx context.Context, clientID, registrationToken string, 
 	if reconciled, ok, reconcileErr := s.reconcileUpdate(ctx, clientID, rotatedDigest, desired); reconcileErr != nil {
 		return Registration{}, reconcileErr
 	} else if ok {
+		// The local row only proves this mutation applied, not that the anchor
+		// archived it. Re-submitting the identical request is answered from
+		// Rhiza's per-request receipt only once the before-ack barrier has
+		// re-passed for that slot, and stays commit-unknown until then.
+		if _, durableErr := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: requestID, Statements: statements}); durableErr != nil {
+			return Registration{}, durableErr
+		}
 		reconciled.ClientSecret = desired.ClientSecret
 		reconciled.RegistrationAccessToken = desired.RegistrationAccessToken
 		return reconciled, nil

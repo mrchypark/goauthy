@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -27,6 +28,36 @@ var (
 	ErrMasterKeyRetirementNotPrepared = errors.New("master-key retirement is not prepared")
 	ErrMasterKeyRetirementConflict    = errors.New("master-key retirement state conflict")
 )
+
+// retirementPrepareConflictClause binds a preparation to the exact prior
+// generation: a chained epoch must retire the key the completed epoch
+// installed, and a retried epoch must retire the same key as the attempt it
+// replaces. Without the binding the mutation would accept any increasing epoch
+// and rewrite the barrier from a state the caller never observed.
+const retirementPrepareConflictClause = ` ON CONFLICT(barrier_id) DO UPDATE SET epoch=excluded.epoch, old_key_id=excluded.old_key_id, replacement_key_id=excluded.replacement_key_id, membership_digest=excluded.membership_digest, state='prepared', prepared_at_unix_ms=excluded.prepared_at_unix_ms, fenced_at_unix_ms=NULL, ready_at_unix_ms=NULL, aborted_at_unix_ms=NULL
+			WHERE master_key_retirement_barrier.state IN ('aborted','ready') AND excluded.epoch > master_key_retirement_barrier.epoch
+			  AND NOT EXISTS (SELECT 1 FROM master_key_retirement_generations WHERE old_key_id=excluded.replacement_key_id)
+			  AND (master_key_retirement_barrier.state='aborted' AND master_key_retirement_barrier.old_key_id=excluded.old_key_id
+			       OR master_key_retirement_barrier.state='ready' AND master_key_retirement_barrier.replacement_key_id=excluded.old_key_id)`
+
+// retirementPreparedBarrierGuard keeps a member row in the same transaction as
+// the barrier transition that authorizes it, so a preparation that lost a race
+// leaves no orphaned membership behind.
+const retirementPreparedBarrierGuard = `EXISTS (SELECT 1 FROM master_key_retirement_barrier WHERE barrier_id=1 AND epoch=? AND old_key_id=? AND replacement_key_id=? AND membership_digest=? AND state='prepared')`
+
+// retirementFencedGenerationSQL captures the generation the barrier just
+// fenced. The retired key stays named for good, so admission can reject it
+// after a later epoch replaces the singleton barrier row (GA66-RETIRE-001).
+const retirementFencedGenerationSQL = `INSERT INTO master_key_retirement_generations (epoch, old_key_id, replacement_key_id)
+			SELECT epoch, old_key_id, replacement_key_id FROM master_key_retirement_barrier WHERE barrier_id=1 AND epoch=? AND state='fenced'
+			ON CONFLICT DO NOTHING`
+
+// retirementReadyGenerationSQL records completion, which is what the retired
+// generation's own deletion overlap and acknowledgment count from
+// (GA66-RETIRE-002).
+const retirementReadyGenerationSQL = `INSERT INTO master_key_retirement_generations (epoch, old_key_id, replacement_key_id, ready_at_unix_ms)
+			SELECT epoch, old_key_id, replacement_key_id, ready_at_unix_ms FROM master_key_retirement_barrier WHERE barrier_id=1 AND epoch=? AND state='ready'
+			ON CONFLICT (epoch) DO UPDATE SET ready_at_unix_ms=excluded.ready_at_unix_ms WHERE master_key_retirement_generations.ready_at_unix_ms IS NULL`
 
 // MasterKeyRetirementAuthorization is an immutable API-key authority snapshot
 // for a guarded retirement mutation. The predicate is fixed to api_keys and
@@ -98,8 +129,9 @@ type MasterKeyRetirement struct {
 }
 
 // PrepareMasterKeyRetirement creates or replays one exact-one or exact-three
-// membership set. A new epoch is permitted only after an earlier attempt was
-// aborted.
+// membership set. A new epoch is permitted after an earlier attempt was
+// aborted, or after a completed epoch whose replacement key becomes the new
+// old key, so rotations chain as A->B->C without state surgery.
 func PrepareMasterKeyRetirement(ctx context.Context, db *rhiza.DB, req MasterKeyRetirementPrepareRequest) (MasterKeyRetirement, error) {
 	return prepareMasterKeyRetirement(ctx, db, req, nil)
 }
@@ -142,7 +174,20 @@ func prepareMasterKeyRetirement(ctx context.Context, db *rhiza.DB, req MasterKey
 			}
 			return current, nil
 		}
-		if current.State != MasterKeyRetirementAborted || req.Epoch <= current.Epoch {
+		// GA-STOR-005: allow a new epoch from ready state when the prior
+		// replacement becomes the new old key (A→B→C rotation).
+		switch current.State {
+		case MasterKeyRetirementAborted:
+			// The retried epoch must still retire the key the aborted attempt was
+			// retiring; the mutation enforces the same relationship in SQL.
+			if req.Epoch <= current.Epoch || req.OldKeyID != current.OldKeyID {
+				return MasterKeyRetirement{}, fmt.Errorf("%w: cannot prepare epoch %d while epoch %d is %s", ErrMasterKeyRetirementConflict, req.Epoch, current.Epoch, current.State)
+			}
+		case MasterKeyRetirementReady:
+			if req.OldKeyID != current.ReplacementKeyID || req.Epoch <= current.Epoch {
+				return MasterKeyRetirement{}, fmt.Errorf("%w: cannot prepare epoch %d while epoch %d is %s", ErrMasterKeyRetirementConflict, req.Epoch, current.Epoch, current.State)
+			}
+		default:
 			return MasterKeyRetirement{}, fmt.Errorf("%w: cannot prepare epoch %d while epoch %d is %s", ErrMasterKeyRetirementConflict, req.Epoch, current.Epoch, current.State)
 		}
 	}
@@ -153,33 +198,34 @@ func prepareMasterKeyRetirement(ctx context.Context, db *rhiza.DB, req MasterKey
 		condition := `NOT EXISTS (SELECT 1 FROM master_key_retirement_barrier WHERE barrier_id=1)`
 		conditionArgs := []any(nil)
 		if err == nil {
-			condition = `EXISTS (SELECT 1 FROM master_key_retirement_barrier WHERE barrier_id=1 AND state='aborted' AND epoch<?)`
-			conditionArgs = []any{req.Epoch}
+			condition = `EXISTS (SELECT 1 FROM master_key_retirement_barrier WHERE barrier_id=1 AND state IN ('aborted','ready') AND epoch<? AND (state='aborted' AND old_key_id=? OR state='ready' AND replacement_key_id=?))`
+			conditionArgs = []any{req.Epoch, req.OldKeyID, req.OldKeyID}
 		}
+		// A replacement key that a completed generation already retired can never
+		// be admitted again, so a fence naming it would reject every writer. Keep
+		// the audit stream clean by applying the same prohibition to the event.
+		condition += ` AND NOT EXISTS (SELECT 1 FROM master_key_retirement_generations WHERE old_key_id=?)`
+		conditionArgs = append(conditionArgs, req.ReplacementKeyID)
 		event, eventErr := retirementAuditStatement(*authorization, requestID, "master_key_retirement.prepared", "prepare", req.Epoch, req.PreparedAt, condition, conditionArgs...)
 		if eventErr != nil {
 			return MasterKeyRetirement{}, eventErr
 		}
 		statements = append(statements, event)
 	}
-	if err == nil {
-		statements = append(statements, retirementGuardedStatementAt(authorization, rhiza.SQLStatement{SQL: `DELETE FROM master_key_retirement_members WHERE epoch = (SELECT epoch FROM master_key_retirement_barrier WHERE barrier_id = 1 AND state = 'aborted')`}, req.PreparedAt))
-	}
 	barrierSQL := `INSERT INTO master_key_retirement_barrier (barrier_id, epoch, old_key_id, replacement_key_id, membership_digest, state, prepared_at_unix_ms) VALUES (1, ?, ?, ?, ?, 'prepared', ?)
-			ON CONFLICT(barrier_id) DO UPDATE SET epoch=excluded.epoch, old_key_id=excluded.old_key_id, replacement_key_id=excluded.replacement_key_id, membership_digest=excluded.membership_digest, state='prepared', prepared_at_unix_ms=excluded.prepared_at_unix_ms, fenced_at_unix_ms=NULL, ready_at_unix_ms=NULL, aborted_at_unix_ms=NULL
-			WHERE master_key_retirement_barrier.state = 'aborted' AND excluded.epoch > master_key_retirement_barrier.epoch`
+		` + retirementPrepareConflictClause
 	barrierArgs := []any{req.Epoch, req.OldKeyID, req.ReplacementKeyID, digest, req.PreparedAt.UnixMilli()}
 	if authorization != nil {
 		barrierSQL = `INSERT INTO master_key_retirement_barrier (barrier_id, epoch, old_key_id, replacement_key_id, membership_digest, state, prepared_at_unix_ms) SELECT 1, ?, ?, ?, ?, 'prepared', ? WHERE ` + retirementAuthorizationPredicate()
-		barrierSQL += ` ON CONFLICT(barrier_id) DO UPDATE SET epoch=excluded.epoch, old_key_id=excluded.old_key_id, replacement_key_id=excluded.replacement_key_id, membership_digest=excluded.membership_digest, state='prepared', prepared_at_unix_ms=excluded.prepared_at_unix_ms, fenced_at_unix_ms=NULL, ready_at_unix_ms=NULL, aborted_at_unix_ms=NULL WHERE master_key_retirement_barrier.state = 'aborted' AND excluded.epoch > master_key_retirement_barrier.epoch`
+		barrierSQL += retirementPrepareConflictClause
 		barrierArgs = append(barrierArgs, retirementAuthorizationArgs(*authorization, req.PreparedAt)...)
 	}
 	statements = append(statements, rhiza.SQLStatement{SQL: barrierSQL, Args: barrierArgs})
 	for _, member := range members {
-		memberSQL := `INSERT INTO master_key_retirement_members (epoch, node_id) VALUES (?, ?)`
-		memberArgs := []any{req.Epoch, member}
+		memberSQL := `INSERT INTO master_key_retirement_members (epoch, node_id) SELECT ?, ? WHERE ` + retirementPreparedBarrierGuard
+		memberArgs := []any{req.Epoch, member, req.Epoch, req.OldKeyID, req.ReplacementKeyID, digest}
 		if authorization != nil {
-			memberSQL = `INSERT INTO master_key_retirement_members (epoch, node_id) SELECT ?, ? WHERE ` + retirementAuthorizationPredicate()
+			memberSQL = `INSERT INTO master_key_retirement_members (epoch, node_id) SELECT ?, ? WHERE ` + retirementPreparedBarrierGuard + ` AND ` + retirementAuthorizationPredicate()
 			memberArgs = append(memberArgs, retirementAuthorizationArgs(*authorization, req.PreparedAt)...)
 		}
 		statements = append(statements, rhiza.SQLStatement{SQL: memberSQL, Args: memberArgs})
@@ -253,6 +299,7 @@ func fenceMasterKeyRetirement(ctx context.Context, db *rhiza.DB, epoch int64, no
 	}
 	sql, args = retirementGuardedSQLAt(sql, args, authorization, now)
 	statements = append(statements, rhiza.SQLStatement{SQL: sql, Args: args})
+	statements = append(statements, rhiza.SQLStatement{SQL: retirementFencedGenerationSQL, Args: []any{epoch}})
 	response, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: requestID, Statements: statements})
 	if err != nil {
 		return MasterKeyRetirement{}, err
@@ -405,6 +452,7 @@ func readyMasterKeyRetirement(ctx context.Context, db *rhiza.DB, epoch int64, no
 	}
 	sql, args = retirementGuardedSQLAt(sql, args, authorization, now)
 	statements = append(statements, rhiza.SQLStatement{SQL: sql, Args: args})
+	statements = append(statements, rhiza.SQLStatement{SQL: retirementReadyGenerationSQL, Args: []any{epoch}})
 	response, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: requestID, Statements: statements})
 	if err != nil {
 		return MasterKeyRetirement{}, err
@@ -420,6 +468,159 @@ func readyMasterKeyRetirement(ctx context.Context, db *rhiza.DB, epoch int64, no
 		return MasterKeyRetirement{}, ErrMasterKeyRetirementConflict
 	}
 	return result, nil
+}
+
+// AcknowledgeMasterKeyRetirementArchival re-proves that the exact ready
+// barrier crossed Rhiza's before-ack durability boundary. It performs one
+// inert, guarded write with a fresh request ID: a cached receipt would only
+// prove an earlier boundary, while a committed no-op write proves the archive
+// now holds the ready transition and every rewrap mutation that preceded it.
+// The acknowledgment names the generation instead of the singleton barrier, so
+// a later epoch cannot retract it; a generation that never reached ready, or an
+// unavailable archive, fails closed.
+func AcknowledgeMasterKeyRetirementArchival(ctx context.Context, db *rhiza.DB, epoch int64) error {
+	if db == nil {
+		return errors.New("master-key retirement database is required")
+	}
+	if epoch <= 0 {
+		return errors.New("invalid master-key retirement epoch")
+	}
+	// The acknowledgment names one generation. A generation that never reached
+	// ready has nothing to acknowledge, and a foreign epoch must fail closed
+	// instead of writing an inert no-op against another generation's row.
+	if _, err := loadRetirementGeneration(ctx, db, epoch); err != nil {
+		return err
+	}
+	nonce := make([]byte, 16)
+	if _, err := rand.Read(nonce); err != nil {
+		return fmt.Errorf("generate master-key retirement archival acknowledgment ID: %w", err)
+	}
+	requestID := retirementRequestID("archive", epoch, base64.RawURLEncoding.EncodeToString(nonce))
+	one := int64(1)
+	response, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: requestID, Statements: []rhiza.SQLStatement{{
+		SQL:                  `UPDATE master_key_retirement_generations SET ready_at_unix_ms=ready_at_unix_ms WHERE epoch=? AND ready_at_unix_ms IS NOT NULL`,
+		Args:                 []any{epoch},
+		ExpectedRowsAffected: &one,
+	}}})
+	if err != nil {
+		return fmt.Errorf("acknowledge master-key retirement archival: %w", err)
+	}
+	if response.RowsAffected != 1 {
+		return ErrMasterKeyRetirementConflict
+	}
+	return nil
+}
+
+// MasterKeyRetirementGeneration is one completed rotation. Its old key must
+// never write again, and the deletion owner drops it from each keyring once
+// this generation's own overlap window has elapsed (GA66-RETIRE-001,
+// GA66-RETIRE-002).
+type MasterKeyRetirementGeneration struct {
+	Epoch            int64
+	OldKeyID         string
+	ReplacementKeyID string
+	ReadyAt          time.Time
+}
+
+// LoadMasterKeyRetirementGenerations returns every generation whose retirement
+// completed, oldest first. The removal receipt is deliberately not a filter:
+// each node keeps its own keyring, so a member that has not yet dropped the
+// retired key must still see the obligation.
+func LoadMasterKeyRetirementGenerations(ctx context.Context, db *rhiza.DB) ([]MasterKeyRetirementGeneration, error) {
+	if db == nil {
+		return nil, errors.New("master-key retirement database is required")
+	}
+	result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT epoch, old_key_id, replacement_key_id, ready_at_unix_ms FROM master_key_retirement_generations WHERE ready_at_unix_ms IS NOT NULL ORDER BY epoch`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return nil, err
+	}
+	generations := make([]MasterKeyRetirementGeneration, 0, len(result.Rows))
+	for _, row := range result.Rows {
+		generation, err := decodeRetirementGeneration(row)
+		if err != nil {
+			return nil, err
+		}
+		generations = append(generations, generation)
+	}
+	return generations, nil
+}
+
+// MasterKeyRetirementProhibitsWriter reports whether keyID names the old key of
+// a generation whose retirement completed. Such a key must never acquire new
+// ciphertext references again, including while a later epoch is prepared or
+// aborted, because ciphertext sealed under it would outlive its deletion.
+func MasterKeyRetirementProhibitsWriter(ctx context.Context, db *rhiza.DB, keyID string) (bool, error) {
+	if db == nil {
+		return false, errors.New("master-key retirement database is required")
+	}
+	if !validRetirementKeyID(keyID) {
+		return false, errors.New("invalid master-key retirement writer key ID")
+	}
+	result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT 1 FROM master_key_retirement_generations WHERE old_key_id=? AND ready_at_unix_ms IS NOT NULL LIMIT 1`, Args: []any{keyID}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return false, err
+	}
+	if len(result.Rows) == 0 {
+		return false, nil
+	}
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 || result.Rows[0][0] != int64(1) {
+		return false, errors.New("invalid master-key retirement writer prohibition result")
+	}
+	return true, nil
+}
+
+// MarkMasterKeyRetirementGenerationRemoved records that this generation's
+// retired key was deleted under its overlap window. It is idempotent: every
+// node runs the deletion owner against its own keyring.
+func MarkMasterKeyRetirementGenerationRemoved(ctx context.Context, db *rhiza.DB, epoch int64, now time.Time) error {
+	if db == nil {
+		return errors.New("master-key retirement database is required")
+	}
+	if epoch <= 0 {
+		return errors.New("invalid master-key retirement epoch")
+	}
+	if err := validRetirementTime(now); err != nil {
+		return fmt.Errorf("removal time: %w", err)
+	}
+	_, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: retirementRequestID("removed", epoch, now.UnixMilli()), SQL: `UPDATE master_key_retirement_generations SET removed_at_unix_ms=? WHERE epoch=? AND ready_at_unix_ms IS NOT NULL AND removed_at_unix_ms IS NULL`, Args: []any{now.UnixMilli(), epoch}})
+	return err
+}
+
+func decodeRetirementGeneration(row []any) (MasterKeyRetirementGeneration, error) {
+	if len(row) != 4 {
+		return MasterKeyRetirementGeneration{}, errors.New("invalid master-key retirement generation row")
+	}
+	epoch, ok := row[0].(int64)
+	if !ok || epoch <= 0 {
+		return MasterKeyRetirementGeneration{}, errors.New("invalid master-key retirement generation epoch")
+	}
+	generation := MasterKeyRetirementGeneration{Epoch: epoch}
+	if generation.OldKeyID, ok = row[1].(string); !ok || !validRetirementKeyID(generation.OldKeyID) {
+		return MasterKeyRetirementGeneration{}, errors.New("invalid master-key retirement generation old key")
+	}
+	if generation.ReplacementKeyID, ok = row[2].(string); !ok || !validRetirementKeyID(generation.ReplacementKeyID) || generation.ReplacementKeyID == generation.OldKeyID {
+		return MasterKeyRetirementGeneration{}, errors.New("invalid master-key retirement generation replacement key")
+	}
+	ready, err := retirementTime(row[3], true)
+	if err != nil {
+		return MasterKeyRetirementGeneration{}, err
+	}
+	generation.ReadyAt = ready
+	return generation, nil
+}
+
+func loadRetirementGeneration(ctx context.Context, db *rhiza.DB, epoch int64) (MasterKeyRetirementGeneration, error) {
+	result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT epoch, old_key_id, replacement_key_id, ready_at_unix_ms FROM master_key_retirement_generations WHERE epoch=? AND ready_at_unix_ms IS NOT NULL`, Args: []any{epoch}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return MasterKeyRetirementGeneration{}, err
+	}
+	if len(result.Rows) == 0 {
+		return MasterKeyRetirementGeneration{}, ErrMasterKeyRetirementConflict
+	}
+	if len(result.Rows) != 1 {
+		return MasterKeyRetirementGeneration{}, errors.New("invalid master-key retirement generation row")
+	}
+	return decodeRetirementGeneration(result.Rows[0])
 }
 
 func AbortMasterKeyRetirement(ctx context.Context, db *rhiza.DB, epoch int64, now time.Time) (MasterKeyRetirement, error) {
@@ -869,11 +1070,6 @@ func retirementGuardedSQLAt(sql string, args []any, authorization *MasterKeyReti
 		return sql, args
 	}
 	return sql + " AND " + retirementAuthorizationPredicate(), append(args, retirementAuthorizationArgs(*authorization, operationAt)...)
-}
-
-func retirementGuardedStatementAt(authorization *MasterKeyRetirementAuthorization, statement rhiza.SQLStatement, operationAt time.Time) rhiza.SQLStatement {
-	statement.SQL, statement.Args = retirementGuardedSQLAt(statement.SQL, statement.Args, authorization, operationAt)
-	return statement
 }
 
 func retirementMutationApplied(response rhiza.ExecuteResponse, minimumRows int64) bool {

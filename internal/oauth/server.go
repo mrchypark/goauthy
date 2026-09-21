@@ -583,7 +583,12 @@ func (s *Server) TokenHandler() http.Handler {
 				return
 			}
 		}
-		for _, scope := range request.GetRequestedScopes() {
+		granted, err := s.grantedTokenScopes(r.Context(), request)
+		if err != nil {
+			s.writeTokenError(r.Context(), sw, request, err)
+			return
+		}
+		for _, scope := range granted {
 			request.GrantScope(scope)
 		}
 		jkt, err := s.verifyDPoPTokenRequest(r.Context(), r, request)
@@ -778,6 +783,41 @@ func (s *Server) TokenHandler() http.Handler {
 		}
 		s.provider.WriteAccessResponse(r.Context(), sw, request, response)
 	})
+}
+
+// grantedTokenScopes projects the scopes a token request may grant before the
+// claim preflight, which reads GetGrantedScopes. Fosite's authorization-code
+// handler grants the scopes stored with the code only inside
+// PopulateTokenEndpointResponse, after that preflight, and its refresh handler
+// already granted the stored approval. Fosite only ever adds granted scopes, so
+// approving the requested set here would restore scopes the user withheld at
+// consent and carry them into the refresh token.
+func (s *Server) grantedTokenScopes(ctx context.Context, request fosite.AccessRequester) (fosite.Arguments, error) {
+	if request.GetGrantTypes().ExactOne("authorization_code") {
+		if s.authorizeCodes == nil {
+			return nil, fosite.ErrServerError
+		}
+		value, ok := exactlyOne(request.GetRequestForm(), "code")
+		if !ok {
+			return nil, fosite.ErrServerError
+		}
+		stored, err := s.store.GetAuthorizeCodeSession(ctx, s.authorizeCodes.AuthorizeCodeSignature(ctx, value), &fosite.DefaultSession{})
+		if err != nil {
+			// Mirror Fosite's authorization-code handling: a code that expired or
+			// was consumed between the two reads is an invalid grant, not a
+			// server failure.
+			if errors.Is(err, fosite.ErrInvalidatedAuthorizeCode) || errors.Is(err, fosite.ErrNotFound) {
+				return nil, fosite.ErrInvalidGrant
+			}
+			return nil, err
+		}
+		return stored.GetGrantedScopes(), nil
+	}
+	if request.GetGrantTypes().ExactOne("refresh_token") {
+		// The refresh grant handler already projected the stored approval.
+		return nil, nil
+	}
+	return request.GetRequestedScopes(), nil
 }
 
 func resourceAllowList(resources []string) (map[string]struct{}, error) {
@@ -978,10 +1018,7 @@ func (s *Server) authorizationRequestView(ctx context.Context, authorizeRequest 
 	if err != nil {
 		return AuthorizationRequest{}, err
 	}
-	forceMFA, err := s.forceMFA(ctx, authorizeRequest.GetClient().GetID())
-	if err != nil {
-		return AuthorizationRequest{}, err
-	}
+	forceMFA := s.forceMFA(authorizeRequest.GetClient())
 	return AuthorizationRequest{
 		ClientID:           authorizeRequest.GetClient().GetID(),
 		RedirectURI:        authorizeRequest.GetRedirectURI().String(),
@@ -994,19 +1031,20 @@ func (s *Server) authorizationRequestView(ctx context.Context, authorizeRequest 
 	}, nil
 }
 
-func (s *Server) forceMFA(ctx context.Context, clientID string) (bool, error) {
-	if clientID == s.store.client.GetID() {
-		return s.oidc != nil && s.oidc.BootstrapForceMFA, nil
+// forceMFA reads the MFA policy from the exact client snapshot Fosite resolved
+// for this request. A separate managed-client lookup could fail on its own and
+// silently downgrade a force-MFA client to "MFA not required"; the snapshot
+// read already fails the whole request when that client cannot be loaded.
+func (s *Server) forceMFA(client fosite.Client) bool {
+	if client.GetID() == s.store.client.GetID() {
+		return s.oidc != nil && s.oidc.BootstrapForceMFA
 	}
-	if s.store.managedClients != nil {
-		c, err := s.store.managedClients.GetWithGuard(ctx, clientID, func() (string, []any) { return "1", nil })
-		if err == nil {
-			return c.ForceMFA, nil
-		}
+	if managed, ok := client.(*clients.Client); ok {
+		return managed.ForceMFA
 	}
 	// Dynamic registration never admits a force_mfa policy. This also ignores
 	// legacy rows written before that public metadata was removed.
-	return false, nil
+	return false
 }
 
 func (s *Server) parseAuthorizationRequest(r *http.Request) (fosite.AuthorizeRequester, error) {
@@ -1282,6 +1320,15 @@ func (s *Server) completeAuthorization(w http.ResponseWriter, r *http.Request, s
 			return
 		}
 		session.Extra = map[string]interface{}{oidcSessionIDExtra: sessionID}
+	}
+	// Enforce the authentication strength against the client snapshot Fosite
+	// just resolved for this issuance, not the view the login layer rendered.
+	// The login layer already refuses session reuse without MFA, but a stale or
+	// unavailable policy read must never let a password-only session mint an
+	// authorization code for a force-MFA client revision.
+	if s.forceMFA(authorizeRequest.GetClient()) && authMethod != oidcAuthMethodMFA {
+		s.provider.WriteAuthorizeError(r.Context(), w, authorizeRequest, fosite.ErrAccessDenied.WithHint("MFA is required."))
+		return
 	}
 	if s.oidc != nil && approved[openidScope] && authorizeRequest.GetRequestedScopes().Has(openidScope) {
 		if authTime.IsZero() || sessionID == "" || !validOIDCAuthMethod(authMethod) {
