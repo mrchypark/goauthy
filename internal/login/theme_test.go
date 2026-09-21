@@ -12,6 +12,7 @@ import (
 )
 
 func TestThemeLinksResolveOAuthClientAndDirectPagesUseGlobalClient(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	var clients []string
 	h.SetThemeURLResolver(func(_ context.Context, clientID string) (string, error) {
@@ -86,6 +87,7 @@ func TestThemeLinksResolveOAuthClientAndDirectPagesUseGlobalClient(t *testing.T)
 }
 
 func TestThemeLinkEscapesUntrustedResolverURL(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	h.SetThemeURLResolver(func(context.Context, string) (string, error) {
 		return `/auth/v1/theme/rauthy/123\"><script>alert(1)</script>`, nil
@@ -118,6 +120,7 @@ func TestThemeLinkEscapesUntrustedResolverURL(t *testing.T) {
 }
 
 func TestThemeResolverErrorStopsLoginPage(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	h.SetThemeURLResolver(func(context.Context, string) (string, error) {
 		return "", errors.New("theme unavailable")

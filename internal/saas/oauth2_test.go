@@ -15,6 +15,7 @@ import (
 )
 
 func TestOAuth2ConfiguredExchangeAndRefresh(t *testing.T) {
+	t.Parallel()
 	for _, style := range []oauth2.AuthStyle{oauth2.AuthStyleInHeader, oauth2.AuthStyleInParams} {
 		t.Run(map[oauth2.AuthStyle]string{oauth2.AuthStyleInHeader: "basic", oauth2.AuthStyleInParams: "post"}[style], func(t *testing.T) {
 			var calls atomic.Int32
@@ -79,6 +80,7 @@ func TestOAuth2ConfiguredExchangeAndRefresh(t *testing.T) {
 }
 
 func TestOAuth2FailureDoesNotRetryOrLeakProviderBody(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	fixture := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -109,6 +111,7 @@ func TestOAuth2FailureDoesNotRetryOrLeakProviderBody(t *testing.T) {
 }
 
 func TestOAuth2RejectsInvalidConfiguration(t *testing.T) {
+	t.Parallel()
 	base := OAuth2Config{ClientID: "client", AuthorizationURL: "https://provider.example/authorize", TokenURL: "https://provider.example/token", CallbackURL: "https://auth.example/callback", Scopes: []string{"read"}, AuthStyle: oauth2.AuthStyleInHeader}
 	for _, mutate := range []func(*OAuth2Config){
 		func(c *OAuth2Config) { c.AuthStyle = oauth2.AuthStyleAutoDetect },

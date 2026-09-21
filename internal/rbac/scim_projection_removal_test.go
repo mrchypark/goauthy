@@ -37,6 +37,7 @@ func rbacRemovalTargets(ctx context.Context, store *Store, group, role Entity) [
 // local entity, so the stale offer cannot repoint the row, and a restarted
 // worker delivers the deletion alone. Roles share the same helper.
 func TestDeleteRejectsStaleProjectionOverwrite(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	if _, err := store.EnsureBootstrapPrincipal(ctx, "admin", nil, nil); err != nil {
@@ -103,6 +104,7 @@ func TestDeleteRejectsStaleProjectionOverwrite(t *testing.T) {
 // itself, so a projection present when the deletion executes is superseded, and
 // a restarted worker delivers the deletion alone. Roles share the same helper.
 func TestDeleteSupersedesProjectionAdmittedDuringDeletion(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := rbacTestStore(t)
 	insertActive(t, db, "admin")
 	if _, err := store.EnsureBootstrapPrincipal(ctx, "admin", nil, nil); err != nil {

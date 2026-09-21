@@ -29,6 +29,7 @@ func oauth2HandoffInput(s *CredentialStore, b credentialBinding, consumer client
 }
 
 func TestOAuth2UseHandoffApproveAndDeliver(t *testing.T) {
+	t.Parallel()
 	ctx, s, _, b, requester, consumer := oauth2HandoffFixture(t)
 	id, review, err := s.CreateUseHandoff(ctx, b.Owner, requester.ID, "https://consumer.example/resource", oauth2HandoffInput(s, b, consumer), credentialAuthority())
 	if err != nil || review.OAuth2 == nil || review.OAuth2.Version != 1 || review.OAuth2.AccountID != "account-1" || review.ReviewDigest == "" || review.Grant.ID != "" {
@@ -64,6 +65,7 @@ func TestOAuth2UseHandoffApproveAndDeliver(t *testing.T) {
 }
 
 func TestOAuth2UseHandoffDenialAndProxyRejected(t *testing.T) {
+	t.Parallel()
 	ctx, s, _, b, requester, consumer := oauth2HandoffFixture(t)
 	in := oauth2HandoffInput(s, b, consumer)
 	in.Mode = "proxy"
@@ -89,6 +91,7 @@ func TestOAuth2UseHandoffDenialAndProxyRejected(t *testing.T) {
 }
 
 func TestOAuth2UseHandoffTicketAndExpiryFence(t *testing.T) {
+	t.Parallel()
 	ctx, s, db, b, requester, consumer := oauth2HandoffFixture(t)
 	in := oauth2HandoffInput(s, b, consumer)
 	id, review, err := s.CreateUseHandoff(ctx, b.Owner, requester.ID, "https://consumer.example/resource", in, credentialAuthority())
@@ -120,6 +123,7 @@ func TestOAuth2UseHandoffTicketAndExpiryFence(t *testing.T) {
 }
 
 func TestOAuth2UseHandoffReviewDigestAndVersionFence(t *testing.T) {
+	t.Parallel()
 	ctx, s, _, b, requester, consumer := oauth2HandoffFixture(t)
 	id, review, err := s.CreateUseHandoff(ctx, b.Owner, requester.ID, "https://consumer.example/resource", oauth2HandoffInput(s, b, consumer), credentialAuthority())
 	if err != nil {
@@ -144,6 +148,7 @@ func TestOAuth2UseHandoffReviewDigestAndVersionFence(t *testing.T) {
 }
 
 func TestOAuth2UseHandoffReconnectProviderAndClientFences(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		mutate func(context.Context, *CredentialStore, credentialBinding, clients.Client, clients.Client) error

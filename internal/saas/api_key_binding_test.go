@@ -9,6 +9,7 @@ import (
 )
 
 func TestBoundAPIKeyConsentAndCustodyRotation(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "saas-api-key-binding-method", SQL: `UPDATE auth_collection_definitions SET auth_method='api_key',providers_json='[]' WHERE id=?`, Args: []any{b.CollectionID}}); err != nil {
 		t.Fatal(err)
@@ -63,6 +64,7 @@ func TestBoundAPIKeyConsentAndCustodyRotation(t *testing.T) {
 }
 
 func TestPutAPIKeyRejectsMaxInt64Version(t *testing.T) {
+	t.Parallel()
 	ctx, store, _, b := credentialStoreFixture(t)
 	if _, err := store.PutAPIKey(ctx, b.Owner, b.CollectionID, b.ConnectionID, 1<<63-1, "key", credentialAuthority()); !errors.Is(err, ErrInvalidAPIKey) {
 		t.Fatalf("max version=%v", err)

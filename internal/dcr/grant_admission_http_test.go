@@ -8,6 +8,7 @@ import (
 )
 
 func TestRegistrationHTTPConfidentialGrantAdmissionAndDPoPUpdate(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	created := registerHTTPGrantClient(t, h, `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"client_secret_basic","client_name":"Code Refresh","dpop_bound_access_tokens":false}`, "grant-code-refresh")
 	if created.DPoPBoundAccessTokens || len(created.GrantTypes) != 2 {
@@ -34,6 +35,7 @@ func TestRegistrationHTTPConfidentialGrantAdmissionAndDPoPUpdate(t *testing.T) {
 }
 
 func TestRegistrationHTTPClientCredentialsGrantMetadata(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	created := registerHTTPGrantClient(t, h, `{"redirect_uris":[],"grant_types":["client_credentials"],"response_types":[],"token_endpoint_auth_method":"client_secret_post","client_name":"Credentials Only","dpop_bound_access_tokens":true}`, "grant-client-credentials")
 	if !created.DPoPBoundAccessTokens || len(created.RedirectURIs) != 0 || len(created.ResponseTypes) != 0 || len(created.GrantTypes) != 1 || created.GrantTypes[0] != "client_credentials" || created.TokenEndpointAuthMethod != "client_secret_post" {
@@ -49,6 +51,7 @@ func TestRegistrationHTTPClientCredentialsGrantMetadata(t *testing.T) {
 }
 
 func TestRegistrationHTTPPublicAuthorizationCodeRefreshGrantMetadata(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	response := httptest.NewRecorder()
 	body := `{"redirect_uris":["https://rp.example.test/callback"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none","client_name":"Public Code Refresh"}`
@@ -60,6 +63,7 @@ func TestRegistrationHTTPPublicAuthorizationCodeRefreshGrantMetadata(t *testing.
 }
 
 func TestRegistrationHTTPRejectsInvalidClientCredentialsGrantCombinations(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	for index, tc := range []struct {
 		name, body string
@@ -79,6 +83,7 @@ func TestRegistrationHTTPRejectsInvalidClientCredentialsGrantCombinations(t *tes
 }
 
 func TestStoreEnforcesClientCredentialsAndRefreshGrantRelationships(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	for index, tc := range []struct {
 		name string
@@ -129,6 +134,7 @@ func registerHTTPGrantClient(t *testing.T, h http.Handler, body, key string) reg
 }
 
 func TestRegistrationHTTPPasswordGrantMetadata(t *testing.T) {
+	t.Parallel()
 	for _, method := range []string{"none", "client_secret_basic", "client_secret_post"} {
 		t.Run(method, func(t *testing.T) {
 			h := testHandler(t, testGlobalToken)

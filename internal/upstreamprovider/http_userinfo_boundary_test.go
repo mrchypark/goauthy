@@ -79,6 +79,7 @@ func (h *boundaryHooks) hooks() LocalLoginHooks {
 }
 
 func TestOIDCUserInfoBoundary(t *testing.T) {
+	t.Parallel()
 	const (
 		oidcIssuer = "https://issuer.example.test"
 		clientID   = "test-client"

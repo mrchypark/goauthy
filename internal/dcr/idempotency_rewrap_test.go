@@ -16,6 +16,7 @@ import (
 )
 
 func TestRewrapIdempotencyBatchIsBoundedAndSkipsActiveOrExpiredRows(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	old, active := rewrapKeyrings(t)
 	store.keyring = active
@@ -77,6 +78,7 @@ func TestRewrapIdempotencyBatchIsBoundedAndSkipsActiveOrExpiredRows(t *testing.T
 }
 
 func TestRewrapIdempotencyPreflightsBeforeMutation(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	old, active := rewrapKeyrings(t)
 	store.keyring = active
@@ -103,6 +105,7 @@ func TestRewrapIdempotencyPreflightsBeforeMutation(t *testing.T) {
 }
 
 func TestRewrapIdempotencyMutationIsAllOrZero(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	old, active := rewrapKeyrings(t)
 	now := time.UnixMilli(150_000).UTC()
@@ -171,6 +174,7 @@ func queryRewrapEnvelope(t *testing.T, ctx context.Context, db *rhiza.DB, candid
 }
 
 func TestConcurrentRewrapIdempotencyBatchesConverge(t *testing.T) {
+	t.Parallel()
 	ctx, _, db := testStore(t)
 	old, active := rewrapKeyrings(t)
 	now := time.UnixMilli(200_000).UTC()

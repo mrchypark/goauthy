@@ -12,14 +12,15 @@ import (
 
 func userListStore(t *testing.T) *Store {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "user-list-" + t.Name(), DataDir: t.TempDir()})
+	directory := t.TempDir()
+	if err := copyDirTree(rbacMigratedTemplate(t), directory); err != nil {
+		t.Fatal(err)
+	}
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "rbac-store-test", DataDir: directory})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
 	s := NewStore(db)
 	rows := []struct {
 		id                   string
@@ -50,6 +51,7 @@ func nullableTest(v string) any {
 }
 
 func TestListUsersEmptyAndDenied(t *testing.T) {
+	t.Parallel()
 	s := userListStore(t)
 	ctx := context.Background()
 	got, err := s.listUsers(ctx, "1=1", nil, UserListOptions{}, 2)
@@ -63,6 +65,7 @@ func TestListUsersEmptyAndDenied(t *testing.T) {
 }
 
 func TestListUsersTiesForwardBackwardAndCursor(t *testing.T) {
+	t.Parallel()
 	s := userListStore(t)
 	ctx := context.Background()
 	opt := UserListOptions{PageSize: 1}
@@ -88,6 +91,7 @@ func TestListUsersTiesForwardBackwardAndCursor(t *testing.T) {
 }
 
 func TestListUsersNullableAndOffset(t *testing.T) {
+	t.Parallel()
 	s := userListStore(t)
 	got, err := s.listUsers(context.Background(), "1=1", nil, UserListOptions{PageSize: 2, Offset: 1}, 10)
 	if err != nil || got.Count != 3 || len(got.Users) != 3 || got.Users[1].GivenName != nil || got.Users[1].Email != "" {
@@ -99,6 +103,7 @@ func TestListUsersNullableAndOffset(t *testing.T) {
 }
 
 func TestListUsersEmptyPagesKeepAuthorizedCount(t *testing.T) {
+	t.Parallel()
 	s := userListStore(t)
 	ctx := context.Background()
 	page, err := s.listUsers(ctx, "1=1", nil, UserListOptions{PageSize: 1, Offset: 1}, 1)
@@ -143,6 +148,7 @@ func TestListUsersEmptyPagesKeepAuthorizedCount(t *testing.T) {
 }
 
 func TestUserListCursorRoundTripAndBounds(t *testing.T) {
+	t.Parallel()
 	for _, c := range []userListCursor{{0, "legacy-admin"}, {1700000000123, "사용자/a"}, {1, "a\tb"}, {1, strings.Repeat("x", 512)}} {
 		token, err := encodeUserListCursor(c)
 		if err != nil {

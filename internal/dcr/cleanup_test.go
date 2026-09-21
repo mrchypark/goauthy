@@ -12,6 +12,7 @@ import (
 )
 
 func TestCleanupAnonymousClientsEligibilityAndChildren(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
 	unused := cleanupClient(t, ctx, store, db, "cleanup-unused", now.Add(-time.Minute), nil, true)
@@ -46,6 +47,7 @@ func TestCleanupAnonymousClientsEligibilityAndChildren(t *testing.T) {
 }
 
 func TestCleanupAnonymousClientsLimitAndConcurrentPasses(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
 	cleanupClient(t, ctx, store, db, "cleanup-a", now.Add(-48*time.Hour), nil, true)
@@ -86,6 +88,7 @@ func TestCleanupAnonymousClientsLimitAndConcurrentPasses(t *testing.T) {
 }
 
 func TestCleanupAnonymousClientsRejectsInvalidConfiguration(t *testing.T) {
+	t.Parallel()
 	ctx, _, db := testStore(t)
 	for _, config := range []AnonymousCleanupConfig{{}, {CleanupMinutes: -1, Limit: 1}, {Limit: 1001}} {
 		if err := CleanupAnonymousClients(ctx, db, config, time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)); err == nil {

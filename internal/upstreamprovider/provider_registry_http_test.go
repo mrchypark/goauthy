@@ -28,14 +28,7 @@ type httpFixture struct {
 func newHTTPFixture(t *testing.T) *httpFixture {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "http-test", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "http-test")
 	store, err := NewRegistryStore(db, &fakeEnvelopeKeyring{})
 	if err != nil {
 		t.Fatal(err)
@@ -141,6 +134,7 @@ func (f *httpFixture) disableUser(subject string) {
 // --- PostProviders tests ---
 
 func TestPostProvidersReturnsDecryptedSecretList(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("hp-1", "Alpha", true)
 
@@ -169,6 +163,7 @@ func TestPostProvidersReturnsDecryptedSecretList(t *testing.T) {
 }
 
 func TestPostProvidersUnauthorizedWithoutKey(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil {
@@ -184,6 +179,7 @@ func TestPostProvidersUnauthorizedWithoutKey(t *testing.T) {
 }
 
 func TestPostProvidersForbiddenWrongGroup(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	// Create a key with wrong group
 	_, token, err := f.keys.Create(f.ctx, nil, apikey.Request{
@@ -208,6 +204,7 @@ func TestPostProvidersForbiddenWrongGroup(t *testing.T) {
 }
 
 func TestPostProvidersRevokedKey(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	// Revoke the key by overwriting secret_digest
 	if _, err := storage.Execute(f.ctx, f.db, rhiza.ExecuteRequest{
@@ -234,6 +231,7 @@ func TestPostProvidersRevokedKey(t *testing.T) {
 // --- GetProvidersMinimal tests ---
 
 func TestGetProvidersMinimalPublicNeverLeaksSecret(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("min-1", "Visible", true)
 	f.seedProvider("min-2", "Disabled", false)
@@ -274,6 +272,7 @@ func TestGetProvidersMinimalPublicNeverLeaksSecret(t *testing.T) {
 }
 
 func TestGetProvidersMinimalMethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil {
@@ -291,6 +290,7 @@ func TestGetProvidersMinimalMethodNotAllowed(t *testing.T) {
 // --- GetProviderDeleteSafe tests ---
 
 func TestDeleteSafeEmptyReturns200(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("ds-1", "Safe", true)
 
@@ -317,6 +317,7 @@ func TestDeleteSafeEmptyReturns200(t *testing.T) {
 }
 
 func TestDeleteSafeLinkedReturns406(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("ds-2", "Linked", true)
 	f.seedIdentityUser("u-ds-1")
@@ -349,6 +350,7 @@ func TestDeleteSafeLinkedReturns406(t *testing.T) {
 }
 
 func TestDeleteSafeIncludesDisabledUsers(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("ds-3", "DisabledLink", true)
 	f.seedIdentityUser("u-ds-dis")
@@ -379,6 +381,7 @@ func TestDeleteSafeIncludesDisabledUsers(t *testing.T) {
 }
 
 func TestDeleteSafeUnauthorized(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil {
@@ -395,6 +398,7 @@ func TestDeleteSafeUnauthorized(t *testing.T) {
 }
 
 func TestDeleteSafeMethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil {
@@ -411,6 +415,7 @@ func TestDeleteSafeMethodNotAllowed(t *testing.T) {
 }
 
 func TestDeleteSafeBrowserAdmin(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("ds-browser", "Browser", true)
 
@@ -439,6 +444,7 @@ func TestDeleteSafeBrowserAdmin(t *testing.T) {
 // --- Constructor tests ---
 
 func TestNewRegistryHandlerRequiresStore(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	_, err := NewRegistryHandler(nil, f.keys, nil)
 	if err == nil {
@@ -447,6 +453,7 @@ func TestNewRegistryHandlerRequiresStore(t *testing.T) {
 }
 
 func TestNewRegistryHandlerRequiresKeys(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	_, err := NewRegistryHandler(f.store, nil, nil)
 	if err == nil {
@@ -455,6 +462,7 @@ func TestNewRegistryHandlerRequiresKeys(t *testing.T) {
 }
 
 func TestNewRegistryHandlerAcceptsNilBrowserAdmin(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil {
@@ -466,6 +474,7 @@ func TestNewRegistryHandlerAcceptsNilBrowserAdmin(t *testing.T) {
 }
 
 func TestPostProvidersEmptyList(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil {
@@ -489,6 +498,7 @@ func TestPostProvidersEmptyList(t *testing.T) {
 }
 
 func TestPostProvidersMultipleWithSecrets(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("mp-1", "First", true)
 	f.seedProvider("mp-2", "Second", false)
@@ -523,6 +533,7 @@ func TestPostProvidersMultipleWithSecrets(t *testing.T) {
 // --- Browser admin tests ---
 
 func TestPostProvidersBrowserAdminRead(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("ba-1", "BrowserAdmin", true)
 
@@ -551,6 +562,7 @@ func TestPostProvidersBrowserAdminRead(t *testing.T) {
 }
 
 func TestDeleteSafeBrowserAdminReadCSFFalse(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("ba-ds", "BrowserCSF", true)
 
@@ -577,6 +589,7 @@ func TestDeleteSafeBrowserAdminReadCSFFalse(t *testing.T) {
 }
 
 func TestPostProvidersNoBrowserAdmin(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil {
@@ -592,6 +605,7 @@ func TestPostProvidersNoBrowserAdmin(t *testing.T) {
 }
 
 func TestDeleteSafeNonExistentProvider(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil {
@@ -610,6 +624,7 @@ func TestDeleteSafeNonExistentProvider(t *testing.T) {
 }
 
 func TestDeleteSafeEmptyBodyIsJSON(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	h, err := NewRegistryHandler(f.store, f.keys, nil)
 	if err != nil {
@@ -631,6 +646,7 @@ func TestDeleteSafeEmptyBodyIsJSON(t *testing.T) {
 }
 
 func TestGetProvidersMinimalUpdatedNonzeroWithOwnLogo(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("logo-rast", "RasterProvider", true)
 	f.seedProviderLogo("logo-rast", "small", "image/webp", []byte("raster-data"), 42)
@@ -659,6 +675,7 @@ func TestGetProvidersMinimalUpdatedNonzeroWithOwnLogo(t *testing.T) {
 }
 
 func TestGetProvidersMinimalUpdatedNonzeroWithOwnSVG(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("logo-svg", "SVGProvider", true)
 	f.seedProviderLogo("logo-svg", "svg", "image/svg+xml", []byte("<svg/>"), 99)
@@ -687,6 +704,7 @@ func TestGetProvidersMinimalUpdatedNonzeroWithOwnSVG(t *testing.T) {
 }
 
 func TestGetProvidersMinimalUpdatedZeroWhenAbsent(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("no-logo", "NoLogoProvider", true)
 
@@ -714,6 +732,7 @@ func TestGetProvidersMinimalUpdatedZeroWhenAbsent(t *testing.T) {
 }
 
 func TestGetProvidersMinimalDisabledExcludedEvenWithLogo(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("dis-logo", "DisabledLogo", false)
 	f.seedProviderLogo("dis-logo", "small", "image/webp", []byte("should-not-appear"), 55)
@@ -739,6 +758,7 @@ func TestGetProvidersMinimalDisabledExcludedEvenWithLogo(t *testing.T) {
 }
 
 func TestGetProvidersMinimalOtherProviderLogoNotUsed(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("target-p", "Target", true)
 	f.seedProvider("other-p", "Other", true)
@@ -773,6 +793,7 @@ func TestGetProvidersMinimalOtherProviderLogoNotUsed(t *testing.T) {
 }
 
 func TestGetProvidersMinimalSecretNeverLeaks(t *testing.T) {
+	t.Parallel()
 	f := newHTTPFixture(t)
 	f.seedProvider("leak-test", "LeakTest", true)
 	f.seedProviderLogo("leak-test", "small", "image/webp", []byte("secret-logo"), 88)

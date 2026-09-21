@@ -20,6 +20,7 @@ import (
 )
 
 func TestFindOrCreateLoginRevokeCodeIsSharedAndRecoverable(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	keyring := loginRevokeTestKeyring(t)
 	subject := "login-revoke-shared"
@@ -42,6 +43,7 @@ func TestFindOrCreateLoginRevokeCodeIsSharedAndRecoverable(t *testing.T) {
 }
 
 func TestFindOrCreateLoginRevokeCodeRequiresSubject(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	if _, err := store.FindOrCreateLoginRevokeCode(context.Background(), loginRevokeTestKeyring(t), "missing"); !errors.Is(err, ErrInactiveSubject) {
 		t.Fatalf("missing subject error=%v", err)
@@ -49,6 +51,7 @@ func TestFindOrCreateLoginRevokeCodeRequiresSubject(t *testing.T) {
 }
 
 func TestRevokeLoginWrongCodeHasNoEffect(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	keyring := loginRevokeTestKeyring(t)
 	subject, code := seedLoginRevoke(t, store, keyring, "wrong-code")
@@ -83,6 +86,7 @@ func TestRevokeLoginWrongCodeHasNoEffect(t *testing.T) {
 }
 
 func TestRevokeLoginAtomicallyRevokesAllState(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	keyring := loginRevokeTestKeyring(t)
 	subject, code := seedLoginRevoke(t, store, keyring, "atomic")
@@ -121,6 +125,7 @@ func TestRevokeLoginAtomicallyRevokesAllState(t *testing.T) {
 }
 
 func TestRevokeLoginConcurrentRedeemHasOneWinner(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	keyring := loginRevokeTestKeyring(t)
 	subject, code := seedLoginRevoke(t, store, keyring, "concurrent")
@@ -157,6 +162,7 @@ func TestRevokeLoginConcurrentRedeemHasOneWinner(t *testing.T) {
 }
 
 func TestRevokeLoginPersistsExactEventTextForLocationForms(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name     string
 		location *string
@@ -180,6 +186,7 @@ func TestRevokeLoginPersistsExactEventTextForLocationForms(t *testing.T) {
 }
 
 func TestRevokeLoginRollsBackWhenEventFails(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, testRules(3))
 	keyring := loginRevokeTestKeyring(t)
 	subject, code := seedLoginRevoke(t, store, keyring, "rollback")

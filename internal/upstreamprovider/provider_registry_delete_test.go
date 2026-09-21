@@ -25,14 +25,7 @@ type deleteFixture struct {
 func newDeleteFixture(t *testing.T) *deleteFixture {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "delete-test", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "delete-test")
 	store, err := NewRegistryStore(db, &fakeEnvelopeKeyring{})
 	if err != nil {
 		t.Fatal(err)
@@ -185,6 +178,7 @@ func testExtKey(suffix string) string {
 }
 
 func TestDeleteAuthorizedProviderLogoAndLinks(t *testing.T) {
+	t.Parallel()
 	f := newDeleteFixture(t)
 	f.seedProvider("del-clean")
 	f.seedLogo("del-clean", "small")
@@ -216,6 +210,7 @@ func TestDeleteAuthorizedProviderLogoAndLinks(t *testing.T) {
 }
 
 func TestDeleteAuthorizedRevokedPrincipal(t *testing.T) {
+	t.Parallel()
 	f := newDeleteFixture(t)
 	f.seedProvider("del-rev")
 	f.seedLogo("del-rev", "small")
@@ -247,6 +242,7 @@ func TestDeleteAuthorizedRevokedPrincipal(t *testing.T) {
 }
 
 func TestDeleteAuthorizedConstraintRollback(t *testing.T) {
+	t.Parallel()
 	f := newDeleteFixture(t)
 	f.seedProvider("del-roll")
 	_, token, err := f.keys.Create(f.ctx, nil, apikey.Request{
@@ -270,6 +266,7 @@ func TestDeleteAuthorizedConstraintRollback(t *testing.T) {
 }
 
 func TestDeleteAuthorizedLinkedUsersCorrect(t *testing.T) {
+	t.Parallel()
 	f := newDeleteFixture(t)
 	f.seedProvider("del-multi")
 	seedIdentityUser(t, f.ctx, f.db, "u-multi-a")
@@ -306,6 +303,7 @@ func TestDeleteAuthorizedLinkedUsersCorrect(t *testing.T) {
 }
 
 func TestDeleteAuthorizedEmpty(t *testing.T) {
+	t.Parallel()
 	f := newDeleteFixture(t)
 	f.seedProvider("del-empty")
 	linked, err := f.store.LinkedUsers(f.ctx, "del-empty")
@@ -325,6 +323,7 @@ func TestDeleteAuthorizedEmpty(t *testing.T) {
 }
 
 func TestDeleteAuthorizedNonExistent(t *testing.T) {
+	t.Parallel()
 	f := newDeleteFixture(t)
 	err := f.store.DeleteAuthorized(f.ctx, "del-nope", f.newRequestID("del"), f.keys, f.principal)
 	if err != nil {
@@ -333,6 +332,7 @@ func TestDeleteAuthorizedNonExistent(t *testing.T) {
 }
 
 func TestDeleteAuthorizedMissingProfile(t *testing.T) {
+	t.Parallel()
 	f := newDeleteFixture(t)
 	f.seedProvider("del-noprof")
 	seedIdentityUser(t, f.ctx, f.db, "u-noprof")
@@ -353,6 +353,7 @@ func TestDeleteAuthorizedMissingProfile(t *testing.T) {
 }
 
 func TestDeleteAuthorizedMissingProfileWithRecoveryEmail(t *testing.T) {
+	t.Parallel()
 	f := newDeleteFixture(t)
 	f.seedProvider("del-recov")
 	seedIdentityUser(t, f.ctx, f.db, "u-recov")
@@ -371,6 +372,7 @@ func TestDeleteAuthorizedMissingProfileWithRecoveryEmail(t *testing.T) {
 }
 
 func TestDeleteAuthorizedDisabledUserListed(t *testing.T) {
+	t.Parallel()
 	f := newDeleteFixture(t)
 	f.seedProvider("del-dis")
 	seedIdentityUser(t, f.ctx, f.db, "u-dis")

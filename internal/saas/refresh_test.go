@@ -9,6 +9,7 @@ import (
 )
 
 func TestRefreshCredentialCommitsBeforeReturningBinding(t *testing.T) {
+	t.Parallel()
 	ctx, store, _, binding := credentialStoreFixture(t)
 	if err := store.Install(ctx, binding, testCredential(), credentialAuthority()); err != nil {
 		t.Fatal(err)
@@ -34,6 +35,7 @@ func TestRefreshCredentialCommitsBeforeReturningBinding(t *testing.T) {
 }
 
 func TestRefreshCredentialUncertainNeverRetries(t *testing.T) {
+	t.Parallel()
 	for _, canceled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "provider-error", true: "canceled-after-send"}[canceled], func(t *testing.T) {
 			ctx, store, db, binding := credentialStoreFixture(t)
@@ -65,6 +67,7 @@ func TestRefreshCredentialUncertainNeverRetries(t *testing.T) {
 }
 
 func TestRefreshCredentialRevocationDuringExchangePreventsCommit(t *testing.T) {
+	t.Parallel()
 	ctx, store, _, binding := credentialStoreFixture(t)
 	if err := store.Install(ctx, binding, testCredential(), credentialAuthority()); err != nil {
 		t.Fatal(err)
@@ -87,6 +90,7 @@ func TestRefreshCredentialRevocationDuringExchangePreventsCommit(t *testing.T) {
 }
 
 func TestRefreshCredentialChecksExpiryAndCurrentAuthority(t *testing.T) {
+	t.Parallel()
 	ctx, store, _, binding := credentialStoreFixture(t)
 	store.now = func() int64 { return 1000 }
 	value := testCredential()

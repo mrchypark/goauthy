@@ -15,6 +15,7 @@ import (
 // TLS token and userinfo server, real OAuth2TokenExchanger, no ID token or JWKS.
 // Three focused cases: success, replay rejection, changed-version rejection.
 func TestOAuthUserInfoCallback(t *testing.T) {
+	t.Parallel()
 	const (
 		providerID = managedID
 		at         = "access-token-ot"

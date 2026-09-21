@@ -18,6 +18,7 @@ import (
 )
 
 func TestDeleteSessionByIDHTTPAdminAndBoundaries(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	ctx := context.Background()
 	sid := deleteSessionSID(t, 9)
@@ -60,6 +61,7 @@ func TestDeleteSessionByIDHTTPAdminAndBoundaries(t *testing.T) {
 }
 
 func TestDeleteSessionByIDHTTPAPIKeyAndNoFallback(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	keys, err := apikey.NewStore(store.db)
 	if err != nil {
@@ -96,6 +98,7 @@ func TestDeleteSessionByIDHTTPAPIKeyAndNoFallback(t *testing.T) {
 }
 
 func TestDeleteSessionByIDHTTPSelfReaderDelegatedAndRandomFailure(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	ctx := context.Background()
 	self, err := browser.CanonicalTokenDigest(cookie.Value)

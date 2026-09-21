@@ -99,6 +99,7 @@ func managedHandlerWithVersion(t *testing.T, exchanger TokenExchanger, version s
 // --- legacy: zero source/version stays identical ---
 
 func TestRuntimeBindingLegacyCallbackProceeds(t *testing.T) {
+	t.Parallel()
 	ex := &fakeTokenExchanger{idToken: "tok"}
 	h, _, verifier := managedTestHandler(t, ex)
 	verifier.claims = &IDTokenClaims{
@@ -128,6 +129,7 @@ func TestRuntimeBindingLegacyCallbackProceeds(t *testing.T) {
 // --- managed: matching version proceeds ---
 
 func TestRuntimeBindingManagedMatchProceeds(t *testing.T) {
+	t.Parallel()
 	ex := &fakeTokenExchanger{idToken: "tok"}
 	h, _, verifier := managedHandlerWithVersion(t, ex, "v1.0")
 	verifier.claims = &IDTokenClaims{
@@ -155,6 +157,7 @@ func TestRuntimeBindingManagedMatchProceeds(t *testing.T) {
 // --- managed: changed version rejected with zero exchange ---
 
 func TestRuntimeBindingChangedVersionRejected(t *testing.T) {
+	t.Parallel()
 	// Handler is v1.0 but we simulate a version change by starting a
 	// transaction with v1.0, then swapping the handler config to v2.0
 	// before callback.
@@ -189,6 +192,7 @@ func TestRuntimeBindingChangedVersionRejected(t *testing.T) {
 // --- managed: legacy handler vs managed transaction rejected ---
 
 func TestRuntimeBindingLegacyHandlerVsManagedTxRejected(t *testing.T) {
+	t.Parallel()
 	// Start a transaction with managed binding (v1.0), then try to
 	// callback against a legacy handler (empty source/version).
 	ex := &fakeTokenExchanger{idToken: "tok"}
@@ -245,6 +249,7 @@ func TestRuntimeBindingLegacyHandlerVsManagedTxRejected(t *testing.T) {
 // --- local callback: changed version rejected with zero exchange ---
 
 func TestRuntimeBindingLocalCallbackChangedVersionRejected(t *testing.T) {
+	t.Parallel()
 	ex := &fakeTokenExchanger{idToken: "tok"}
 	hooks := &localHookRecorder{session: testCanonicalTestToken, digest: testCanonicalTestDigest, interaction: DigestSHA256("interaction")}
 	// Build a managed local handler.
@@ -285,6 +290,7 @@ func TestRuntimeBindingLocalCallbackChangedVersionRejected(t *testing.T) {
 // --- link callback: changed version rejected with zero exchange ---
 
 func TestRuntimeBindingLinkCallbackChangedVersionRejected(t *testing.T) {
+	t.Parallel()
 	ex := &fakeTokenExchanger{idToken: "tok"}
 	linkHooks := &linkHookRecorder{subject: "local-user", token: testCanonicalTestToken, digest: testCanonicalTestDigest, decision: LinkDecisionLinked}
 	store := newTestStore()
@@ -327,6 +333,7 @@ func TestRuntimeBindingLinkCallbackChangedVersionRejected(t *testing.T) {
 // --- managed: issuer mismatch rejected with zero exchange ---
 
 func TestRuntimeBindingIssuerMismatchRejected(t *testing.T) {
+	t.Parallel()
 	ex := &fakeTokenExchanger{idToken: "tok"}
 	h, _, verifier := managedHandlerWithVersion(t, ex, "v1.0")
 	verifier.claims = &IDTokenClaims{

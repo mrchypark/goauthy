@@ -13,6 +13,7 @@ import (
 const pageTicket = "AQIDBAUGBwgJCgsMDQ4PEBES"
 
 func TestConnectionHandoffPageDistinguishesKeyDelivery(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"proxy", "credential_delivery"} {
 		t.Run(mode, func(t *testing.T) {
 			data := connectionHandoffPageData{Review: saas.UseHandoffReview{Grant: saas.UseGrant{Mode: mode}}}
@@ -35,6 +36,7 @@ func TestConnectionHandoffPageDistinguishesKeyDelivery(t *testing.T) {
 }
 
 func TestConnectionHandoffPageNoReferrerForm(t *testing.T) {
+	t.Parallel()
 	h, cookie, csrf := handoffHTTPFixture(t)
 	for _, site := range []string{"same-origin", "same-site", "cross-site", "none", ""} {
 		t.Run(site, func(t *testing.T) {
@@ -60,6 +62,7 @@ func TestConnectionHandoffPageNoReferrerForm(t *testing.T) {
 }
 
 func TestConnectionHandoffPageOAuthReview(t *testing.T) {
+	t.Parallel()
 	data := connectionHandoffPageData{Review: saas.UseHandoffReview{
 		Grant:        saas.UseGrant{Mode: "credential_delivery"},
 		ReviewDigest: "oauth-review-digest",
@@ -83,6 +86,7 @@ func TestConnectionHandoffPageOAuthReview(t *testing.T) {
 }
 
 func TestConnectionHandoffPageRefreshWarningOptIn(t *testing.T) {
+	t.Parallel()
 	for _, allow := range []bool{false, true} {
 		data := connectionHandoffPageData{Review: saas.UseHandoffReview{
 			Grant:  saas.UseGrant{Mode: "credential_delivery", AllowRefresh: allow},
@@ -100,6 +104,7 @@ func TestConnectionHandoffPageRefreshWarningOptIn(t *testing.T) {
 }
 
 func TestConnectionHandoffPageNavigationBoundary(t *testing.T) {
+	t.Parallel()
 	h, cookie, csrf := handoffHTTPFixture(t)
 	path := "/auth/v1/connection-handoffs/" + pageTicket
 	for name, alter := range map[string]func(*http.Request){
@@ -157,6 +162,7 @@ func TestConnectionHandoffPageNavigationBoundary(t *testing.T) {
 }
 
 func TestConnectionHandoffPageRejectsUnauthenticatedAndCSRF(t *testing.T) {
+	t.Parallel()
 	h, cookie, _ := handoffHTTPFixture(t)
 	path := "/auth/v1/connection-handoffs/" + pageTicket
 	for name, r := range map[string]*http.Request{
@@ -178,6 +184,7 @@ func TestConnectionHandoffPageRejectsUnauthenticatedAndCSRF(t *testing.T) {
 }
 
 func TestConnectionHandoffPageEscapesReviewMetadata(t *testing.T) {
+	t.Parallel()
 	data := connectionHandoffPageData{Review: saas.UseHandoffReview{RequestClientID: "<script>alert(1)</script>", ReturnURI: "https://client.example/?x=\"bad\""}}
 	var out bytes.Buffer
 	if err := connectionHandoffPage.Execute(&out, data); err != nil {

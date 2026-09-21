@@ -10,6 +10,7 @@ import (
 )
 
 func TestCredentialDeliveryHandoffApproveAndDeliver(t *testing.T) {
+	t.Parallel()
 	ctx, s, db, b, connector := registeredAPIKeyFixture(t, "delivery-handoff-provider")
 	if _, err := s.PutBoundAPIKey(ctx, b.Owner, b.CollectionID, b.ConnectionID, 0, "synthetic-key", connector, connector.Digest(), credentialAuthority()); err != nil {
 		t.Fatal(err)
@@ -75,6 +76,7 @@ func TestCredentialDeliveryHandoffApproveAndDeliver(t *testing.T) {
 }
 
 func TestCredentialDeliveryHandoffRejectsPublicConsumer(t *testing.T) {
+	t.Parallel()
 	ctx, s, db, b, connector := registeredAPIKeyFixture(t, "delivery-public-handoff")
 	cs := clients.NewStore(db, s.keys)
 	if _, err := s.PutBoundAPIKey(ctx, b.Owner, b.CollectionID, b.ConnectionID, 0, "synthetic-key", connector, connector.Digest(), credentialAuthority()); err != nil {
@@ -99,6 +101,7 @@ func TestCredentialDeliveryHandoffRejectsPublicConsumer(t *testing.T) {
 }
 
 func TestCredentialDeliveryHandoffConfidentialityFence(t *testing.T) {
+	t.Parallel()
 	ctx, s, db, b, connector := registeredAPIKeyFixture(t, "delivery-handoff-fence")
 	if _, err := s.PutBoundAPIKey(ctx, b.Owner, b.CollectionID, b.ConnectionID, 0, "synthetic-key", connector, connector.Digest(), credentialAuthority()); err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ import (
 func ptr(s string) *string { return &s }
 
 func TestEvaluateClaimMapping(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		rawJSON string
@@ -449,6 +450,7 @@ func TestEvaluateClaimMapping(t *testing.T) {
 // TestLargeIntegerPrecision verifies that large integers beyond float64
 // precision (2^53+1) survive the JSON->yaml.Node path without rounding.
 func TestLargeIntegerPrecision(t *testing.T) {
+	t.Parallel()
 	rawJSON := `{"big":9007199254740993}`
 	want := boolPtr(true)
 	got, err := EvaluateClaimMapping([]byte(rawJSON), ptr("$.big"), ptr("9007199254740993"))
@@ -463,6 +465,7 @@ func TestLargeIntegerPrecision(t *testing.T) {
 // TestLargeIntegerNoFalseGrant verifies that a large integer that does NOT
 // match the target is correctly reported as false.
 func TestLargeIntegerNoFalseGrant(t *testing.T) {
+	t.Parallel()
 	rawJSON := `{"big":9007199254740993}`
 	want := boolPtr(false)
 	got, err := EvaluateClaimMapping([]byte(rawJSON), ptr("$.big"), ptr("9007199254740994"))
@@ -477,6 +480,7 @@ func TestLargeIntegerNoFalseGrant(t *testing.T) {
 // TestDuplicateKeyRejects verifies that JSON with duplicate object keys
 // is rejected by strict validation.
 func TestDuplicateKeyRejects(t *testing.T) {
+	t.Parallel()
 	rawJSON := `{"a":1,"a":2}`
 	_, err := EvaluateClaimMapping([]byte(rawJSON), ptr("$.a"), ptr("1"))
 	if err == nil {
@@ -486,6 +490,7 @@ func TestDuplicateKeyRejects(t *testing.T) {
 
 // TestDuplicateKeyNested rejects duplicates in nested objects.
 func TestDuplicateKeyNested(t *testing.T) {
+	t.Parallel()
 	rawJSON := `{"outer":{"x":1,"x":2}}`
 	_, err := EvaluateClaimMapping([]byte(rawJSON), ptr("$.outer.x"), ptr("1"))
 	if err == nil {
@@ -495,6 +500,7 @@ func TestDuplicateKeyNested(t *testing.T) {
 
 // TestInvalidUTF8Rejects verifies that invalid UTF-8 is rejected.
 func TestInvalidUTF8Rejects(t *testing.T) {
+	t.Parallel()
 	rawJSON := []byte{0x7b, 0x22, 0x6b, 0x65, 0x79, 0x22, 0x3a, 0xff, 0x22, 0x76, 0x61, 0x6c, 0x22, 0x7d}
 	_, err := EvaluateClaimMapping(rawJSON, ptr("$.key"), ptr("val"))
 	if err == nil {
@@ -505,6 +511,7 @@ func TestInvalidUTF8Rejects(t *testing.T) {
 // TestMalformedJSONRejects verifies that syntactically invalid JSON
 // is rejected by strict validation.
 func TestMalformedJSONRejects(t *testing.T) {
+	t.Parallel()
 	rawJSON := `{not valid json}`
 	_, err := EvaluateClaimMapping([]byte(rawJSON), ptr("$.foo"), ptr("bar"))
 	if err == nil {
@@ -515,6 +522,7 @@ func TestMalformedJSONRejects(t *testing.T) {
 // TestTrailingCommaRejects verifies that trailing commas (invalid JSON)
 // are rejected.
 func TestTrailingCommaRejects(t *testing.T) {
+	t.Parallel()
 	rawJSON := `{"a":1,}`
 	_, err := EvaluateClaimMapping([]byte(rawJSON), ptr("$.a"), ptr("1"))
 	if err == nil {
@@ -527,6 +535,7 @@ func TestTrailingCommaRejects(t *testing.T) {
 // TestEvaluateNegativeThresholds verifies positive/negative float thresholds
 // at the scientific/fixed boundary, matching serde_json 1.0.151 exactly.
 func TestEvaluateNegativeThresholds(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		rawJSON string
@@ -620,6 +629,7 @@ func TestEvaluateNegativeThresholds(t *testing.T) {
 // TestEvaluateNegativeZeroNormalization verifies that -0 (JSON number)
 // normalizes to -0.0 in serde_json comparison, including sign preservation.
 func TestEvaluateNegativeZeroNormalization(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		rawJSON string
@@ -652,6 +662,7 @@ func TestEvaluateNegativeZeroNormalization(t *testing.T) {
 // TestEvaluateLargeUintPrecision verifies that large unsigned integers
 // (uint64 max and beyond) survive the JSON->yaml.Node path correctly.
 func TestEvaluateLargeUintPrecision(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		rawJSON string
 		path    *string
@@ -683,6 +694,7 @@ func TestEvaluateLargeUintPrecision(t *testing.T) {
 // TestEvaluateNumericOverflow verifies that numbers exceeding float64
 // range (e.g. 1e309) are rejected, matching serde_json behavior.
 func TestEvaluateNumericOverflow(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		rawJSON string
 		path    *string
@@ -706,6 +718,7 @@ func TestEvaluateNumericOverflow(t *testing.T) {
 // tests for the scientific/fixed format boundary at both positive and
 // negative thresholds.
 func TestEvaluatePositiveNegativeThresholds(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		rawJSON string
 		path    *string

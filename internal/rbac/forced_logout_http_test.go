@@ -33,6 +33,7 @@ func forceLogoutRequest(target string, cookie *http.Cookie, csrf, auth, query, b
 }
 
 func TestForceLogoutUserDelegatedScope(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, role, group, target string
 		want                      int
@@ -114,6 +115,7 @@ func TestForceLogoutUserDelegatedScope(t *testing.T) {
 }
 
 func TestForceLogoutUserBoundariesAndAdmin(t *testing.T) {
+	t.Parallel()
 	h, store, adminCookie, csrf := membershipHTTPFixture(t)
 	ctx := context.Background()
 	for _, tc := range []struct {
@@ -144,6 +146,7 @@ func TestForceLogoutUserBoundariesAndAdmin(t *testing.T) {
 }
 
 func TestForceLogoutUserAPIKeyAndNoAmbientFallback(t *testing.T) {
+	t.Parallel()
 	h, store, adminCookie, csrf := membershipHTTPFixture(t)
 	keys, err := apikey.NewStore(store.db)
 	if err != nil {
@@ -178,6 +181,7 @@ func TestForceLogoutUserAPIKeyAndNoAmbientFallback(t *testing.T) {
 }
 
 func TestForceLogoutUserReadAndEntropyFailures(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	r := forceLogoutRequest("member", cookie, csrf, "", "", "")
 	r.Body = io.NopCloser(iotest.ErrReader(errors.New("body unavailable")))

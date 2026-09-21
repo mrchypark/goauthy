@@ -8,6 +8,7 @@ import (
 // TestRuntimePolicyRetainsAllFields proves that CreateAuthorized followed
 // by RuntimeConfig preserves all 6 policy fields and the source version.
 func TestRuntimePolicyRetainsAllFields(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	id := "AbCdEfGhIjKlMnOpQrStUvWx"
 	if len(id) != 24 {
@@ -65,6 +66,7 @@ func TestRuntimePolicyRetainsAllFields(t *testing.T) {
 // TestRuntimePolicyNilFieldsWhenAbsent proves that nil pointer policy
 // fields in the document produce nil pointers in the Config.
 func TestRuntimePolicyNilFieldsWhenAbsent(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	id := "AbCdEfGhIjKlMnOpQrStUvWx"
 	if len(id) != 24 {
@@ -104,6 +106,7 @@ func TestRuntimePolicyNilFieldsWhenAbsent(t *testing.T) {
 // TestRuntimePolicyHandlerCloneImmune proves that NewHandler deep-copies
 // policy pointer fields so the caller can safely mutate after construction.
 func TestRuntimePolicyHandlerCloneImmune(t *testing.T) {
+	t.Parallel()
 	configs := map[string]Config{
 		"google": {
 			Issuer:                "https://issuer.example.com",
@@ -171,6 +174,7 @@ func TestRuntimePolicyHandlerCloneImmune(t *testing.T) {
 // TestRuntimePolicyExchangerCloneImmune proves that
 // NewOAuth2TokenExchanger deep-copies policy pointer fields.
 func TestRuntimePolicyExchangerCloneImmune(t *testing.T) {
+	t.Parallel()
 	configs := map[string]Config{
 		"google": {
 			Issuer:                "https://issuer.example.com",

@@ -70,6 +70,7 @@ func hasRuntimeVersion(t *testing.T, db *rhiza.DB, id string) bool {
 }
 
 func TestRuntimeVersionOnCreate(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	req := validProviderMutationRequest()
 	req.ClientSecret = nil
@@ -95,6 +96,7 @@ func TestRuntimeVersionOnCreate(t *testing.T) {
 }
 
 func TestRuntimeVersionAlwaysNewOnUpdate(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	seedProviderWithVersion(t, f, "rt-upd")
 	v1 := readRuntimeVersion(t, f.db, "rt-upd")
@@ -111,6 +113,7 @@ func TestRuntimeVersionAlwaysNewOnUpdate(t *testing.T) {
 }
 
 func TestRuntimeVersionAlwaysNewOnNoopUpdate(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	seedProviderWithVersion(t, f, "rt-noop")
 	v1 := readRuntimeVersion(t, f.db, "rt-noop")
@@ -128,6 +131,7 @@ func TestRuntimeVersionAlwaysNewOnNoopUpdate(t *testing.T) {
 }
 
 func TestRuntimeVersionAlwaysNewOnDisableEnable(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	seedProviderWithVersion(t, f, "rt-de")
 	v1 := readRuntimeVersion(t, f.db, "rt-de")
@@ -158,6 +162,7 @@ func TestRuntimeVersionAlwaysNewOnDisableEnable(t *testing.T) {
 }
 
 func TestRuntimeVersionNewOnDeleteRecreate(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	seedProviderWithVersion(t, f, "rt-dr")
 	v1 := readRuntimeVersion(t, f.db, "rt-dr")
@@ -181,6 +186,7 @@ func TestRuntimeVersionNewOnDeleteRecreate(t *testing.T) {
 }
 
 func TestRuntimeVersionNotChangedOnFailedCreate(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	seedProviderWithVersion(t, f, "rt-fc")
 	v1 := readRuntimeVersion(t, f.db, "rt-fc")
@@ -198,6 +204,7 @@ func TestRuntimeVersionNotChangedOnFailedCreate(t *testing.T) {
 }
 
 func TestRuntimeVersionNotChangedOnFailedUpdate(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	req := validProviderMutationRequest()
 	req.ClientSecret = nil
@@ -211,6 +218,7 @@ func TestRuntimeVersionNotChangedOnFailedUpdate(t *testing.T) {
 }
 
 func TestRuntimeVersionNotChangedOnRevokedKey(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	seedProviderWithVersion(t, f, "rt-rk")
 	v1 := readRuntimeVersion(t, f.db, "rt-rk")
@@ -237,6 +245,7 @@ func TestRuntimeVersionNotChangedOnRevokedKey(t *testing.T) {
 }
 
 func TestGetRuntimeDisabledProviderFailsClosed(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	seedProviderWithVersion(t, f, "rt-dis")
 
@@ -254,6 +263,7 @@ func TestGetRuntimeDisabledProviderFailsClosed(t *testing.T) {
 }
 
 func TestGetRuntimeMissingProviderFailsClosed(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	_, _, err := f.store.GetRuntime(f.ctx, "rt-noexist")
 	if !errors.Is(err, ErrProviderNotFound) {
@@ -262,6 +272,7 @@ func TestGetRuntimeMissingProviderFailsClosed(t *testing.T) {
 }
 
 func TestGetRuntimeMissingVersionFailsClosed(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	req := validProviderMutationRequest()
 	req.ClientSecret = nil
@@ -283,6 +294,7 @@ func TestGetRuntimeMissingVersionFailsClosed(t *testing.T) {
 }
 
 func TestRuntimeVersionNotModifiedByRewrap(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	secret := "rewrap-secret"
 	req := validProviderMutationRequest()
@@ -303,6 +315,7 @@ func TestRuntimeVersionNotModifiedByRewrap(t *testing.T) {
 }
 
 func TestRuntimeVersionAtomicUnauthorized(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	seedProviderWithVersion(t, f, "rt-unauth")
 	v1 := readRuntimeVersion(t, f.db, "rt-unauth")
@@ -331,6 +344,7 @@ func TestRuntimeVersionAtomicUnauthorized(t *testing.T) {
 }
 
 func TestUpdateAuthorizedMissingTargetNoVersionRow(t *testing.T) {
+	t.Parallel()
 	f := runtimeFixture(t)
 	req := validProviderMutationRequest()
 	req.ClientSecret = nil

@@ -12,6 +12,7 @@ import (
 )
 
 func TestAccountConnectionOAuth2StatusAndRevokeBoundaries(t *testing.T) {
+	t.Parallel()
 	h, store, _, _ := membershipHTTPFixture(t)
 	if err := h.BindSaaSCredentials(oauthCredentialHTTPStore(t, store)); err != nil {
 		t.Fatal(err)

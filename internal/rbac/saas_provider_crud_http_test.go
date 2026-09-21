@@ -62,6 +62,7 @@ const oauthProviderUpdateBody = `{"name":"Managed OAuth 2","kind":"oauth2","enab
 const apiKeyProviderBody = `{"id":"managed-api","name":"Managed API","kind":"api_key","enabled":true,"connector":{"id":"managed-api","header":"X-API-Key","prefix":"","operations":[{"id":"whoami","url":"https://provider.example/me","response_fields":{"id":"string"}}]}}`
 
 func TestManagedSaaSProviderHTTPOAuthCRUDAndSecretOmission(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	if err := h.BindSaaSProviders([]SaaSProviderInfo{{ID: "github", Kind: "github", CallbackURI: "https://app.example/github"}}); err != nil {
 		t.Fatal(err)
@@ -102,6 +103,7 @@ func TestManagedSaaSProviderHTTPOAuthCRUDAndSecretOmission(t *testing.T) {
 }
 
 func TestManagedSaaSProviderHTTPBoundariesAndJSON(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	if err := h.BindSaaSProviders([]SaaSProviderInfo{{ID: "github", Kind: "github", CallbackURI: "https://app.example/github"}}); err != nil {
 		t.Fatal(err)
@@ -196,6 +198,7 @@ func TestManagedSaaSProviderHTTPBoundariesAndJSON(t *testing.T) {
 }
 
 func TestManagedSaaSProviderHTTPAPIKeyCRUD(t *testing.T) {
+	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	if in, err := decodeProvider(providerRequest(http.MethodPost, "/auth/v1/saas/providers", apiKeyProviderBody, cookie, csrf, ""), true); err != nil {
 		t.Fatalf("decode api provider: %v input=%+v", err, in)

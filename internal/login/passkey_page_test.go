@@ -8,6 +8,7 @@ import (
 )
 
 func TestAuthorizeRendersPasskeyButtonWhenPasskeysEnabled(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
 	page := httptest.NewRecorder()
@@ -41,6 +42,7 @@ func TestAuthorizeRendersPasskeyButtonWhenPasskeysEnabled(t *testing.T) {
 }
 
 func TestAuthorizePasskeyScriptCapturesStartJSON(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
 	page := httptest.NewRecorder()
@@ -82,6 +84,7 @@ func TestAuthorizePasskeyScriptCapturesStartJSON(t *testing.T) {
 }
 
 func TestAuthorizePasskeyNonceNotSetWhenPasskeysDisabled(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	h.passkeys = nil
 	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
@@ -101,6 +104,7 @@ func TestAuthorizePasskeyNonceNotSetWhenPasskeysDisabled(t *testing.T) {
 }
 
 func TestAuthorizeCSPContainsBasePolicyWhenPasskeysEnabled(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t)
 	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
 	page := httptest.NewRecorder()

@@ -15,6 +15,7 @@ import (
 const testVerifier = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
 
 func TestGitHubUserAndRevokeUseFixedAPI(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/user":
@@ -59,6 +60,7 @@ func TestGitHubUserAndRevokeUseFixedAPI(t *testing.T) {
 }
 
 func TestGitHubAuthorizationURLDelegatesPKCEAndScopes(t *testing.T) {
+	t.Parallel()
 	g, err := NewGitHub("client", "secret", "https://app.example/callback")
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +86,7 @@ func TestGitHubAuthorizationURLDelegatesPKCEAndScopes(t *testing.T) {
 }
 
 func TestGitHubExchangeAndRefreshDelegateOneRequestEach(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/login/oauth/access_token" || r.Method != http.MethodPost {

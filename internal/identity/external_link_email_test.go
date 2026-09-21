@@ -110,6 +110,7 @@ func bootstrapPasskeyOnly(t *testing.T, store *Store, subject, username, email s
 // verified email, then auto-links it. The link must persist and the returned
 // subject must match the local account.
 func TestAutoLinkExternalVerifiedSuccess(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(5_000_000).UTC() }
@@ -134,6 +135,7 @@ func TestAutoLinkExternalVerifiedSuccess(t *testing.T) {
 // password, has WebAuthn credential) with a verified email, then auto-links
 // it. This verifies the fix for passkey-only account support.
 func TestAutoLinkExternalPasskeyOnlySuccess(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(5_000_020).UTC() }
@@ -157,6 +159,7 @@ func TestAutoLinkExternalPasskeyOnlySuccess(t *testing.T) {
 // TestAutoLinkExternalLocalUnverifiedRejects rejects auto-link when the
 // local account's email is not verified.
 func TestAutoLinkExternalLocalUnverifiedRejects(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(5_000_001).UTC() }
@@ -179,6 +182,7 @@ func TestAutoLinkExternalLocalUnverifiedRejects(t *testing.T) {
 // error is ErrAutoLinkUnavailable and NOT ErrAutoLinkNoAccount. The
 // precheck finds the account; only the transactional batch rejects it.
 func TestAutoLinkExternalIneligibleLocalExistsNotNoAccount(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(5_000_030).UTC() }
@@ -210,6 +214,7 @@ func TestAutoLinkExternalIneligibleLocalExistsNotNoAccount(t *testing.T) {
 // TestAutoLinkExternalIncomingUnverifiedRejects rejects auto-link when the
 // incoming email is not verified by the upstream provider.
 func TestAutoLinkExternalIncomingUnverifiedRejects(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(5_000_002).UTC() }
@@ -229,6 +234,7 @@ func TestAutoLinkExternalIncomingUnverifiedRejects(t *testing.T) {
 // TestAutoLinkExternalPendingAccountRejects rejects auto-link for a pending
 // account (password_phc = '') that has not completed registration.
 func TestAutoLinkExternalPendingAccountRejects(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(5_000_003).UTC() }
@@ -254,6 +260,7 @@ func TestAutoLinkExternalPendingAccountRejects(t *testing.T) {
 // TestAutoLinkExternalDisabledUserRejects rejects auto-link for a disabled
 // account.
 func TestAutoLinkExternalDisabledUserRejects(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(5_000_004).UTC() }
@@ -280,6 +287,7 @@ func TestAutoLinkExternalDisabledUserRejects(t *testing.T) {
 // TestAutoLinkExternalExpiredUserRejects rejects auto-link when the local
 // account has expired.
 func TestAutoLinkExternalExpiredUserRejects(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	now := time.UnixMilli(5_000_005)
@@ -307,6 +315,7 @@ func TestAutoLinkExternalExpiredUserRejects(t *testing.T) {
 // TestAutoLinkExternalExpiredPasskeyOnlyRejects rejects auto-link when an
 // expired account has passkey credentials but no password.
 func TestAutoLinkExternalExpiredPasskeyOnlyRejects(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	now := time.UnixMilli(5_000_021)
@@ -334,6 +343,7 @@ func TestAutoLinkExternalExpiredPasskeyOnlyRejects(t *testing.T) {
 // TestAutoLinkExternalNoPasswordNoPasskeyRejects rejects auto-link for an
 // account with no password and no passkey credentials.
 func TestAutoLinkExternalNoPasswordNoPasskeyRejects(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(5_000_022).UTC() }
@@ -362,6 +372,7 @@ func TestAutoLinkExternalNoPasswordNoPasskeyRejects(t *testing.T) {
 // TestAutoLinkExternalExistingOtherProviderRejects rejects auto-link when the
 // local account already has an external link to a different provider.
 func TestAutoLinkExternalExistingOtherProviderRejects(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(5_000_006).UTC() }
@@ -385,6 +396,7 @@ func TestAutoLinkExternalExistingOtherProviderRejects(t *testing.T) {
 // TestAutoLinkExternalVersionChangedRejected rejects auto-link when the
 // provider version has changed since the callback.
 func TestAutoLinkExternalVersionChangedRejected(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(5_000_007).UTC() }
@@ -407,6 +419,7 @@ func TestAutoLinkExternalVersionChangedRejected(t *testing.T) {
 // TestAutoLinkExternalPolicyChangeRejected rejects auto-link when auto_link
 // has been disabled on the provider.
 func TestAutoLinkExternalPolicyChangeRejected(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(5_000_008).UTC() }
@@ -429,6 +442,7 @@ func TestAutoLinkExternalPolicyChangeRejected(t *testing.T) {
 // TestAutoLinkExternalCollisionNoOrphan verifies that a collision (external
 // key already linked to a different subject) does not leave orphan rows.
 func TestAutoLinkExternalCollisionNoOrphan(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(5_000_009).UTC() }
@@ -461,6 +475,7 @@ func TestAutoLinkExternalCollisionNoOrphan(t *testing.T) {
 // auto-link returns ErrAutoLinkUnavailable when no local account matches
 // the email.
 func TestAutoLinkExternalMissingLocalAccountReturnsNoAccount(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(5_000_010).UTC() }
@@ -479,6 +494,7 @@ func TestAutoLinkExternalMissingLocalAccountReturnsNoAccount(t *testing.T) {
 // TestAutoLinkExternalCanonicalizesEmail verifies that the email is
 // canonicalized before lookup.
 func TestAutoLinkExternalCanonicalizesEmail(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(5_000_011).UTC() }
@@ -499,6 +515,7 @@ func TestAutoLinkExternalCanonicalizesEmail(t *testing.T) {
 // FindExternalLinkActive returns ErrInactiveSubject when the link exists
 // but the user is disabled.
 func TestFindExternalLinkActiveReturnsInactiveForLinkedButDisabled(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(6_000_000).UTC() }
@@ -525,6 +542,7 @@ func TestFindExternalLinkActiveReturnsInactiveForLinkedButDisabled(t *testing.T)
 // FindExternalLinkActive returns ErrInactiveSubject when the link exists
 // but the user has expired.
 func TestFindExternalLinkActiveReturnsInactiveForLinkedButExpired(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	now := time.UnixMilli(6_000_010)
@@ -551,6 +569,7 @@ func TestFindExternalLinkActiveReturnsInactiveForLinkedButExpired(t *testing.T) 
 // TestFindExternalLinkActiveReturnsEmptyForNoLink verifies that
 // FindExternalLinkActive returns ("", nil) when no link exists.
 func TestFindExternalLinkActiveReturnsEmptyForNoLink(t *testing.T) {
+	t.Parallel()
 	store := testAutoLinkStore(t)
 	ctx := context.Background()
 	external := upstreamprovider.SubjectResult{ProviderID: "nolink-google", Subject: "nolink-upstream"}

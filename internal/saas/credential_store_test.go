@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,17 +18,82 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
+var (
+	saasTemplateOnce      sync.Once
+	saasTemplateDirectory string
+	saasTemplateErr       error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if saasTemplateDirectory != "" {
+		_ = os.RemoveAll(saasTemplateDirectory)
+	}
+	os.Exit(code)
+}
+
+func saasMigratedTemplate(t *testing.T) string {
+	t.Helper()
+	saasTemplateOnce.Do(func() {
+		directory, err := os.MkdirTemp("", "goauthy-saas-template-")
+		if err != nil {
+			saasTemplateErr = err
+			return
+		}
+		db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "saas-credential-test", DataDir: directory})
+		if err != nil {
+			saasTemplateErr = fmt.Errorf("open test template: %w", err)
+			return
+		}
+		if err := storage.Migrate(context.Background(), db); err != nil {
+			_ = db.Close()
+			saasTemplateErr = fmt.Errorf("migrate test template: %w", err)
+			return
+		}
+		if err := db.Close(); err != nil {
+			saasTemplateErr = fmt.Errorf("close test template: %w", err)
+			return
+		}
+		saasTemplateDirectory = directory
+	})
+	if saasTemplateErr != nil {
+		t.Fatal(saasTemplateErr)
+	}
+	return saasTemplateDirectory
+}
+
+func copyDirTree(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		c2, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, c2, 0o644)
+	})
+}
 func credentialStoreFixture(t *testing.T) (context.Context, *CredentialStore, *rhiza.DB, credentialBinding) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "saas-credential-test", DataDir: t.TempDir()})
+	directory := t.TempDir()
+	if err := copyDirTree(saasMigratedTemplate(t), directory); err != nil {
+		t.Fatal(err)
+	}
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "saas-credential-test", DataDir: directory})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "saas-credential-fence", SQL: `INSERT INTO master_key_retirement_barrier(barrier_id,epoch,old_key_id,replacement_key_id,membership_digest,state,prepared_at_unix_ms) VALUES (1,1,'old','master',?,'prepared',1)`, Args: []any{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +133,7 @@ func testCredential() credential {
 }
 
 func TestCredentialStoreInstallLoadAndPlaintextProtection(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)
 	if err := store.Install(ctx, b, testCredential(), credentialAuthority()); err != nil {
 		t.Fatal(err)
@@ -83,6 +152,7 @@ func TestCredentialStoreInstallLoadAndPlaintextProtection(t *testing.T) {
 }
 
 func TestCredentialStoreClaimCompleteAndOldVersionReject(t *testing.T) {
+	t.Parallel()
 	ctx, store, _, b := credentialStoreFixture(t)
 	if err := store.Install(ctx, b, testCredential(), credentialAuthority()); err != nil {
 		t.Fatal(err)
@@ -108,6 +178,7 @@ func TestCredentialStoreClaimCompleteAndOldVersionReject(t *testing.T) {
 }
 
 func TestCredentialStoreRevokePreventsRefreshCommit(t *testing.T) {
+	t.Parallel()
 	ctx, store, _, b := credentialStoreFixture(t)
 	if err := store.Install(ctx, b, testCredential(), credentialAuthority()); err != nil {
 		t.Fatal(err)

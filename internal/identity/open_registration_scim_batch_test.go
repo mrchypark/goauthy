@@ -11,6 +11,7 @@ import (
 )
 
 func TestCleanupExpiredOpenRegistrationSCIMBatchLeavesAndThenRemovesRemainder(t *testing.T) {
+	t.Parallel()
 	store := testResetStore(t, credential.DefaultRules())
 	base := time.UnixMilli(2_000_000).UTC()
 	store.now = func() time.Time { return base }

@@ -26,6 +26,7 @@ type userCreateTestSender struct {
 }
 
 func TestCreateUserHTTPPreferredUsernamePolicy(t *testing.T) {
+	t.Parallel()
 	custom, err := identity.NewPreferredUsernamePolicy("required", `^Team_[0-9]{2}$`, []string{"team_12"})
 	if err != nil {
 		t.Fatal(err)
@@ -167,6 +168,7 @@ func userCreateRequest(cookie *http.Cookie, body string) *http.Request {
 }
 
 func TestCreateUserHTTPBrowserAndCreateOnlyAPIKey(t *testing.T) {
+	t.Parallel()
 	h, store, sender, keys, cookie := userCreateHTTPFixture(t)
 	body := `{"email":"New@Example.TEST","language":"en","roles":["viewer","missing"],"groups":["team/a","missing"],"preferred_username":"unicode-user","given_name":"José Name","family_name":"Family","tz":"Asia/Seoul"}`
 	if _, err := decodeUserCreate(httptest.NewRecorder(), userCreateRequest(cookie, body), nil); err != nil {
@@ -201,6 +203,7 @@ func TestCreateUserHTTPBrowserAndCreateOnlyAPIKey(t *testing.T) {
 }
 
 func TestCreateUserHTTPStrictJSON(t *testing.T) {
+	t.Parallel()
 	h, _, _, _, cookie := userCreateHTTPFixture(t)
 	for _, body := range []string{
 		`{}`, `{"email":null,"language":"en","roles":[]}`, `{"email":"x@example.test","language":"en"}`,
@@ -217,6 +220,7 @@ func TestCreateUserHTTPStrictJSON(t *testing.T) {
 }
 
 func TestCreateUserHTTPGuardSnapshotPreventsWritesAndMail(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, sql string
 		api       bool
@@ -263,6 +267,7 @@ func TestCreateUserHTTPGuardSnapshotPreventsWritesAndMail(t *testing.T) {
 }
 
 func TestCreateUserHTTPDelegatedExactWildcardAndRejections(t *testing.T) {
+	t.Parallel()
 	h, store, sender, _, _ := userCreateHTTPFixture(t)
 	ctx := context.Background()
 	insertActive(t, store.db, "delegated")

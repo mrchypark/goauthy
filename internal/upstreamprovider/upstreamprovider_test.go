@@ -147,6 +147,7 @@ func testNow() time.Time {
 // --- tests ---
 
 func TestConfigValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		cfg     Config
@@ -261,6 +262,7 @@ func TestConfigValidation(t *testing.T) {
 }
 
 func TestGenerateState(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	for i := range entropy {
 		entropy[i] = byte(i)
@@ -283,6 +285,7 @@ func TestGenerateState(t *testing.T) {
 }
 
 func TestGenerateNonce(t *testing.T) {
+	t.Parallel()
 	p := newTestProvider(make([]byte, 128))
 	nonce, err := p.GenerateNonce()
 	if err != nil {
@@ -294,6 +297,7 @@ func TestGenerateNonce(t *testing.T) {
 }
 
 func TestGeneratePKCEVerifier(t *testing.T) {
+	t.Parallel()
 	p := newTestProvider(make([]byte, 128))
 	verifier, challenge, err := p.GeneratePKCEVerifier()
 	if err != nil {
@@ -309,6 +313,7 @@ func TestGeneratePKCEVerifier(t *testing.T) {
 }
 
 func TestShortEntropyReader(t *testing.T) {
+	t.Parallel()
 	r := &shortEntropyReader{remaining: 4}
 	p := newCryptoProvider(r)
 	_, err := p.GenerateState()
@@ -318,6 +323,7 @@ func TestShortEntropyReader(t *testing.T) {
 }
 
 func TestDigestSHA256(t *testing.T) {
+	t.Parallel()
 	d1 := DigestSHA256("hello")
 	d2 := DigestSHA256("hello")
 	d3 := DigestSHA256("world")
@@ -330,6 +336,7 @@ func TestDigestSHA256(t *testing.T) {
 }
 
 func TestTestStoreOneUse(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	now := testNow()
 	tx := Transaction{
@@ -361,6 +368,7 @@ func TestTestStoreOneUse(t *testing.T) {
 }
 
 func TestTestStoreNotFound(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	_, err := store.Consume(context.Background(), "nonexistent", "b", "p", testNow())
 	if !errors.Is(err, ErrTransactionNotFound) {
@@ -369,6 +377,7 @@ func TestTestStoreNotFound(t *testing.T) {
 }
 
 func TestTestStoreBindingMismatch(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	now := testNow()
 	tx := Transaction{
@@ -386,6 +395,7 @@ func TestTestStoreBindingMismatch(t *testing.T) {
 }
 
 func TestTestStoreProviderMismatch(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	now := testNow()
 	tx := Transaction{
@@ -403,6 +413,7 @@ func TestTestStoreProviderMismatch(t *testing.T) {
 }
 
 func TestTestStoreExpiryEquality(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	now := testNow()
 	tx := Transaction{
@@ -420,6 +431,7 @@ func TestTestStoreExpiryEquality(t *testing.T) {
 }
 
 func TestGenerateAuthorizationURL(t *testing.T) {
+	t.Parallel()
 	entropy := make([]byte, 256)
 	for i := range entropy {
 		entropy[i] = byte(i)
@@ -493,6 +505,7 @@ func TestGenerateAuthorizationURL(t *testing.T) {
 }
 
 func TestGenerateGitHubAuthorizationURLOmitsNonce(t *testing.T) {
+	t.Parallel()
 	cfg := Config{
 		Kind:                  ProviderKindGitHub,
 		Issuer:                "https://github.com",
@@ -526,6 +539,7 @@ func mustParseURL(t *testing.T, raw string) *url.URL {
 }
 
 func TestGenerateAuthorizationURLInvalidCallbackURI(t *testing.T) {
+	t.Parallel()
 	p := newTestProvider(make([]byte, 128))
 	cfg := Config{
 		Issuer:                "https://issuer.example.com",
@@ -545,6 +559,7 @@ func TestGenerateAuthorizationURLInvalidCallbackURI(t *testing.T) {
 }
 
 func TestGenerateAuthorizationURLScopeViolation(t *testing.T) {
+	t.Parallel()
 	p := newTestProvider(make([]byte, 128))
 	cfg := Config{
 		Issuer:                "https://issuer.example.com",
@@ -565,6 +580,7 @@ func TestGenerateAuthorizationURLScopeViolation(t *testing.T) {
 }
 
 func TestGenerateAuthorizationURLInvalidConfig(t *testing.T) {
+	t.Parallel()
 	p := newTestProvider(make([]byte, 128))
 	store := newTestStore()
 	_, err := GenerateAuthorizationURL(
@@ -577,6 +593,7 @@ func TestGenerateAuthorizationURLInvalidConfig(t *testing.T) {
 }
 
 func TestGenerateAuthorizationURLMissingBinding(t *testing.T) {
+	t.Parallel()
 	p := newTestProvider(make([]byte, 128))
 	cfg := Config{
 		Issuer:                "https://issuer.example.com",
@@ -596,6 +613,7 @@ func TestGenerateAuthorizationURLMissingBinding(t *testing.T) {
 }
 
 func TestGenerateAuthorizationURLPersistsLocalOAuthBinding(t *testing.T) {
+	t.Parallel()
 	p := newTestProvider(make([]byte, 128))
 	cfg := Config{Issuer: "https://issuer.example.com", AuthorizationEndpoint: "https://issuer.example.com/auth", TokenEndpoint: "https://issuer.example.com/token", ClientID: "c"}
 	params := AuthorizationParams{CallbackURI: "https://app.example.com/cb", SessionDigest: DigestSHA256("session"), InteractionDigest: DigestSHA256("interaction")}
@@ -609,6 +627,7 @@ func TestGenerateAuthorizationURLPersistsLocalOAuthBinding(t *testing.T) {
 }
 
 func TestGenerateAuthorizationURLRejectsMalformedLocalOAuthBinding(t *testing.T) {
+	t.Parallel()
 	p := newTestProvider(make([]byte, 128))
 	cfg := Config{Issuer: "https://issuer.example.com", AuthorizationEndpoint: "https://issuer.example.com/auth", TokenEndpoint: "https://issuer.example.com/token", ClientID: "c"}
 	_, err := GenerateAuthorizationURL(context.Background(), p, cfg, newTestStore(), AuthorizationParams{CallbackURI: "https://app.example.com/cb", SessionDigest: DigestSHA256("session")}, DigestSHA256("browser"), "google", testNow())
@@ -618,6 +637,7 @@ func TestGenerateAuthorizationURLRejectsMalformedLocalOAuthBinding(t *testing.T)
 }
 
 func TestGenerateAuthorizationURLPersistsLinkBinding(t *testing.T) {
+	t.Parallel()
 	p := newTestProvider(make([]byte, 128))
 	cfg := Config{Issuer: "https://issuer.example.com", AuthorizationEndpoint: "https://issuer.example.com/auth", TokenEndpoint: "https://issuer.example.com/token", ClientID: "c"}
 	binding := DigestSHA256("session")
@@ -632,6 +652,7 @@ func TestGenerateAuthorizationURLPersistsLinkBinding(t *testing.T) {
 }
 
 func TestGenerateAuthorizationURLRejectsMalformedLinkBinding(t *testing.T) {
+	t.Parallel()
 	p := newTestProvider(make([]byte, 128))
 	cfg := Config{Issuer: "https://issuer.example.com", AuthorizationEndpoint: "https://issuer.example.com/auth", TokenEndpoint: "https://issuer.example.com/token", ClientID: "c"}
 	binding := DigestSHA256("session")
@@ -642,6 +663,7 @@ func TestGenerateAuthorizationURLRejectsMalformedLinkBinding(t *testing.T) {
 }
 
 func TestValidateCallbackSuccess(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	now := testNow()
 	binding := DigestSHA256("browser-session")
@@ -677,6 +699,7 @@ func TestValidateCallbackSuccess(t *testing.T) {
 }
 
 func TestValidateCallbackStateMismatch(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	now := testNow()
 	binding := DigestSHA256("b")
@@ -703,6 +726,7 @@ func TestValidateCallbackStateMismatch(t *testing.T) {
 // TestValidateCallbackInternalStateDigest verifies that the state digest
 // is derived internally from params.State via DigestSHA256.
 func TestValidateCallbackInternalStateDigest(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	now := testNow()
 	binding := DigestSHA256("b")
@@ -737,6 +761,7 @@ func TestValidateCallbackInternalStateDigest(t *testing.T) {
 }
 
 func TestValidateCallbackReplay(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	now := testNow()
 	state := "my-state"
@@ -771,6 +796,7 @@ func TestValidateCallbackReplay(t *testing.T) {
 }
 
 func TestValidateCallbackExpired(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	now := testNow()
 	state := "my-state"
@@ -796,6 +822,7 @@ func TestValidateCallbackExpired(t *testing.T) {
 }
 
 func TestValidateCallbackMissingParams(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	now := testNow()
 
@@ -837,6 +864,7 @@ func TestValidateCallbackMissingParams(t *testing.T) {
 }
 
 func TestValidateIDTokenNilClaims(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{claims: nil}
 	tx := Transaction{
 		Issuer:   "https://issuer.example.com",
@@ -850,6 +878,7 @@ func TestValidateIDTokenNilClaims(t *testing.T) {
 }
 
 func TestValidateIDTokenNonceMismatch(t *testing.T) {
+	t.Parallel()
 	now := testNow()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
@@ -873,6 +902,7 @@ func TestValidateIDTokenNonceMismatch(t *testing.T) {
 }
 
 func TestValidateIDTokenIssuerMismatch(t *testing.T) {
+	t.Parallel()
 	now := testNow()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
@@ -896,6 +926,7 @@ func TestValidateIDTokenIssuerMismatch(t *testing.T) {
 }
 
 func TestValidateIDTokenEmptySubject(t *testing.T) {
+	t.Parallel()
 	now := testNow()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
@@ -919,6 +950,7 @@ func TestValidateIDTokenEmptySubject(t *testing.T) {
 }
 
 func TestValidateIDTokenAudienceMismatch(t *testing.T) {
+	t.Parallel()
 	now := testNow()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
@@ -942,6 +974,7 @@ func TestValidateIDTokenAudienceMismatch(t *testing.T) {
 }
 
 func TestValidateIDTokenAzpMismatch(t *testing.T) {
+	t.Parallel()
 	now := testNow()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
@@ -966,6 +999,7 @@ func TestValidateIDTokenAzpMismatch(t *testing.T) {
 }
 
 func TestValidateIDTokenExpired(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
 			Issuer:    "https://issuer.example.com",
@@ -987,6 +1021,7 @@ func TestValidateIDTokenExpired(t *testing.T) {
 }
 
 func TestValidateIDTokenNotYetValid(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
 			Issuer:    "https://issuer.example.com",
@@ -1009,6 +1044,7 @@ func TestValidateIDTokenNotYetValid(t *testing.T) {
 }
 
 func TestValidateIDTokenSuccess(t *testing.T) {
+	t.Parallel()
 	now := testNow()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
@@ -1035,6 +1071,7 @@ func TestValidateIDTokenSuccess(t *testing.T) {
 }
 
 func TestValidateIDTokenNilVerifier(t *testing.T) {
+	t.Parallel()
 	_, err := ValidateIDToken(context.Background(), nil, "token", Transaction{}, testNow())
 	if err == nil {
 		t.Error("should fail with nil verifier")
@@ -1042,6 +1079,7 @@ func TestValidateIDTokenNilVerifier(t *testing.T) {
 }
 
 func TestValidateIDTokenVerifierError(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{err: errors.New("verification failed")}
 	_, err := ValidateIDToken(context.Background(), v, "token", Transaction{Issuer: "iss"}, testNow())
 	if err == nil {
@@ -1050,6 +1088,7 @@ func TestValidateIDTokenVerifierError(t *testing.T) {
 }
 
 func TestSubjectResultValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		sr      SubjectResult
@@ -1073,6 +1112,7 @@ func TestSubjectResultValidation(t *testing.T) {
 }
 
 func TestSubjectResultExternalKey(t *testing.T) {
+	t.Parallel()
 	sr := SubjectResult{ProviderID: "google", Subject: "12345"}
 	key := sr.ExternalKey()
 	// Must be deterministic
@@ -1092,6 +1132,7 @@ func TestSubjectResultExternalKey(t *testing.T) {
 }
 
 func TestNormalizeProviderID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input, want string
 	}{
@@ -1112,6 +1153,7 @@ func TestNormalizeProviderID(t *testing.T) {
 }
 
 func TestLinkDecisionString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		d    LinkDecision
 		want string
@@ -1132,6 +1174,7 @@ func TestLinkDecisionString(t *testing.T) {
 // between two simultaneous callbacks by using deterministic randomness
 // and barriers.
 func TestDeterministicTwoUserBarrier(t *testing.T) {
+	t.Parallel()
 	// Each user gets distinct 256-byte entropy blocks.
 	entropy1 := make([]byte, 256)
 	entropy2 := make([]byte, 256)
@@ -1258,6 +1301,7 @@ func TestDeterministicTwoUserBarrier(t *testing.T) {
 // TestWrongBrowserRejectionWithoutConsume verifies that a wrong browser
 // binding is rejected and the transaction is NOT consumed.
 func TestWrongBrowserRejectionWithoutConsume(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	now := testNow()
 	state := "s"
@@ -1297,6 +1341,7 @@ func TestWrongBrowserRejectionWithoutConsume(t *testing.T) {
 // TestWrongProviderRejectionWithoutConsume verifies wrong provider doesn't
 // consume the transaction.
 func TestWrongProviderRejectionWithoutConsume(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	now := testNow()
 	state := "s"
@@ -1334,6 +1379,7 @@ func TestWrongProviderRejectionWithoutConsume(t *testing.T) {
 // TestURLBuildViaNetURL verifies the authorization URL is built with net/url
 // and survives round-trip parsing.
 func TestURLBuildViaNetURL(t *testing.T) {
+	t.Parallel()
 	p := newTestProvider(make([]byte, 256))
 	cfg := Config{
 		Issuer:                "https://issuer.example.com",
@@ -1369,6 +1415,7 @@ func TestURLBuildViaNetURL(t *testing.T) {
 }
 
 func TestCallbackURIRelativeRejected(t *testing.T) {
+	t.Parallel()
 	err := validateCallbackURI("/relative/path")
 	if err == nil {
 		t.Error("expected error for relative callback URI")
@@ -1376,6 +1423,7 @@ func TestCallbackURIRelativeRejected(t *testing.T) {
 }
 
 func TestCallbackURIHTTPRejected(t *testing.T) {
+	t.Parallel()
 	err := validateCallbackURI("http://insecure.example.com/cb")
 	if err == nil {
 		t.Error("expected error for HTTP callback URI")
@@ -1383,6 +1431,7 @@ func TestCallbackURIHTTPRejected(t *testing.T) {
 }
 
 func TestCallbackURIUserinfoRejected(t *testing.T) {
+	t.Parallel()
 	err := validateCallbackURI("https://user@example.com/cb")
 	if err == nil {
 		t.Error("expected error for userinfo in callback URI")
@@ -1390,6 +1439,7 @@ func TestCallbackURIUserinfoRejected(t *testing.T) {
 }
 
 func TestCallbackURIFragmentRejected(t *testing.T) {
+	t.Parallel()
 	err := validateCallbackURI("https://example.com/cb#frag")
 	if err == nil {
 		t.Error("expected error for fragment in callback URI")
@@ -1397,6 +1447,7 @@ func TestCallbackURIFragmentRejected(t *testing.T) {
 }
 
 func TestValidateScopesEmptyConfig(t *testing.T) {
+	t.Parallel()
 	err := validateScopes(nil, []string{"any"})
 	if err != nil {
 		t.Errorf("empty config should accept any scope, got %v", err)
@@ -1404,6 +1455,7 @@ func TestValidateScopesEmptyConfig(t *testing.T) {
 }
 
 func TestValidateScopesViolation(t *testing.T) {
+	t.Parallel()
 	err := validateScopes([]string{"openid", "profile"}, []string{"openid", "admin"})
 	if err == nil {
 		t.Error("expected error for out-of-scope request")
@@ -1411,6 +1463,7 @@ func TestValidateScopesViolation(t *testing.T) {
 }
 
 func TestValidateScopesSubset(t *testing.T) {
+	t.Parallel()
 	err := validateScopes([]string{"openid", "profile"}, []string{"openid"})
 	if err != nil {
 		t.Errorf("subset should be valid, got %v", err)
@@ -1423,6 +1476,7 @@ var fixedNow = time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
 
 // TestValidateIDTokenMissingExp verifies that zero exp is rejected.
 func TestValidateIDTokenMissingExp(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
 			Issuer:    "https://issuer.example.com",
@@ -1442,6 +1496,7 @@ func TestValidateIDTokenMissingExp(t *testing.T) {
 
 // TestValidateIDTokenMissingIat verifies that zero iat is rejected.
 func TestValidateIDTokenMissingIat(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
 			Issuer:    "https://issuer.example.com",
@@ -1461,6 +1516,7 @@ func TestValidateIDTokenMissingIat(t *testing.T) {
 
 // TestValidateIDTokenExpiryEquality verifies that now == exp is expired.
 func TestValidateIDTokenExpiryEquality(t *testing.T) {
+	t.Parallel()
 	exp := fixedNow.Unix()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
@@ -1481,6 +1537,7 @@ func TestValidateIDTokenExpiryEquality(t *testing.T) {
 
 // TestValidateIDTokenMultiAudienceMissingAzp verifies multi-aud requires azp.
 func TestValidateIDTokenMultiAudienceMissingAzp(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
 			Issuer:    "https://issuer.example.com",
@@ -1501,6 +1558,7 @@ func TestValidateIDTokenMultiAudienceMissingAzp(t *testing.T) {
 
 // TestValidateIDTokenMultiAudienceAzpMismatch verifies multi-aud azp must match client ID.
 func TestValidateIDTokenMultiAudienceAzpMismatch(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
 			Issuer:    "https://issuer.example.com",
@@ -1521,6 +1579,7 @@ func TestValidateIDTokenMultiAudienceAzpMismatch(t *testing.T) {
 
 // TestValidateIDTokenEmptyNonceTransaction verifies empty tx nonce is rejected.
 func TestValidateIDTokenEmptyNonceTransaction(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{claims: &IDTokenClaims{Issuer: "i", Subject: "s", Audience: []string{"c"}, ExpiresAt: 1, IssuedAt: 1}}
 	tx := Transaction{Issuer: "i", Nonce: "", ClientID: "c"}
 	_, err := ValidateIDToken(context.Background(), v, "tok", tx, fixedNow)
@@ -1531,6 +1590,7 @@ func TestValidateIDTokenEmptyNonceTransaction(t *testing.T) {
 
 // TestValidateIDTokenEmptyClientIDTransaction verifies empty tx clientID is rejected.
 func TestValidateIDTokenEmptyClientIDTransaction(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{claims: &IDTokenClaims{Issuer: "i", Subject: "s", Audience: []string{"c"}, ExpiresAt: 1, IssuedAt: 1}}
 	tx := Transaction{Issuer: "i", Nonce: "n", ClientID: ""}
 	_, err := ValidateIDToken(context.Background(), v, "tok", tx, fixedNow)
@@ -1541,6 +1601,7 @@ func TestValidateIDTokenEmptyClientIDTransaction(t *testing.T) {
 
 // TestValidateIDTokenEmptyIssuerTransaction verifies empty tx issuer is rejected.
 func TestValidateIDTokenEmptyIssuerTransaction(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{claims: &IDTokenClaims{Issuer: "i", Subject: "s", Audience: []string{"c"}, ExpiresAt: 1, IssuedAt: 1}}
 	tx := Transaction{Issuer: "", Nonce: "n", ClientID: "c"}
 	_, err := ValidateIDToken(context.Background(), v, "tok", tx, fixedNow)
@@ -1551,6 +1612,7 @@ func TestValidateIDTokenEmptyIssuerTransaction(t *testing.T) {
 
 // TestValidateIDTokenFutureIat verifies future iat is rejected.
 func TestValidateIDTokenFutureIat(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
 			Issuer:    "https://issuer.example.com",
@@ -1570,6 +1632,7 @@ func TestValidateIDTokenFutureIat(t *testing.T) {
 
 // TestValidateIDTokenAzpPresentExactMatch verifies azp present and matching is accepted.
 func TestValidateIDTokenAzpPresentExactMatch(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
 			Issuer:    "https://issuer.example.com",
@@ -1593,6 +1656,7 @@ func TestValidateIDTokenAzpPresentExactMatch(t *testing.T) {
 
 // TestValidateIDTokenSingleAudienceNoAzp verifies single-aud with no azp is accepted.
 func TestValidateIDTokenSingleAudienceNoAzp(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
 			Issuer:    "https://issuer.example.com",
@@ -1617,6 +1681,7 @@ func TestValidateIDTokenSingleAudienceNoAzp(t *testing.T) {
 // TestValidateIDTokenVerifierReceivesClientID verifies that the token
 // verifier receives tx.ClientID (not tx.Audience) as the audience arg.
 func TestValidateIDTokenVerifierReceivesClientID(t *testing.T) {
+	t.Parallel()
 	v := &fakeVerifier{
 		claims: &IDTokenClaims{
 			Issuer:    "https://issuer.example.com",
@@ -1649,6 +1714,7 @@ func TestValidateIDTokenVerifierReceivesClientID(t *testing.T) {
 // TestValidateCallbackUnknownState returns ErrStateMismatch and does not
 // consume anything when the derived state digest doesn't match.
 func TestValidateCallbackUnknownState(t *testing.T) {
+	t.Parallel()
 	store := newTestStore()
 	binding := DigestSHA256("binding")
 	// Save a transaction with a known state.

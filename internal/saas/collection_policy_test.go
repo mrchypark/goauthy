@@ -10,6 +10,7 @@ import (
 )
 
 func TestCredentialCollectionProviderRemovalCannotResurrect(t *testing.T) {
+	t.Parallel()
 	ctx, store, db, binding := credentialStoreFixture(t)
 	wrong := binding
 	wrong.ProviderID = "unapproved"

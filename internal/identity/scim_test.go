@@ -17,6 +17,7 @@ import (
 )
 
 func TestListSCIMUsersIsCompleteOrderedAndCredentialFree(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 	for _, row := range []struct {
@@ -61,6 +62,7 @@ func TestListSCIMUsersIsCompleteOrderedAndCredentialFree(t *testing.T) {
 }
 
 func TestDeleteUserTombstonesAndDeletesOwnedRows(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	seedDeterministicRandom(store)
 	store.now = func() time.Time { return time.UnixMilli(42_000) }
@@ -148,6 +150,7 @@ func TestDeleteUserTombstonesAndDeletesOwnedRows(t *testing.T) {
 }
 
 func TestDeleteUserSubjectDeliveryIsolationAndRollback(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	store.now = func() time.Time { return time.UnixMilli(42_000) }
 	ctx := t.Context()
@@ -203,6 +206,7 @@ func TestDeleteUserSubjectDeliveryIsolationAndRollback(t *testing.T) {
 }
 
 func TestListSCIMDeletedUsersIsOrderedAndDeleteRollsBack(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	ctx := context.Background()
 	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "identity-tombstone-order", Statements: []rhiza.SQLStatement{
@@ -229,6 +233,7 @@ func TestListSCIMDeletedUsersIsOrderedAndDeleteRollsBack(t *testing.T) {
 }
 
 func TestDeleteUserSnapshotsConcurrentValidUpdateAtTransactionTime(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	seedDeterministicRandom(store)
 	ctx := context.Background()
@@ -261,6 +266,7 @@ func TestDeleteUserSnapshotsConcurrentValidUpdateAtTransactionTime(t *testing.T)
 }
 
 func TestDeleteUserPreservesFinalDirectAdminConcurrently(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(45_000) }
@@ -311,6 +317,7 @@ func TestDeleteUserPreservesFinalDirectAdminConcurrently(t *testing.T) {
 }
 
 func TestDeleteUserPersistsTombstoneGeneration(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	store.random = func(out []byte) (int, error) {
 		for i := range out {
@@ -334,6 +341,7 @@ func TestDeleteUserPersistsTombstoneGeneration(t *testing.T) {
 }
 
 func TestDeleteUserRejectsUnavailableTombstoneGeneration(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	bootstrapPassword(t, store, "subject-no-generation", "alice", []byte("CurrentPassword1"))
 	store.random = func([]byte) (int, error) { return 0, errors.New("entropy unavailable") }
@@ -345,6 +353,7 @@ func TestDeleteUserRejectsUnavailableTombstoneGeneration(t *testing.T) {
 }
 
 func TestListSCIMDeletedUsersParsesLegacyAndGeneration(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	generation := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{7}, 16))
 	if _, err := storage.Execute(context.Background(), store.db, rhiza.ExecuteRequest{RequestID: "identity-tombstone-generation-parse", SQL: `INSERT INTO scim_user_tombstones (local_external_id,user_name,active,generation,deleted_at_unix_ms) VALUES ('legacy','alice',1,'',1),('generated','bob',1,?,2)`, Args: []any{generation}}); err != nil {
@@ -363,6 +372,7 @@ func TestListSCIMDeletedUsersParsesLegacyAndGeneration(t *testing.T) {
 }
 
 func TestDeleteUserWithGuardRevalidatesAuthorityAtCommit(t *testing.T) {
+	t.Parallel()
 	t.Run("authorized final admin remains blocked", func(t *testing.T) {
 		store := scimDeleteStore(t)
 		ctx := context.Background()
@@ -427,6 +437,7 @@ func TestDeleteUserWithGuardRevalidatesAuthorityAtCommit(t *testing.T) {
 // housekeeping timing cannot decide whether the deployment keeps an
 // administrator: an expired but unswept administrator is not one.
 func TestDeleteUserKeepsExpiredAdministratorOutOfFinalAdminGuard(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	ctx := context.Background()
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -457,6 +468,7 @@ func TestDeleteUserKeepsExpiredAdministratorOutOfFinalAdminGuard(t *testing.T) {
 }
 
 func TestCleanupSCIMDeletedUsersRequiresExactSucceededDeletes(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	providers := []SCIMTombstoneProvider{{ID: "provider-a", DeletePolicy: scim.UnlinkRemote}}
 	for _, tc := range []struct {
@@ -490,6 +502,7 @@ func TestCleanupSCIMDeletedUsersRequiresExactSucceededDeletes(t *testing.T) {
 }
 
 func TestCleanupSCIMDeletedUsersMatchesHardDeletePolicyAndBoundsOrder(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	seedDeterministicRandom(store)
 	ctx := context.Background()
@@ -526,6 +539,7 @@ func TestCleanupSCIMDeletedUsersMatchesHardDeletePolicyAndBoundsOrder(t *testing
 }
 
 func TestCleanupSCIMDeletedUsersObservesOutboxProgressAfterEarlierNoop(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	seedDeterministicRandom(store)
 	ctx := context.Background()
@@ -541,6 +555,7 @@ func TestCleanupSCIMDeletedUsersObservesOutboxProgressAfterEarlierNoop(t *testin
 }
 
 func TestSCIMTombstoneSnapshotsStartupProviders(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	providers := []SCIMTombstoneProvider{{ID: "provider-z", DeletePolicy: scim.UnlinkRemote}, {ID: "provider-a", DeletePolicy: scim.DeleteRemote}}
 	if err := store.ConfigureSCIMTombstoneProviders(providers); err != nil {
@@ -562,6 +577,7 @@ func TestSCIMTombstoneSnapshotsStartupProviders(t *testing.T) {
 }
 
 func TestCleanupSCIMDeletedUsersSkipsIncompleteLegacyWithoutBlocking(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	seedDeterministicRandom(store)
 	if _, err := storage.Execute(context.Background(), store.db, rhiza.ExecuteRequest{RequestID: "legacy-incomplete", SQL: `INSERT INTO scim_user_tombstones (local_external_id,user_name,active,deleted_at_unix_ms) VALUES ('legacy','alice',1,0)`}); err != nil {
@@ -579,6 +595,7 @@ func TestCleanupSCIMDeletedUsersSkipsIncompleteLegacyWithoutBlocking(t *testing.
 }
 
 func TestCleanupSCIMDeletedUsersRequiresExactTombstoneGeneration(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	seedDeterministicRandom(store)
 	providers := []SCIMTombstoneProvider{{ID: "provider", DeletePolicy: scim.UnlinkRemote}}
@@ -605,6 +622,7 @@ func TestCleanupSCIMDeletedUsersRequiresExactTombstoneGeneration(t *testing.T) {
 }
 
 func TestCleanupSCIMDeletedUsersKeepsTamperedHardDeleteSnapshot(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	seedDeterministicRandom(store)
 	if _, err := storage.Execute(context.Background(), store.db, rhiza.ExecuteRequest{RequestID: "tampered-hard-snapshot", Statements: []rhiza.SQLStatement{
@@ -621,6 +639,7 @@ func TestCleanupSCIMDeletedUsersKeepsTamperedHardDeleteSnapshot(t *testing.T) {
 }
 
 func TestCleanupSCIMDeletedUsersKeepsHardDeleteWithoutProviderSnapshot(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	seedDeterministicRandom(store)
 	seedSCIMTombstone(t, store, "hard", true, 1, nil)
@@ -632,6 +651,7 @@ func TestCleanupSCIMDeletedUsersKeepsHardDeleteWithoutProviderSnapshot(t *testin
 }
 
 func TestCleanupSCIMDeletedUsersRejectsInvalidRequest(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	ctx := context.Background()
 	for _, tc := range []struct {
@@ -650,6 +670,7 @@ func TestCleanupSCIMDeletedUsersRejectsInvalidRequest(t *testing.T) {
 }
 
 func TestCleanupSCIMDeletedUsersRejectsShortEntropy(t *testing.T) {
+	t.Parallel()
 	store := scimDeleteStore(t)
 	seedSCIMTombstone(t, store, "subject", false, 1, nil)
 	store.random = func(value []byte) (int, error) { return len(value) - 1, nil }
@@ -727,6 +748,7 @@ func scimDeleteStore(t *testing.T) *Store {
 }
 
 func TestListSCIMUsersRejectsMalformedDurableIdentity(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
@@ -744,6 +766,7 @@ func TestListSCIMUsersRejectsMalformedDurableIdentity(t *testing.T) {
 }
 
 func TestListSCIMUsersDoesNotSilentlyOmitMissingAuthenticationMode(t *testing.T) {
+	t.Parallel()
 	store := testStore(t)
 	ctx := context.Background()
 	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{

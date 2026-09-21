@@ -59,6 +59,7 @@ func pkceParamsInURL(t *testing.T, rawURL string) (hasChallenge, hasMethod bool)
 }
 
 func TestProtocolPKCEOmittedDefaultsToEnabled(t *testing.T) {
+	t.Parallel()
 	// Protocol is zero value: UsePKCE nil. EffectiveProtocol() defaults to true.
 	cfg, p, store, params, binding, now := authProtocolFixture(t)
 	result := mustGenAuthURL(t, cfg, p, store, params, binding, now)
@@ -76,6 +77,7 @@ func TestProtocolPKCEOmittedDefaultsToEnabled(t *testing.T) {
 }
 
 func TestProtocolPKCEExplicitTrue(t *testing.T) {
+	t.Parallel()
 	cfg, p, store, params, binding, now := authProtocolFixture(t)
 	trueVal := true
 	cfg.Protocol.UsePKCE = &trueVal
@@ -95,6 +97,7 @@ func TestProtocolPKCEExplicitTrue(t *testing.T) {
 }
 
 func TestProtocolPKCEExplicitFalseOmitsParameters(t *testing.T) {
+	t.Parallel()
 	cfg, p, store, params, binding, now := authProtocolFixture(t)
 	falseVal := false
 	cfg.Protocol.UsePKCE = &falseVal
@@ -117,6 +120,7 @@ func TestProtocolPKCEExplicitFalseOmitsParameters(t *testing.T) {
 }
 
 func TestProtocolPKCEFalsePreservesBrowserStateNonce(t *testing.T) {
+	t.Parallel()
 	cfg, p, store, params, binding, now := authProtocolFixture(t)
 	falseVal := false
 	cfg.Protocol.UsePKCE = &falseVal
@@ -161,6 +165,7 @@ func TestProtocolPKCEFalsePreservesBrowserStateNonce(t *testing.T) {
 }
 
 func TestProtocolPKCEFalseWithPreexistingEndpointQuery(t *testing.T) {
+	t.Parallel()
 	cfg, p, store, params, binding, now := authProtocolFixture(t)
 	cfg.AuthorizationEndpoint = "https://issuer.example.com/authorize?existing=param&code_challenge=old&code_challenge_method=old"
 	falseVal := false
@@ -188,6 +193,7 @@ func TestProtocolPKCEFalseWithPreexistingEndpointQuery(t *testing.T) {
 }
 
 func TestProtocolPKCEDefaultsToEnabledWhenNil(t *testing.T) {
+	t.Parallel()
 	// Regression: nil UsePKCE must behave identical to explicit true.
 	cfgTrue, pTrue, storeTrue, paramsTrue, binding, now := authProtocolFixture(t)
 	trueVal := true

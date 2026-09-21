@@ -15,6 +15,7 @@ import (
 )
 
 func TestEventsTestUsesServerClockAndResolvedPeer(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, _ := userCreateHTTPFixture(t)
 	at := time.UnixMilli(1_800_000_000_123)
 	store.now = func() time.Time { return at }
@@ -50,6 +51,7 @@ func TestEventsTestUsesServerClockAndResolvedPeer(t *testing.T) {
 }
 
 func TestEventsTestFailureDoesNotAppendEventOrSequence(t *testing.T) {
+	t.Parallel()
 	for _, failure := range []string{"entropy", "short entropy", "database", "invalid peer"} {
 		t.Run(failure, func(t *testing.T) {
 			h, store, _, keys, _ := userCreateHTTPFixture(t)

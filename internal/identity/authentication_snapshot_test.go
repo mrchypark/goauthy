@@ -9,6 +9,7 @@ import (
 )
 
 func TestAuthenticationDoesNotRecaptureChangedGenerations(t *testing.T) {
+	t.Parallel()
 	s := testStoreWithRules(t, testRules(3))
 	password := []byte("CurrentPassword1")
 	bootstrapPassword(t, s, "snapshot-user", "alice", password)
@@ -39,6 +40,7 @@ func TestAuthenticationDoesNotRecaptureChangedGenerations(t *testing.T) {
 }
 
 func TestAuthenticationCapturesCredentialGenerations(t *testing.T) {
+	t.Parallel()
 	s := testStoreWithRules(t, testRules(3))
 	old, next := []byte("CurrentPassword1"), []byte("NextPassword2")
 	bootstrapPassword(t, s, "snapshot-user", "alice", old)

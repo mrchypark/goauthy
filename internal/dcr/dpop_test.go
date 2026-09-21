@@ -27,6 +27,7 @@ func dpopRegistrationBody(clientID, name string, value string) string {
 }
 
 func TestDPoPBoundAccessTokensHTTPRoundTripAndReplacement(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	created := httptest.NewRecorder()
 	h.ServeHTTP(created, requestWithKey(http.MethodPost, registrationPath, dpopRegistrationBody("", "DPoP RP", "true"), testGlobalToken, "dpop-roundtrip"))
@@ -72,6 +73,7 @@ func TestDPoPBoundAccessTokensHTTPRoundTripAndReplacement(t *testing.T) {
 }
 
 func TestDPoPBoundAccessTokensDefaultsFalseAndStoreNotFound(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	created, err := store.Create(ctx, validRequest("dpop-default", TokenEndpointAuthNone))
 	if err != nil {
@@ -89,6 +91,7 @@ func TestDPoPBoundAccessTokensDefaultsFalseAndStoreNotFound(t *testing.T) {
 }
 
 func TestDPoPBoundAccessTokensStrictHTTPBool(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	for _, value := range []string{`"true"`, `1`, `null`} {
 		response := httptest.NewRecorder()
@@ -100,6 +103,7 @@ func TestDPoPBoundAccessTokensStrictHTTPBool(t *testing.T) {
 }
 
 func TestDPoPBoundAccessTokensAnonymousCreate(t *testing.T) {
+	t.Parallel()
 	h := testAnonymousHandler(t, time.Minute)
 	req := requestWithKey(http.MethodPost, registrationPath, dpopRegistrationBody("", "Anonymous DPoP", "true"), "", "dpop-anonymous")
 	req = req.WithContext(browser.ContextWithPeerIP(context.Background(), "198.51.100.77"))
@@ -112,6 +116,7 @@ func TestDPoPBoundAccessTokensAnonymousCreate(t *testing.T) {
 }
 
 func TestDPoPBoundAccessTokensSoftwareStatementTakesPrecedence(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
 	token, key := testSoftwareStatement(t, map[string]any{
 		"iss": "https://publisher.example.test", "aud": "https://id.example.test/oidc/register",
@@ -130,6 +135,7 @@ func TestDPoPBoundAccessTokensSoftwareStatementTakesPrecedence(t *testing.T) {
 }
 
 func TestDPoPBoundAccessTokensIdempotencyDistinguishesValue(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t, testGlobalToken)
 	first := httptest.NewRecorder()
 	h.ServeHTTP(first, requestWithKey(http.MethodPost, registrationPath, dpopRegistrationBody("", "Idempotent DPoP", "false"), testGlobalToken, "dpop-same-key"))

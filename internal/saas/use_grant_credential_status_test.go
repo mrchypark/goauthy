@@ -32,6 +32,7 @@ func credentialStatusFixture(t *testing.T) (*refreshFixture, clients.Client, Use
 }
 
 func TestOAuth2UseGrantStatusShowsMetadataForEveryCredentialState(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"ready", "refreshing", "uncertain", "revoked"} {
 		t.Run(state, func(t *testing.T) {
 			f, consumer, grant := credentialStatusFixture(t)
@@ -56,6 +57,7 @@ func TestOAuth2UseGrantStatusShowsMetadataForEveryCredentialState(t *testing.T) 
 }
 
 func TestOAuth2UseGrantStatusAllowsExpiredAccessAndRejectsFences(t *testing.T) {
+	t.Parallel()
 	f, consumer, grant := credentialStatusFixture(t)
 	old := credentialBinding{Owner: f.b.Owner, CollectionID: f.b.CollectionID, ConnectionID: f.b.ConnectionID, ProviderID: f.b.ProviderID, Generation: f.b.Generation, TokenVersion: 1}
 	env, err := sealCredential(f.s.keys, old, credential{AccountID: "account-1", AccessToken: "expired", RefreshToken: "refresh-old", ExpiresAtUnixMS: f.s.now() - 1, Scopes: []string{"openid", "profile"}})
@@ -121,6 +123,7 @@ func statusDenied(err error) bool {
 }
 
 func TestOAuth2UseGrantStatusRejectsRevokedGrantAndAPIKey(t *testing.T) {
+	t.Parallel()
 	f, consumer, grant := credentialStatusFixture(t)
 	if _, err := storage.Execute(f.ctx, f.s.db, rhiza.ExecuteRequest{RequestID: "status-revoke-grant", SQL: `UPDATE saas_use_grants SET revoked=1 WHERE id=?`, Args: []any{grant.ID}}); err != nil {
 		t.Fatal(err)
@@ -158,6 +161,7 @@ func credentialStatusRow(t *testing.T, f *refreshFixture) string {
 }
 
 func TestOAuth2UseGrantStatusRechecksAuthority(t *testing.T) {
+	t.Parallel()
 	f, consumer, grant := credentialStatusFixture(t)
 	calls := 0
 	authority := func() (string, []any) {
@@ -181,6 +185,7 @@ func TestOAuth2UseGrantStatusRechecksAuthority(t *testing.T) {
 }
 
 func TestOAuth2UseGrantStatusRejectsChangedSnapshot(t *testing.T) {
+	t.Parallel()
 	f, consumer, grant := credentialStatusFixture(t)
 	calls := 0
 	authority := func() (string, []any) {

@@ -8,6 +8,7 @@ import (
 )
 
 func TestUseGrantReviewedCredentialVersionOAuth2(t *testing.T) {
+	t.Parallel()
 	ctx, s, b, consumer, _ := oauth2DeliveryFixture(t)
 	version := int64(1)
 	input := UseGrantInput{ConsumerClientID: consumer.ID, Mode: "credential_delivery", Purpose: "review", ExpiresAt: s.now() + 60000, ReviewedCredentialVersion: &version}
@@ -31,6 +32,7 @@ func TestUseGrantReviewedCredentialVersionOAuth2(t *testing.T) {
 }
 
 func TestUseGrantReviewedCredentialVersionValidation(t *testing.T) {
+	t.Parallel()
 	ctx, s, b, consumer, _ := oauth2DeliveryFixture(t)
 	for name, version := range map[string]int64{"zero": 0, "negative": -1} {
 		t.Run(name, func(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 )
 
 func TestSaaSProvidersAdminCatalogAndDefensiveCopy(t *testing.T) {
+	t.Parallel()
 	h, store, adminCookie, _ := membershipHTTPFixture(t)
 	scopes := []string{"read:user"}
 	providers := []SaaSProviderInfo{{ID: "z", Kind: "github", CallbackURI: "https://app/z", Scopes: scopes}, {ID: "a", Kind: "oauth2", CallbackURI: "https://app/a", Scopes: []string{"openid"}}}
@@ -50,6 +51,7 @@ func TestSaaSProvidersAdminCatalogAndDefensiveCopy(t *testing.T) {
 }
 
 func TestSaaSProvidersRequiresFullAdminBrowserSession(t *testing.T) {
+	t.Parallel()
 	h, store, adminCookie, _ := membershipHTTPFixture(t)
 	if err := h.BindSaaSProviders([]SaaSProviderInfo{{ID: "github", Kind: "github", CallbackURI: "https://app/callback"}}); err != nil {
 		t.Fatal(err)

@@ -17,6 +17,7 @@ import (
 )
 
 func TestEventsQueryKeyAndBrowserAdmin(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, cookie := userCreateHTTPFixture(t)
 	ctx := context.Background()
 	at := time.UnixMilli(1_800_000_000_000).UTC()
@@ -53,6 +54,7 @@ func TestEventsQueryKeyAndBrowserAdmin(t *testing.T) {
 }
 
 func TestEventsQueryStrictInputAndGuardRevocation(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, _ := userCreateHTTPFixture(t)
 	_, token, err := keys.Create(context.Background(), nil, apikey.Request{Name: "events-reader", Access: []apikey.Access{{Group: "Events", AccessRights: []apikey.Right{apikey.Read}}}})
 	if err != nil {
@@ -105,6 +107,7 @@ func TestEventsQueryStrictInputAndGuardRevocation(t *testing.T) {
 }
 
 func TestEventsQueryBrowserSnapshotRevocation(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, sql string }{
 		{"session", `UPDATE browser_sessions SET revoked_at_unix_ms=1 WHERE subject='admin'`},
 		{"role", `DELETE FROM rbac_user_roles WHERE subject='admin'`},
@@ -152,6 +155,7 @@ func TestEventsQueryBrowserSnapshotRevocation(t *testing.T) {
 }
 
 func TestEventsQueryHeadersAndBodyLimit(t *testing.T) {
+	t.Parallel()
 	h, _, _, keys, _ := userCreateHTTPFixture(t)
 	_, token, err := keys.Create(context.Background(), nil, apikey.Request{Name: "events-header", Access: []apikey.Access{{Group: "Events", AccessRights: []apikey.Right{apikey.Read}}}})
 	if err != nil {
@@ -181,6 +185,7 @@ func TestEventsQueryHeadersAndBodyLimit(t *testing.T) {
 }
 
 func TestEventsQueryRejectsCaseAliases(t *testing.T) {
+	t.Parallel()
 	h, _, _, _, cookie := userCreateHTTPFixture(t)
 	for _, body := range []string{
 		`{"From":1719784800,"level":"info"}`,
@@ -203,6 +208,7 @@ func TestEventsQueryRejectsCaseAliases(t *testing.T) {
 // losing the whole range to a generic unavailable response, and a malformed or
 // oversized page request is still rejected before the query.
 func TestEventsQueryBoundedPageContinuation(t *testing.T) {
+	t.Parallel()
 	h, store, _, keys, _ := userCreateHTTPFixture(t)
 	at := time.UnixMilli(1_800_000_000_000).UTC()
 	store.now = func() time.Time { return at }

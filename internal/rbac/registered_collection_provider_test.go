@@ -9,6 +9,7 @@ import (
 )
 
 func TestRegisteredAPIKeyCollectionProviderAuthority(t *testing.T) {
+	t.Parallel()
 	h, store, _, _ := membershipHTTPFixture(t)
 	providers := providerHTTPStore(t, store)
 	if err := h.BindSaaSProviderStore(providers); err != nil {

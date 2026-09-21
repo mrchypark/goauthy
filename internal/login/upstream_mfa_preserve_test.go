@@ -13,6 +13,7 @@ import (
 // that verified upstream MFA is preserved in the session even when the current
 // authorization request does not force MFA.
 func TestCompleteUpstreamAuthenticationMFAPassedPreservesMFAWithoutForceMFA(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t) // ForceMFA=false
 	init, _, interactionDigest := externalAuthorization(t, h)
 	binding := browser.UpstreamSessionBinding{
@@ -43,6 +44,7 @@ func TestCompleteUpstreamAuthenticationMFAPassedPreservesMFAWithoutForceMFA(t *t
 // TestCompleteUpstreamAuthenticationNilBindingWithoutForceMFAUsesExternal proves
 // that a nil binding produces an "external" session when ForceMFA is false.
 func TestCompleteUpstreamAuthenticationNilBindingWithoutForceMFAUsesExternal(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t) // ForceMFA=false
 	init, _, interactionDigest := externalAuthorization(t, h)
 	response := httptest.NewRecorder()
@@ -66,6 +68,7 @@ func TestCompleteUpstreamAuthenticationNilBindingWithoutForceMFAUsesExternal(t *
 // TestCompleteUpstreamAuthenticationMFAPassedFalseWithoutForceMFAUsesExternal
 // proves that MFAPassed=false with ForceMFA=false produces "external".
 func TestCompleteUpstreamAuthenticationMFAPassedFalseWithoutForceMFAUsesExternal(t *testing.T) {
+	t.Parallel()
 	h := testHandler(t) // ForceMFA=false
 	init, _, interactionDigest := externalAuthorization(t, h)
 	response := httptest.NewRecorder()

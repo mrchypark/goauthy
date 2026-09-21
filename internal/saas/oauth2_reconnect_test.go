@@ -13,6 +13,7 @@ import (
 )
 
 func TestOAuth2ReconnectReplacesRevokedCredentialAndFencesVersion(t *testing.T) {
+	t.Parallel()
 	ctx, credentials, db, binding := credentialStoreFixture(t)
 	if _, err := credentials.PrepareOAuth2Reconnect(ctx, binding.Owner, binding.CollectionID, binding.ConnectionID, 1, credentialAuthority()); !errors.Is(err, ErrCredentialConflict) {
 		t.Fatalf("draft prepare=%v", err)
