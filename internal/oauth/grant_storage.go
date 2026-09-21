@@ -23,6 +23,7 @@ type transactionContextKey struct{}
 type transaction struct {
 	passwordGeneration                  int64
 	authenticationGeneration            int64
+	accountHash                         string
 	targetRefreshSignature              string
 	attempt                             string
 	kind                                string
@@ -501,6 +502,14 @@ func (tx *transaction) principalGuard() (string, []any) {
 	if tx.kind == "password" {
 		guard += ` AND EXISTS (SELECT 1 FROM identity_users u JOIN identity_authentication_modes m ON m.subject=u.subject WHERE u.subject=? AND u.password_generation=? AND m.mode='password' AND m.generation=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?))`
 		args = append(args, tx.principalSubject, tx.passwordGeneration, tx.authenticationGeneration, accountExpiryCutoff{})
+		// Admission checks the account lock before the password is verified.
+		// This predicate re-checks it inside the same Execute that writes the
+		// artifacts, so a lock committed while the transaction is queued still
+		// denies the token (GA-OAUTH-006).
+		if tx.accountHash != "" {
+			guard += ` AND NOT EXISTS (SELECT 1 FROM login_account_locks WHERE account_hash=? AND locked_until_unix_ms>?)`
+			args = append(args, tx.accountHash, tx.issueNowMillis())
+		}
 	}
 	dpopGuard, dpopArgs := tx.dpopPolicy.guard()
 	guard += dpopGuard

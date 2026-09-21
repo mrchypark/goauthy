@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/backchannel"
 	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/credential"
@@ -27,12 +28,21 @@ import (
 	"github.com/ory/fosite"
 )
 
+// Default deployment secret paths, shared by the configuration preflight and
+// startup so both read the same files.
+const (
+	defaultHMACSecretPath   = "./secrets/oauth-hmac"
+	defaultClientSecretPath = "./secrets/bootstrap-client"
+)
+
 type applicationConfig struct {
 	Issuer                     string
 	Swagger                    swaggerConfig
 	TLS                        *tls.Config
 	TLSReloader                *tlsconfig.Reloader
 	Favicon                    *branding.Asset
+	HMACSecret                 []byte
+	ClientSecret               string
 	CIMDEnabled                bool
 	CIMDIgnoreUnknownAuthFlows bool
 	CIMDDangerUnvalidated      bool
@@ -110,6 +120,16 @@ func loadApplicationConfig(getenv func(string) string) (applicationConfig, error
 	if err := validateRuntimeConfig(getenv, c); err != nil {
 		return applicationConfig{}, err
 	}
+	// GA-CONFIG-001: the two deployment secrets are loaded inside the typed
+	// boundary so the configuration preflight rejects a missing or undecodable
+	// file before Rhiza is opened, the bootstrap mutations commit or any worker
+	// starts, and startup serves the same already-validated values.
+	if c.HMACSecret, err = oauth.LoadSecret(envValue(getenv, "GOAUTHY_OAUTH_HMAC_SECRET_FILE", defaultHMACSecretPath)); err != nil {
+		return applicationConfig{}, err
+	}
+	if c.ClientSecret, err = oauth.LoadClientSecret(envValue(getenv, "GOAUTHY_BOOTSTRAP_CLIENT_SECRET_FILE", defaultClientSecretPath)); err != nil {
+		return applicationConfig{}, err
+	}
 	return c, nil
 }
 
@@ -120,10 +140,12 @@ func loadApplicationConfig(getenv func(string) string) (applicationConfig, error
 // that configuration before any store, mutation or listener side effect.
 //
 // Conditions mirror startup: a parser that startup only runs for an enabled
-// feature is only run here for that feature. Deployment key material read from
-// default paths (master keys, the OAuth HMAC and bootstrap client secrets) stays
+// feature is only run here for that feature. Active master key material stays
 // out of the preflight because the configuration command must not require
-// mounted secrets; an explicitly configured path is content-validated.
+// mounted master keys; it is loaded during startup before Rhiza is opened. The
+// OAuth HMAC and bootstrap client secrets are loaded by loadApplicationConfig
+// for both entrypoints instead, so their presence and content are validated
+// before any database side effect.
 func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) error {
 	if _, err := scheduledBackupFromEnv(getenv, cfg.Rhiza); err != nil {
 		return err
@@ -139,6 +161,16 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 	// no API-key bootstrap input after Rhiza is open and mutations have committed.
 	if generatedBootstrap.artifact != "" && strings.TrimSpace(getenv("GOAUTHY_API_KEY_BOOTSTRAP_FILE")) == "" {
 		return errors.New("generated bootstrap requires API-key bootstrap input")
+	}
+	// GA-CONFIG-001: validate the bootstrap API-key file before the secret store
+	// is opened. The preflight cannot decrypt Encrypted entries because the master
+	// key is loaded during startup, so it defers them and keeps validating the
+	// rest of the document. Generate entries are accepted exactly when startup
+	// configures the generated-secret export that supplies their secrets.
+	if path := getenv("GOAUTHY_API_KEY_BOOTSTRAP_FILE"); path != "" {
+		if err := apikey.ValidateBootstrapFile(path, nil, generatedBootstrap.artifact != ""); err != nil {
+			return err
+		}
 	}
 	registrationToken, err := dcrRegistrationToken(getenv)
 	if err != nil {
@@ -353,16 +385,6 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 	}
 	if metricsAddr != "" {
 		if _, err := loadMetricsToken(getenv); err != nil {
-			return err
-		}
-	}
-	if path := getenv("GOAUTHY_OAUTH_HMAC_SECRET_FILE"); path != "" {
-		if _, err := oauth.LoadSecret(path); err != nil {
-			return err
-		}
-	}
-	if path := getenv("GOAUTHY_BOOTSTRAP_CLIENT_SECRET_FILE"); path != "" {
-		if _, err := oauth.LoadClientSecret(path); err != nil {
 			return err
 		}
 	}

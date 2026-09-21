@@ -2,7 +2,6 @@ package tracing
 
 import (
 	"context"
-	"net"
 	"os"
 	"strings"
 
@@ -56,15 +55,16 @@ func Init(ctx context.Context) (shutdown func(context.Context) error, err error)
 	return tp.Shutdown, nil
 }
 
-// normalizeLegacyEndpoint rewrites a bare host:port value into an http URL.
+// normalizeLegacyEndpoint rewrites a scheme-less host:port value into an http
+// URL. url.Parse reads "host:4317/path" as scheme "host", which would leave the
+// exporter without an endpoint, so any value without "://" is treated as the
+// legacy bare form.
 func normalizeLegacyEndpoint(name string) {
 	value := os.Getenv(name)
 	if value == "" || strings.Contains(value, "://") {
 		return
 	}
-	if _, _, err := net.SplitHostPort(value); err == nil {
-		_ = os.Setenv(name, "http://"+value)
-	}
+	_ = os.Setenv(name, "http://"+value)
 }
 
 func NewTracer(name string) trace.Tracer {

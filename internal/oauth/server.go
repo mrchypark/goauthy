@@ -282,6 +282,7 @@ type OIDCConfig struct {
 type Store struct {
 	db                        *rhiza.DB
 	client                    fosite.Client
+	bootstrapForceMFA         bool
 	dynamicClients            *dcr.Store
 	managedClients            *clients.Store
 	cimd                      cimdResolver
@@ -461,6 +462,7 @@ func newServer(ctx context.Context, db *rhiza.DB, hmacSecret []byte, clientID, c
 		store.managedClients = oidcConfig.ManagedClients
 		store.bootstrapClientScopes = oidcConfig.BootstrapClientScopes
 		store.customScopeExists = oidcConfig.CustomScopeExists
+		store.bootstrapForceMFA = oidcConfig.BootstrapForceMFA
 	}
 	hmacAccessTokens := compose.NewOAuth2HMACStrategy(config)
 	var accessTokens oauth2.CoreStrategy = hmacAccessTokens
@@ -1018,7 +1020,7 @@ func (s *Server) authorizationRequestView(ctx context.Context, authorizeRequest 
 	if err != nil {
 		return AuthorizationRequest{}, err
 	}
-	forceMFA := s.forceMFA(authorizeRequest.GetClient())
+	forceMFA := s.store.forceMFA(authorizeRequest.GetClient())
 	return AuthorizationRequest{
 		ClientID:           authorizeRequest.GetClient().GetID(),
 		RedirectURI:        authorizeRequest.GetRedirectURI().String(),
@@ -1035,9 +1037,9 @@ func (s *Server) authorizationRequestView(ctx context.Context, authorizeRequest 
 // for this request. A separate managed-client lookup could fail on its own and
 // silently downgrade a force-MFA client to "MFA not required"; the snapshot
 // read already fails the whole request when that client cannot be loaded.
-func (s *Server) forceMFA(client fosite.Client) bool {
-	if client.GetID() == s.store.client.GetID() {
-		return s.oidc != nil && s.oidc.BootstrapForceMFA
+func (s *Store) forceMFA(client fosite.Client) bool {
+	if s.client != nil && client.GetID() == s.client.GetID() {
+		return s.bootstrapForceMFA
 	}
 	if managed, ok := client.(*clients.Client); ok {
 		return managed.ForceMFA
@@ -1326,7 +1328,7 @@ func (s *Server) completeAuthorization(w http.ResponseWriter, r *http.Request, s
 	// The login layer already refuses session reuse without MFA, but a stale or
 	// unavailable policy read must never let a password-only session mint an
 	// authorization code for a force-MFA client revision.
-	if s.forceMFA(authorizeRequest.GetClient()) && authMethod != oidcAuthMethodMFA {
+	if s.store.forceMFA(authorizeRequest.GetClient()) && authMethod != oidcAuthMethodMFA {
 		s.provider.WriteAuthorizeError(r.Context(), w, authorizeRequest, fosite.ErrAccessDenied.WithHint("MFA is required."))
 		return
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/loginpolicy"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 	"github.com/ory/fosite"
@@ -12,7 +13,7 @@ import (
 
 func TestPasswordTransactionBindsAuthenticatedSubject(t *testing.T) {
 	s := oauthTestServer(t, oauthTestDB(t), randomSecret(t)).store
-	ctx, err := s.beginPasswordTX(t.Context(), "authenticated-user", 1, 1)
+	ctx, err := s.beginPasswordTX(t.Context(), "authenticated-user", 1, 1, loginpolicy.AccountStuffingDigest("authenticated-user"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +45,7 @@ func TestPasswordTransactionRejectsChangedAuthentication(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx, err := s.beginPasswordTX(t.Context(), "password-user", 1, 1)
+			ctx, err := s.beginPasswordTX(t.Context(), "password-user", 1, 1, loginpolicy.AccountStuffingDigest("password-user"))
 			if err != nil {
 				t.Fatal(err)
 			}

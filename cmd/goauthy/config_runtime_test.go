@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,11 +25,16 @@ func writeTestFile(t *testing.T, dir, name, content string) string {
 
 func applicationConfigTestEnv(t *testing.T, overrides map[string]string) func(string) string {
 	t.Helper()
+	secretDir := t.TempDir()
 	values := map[string]string{
 		"GOAUTHY_RHIZA_PROFILE": "dev",
 		"GOAUTHY_CLUSTER_ID":    "test-cluster",
 		"GOAUTHY_NODE_ID":       "test-node",
 		"GOAUTHY_DATA_DIR":      filepath.Join(t.TempDir(), "data"),
+		// GA-CONFIG-001: the preflight loads both deployment secrets, so a valid
+		// configuration needs readable files unless a case overrides the path.
+		"GOAUTHY_OAUTH_HMAC_SECRET_FILE":       writeTestFile(t, secretDir, "oauth-hmac", base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32))),
+		"GOAUTHY_BOOTSTRAP_CLIENT_SECRET_FILE": writeTestFile(t, secretDir, "bootstrap-client", strings.Repeat("c", 32)),
 	}
 	for name, value := range overrides {
 		values[name] = value
@@ -157,6 +164,31 @@ func TestRunConfigCommandRejectsInvalidRuntimeConfiguration(t *testing.T) {
 		{name: "backchannel endpoint without http exception", env: map[string]string{"GOAUTHY_BOOTSTRAP_BACKCHANNEL_LOGOUT_URI": "http://logout.example.test/hook"}, wantErr: "invalid bootstrap back-channel logout endpoint"},
 		{name: "fedcm with forced mfa", env: map[string]string{"GOAUTHY_FEDCM_CONFIG_FILE": fedcmFile, "GOAUTHY_BOOTSTRAP_FORCE_MFA": "true", "GOAUTHY_PASSKEY_RP_ID": "id.example.test", "GOAUTHY_PASSKEY_ORIGINS": "https://id.example.test", "GOAUTHY_PASSKEY_KEY_FILE": passkeyKeyFile}, wantErr: "FedCM cannot be enabled while bootstrap forced-MFA is active"},
 		{name: "generated secrets without api key input", env: map[string]string{"GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_FILE": filepath.Join(credentialDir, "generated-secrets.json"), "GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_TTL_SECONDS": "900"}, wantErr: "generated bootstrap requires API-key bootstrap input"},
+		// GA-CONFIG-001-A: the preflight runs the same document validation as
+		// startup, so these conditions no longer pass the configuration check
+		// and fail after Rhiza is opened.
+		{name: "malformed encrypted bootstrap secret", env: map[string]string{"GOAUTHY_API_KEY_BOOTSTRAP_FILE": writeTestFile(t, credentialDir, "bad-encrypted.json", "[{\"name\":\"secret-key\",\"secret\":{\"Encrypted\":\"not-base64!!\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]")}, wantErr: "Encrypted secret must be base64"},
+		{name: "duplicate name behind deferred encrypted entry", env: map[string]string{"GOAUTHY_API_KEY_BOOTSTRAP_FILE": writeTestFile(t, credentialDir, "deferred-duplicate.json", "[{\"name\":\"dup\",\"secret\":{\"Encrypted\":\"Y2lwaGVydGV4dA==\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]},{\"name\":\"dup\",\"secret\":{\"Encrypted\":\"Y2lwaGVydGV4dA==\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]")}, wantErr: "duplicate names"},
+		{name: "generate mode without generated secret export", env: map[string]string{"GOAUTHY_API_KEY_BOOTSTRAP_FILE": writeTestFile(t, credentialDir, "generate.json", "[{\"name\":\"generated-key\",\"secret\":\"generate\",\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]")}, wantErr: "generated-secret export"},
+		// GA-CONFIG-001-B: the runtime statement budget is a preflight condition
+		// too, so an oversized batch is rejected before the generated-secret
+		// artifact can be written.
+		{name: "bootstrap statement budget", env: map[string]string{"GOAUTHY_API_KEY_BOOTSTRAP_FILE": writeTestFile(t, credentialDir, "over-budget.json", bootstrapOverBudgetFile(t))}, wantErr: "too many entries"},
+		// GA-CONFIG-001-C: the generated-secret export selects the shared path,
+		// which requires a Generate entry in the selected document.
+		{name: "generated secrets with plain-only bootstrap input", env: map[string]string{
+			"GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_FILE":        filepath.Join(credentialDir, "generated-secrets.json"),
+			"GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_TTL_SECONDS": "900",
+			"GOAUTHY_API_KEY_BOOTSTRAP_FILE":                  writeTestFile(t, credentialDir, "plain-only-shared.json", bootstrapPlainOnlyFile(t)),
+		}, wantErr: "Generate API key"},
+		// GA-CONFIG-001-B: the shared command adds its own two statements, so the
+		// preflight budget covers them instead of accepting a batch the shared
+		// path rejects after Rhiza is open.
+		{name: "shared bootstrap statement budget", env: map[string]string{
+			"GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_FILE":        filepath.Join(credentialDir, "generated-secrets.json"),
+			"GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_TTL_SECONDS": "900",
+			"GOAUTHY_API_KEY_BOOTSTRAP_FILE":                  writeTestFile(t, credentialDir, "shared-over-budget.json", bootstrapSharedOverBudgetFile(t)),
+		}, wantErr: "too many entries"},
 		{name: "bootstrap redirect uri", env: map[string]string{"GOAUTHY_BOOTSTRAP_REDIRECT_URI": "not-a-url"}, wantErr: "invalid bootstrap OAuth redirect URI"},
 		{name: "bootstrap redirect uri without https", env: map[string]string{"GOAUTHY_BOOTSTRAP_REDIRECT_URI": "http://id.example.test/callback"}, wantErr: "invalid bootstrap OAuth redirect URI"},
 	} {
@@ -178,6 +210,36 @@ func TestRunConfigCommandRejectsInvalidRuntimeConfiguration(t *testing.T) {
 			}
 		})
 	}
+}
+
+// bootstrapOverBudgetFile builds a bootstrap document with one more key than
+// the runtime statement budget allows: two statements per key plus one per
+// access right against maxBootstrapStatements.
+func bootstrapOverBudgetFile(t *testing.T) string {
+	t.Helper()
+	entries := make([]string, 0, 22)
+	for i := 0; i < 22; i++ {
+		entries = append(entries, fmt.Sprintf("{\"name\":\"key-%02d\",\"secret\":{\"Plain\":\"%s\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}", i, strings.Repeat("a", 64)))
+	}
+	return "[" + strings.Join(entries, ",") + "]"
+}
+
+// bootstrapPlainOnlyFile builds a valid document with no Generate entry.
+func bootstrapPlainOnlyFile(t *testing.T) string {
+	t.Helper()
+	return fmt.Sprintf("[{\"name\":\"plain-key\",\"secret\":{\"Plain\":\"%s\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]", strings.Repeat("a", 64))
+}
+
+// bootstrapSharedOverBudgetFile builds a generated-secret document whose key
+// statements fit the ordinary budget but not the shared command, which adds the
+// generated-secret record and the retirement fence.
+func bootstrapSharedOverBudgetFile(t *testing.T) string {
+	t.Helper()
+	entries := make([]string, 0, 21)
+	for i := 0; i < 21; i++ {
+		entries = append(entries, fmt.Sprintf("{\"name\":\"gen-%02d\",\"secret\":\"generate\",\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}", i))
+	}
+	return "[" + strings.Join(entries, ",") + "]"
 }
 
 // GA-CONFIG-001: configured files are content-validated, and a valid runtime
@@ -238,5 +300,62 @@ func TestRunConfigCommandValidatesRuntimeFiles(t *testing.T) {
 				t.Fatalf("error = %v want %q", err, test.wantErr)
 			}
 		})
+	}
+}
+
+// GA-CONFIG-001: the preflight loads both deployment secrets, so a missing or
+// undecodable file at its default path is rejected before the configuration
+// command can touch storage. Startup loads these in loadApplicationConfig, so
+// the check no longer accepts a configuration that would fail after the
+// storage migration and bootstrap mutations commit.
+func TestRunConfigCommandRejectsInvalidDeploymentSecrets(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	dataDir := filepath.Join(dir, "data")
+	env := func(name string) string {
+		switch name {
+		case "GOAUTHY_RHIZA_PROFILE":
+			return "dev"
+		case "GOAUTHY_CLUSTER_ID":
+			return "test-cluster"
+		case "GOAUTHY_NODE_ID":
+			return "test-node"
+		case "GOAUTHY_DATA_DIR":
+			return dataDir
+		default:
+			return ""
+		}
+	}
+
+	assertRejected := func(t *testing.T, wantErr string) {
+		t.Helper()
+		var out bytes.Buffer
+		err := runConfigCommand([]string{"check"}, env, &out)
+		if err == nil || !strings.Contains(err.Error(), wantErr) {
+			t.Fatalf("error = %v want %q", err, wantErr)
+		}
+		if out.Len() != 0 {
+			t.Fatalf("rejected configuration wrote output = %q", out.String())
+		}
+		if _, statErr := os.Stat(dataDir); statErr == nil {
+			t.Fatalf("configuration rejection opened storage at %s", dataDir)
+		}
+	}
+
+	// Empty env values fall back to ./secrets/*, which do not exist yet.
+	assertRejected(t, "OAuth HMAC secret")
+
+	// A valid HMAC secret still leaves the bootstrap client secret validated.
+	if err := os.MkdirAll(filepath.Join(dir, "secrets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dir, "secrets"), "oauth-hmac", base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
+	assertRejected(t, "bootstrap OAuth client secret")
+
+	// Both secrets present makes the configuration valid again.
+	writeTestFile(t, filepath.Join(dir, "secrets"), "bootstrap-client", strings.Repeat("c", 32))
+	var out bytes.Buffer
+	if err := runConfigCommand([]string{"check"}, env, &out); err != nil {
+		t.Fatalf("valid deployment secrets rejected: %v", err)
 	}
 }

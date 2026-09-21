@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/dcr"
+	"github.com/mrchypark/goauthy/internal/loginpolicy"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 	"github.com/ory/fosite"
@@ -196,7 +197,7 @@ func TestDynamicClientLastUsedPasswordCredentialFence(t *testing.T) {
 	}
 	for i, at := range []int64{2000, 1000, 3000} {
 		s.now = func() time.Time { return time.UnixMilli(at) }
-		ctx, err := s.beginPasswordTX(t.Context(), "password-user", 1, 1)
+		ctx, err := s.beginPasswordTX(t.Context(), "password-user", 1, 1, loginpolicy.AccountStuffingDigest("password-user"))
 		if err != nil {
 			t.Fatal(err)
 		}

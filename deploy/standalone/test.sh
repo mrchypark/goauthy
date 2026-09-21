@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-for tool in kustomize yq rg awk; do
+for tool in kustomize yq awk; do
 	command -v "$tool" >/dev/null 2>&1 || {
 		echo "required tool not found: $tool" >&2
 		exit 1
@@ -17,15 +17,18 @@ kustomize build "$root/deploy/standalone" >"$render"
 kustomize build "$root/deploy/k8s" >"$ha_render"
 
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.replicas' "$render")" = 1
-test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | (.spec.volumeClaimTemplates // [] | length)' "$render")" = 0
+test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | (.spec.volumeClaimTemplates | length)' "$render")" = 0
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.volumes[] | select(.name == "data") | .emptyDir.sizeLimit' "$render")" = 1Gi
-test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | (.spec.template.spec.initContainers // [] | length)' "$render")" = 1
+test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | (.spec.template.spec.initContainers | length)' "$render")" = 1
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | (.spec.template.spec.containers[0].ports | length)' "$render")" = 1
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.containers[0].env | map(select(.name == "GOAUTHY_RHIZA_PROFILE") | .value) | .[]' "$render")" = standalone
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.containers[0].ports[0].name' "$render")" = http
+# minio-ingress admits TCP/9000 only from pods carrying
+# app.kubernetes.io/component: object-store-client, so the pod template must keep it.
+test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.metadata.labels."app.kubernetes.io/component"' "$render")" = object-store-client
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .metadata.name' "$render" | awk 'END { print NR }')" = 1
 test "$(yq -r 'select(.kind == "PodDisruptionBudget" and .metadata.name == "goauthy") | .spec.minAvailable' "$render")" = 1
-if rg -n 'GOAUTHY_RHIZA_(PEER_ADDR|MEMBERS|ADMIN_TOKEN)|name: peer|targetPort: peer' "$render"; then
+if grep -E -n 'GOAUTHY_RHIZA_(PEER_ADDR|MEMBERS|ADMIN_TOKEN)|name: peer|targetPort: peer' "$render"; then
 	echo "standalone render contains forbidden peer settings" >&2
 	exit 1
 fi

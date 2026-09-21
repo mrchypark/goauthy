@@ -79,7 +79,7 @@ type Client struct {
 	Generation           string   `json:"-"`
 	SecretHash           []byte   `json:"-"`
 	secretEnvelope       []byte
-	ForceMFA             bool     `json:"force_mfa"`
+	ForceMFA             bool `json:"force_mfa"`
 }
 type Store struct {
 	db       *rhiza.DB
@@ -541,6 +541,11 @@ func validateNew(in NewRequest, reserved map[string]bool) error {
 	if err := validatePolicy(in.Confidential, in.RedirectURIs, grants, scopes, defaults); err != nil {
 		return err
 	}
+	// The password grant cannot carry a second factor, so admitting it on a
+	// force_mfa client would make the MFA requirement unenforceable (GA-OAUTH-005).
+	if in.ForceMFA && contains(grants, "password") {
+		return ErrInvalid
+	}
 	if err := validateAudiences(in.Audiences); err != nil {
 		return err
 	}
@@ -558,6 +563,9 @@ func validateUpdate(in UpdateRequest) error {
 	}
 	if err := validatePolicy(in.Confidential, in.RedirectURIs, in.GrantTypes, in.Scopes, in.DefaultScopes); err != nil {
 		return err
+	}
+	if in.ForceMFA && contains(in.GrantTypes, "password") {
+		return ErrInvalid
 	}
 	if in.Audiences != nil {
 		if err := validateAudiences(in.Audiences); err != nil {

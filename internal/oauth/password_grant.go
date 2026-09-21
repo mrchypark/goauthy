@@ -9,6 +9,7 @@ import (
 
 	"github.com/mrchypark/goauthy/internal/clients"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/loginpolicy"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/handler/oauth2"
 )
@@ -16,17 +17,27 @@ import (
 const passwordSnapshotExtra = "goauthy_password_snapshot"
 const passwordAuthTimeExtra = "goauthy_password_auth_time"
 
+// Fosite access-denied errors compare equal by field and code alone, and its
+// password handler reports every non-ErrNotFound authentication failure as a
+// server error. These sentinels keep the two policy denials distinguishable
+// through that wrapping so each keeps its own public error.
+var (
+	errAccountLocked         = errors.New("account locked")
+	errPasswordResetRequired = errors.New("password reset required")
+)
+
 type passwordAuthenticationKey struct{}
 
 type passwordGrantHandler struct {
 	*oauth2.ResourceOwnerPasswordCredentialsGrantHandler
 	*Store
 	users             *identity.Store
+	locks             *loginpolicy.Store
 	onPasswordExpired func(context.Context, string) error
 }
 
 func newPasswordGrantHandler(store *Store, users *identity.Store, strategy oauth2.CoreStrategy, config *fosite.Config) *passwordGrantHandler {
-	h := &passwordGrantHandler{Store: store, users: users}
+	h := &passwordGrantHandler{Store: store, users: users, locks: loginpolicy.NewStore(store.db)}
 	h.ResourceOwnerPasswordCredentialsGrantHandler = &oauth2.ResourceOwnerPasswordCredentialsGrantHandler{
 		HandleHelper: &oauth2.HandleHelper{AccessTokenStrategy: strategy, AccessTokenStorage: store, Config: config},
 		ResourceOwnerPasswordCredentialsGrantStorage: h, RefreshTokenStrategy: strategy, Config: config,
@@ -36,15 +47,24 @@ func newPasswordGrantHandler(store *Store, users *identity.Store, strategy oauth
 
 func (h *passwordGrantHandler) Authenticate(ctx context.Context, username, password string) (string, error) {
 	snapshot, ok := ctx.Value(passwordAuthenticationKey{}).(*identity.Authentication)
-	if !ok || h.users == nil {
+	if !ok || h.users == nil || h.locks == nil {
 		return "", fosite.ErrServerError
+	}
+	// The browser path refuses an actively locked account before checking
+	// credentials; this grant must not be a way around that lock (GA-OAUTH-006).
+	locked, _, err := h.locks.CheckAccountLock(ctx, loginpolicy.AccountStuffingDigest(username), time.Now().UTC())
+	if err != nil {
+		return "", fosite.ErrServerError
+	}
+	if locked {
+		return "", fosite.ErrAccessDenied.WithHint("Account locked.").WithWrap(errAccountLocked)
 	}
 	auth, err := h.users.AuthenticatePasswordGrant(ctx, username, []byte(password), h.onPasswordExpired)
 	if errors.Is(err, identity.ErrPasswordExpired) {
 		if auth.Subject == "" {
 			return "", fosite.ErrServerError
 		}
-		return "", fosite.ErrAccessDenied.WithHint("Password reset required.")
+		return "", fosite.ErrAccessDenied.WithHint("Password reset required.").WithWrap(errPasswordResetRequired)
 	}
 	if errors.Is(err, identity.ErrInvalidCredentials) {
 		return "", fosite.ErrNotFound
@@ -61,6 +81,11 @@ func (h *passwordGrantHandler) HandleTokenEndpointRequest(ctx context.Context, r
 		return fosite.ErrUnknownRequest
 	}
 	if !request.GetClient().GetGrantTypes().Has("password") {
+		return fosite.ErrUnauthorizedClient
+	}
+	// Admission refuses force_mfa together with the password grant; this keeps
+	// rows written before that rule from issuing password-only tokens.
+	if h.forceMFA(request.GetClient()) {
 		return fosite.ErrUnauthorizedClient
 	}
 	form := request.GetRequestForm()
@@ -88,7 +113,12 @@ func (h *passwordGrantHandler) HandleTokenEndpointRequest(ctx context.Context, r
 	snapshot := identity.Authentication{}
 	ctx = context.WithValue(ctx, passwordAuthenticationKey{}, &snapshot)
 	if err := h.ResourceOwnerPasswordCredentialsGrantHandler.HandleTokenEndpointRequest(ctx, request); err != nil {
-		if errors.Is(err, fosite.ErrAccessDenied) {
+		// Restore the policy denials the grant handler collapsed into a server
+		// error; a storage failure keeps that server error.
+		if errors.Is(err, errAccountLocked) {
+			return fosite.ErrAccessDenied.WithHint("Account locked.")
+		}
+		if errors.Is(err, errPasswordResetRequired) {
 			return fosite.ErrAccessDenied.WithHint("Password reset required.")
 		}
 		return err
@@ -124,7 +154,10 @@ func (h *passwordGrantHandler) PopulateTokenEndpointResponse(ctx context.Context
 	if err := h.users.RecordPasswordLogin(ctx, snapshot); err != nil {
 		return err
 	}
-	ctx, err := h.beginPasswordTX(ctx, snapshot.Subject, snapshot.PasswordGeneration, snapshot.AuthenticationGeneration)
+	// The lock row is keyed by the submitted login identifier: that is what
+	// admission checked and what the browser login path records failures against.
+	accountHash := loginpolicy.AccountStuffingDigest(request.GetRequestForm().Get("username"))
+	ctx, err := h.beginPasswordTX(ctx, snapshot.Subject, snapshot.PasswordGeneration, snapshot.AuthenticationGeneration, accountHash)
 	if err != nil {
 		return err
 	}
