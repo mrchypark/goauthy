@@ -22,7 +22,7 @@ kustomize build "$root/deploy/ternal-no-pvc/gcs-ha" >"$gcs_ha_render"
 statefulset='select(.kind == "StatefulSet" and .metadata.name == "ternal-goauthy")'
 test "$(yq -r "$statefulset | .metadata.namespace" "$render")" = ternal-auth
 test "$(yq -r "$statefulset | .spec.replicas" "$render")" = 3
-test "$(yq -r "$statefulset | (.spec.volumeClaimTemplates // [] | length)" "$render")" = 0
+test "$(yq -r "$statefulset | (.spec.volumeClaimTemplates | length)" "$render")" = 0
 test "$(yq -r "$statefulset | .spec.template.spec.volumes[] | select(.name == \"data\") | has(\"emptyDir\")" "$render")" = true
 test "$(yq -r "$statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_PROFILE\") | .value" "$render")" = cluster
 test "$(yq -r "$statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE\") | .value" "$render")" = true
@@ -50,7 +50,7 @@ test "$(yq -r 'select(.kind == "StatefulSet") | .metadata.namespace' "$render")"
 
 standalone_statefulset='select(.kind == "StatefulSet" and .metadata.name == "ternal-goauthy")'
 test "$(yq -r "$standalone_statefulset | .spec.replicas" "$standalone_render")" = 1
-test "$(yq -r "$standalone_statefulset | (.spec.volumeClaimTemplates // [] | length)" "$standalone_render")" = 0
+test "$(yq -r "$standalone_statefulset | (.spec.volumeClaimTemplates | length)" "$standalone_render")" = 0
 test "$(yq -r "$standalone_statefulset | .spec.template.spec.volumes[] | select(.name == \"data\") | has(\"emptyDir\")" "$standalone_render")" = true
 test "$(yq -r "$standalone_statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_PROFILE\") | .value" "$standalone_render")" = standalone
 test "$(yq -r "$standalone_statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE\") | .value" "$standalone_render")" = true
@@ -72,7 +72,7 @@ fi
 
 gcs_statefulset='select(.kind == "StatefulSet" and .metadata.name == "ternal-goauthy")'
 test "$(yq -r "$gcs_statefulset | .spec.replicas" "$gcs_standalone_render")" = 1
-test "$(yq -r "$gcs_statefulset | (.spec.volumeClaimTemplates // [] | length)" "$gcs_standalone_render")" = 0
+test "$(yq -r "$gcs_statefulset | (.spec.volumeClaimTemplates | length)" "$gcs_standalone_render")" = 0
 test "$(yq -r "$gcs_statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_PROFILE\") | .value" "$gcs_standalone_render")" = standalone
 test "$(yq -r "$gcs_statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE\") | .value" "$gcs_standalone_render")" = true
 test "$(yq -r "$gcs_statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER\") | .value" "$gcs_standalone_render")" = gcs
@@ -90,7 +90,7 @@ fi
 
 gcs_ha_statefulset='select(.kind == "StatefulSet" and .metadata.name == "ternal-goauthy")'
 test "$(yq -r "$gcs_ha_statefulset | .spec.replicas" "$gcs_ha_render")" = 3
-test "$(yq -r "$gcs_ha_statefulset | (.spec.volumeClaimTemplates // [] | length)" "$gcs_ha_render")" = 0
+test "$(yq -r "$gcs_ha_statefulset | (.spec.volumeClaimTemplates | length)" "$gcs_ha_render")" = 0
 test "$(yq -r "$gcs_ha_statefulset | .spec.template.spec.volumes[] | select(.name == \"data\") | has(\"emptyDir\")" "$gcs_ha_render")" = true
 test "$(yq -r "$gcs_ha_statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_PROFILE\") | .value" "$gcs_ha_render")" = cluster
 test "$(yq -r "$gcs_ha_statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE\") | .value" "$gcs_ha_render")" = true

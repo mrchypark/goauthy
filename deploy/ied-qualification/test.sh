@@ -75,7 +75,7 @@ ha3='select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-0917")'
 
 test "$(yq -r "$ha3 | .metadata.namespace" "$render")" = ternal-auth
 test "$(yq -r "$ha3 | .spec.replicas" "$render")" = 3
-test "$(yq -r "$ha3 | (.spec.volumeClaimTemplates // [] | length)" "$render")" = 0
+test "$(yq -r "$ha3 | (.spec.volumeClaimTemplates | length)" "$render")" = 0
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-0917") | .spec.template.spec.volumes[] | select(.name == "data") | has("emptyDir")' "$render")" = true
 test "$(yq -r "$ha3 | .spec.template.spec.serviceAccountName" "$render")" = ternal-goauthy
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-0917") | .spec.template.spec.containers[0].env[] | select(.name == "GOAUTHY_RHIZA_PROFILE") | .value' "$render")" = cluster
@@ -118,7 +118,7 @@ s1='select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-s1-0917")'
 
 test "$(yq -r "$s1 | .metadata.namespace" "$render")" = ternal-auth
 test "$(yq -r "$s1 | .spec.replicas" "$render")" = 1
-test "$(yq -r "$s1 | (.spec.volumeClaimTemplates // [] | length)" "$render")" = 0
+test "$(yq -r "$s1 | (.spec.volumeClaimTemplates | length)" "$render")" = 0
 test "$(yq -r "$s1 | .spec.template.spec.serviceAccountName" "$render")" = ternal-goauthy
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-s1-0917") | .spec.template.spec.containers[0].env[] | select(.name == "GOAUTHY_RHIZA_PROFILE") | .value' "$render")" = standalone
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-s1-0917") | .spec.template.spec.containers[0].env[] | select(.name == "GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER") | .value' "$render")" = gcs

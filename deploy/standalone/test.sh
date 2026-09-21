@@ -17,9 +17,9 @@ kustomize build "$root/deploy/standalone" >"$render"
 kustomize build "$root/deploy/k8s" >"$ha_render"
 
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.replicas' "$render")" = 1
-test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | (.spec.volumeClaimTemplates // [] | length)' "$render")" = 0
+test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | (.spec.volumeClaimTemplates | length)' "$render")" = 0
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.volumes[] | select(.name == "data") | .emptyDir.sizeLimit' "$render")" = 1Gi
-test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | (.spec.template.spec.initContainers // [] | length)' "$render")" = 1
+test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | (.spec.template.spec.initContainers | length)' "$render")" = 1
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | (.spec.template.spec.containers[0].ports | length)' "$render")" = 1
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.containers[0].env | map(select(.name == "GOAUTHY_RHIZA_PROFILE") | .value) | .[]' "$render")" = standalone
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.containers[0].ports[0].name' "$render")" = http
