@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -163,6 +164,16 @@ func TestRunConfigCommandRejectsInvalidRuntimeConfiguration(t *testing.T) {
 		{name: "backchannel endpoint without http exception", env: map[string]string{"GOAUTHY_BOOTSTRAP_BACKCHANNEL_LOGOUT_URI": "http://logout.example.test/hook"}, wantErr: "invalid bootstrap back-channel logout endpoint"},
 		{name: "fedcm with forced mfa", env: map[string]string{"GOAUTHY_FEDCM_CONFIG_FILE": fedcmFile, "GOAUTHY_BOOTSTRAP_FORCE_MFA": "true", "GOAUTHY_PASSKEY_RP_ID": "id.example.test", "GOAUTHY_PASSKEY_ORIGINS": "https://id.example.test", "GOAUTHY_PASSKEY_KEY_FILE": passkeyKeyFile}, wantErr: "FedCM cannot be enabled while bootstrap forced-MFA is active"},
 		{name: "generated secrets without api key input", env: map[string]string{"GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_FILE": filepath.Join(credentialDir, "generated-secrets.json"), "GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_TTL_SECONDS": "900"}, wantErr: "generated bootstrap requires API-key bootstrap input"},
+		// GA-CONFIG-001-A: the preflight runs the same document validation as
+		// startup, so these conditions no longer pass the configuration check
+		// and fail after Rhiza is opened.
+		{name: "malformed encrypted bootstrap secret", env: map[string]string{"GOAUTHY_API_KEY_BOOTSTRAP_FILE": writeTestFile(t, credentialDir, "bad-encrypted.json", "[{\"name\":\"secret-key\",\"secret\":{\"Encrypted\":\"not-base64!!\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]")}, wantErr: "Encrypted secret must be base64"},
+		{name: "duplicate name behind deferred encrypted entry", env: map[string]string{"GOAUTHY_API_KEY_BOOTSTRAP_FILE": writeTestFile(t, credentialDir, "deferred-duplicate.json", "[{\"name\":\"dup\",\"secret\":{\"Encrypted\":\"Y2lwaGVydGV4dA==\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]},{\"name\":\"dup\",\"secret\":{\"Encrypted\":\"Y2lwaGVydGV4dA==\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]")}, wantErr: "duplicate names"},
+		{name: "generate mode without generated secret export", env: map[string]string{"GOAUTHY_API_KEY_BOOTSTRAP_FILE": writeTestFile(t, credentialDir, "generate.json", "[{\"name\":\"generated-key\",\"secret\":\"generate\",\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]")}, wantErr: "generated-secret export"},
+		// GA-CONFIG-001-B: the runtime statement budget is a preflight condition
+		// too, so an oversized batch is rejected before the generated-secret
+		// artifact can be written.
+		{name: "bootstrap statement budget", env: map[string]string{"GOAUTHY_API_KEY_BOOTSTRAP_FILE": writeTestFile(t, credentialDir, "over-budget.json", bootstrapOverBudgetFile(t))}, wantErr: "too many entries"},
 		{name: "bootstrap redirect uri", env: map[string]string{"GOAUTHY_BOOTSTRAP_REDIRECT_URI": "not-a-url"}, wantErr: "invalid bootstrap OAuth redirect URI"},
 		{name: "bootstrap redirect uri without https", env: map[string]string{"GOAUTHY_BOOTSTRAP_REDIRECT_URI": "http://id.example.test/callback"}, wantErr: "invalid bootstrap OAuth redirect URI"},
 	} {
@@ -184,6 +195,18 @@ func TestRunConfigCommandRejectsInvalidRuntimeConfiguration(t *testing.T) {
 			}
 		})
 	}
+}
+
+// bootstrapOverBudgetFile builds a bootstrap document with one more key than
+// the runtime statement budget allows: two statements per key plus one per
+// access right against maxBootstrapStatements.
+func bootstrapOverBudgetFile(t *testing.T) string {
+	t.Helper()
+	entries := make([]string, 0, 22)
+	for i := 0; i < 22; i++ {
+		entries = append(entries, fmt.Sprintf("{\"name\":\"key-%02d\",\"secret\":{\"Plain\":\"%s\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}", i, strings.Repeat("a", 64)))
+	}
+	return "[" + strings.Join(entries, ",") + "]"
 }
 
 // GA-CONFIG-001: configured files are content-validated, and a valid runtime

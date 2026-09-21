@@ -95,7 +95,7 @@ func (s *Store) bootstrapOptions(ctx context.Context, path string, decrypt func(
 		return nil
 	}
 
-	keys, err := parseBootstrapKeysWithDecrypt(content, decrypt, allowGenerate)
+	keys, err := parseBootstrapKeysWithDecrypt(content, decrypt, allowGenerate, false)
 	if err != nil {
 		return err
 	}
@@ -227,13 +227,16 @@ func readBootstrapFile(path string) ([]byte, error) {
 // ValidateBootstrapFile checks the structure and content of a bootstrap
 // API-key file before the secret store is opened. It verifies that the file
 // exists, is readable, contains valid JSON with no duplicate field names or
-// key names, and that every entry has a structurally valid plain secret.
+// key names, that every entry is structurally valid, and that the file stays
+// inside the statement budget the store enforces after Rhiza is open.
 //
-// Encrypted and generate-mode entries are accepted without validation because
-// they require resources (master key, generated artifact) that only exist
-// after the store is opened. Passing decrypt=nil and allowGenerate=false
-// causes the parser to surface ErrUnsupportedSecret for those modes; this
-// function treats that error as "out of scope" and returns nil.
+// The preflight cannot decrypt Encrypted entries because the master key is
+// loaded during startup, so those entries are recorded as deferred and the
+// parser keeps validating the rest of the document: duplicate names, later
+// entries and the statement budget are all still checked. Generate entries are
+// validated against allowGenerate, which the caller sets from the same
+// generated-secret configuration startup uses, so a generate entry without
+// that configuration is rejected here instead of after Rhiza is open.
 //
 // The function is side-effect-free: it does not touch the database, Rhiza,
 // or global state and does not create the key directory or write anything.
@@ -247,22 +250,30 @@ func ValidateBootstrapFile(path string, decrypt func([]byte) ([]byte, error), al
 	if len(bytes.TrimSpace(content)) == 0 {
 		return nil
 	}
-	keys, err := parseBootstrapKeysWithDecrypt(content, decrypt, allowGenerate)
+	keys, err := parseBootstrapKeysWithDecrypt(content, decrypt, allowGenerate, true)
 	if err != nil {
-		if errors.Is(err, ErrUnsupportedSecret) {
-			return nil
-		}
 		return err
 	}
-	wipeBootstrapKeys(keys)
+	defer wipeBootstrapKeys(keys)
+	// GA-CONFIG-001: the store rejects an oversized statement batch only after
+	// Rhiza is open and the generated-secret artifact may already be written, so
+	// the preflight applies the same helper and limit.
+	if statements, _ := bootstrapStatements(keys, 0); len(statements) > maxBootstrapStatements {
+		return errors.New("API-key bootstrap contains too many entries")
+	}
 	return nil
 }
 
 func parseBootstrapKeys(content []byte) ([]bootstrapKey, error) {
-	return parseBootstrapKeysWithDecrypt(content, nil, false)
+	return parseBootstrapKeysWithDecrypt(content, nil, false, false)
 }
 
-func parseBootstrapKeysWithDecrypt(content []byte, decrypt func([]byte) ([]byte, error), allowGenerate bool) ([]bootstrapKey, error) {
+// parseBootstrapKeysWithDecrypt parses a bootstrap document. preflight marks
+// the configuration preflight, which runs before the master key exists: it
+// defers Encrypted entries instead of rejecting them and turns the
+// unsupported-mode sentinels into hard errors, because no later stage of that
+// path re-checks them.
+func parseBootstrapKeysWithDecrypt(content []byte, decrypt func([]byte) ([]byte, error), allowGenerate, preflight bool) ([]bootstrapKey, error) {
 	if err := rejectDuplicateFields(content); err != nil {
 		return nil, errors.New("invalid API-key bootstrap JSON")
 	}
@@ -270,10 +281,10 @@ func parseBootstrapKeysWithDecrypt(content []byte, decrypt func([]byte) ([]byte,
 	decoder.DisallowUnknownFields()
 	var raw []bootstrapJSONKey
 	if err := decoder.Decode(&raw); err != nil {
-		if errors.Is(err, ErrUnsupportedSecret) {
-			return nil, err
-		}
-		return nil, errors.New("API-key bootstrap must be a JSON array")
+		// GA-CONFIG-001: keep the decoder's reason (unknown field, malformed
+		// secret payload) so a rejected file names the actual defect instead of
+		// reporting every failure as a non-array document.
+		return nil, fmt.Errorf("API-key bootstrap must be a JSON array: %w", err)
 	}
 	if raw == nil {
 		return nil, errors.New("API-key bootstrap must be a JSON array")
@@ -306,6 +317,9 @@ func parseBootstrapKeysWithDecrypt(content []byte, decrypt func([]byte) ([]byte,
 		secret := append([]byte(nil), entry.Secret.plain...)
 		if entry.Secret.generate {
 			if !allowGenerate {
+				if preflight {
+					return nil, errors.New("API-key bootstrap generate mode requires a configured generated-secret export")
+				}
 				return nil, fmt.Errorf("%w: generate", ErrUnsupportedSecret)
 			}
 			var err error
@@ -316,17 +330,22 @@ func parseBootstrapKeysWithDecrypt(content []byte, decrypt func([]byte) ([]byte,
 		}
 		if len(secret) == 0 && len(entry.Secret.encrypted) != 0 {
 			if decrypt == nil {
-				return nil, fmt.Errorf("%w: Encrypted", ErrUnsupportedSecret)
-			}
-			var err error
-			clear(secret)
-			secret, err = decrypt(entry.Secret.encrypted)
-			if err != nil {
-				return nil, fmt.Errorf("decrypt API-key bootstrap secret: %w", err)
-			}
-			if len(secret) != secretLength || !alphaNum(string(secret)) {
+				if !preflight {
+					return nil, fmt.Errorf("%w: Encrypted", ErrUnsupportedSecret)
+				}
+				// GA-CONFIG-001: no master key yet. Keep the entry deferred and
+				// keep validating the document; startup decrypts it later.
+			} else {
+				var err error
 				clear(secret)
-				return nil, errors.New("API-key bootstrap Encrypted secret must decrypt to exactly 64 ASCII alphanumeric characters")
+				secret, err = decrypt(entry.Secret.encrypted)
+				if err != nil {
+					return nil, fmt.Errorf("decrypt API-key bootstrap secret: %w", err)
+				}
+				if len(secret) != secretLength || !alphaNum(string(secret)) {
+					clear(secret)
+					return nil, errors.New("API-key bootstrap Encrypted secret must decrypt to exactly 64 ASCII alphanumeric characters")
+				}
 			}
 		}
 		keys = append(keys, bootstrapKey{
@@ -487,7 +506,10 @@ func (s *bootstrapSecret) UnmarshalJSON(data []byte) error {
 	}
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil || len(decoded) == 0 {
-		return fmt.Errorf("%w: Encrypted", ErrUnsupportedSecret)
+		// GA-CONFIG-001: a malformed payload is not the deferred Encrypted mode.
+		// Reporting the unsupported-mode sentinel here would let the preflight
+		// accept a file that the real bootstrap path rejects.
+		return errors.New("API-key bootstrap Encrypted secret must be base64")
 	}
 	s.encrypted = decoded
 	return nil

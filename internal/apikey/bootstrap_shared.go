@@ -260,7 +260,7 @@ func (s *Store) parseSharedBootstrapKeys(content []byte, keyDir string) ([]boots
 		return nil, err
 	}
 	defer wipeBootstrapMasterKeys(master)
-	return parseBootstrapKeysWithDecrypt(content, func(envelope []byte) ([]byte, error) { return decryptCryptrValue(envelope, master) }, true)
+	return parseBootstrapKeysWithDecrypt(content, func(envelope []byte) ([]byte, error) { return decryptCryptrValue(envelope, master) }, true, false)
 }
 
 func (s *Store) sharedGeneratedBootstrapRow(ctx context.Context) (sharedGeneratedBootstrapRow, bool, error) {

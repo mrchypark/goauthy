@@ -175,9 +175,15 @@ func q(r *http.Request) (int, string, string, error) {
 }
 func (h *Handler) namespaces(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
-		n, _, cursor, e := q(r)
+		n, s, cursor, e := q(r)
 		if e != nil {
 			errw(w, e)
+			return
+		}
+		// GA80-KV-001: this listing has no search filter, so a nonempty term is
+		// rejected instead of answered with an unfiltered page.
+		if s != "" {
+			errw(w, ErrBadRequest)
 			return
 		}
 		if !h.adminOK(w, clean(r), false) {
@@ -242,9 +248,15 @@ func (h *Handler) namespace(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) accesses(w http.ResponseWriter, r *http.Request) {
 	n := r.PathValue("ns")
 	if r.Method == "GET" {
-		n2, _, cursor, e := q(r)
+		n2, s, cursor, e := q(r)
 		if e != nil {
 			errw(w, e)
+			return
+		}
+		// GA80-KV-001: this listing has no search filter, so a nonempty term is
+		// rejected instead of answered with an unfiltered page.
+		if s != "" {
+			errw(w, ErrBadRequest)
 			return
 		}
 		// The admin gate rejects any query string, so the validated listing

@@ -36,7 +36,8 @@ func TestParseBootstrapStrictAndPolicy(t *testing.T) {
 		{"api keys policy", strings.Replace(valid, `"Clients"`, `"ApiKeys"`, 1), errors.New("invalid")},
 		{"sso policy", strings.Replace(valid, `"Clients"`, `"AuthProviders"`, 1), errors.New("invalid")},
 		{"generate", strings.Replace(valid, fmt.Sprintf(`{"Plain":%q}`, bootstrapTestSecret), `"generate"`, 1), ErrUnsupportedSecret},
-		{"encrypted", strings.Replace(valid, fmt.Sprintf(`{"Plain":%q}`, bootstrapTestSecret), `{"Encrypted":"ciphertext"}`, 1), ErrUnsupportedSecret},
+		{"encrypted", strings.Replace(valid, fmt.Sprintf(`{"Plain":%q}`, bootstrapTestSecret), `{"Encrypted":"Y2lwaGVydGV4dA=="}`, 1), ErrUnsupportedSecret},
+		{"encrypted malformed", strings.Replace(valid, fmt.Sprintf(`{"Plain":%q}`, bootstrapTestSecret), `{"Encrypted":"not-base64!!"}`, 1), errors.New("invalid")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -345,10 +346,43 @@ func TestValidateBootstrapFileRejectsDuplicateNames(t *testing.T) {
 
 func TestValidateBootstrapFileAcceptsEncryptedMode(t *testing.T) {
 	dir := t.TempDir()
-	enc := "[{\"name\":\"secret-key\",\"secret\":{\"Encrypted\":\"ciphertext\"}}]"
+	enc := "[{\"name\":\"secret-key\",\"secret\":{\"Encrypted\":\"Y2lwaGVydGV4dA==\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]"
 	path := writeBootstrapTestFile(t, dir, "encrypted.json", enc)
 	if err := ValidateBootstrapFile(path, nil, false); err != nil {
 		t.Fatalf("encrypted-mode file rejected: %v", err)
+	}
+}
+
+// GA-CONFIG-001: the preflight has no master key, so an Encrypted entry stays
+// deferred and the parser must keep validating the rest of the document. A
+// duplicate name behind a deferred entry used to be skipped entirely.
+func TestValidateBootstrapFileValidatesEntriesAfterDeferredEncrypted(t *testing.T) {
+	dir := t.TempDir()
+	entry := "{\"name\":\"dup\",\"secret\":{\"Encrypted\":\"Y2lwaGVydGV4dA==\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}"
+	path := writeBootstrapTestFile(t, dir, "deferred-dup.json", "["+entry+","+entry+"]")
+	err := ValidateBootstrapFile(path, nil, false)
+	if err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("duplicate name behind a deferred entry err=%v", err)
+	}
+	bad := writeBootstrapTestFile(t, dir, "deferred-bad.json", "["+entry+",{\"name\":\"second\",\"secret\":{\"Plain\":\"short\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]")
+	if err := ValidateBootstrapFile(bad, nil, false); err == nil {
+		t.Fatal("invalid entry behind a deferred entry accepted")
+	}
+}
+
+// GA-CONFIG-001: a malformed Encrypted payload is not the deferred encrypted
+// mode, so the preflight must reject it instead of letting `config check` pass
+// a file that deterministically fails startup after Rhiza is opened.
+func TestValidateBootstrapFileRejectsMalformedEncryptedSecret(t *testing.T) {
+	dir := t.TempDir()
+	bad := "[{\"name\":\"secret-key\",\"secret\":{\"Encrypted\":\"not-base64!!\"}}]"
+	path := writeBootstrapTestFile(t, dir, "bad-encrypted.json", bad)
+	err := ValidateBootstrapFile(path, nil, false)
+	if err == nil {
+		t.Fatal("malformed Encrypted secret accepted")
+	}
+	if errors.Is(err, ErrUnsupportedSecret) {
+		t.Fatalf("malformed payload reported as the deferred encrypted mode: %v", err)
 	}
 }
 
@@ -356,8 +390,41 @@ func TestValidateBootstrapFileAcceptsGenerateMode(t *testing.T) {
 	dir := t.TempDir()
 	gen := "[{\"name\":\"gen-key\",\"secret\":\"generate\",\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]"
 	path := writeBootstrapTestFile(t, dir, "generate.json", gen)
-	if err := ValidateBootstrapFile(path, nil, false); err != nil {
-		t.Fatalf("generate-mode file rejected: %v", err)
+	// GA-CONFIG-001: generate mode needs the generated-secret export that
+	// startup configures, so the preflight accepts it only when that is present.
+	if err := ValidateBootstrapFile(path, nil, false); err == nil {
+		t.Fatal("generate-mode file accepted without generated-secret configuration")
+	}
+	if err := ValidateBootstrapFile(path, nil, true); err != nil {
+		t.Fatalf("generate-mode file rejected with generated-secret configuration: %v", err)
+	}
+}
+
+// GA-CONFIG-001: the runtime statement budget is a preflight condition too.
+// The store rejects an oversized batch only after Rhiza is open, by which point
+// a generated-secret artifact may already be on disk.
+func TestValidateBootstrapFileEnforcesStatementBudget(t *testing.T) {
+	dir := t.TempDir()
+	entry := func(name string) string {
+		return "{\"name\":\"" + name + "\",\"secret\":{\"Plain\":\"" + bootstrapTestSecret + "\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}"
+	}
+	// Two statements per key plus one per access right: 21 keys stay inside the
+	// 64-statement cap, 22 keys exceed it.
+	within := make([]string, 0, 21)
+	over := make([]string, 0, 22)
+	for i := 0; i < 22; i++ {
+		name := fmt.Sprintf("key-%02d", i)
+		over = append(over, entry(name))
+		if i < 21 {
+			within = append(within, entry(name))
+		}
+	}
+	if err := ValidateBootstrapFile(writeBootstrapTestFile(t, dir, "within.json", "["+strings.Join(within, ",")+"]"), nil, false); err != nil {
+		t.Fatalf("file inside the statement budget rejected: %v", err)
+	}
+	err := ValidateBootstrapFile(writeBootstrapTestFile(t, dir, "over.json", "["+strings.Join(over, ",")+"]"), nil, false)
+	if err == nil || !strings.Contains(err.Error(), "too many entries") {
+		t.Fatalf("file over the statement budget err=%v", err)
 	}
 }
 

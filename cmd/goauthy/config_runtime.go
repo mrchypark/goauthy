@@ -163,11 +163,12 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 		return errors.New("generated bootstrap requires API-key bootstrap input")
 	}
 	// GA-CONFIG-001: validate the bootstrap API-key file before the secret store
-	// is opened. Encrypted and generate-mode entries are out of scope because they
-	// require the master key or generated artifact that only exists after the store
-	// is opened; those modes are accepted without validation to avoid false failures.
+	// is opened. The preflight cannot decrypt Encrypted entries because the master
+	// key is loaded during startup, so it defers them and keeps validating the
+	// rest of the document. Generate entries are accepted exactly when startup
+	// configures the generated-secret export that supplies their secrets.
 	if path := getenv("GOAUTHY_API_KEY_BOOTSTRAP_FILE"); path != "" {
-		if err := apikey.ValidateBootstrapFile(path, nil, false); err != nil {
+		if err := apikey.ValidateBootstrapFile(path, nil, generatedBootstrap.artifact != ""); err != nil {
 			return err
 		}
 	}
