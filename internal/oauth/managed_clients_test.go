@@ -27,6 +27,7 @@ func seedManagedClient(t *testing.T, db *rhiza.DB, revision int64, generation st
 }
 
 func TestManagedClientIssuanceGuardsRevisionAndGeneration(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := oauthTestDB(t)
 	client := seedManagedClient(t, db, 1, "generation-one", true)

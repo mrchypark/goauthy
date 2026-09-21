@@ -16,6 +16,7 @@ import (
 )
 
 func TestPasswordLoginObserverHTTP(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	users, err := identity.NewStore(db)
 	if err != nil {

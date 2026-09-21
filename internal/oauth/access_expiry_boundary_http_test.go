@@ -17,6 +17,7 @@ import (
 )
 
 func TestAccessTokenExpiryBoundaryOverRealHTTP(t *testing.T) {
+	t.Parallel()
 	const verifier = "expiry-boundary-verifier-012345678901234567890123"
 	var clock atomic.Int64
 	key := oidcTestKey(t)

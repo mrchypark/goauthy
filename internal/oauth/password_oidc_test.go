@@ -9,6 +9,7 @@ import (
 )
 
 func TestPasswordOIDCOriginWithoutBrowserSession(t *testing.T) {
+	t.Parallel()
 	key := oidcTestKey(t)
 	s := &Server{oidc: &OIDCConfig{Issuer: oidcTestIssuer}}
 	for _, grant := range []string{"password", "refresh_token", "authorization_code"} {

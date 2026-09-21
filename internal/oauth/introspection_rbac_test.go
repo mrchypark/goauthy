@@ -14,6 +14,7 @@ import (
 )
 
 func TestIntrospectionUsesCurrentPrincipalClaims(t *testing.T) {
+	t.Parallel()
 	claims := PrincipalClaims{Roles: []string{"viewer"}, Groups: []string{"team/a"}, Revision: 1}
 	server := rbacClaimsServer(t, func(context.Context, string) (PrincipalClaims, error) { return claims, nil })
 	withGroups := issueRBACAccessToken(t, server, strings.Repeat("i", 43), "openid groups goauthy.read offline_access")
@@ -25,6 +26,7 @@ func TestIntrospectionUsesCurrentPrincipalClaims(t *testing.T) {
 }
 
 func TestIntrospectionMakesRevokedPrincipalInactive(t *testing.T) {
+	t.Parallel()
 	resolverErr := error(nil)
 	server := rbacClaimsServer(t, func(context.Context, string) (PrincipalClaims, error) {
 		if resolverErr != nil {
@@ -47,6 +49,7 @@ func TestIntrospectionMakesRevokedPrincipalInactive(t *testing.T) {
 }
 
 func TestIntrospectionRefreshAccessUsesCurrentPrincipalClaims(t *testing.T) {
+	t.Parallel()
 	claims := PrincipalClaims{Roles: []string{"viewer"}, Groups: []string{"team/a"}, Revision: 1}
 	server := rbacClaimsServer(t, func(context.Context, string) (PrincipalClaims, error) { return claims, nil })
 	verifier := strings.Repeat("l", 43)
@@ -64,6 +67,7 @@ func TestIntrospectionRefreshAccessUsesCurrentPrincipalClaims(t *testing.T) {
 }
 
 func TestIntrospectionClientCredentialsHasNoPrincipalClaims(t *testing.T) {
+	t.Parallel()
 	resolves := 0
 	server := rbacClaimsServer(t, func(context.Context, string) (PrincipalClaims, error) {
 		resolves++

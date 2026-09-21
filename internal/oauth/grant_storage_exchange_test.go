@@ -14,6 +14,7 @@ import (
 )
 
 func TestTokenExchangeSourceRevocationPreventsTargetIssue(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	sourceSignature, sourceExpiry := exchangeSource(t, server)
@@ -37,6 +38,7 @@ func TestTokenExchangeSourceRevocationPreventsTargetIssue(t *testing.T) {
 }
 
 func TestTokenExchangeConcurrentIndependentTargets(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	sourceSignature, sourceExpiry := exchangeSource(t, server)
@@ -74,6 +76,7 @@ func TestTokenExchangeConcurrentIndependentTargets(t *testing.T) {
 }
 
 func TestTokenExchangeRejectsRefreshArtifact(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	sourceSignature, sourceExpiry := exchangeSource(t, server)
@@ -89,6 +92,7 @@ func TestTokenExchangeRejectsRefreshArtifact(t *testing.T) {
 }
 
 func TestTokenExchangeCommitCutoffRejectsSourceThatExpiresWhileQueued(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	sourceSignature, sourceExpiry := exchangeSource(t, server)
@@ -114,6 +118,7 @@ func TestTokenExchangeCommitCutoffRejectsSourceThatExpiresWhileQueued(t *testing
 }
 
 func TestTokenExchangeCommitCutoffRejectsActorThatExpiresWhileQueued(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	sourceSignature, sourceExpiry := exchangeSource(t, server)
@@ -144,6 +149,7 @@ func TestTokenExchangeCommitCutoffRejectsActorThatExpiresWhileQueued(t *testing.
 }
 
 func TestTokenExchangeActorRevocationPreventsTargetIssueAtCommit(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	sourceSignature, sourceExpiry := exchangeSource(t, server)

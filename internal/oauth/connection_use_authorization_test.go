@@ -13,6 +13,7 @@ import (
 )
 
 func TestAuthorizeConnectionUseBindsTokenConsumerAndCurrentAuthority(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	s := resourceAuthorizationServer(t, db, randomSecret(t))
 	token := issueResourceToken(t, s, "goauthy.connections.use")
@@ -49,6 +50,7 @@ func TestAuthorizeConnectionUseBindsTokenConsumerAndCurrentAuthority(t *testing.
 }
 
 func TestAuthorizeConnectionUseRejectsNonUseAndAmbiguousCredentials(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	s := resourceAuthorizationServer(t, db, randomSecret(t))
 	use := issueResourceToken(t, s, "goauthy.connections.use")

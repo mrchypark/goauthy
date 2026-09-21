@@ -44,6 +44,7 @@ func consentCode(t *testing.T, server *Server, verifier, requested string, appro
 // and the later refresh grant must carry the durable approval instead of
 // restoring every requested scope.
 func TestTokenIssuanceKeepsScopesWithheldAtConsent(t *testing.T) {
+	t.Parallel()
 	accessValue := json.RawMessage(`"access-v1"`)
 	server := customClaimsServer(t, false, &accessValue)
 	requested := "openid employee goauthy.read offline_access"

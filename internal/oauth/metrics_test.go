@@ -14,6 +14,7 @@ import (
 )
 
 func TestTokenMetricsClientCredentialsSuccessAndFailure(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	reg := metrics.NewRegistry()
@@ -57,6 +58,7 @@ func TestTokenMetricsClientCredentialsSuccessAndFailure(t *testing.T) {
 }
 
 func TestTokenMetricsMalformedContentType(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	reg := metrics.NewRegistry()
@@ -77,6 +79,7 @@ func TestTokenMetricsMalformedContentType(t *testing.T) {
 }
 
 func TestTokenMetricsOversizedForm(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	reg := metrics.NewRegistry()
@@ -97,6 +100,7 @@ func TestTokenMetricsOversizedForm(t *testing.T) {
 }
 
 func TestTokenMetricsNilRegistryNoPanic(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	// No SetMetrics — metrics is nil.
@@ -113,6 +117,7 @@ func TestTokenMetricsNilRegistryNoPanic(t *testing.T) {
 }
 
 func TestTokenMetricsConcurrentTokenRequests(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	reg := metrics.NewRegistry()
@@ -164,6 +169,7 @@ func TestTokenMetricsConcurrentTokenRequests(t *testing.T) {
 }
 
 func TestForwardAuthMetricsValidAndInvalidTokens(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := userInfoTestServer(t, db, nil)
 	valid := issueUserInfoToken(t, server)
@@ -191,6 +197,7 @@ func TestForwardAuthMetricsValidAndInvalidTokens(t *testing.T) {
 }
 
 func TestForwardAuthMetricsMissingBearerScheme(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := userInfoTestServer(t, db, nil)
 	reg := metrics.NewRegistry()
@@ -210,6 +217,7 @@ func TestForwardAuthMetricsMissingBearerScheme(t *testing.T) {
 }
 
 func TestForwardAuthMetricsRevokedToken(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := userInfoTestServer(t, db, nil)
 	reg := metrics.NewRegistry()
@@ -231,6 +239,7 @@ func TestForwardAuthMetricsRevokedToken(t *testing.T) {
 }
 
 func TestForwardAuthMetricsDisabledSubject(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := userInfoTestServer(t, db, assertError("disabled"))
 	reg := metrics.NewRegistry()
@@ -247,6 +256,7 @@ func TestForwardAuthMetricsDisabledSubject(t *testing.T) {
 }
 
 func TestForwardAuthMetricsNilRegistryNoPanic(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := userInfoTestServer(t, db, nil)
 	// No SetMetrics.
@@ -258,6 +268,7 @@ func TestForwardAuthMetricsNilRegistryNoPanic(t *testing.T) {
 }
 
 func TestForwardAuthMetricsConcurrentRequests(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := userInfoTestServer(t, db, nil)
 	valid := issueUserInfoToken(t, server)
@@ -299,6 +310,7 @@ func TestForwardAuthMetricsConcurrentRequests(t *testing.T) {
 }
 
 func TestForwardAuthMetricsMethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := userInfoTestServer(t, db, nil)
 	reg := metrics.NewRegistry()

@@ -14,6 +14,7 @@ import (
 )
 
 func TestDynamicClientLastUsedIsMonotonicForSuccessfulTokenArtifacts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
@@ -44,6 +45,7 @@ func TestDynamicClientLastUsedIsMonotonicForSuccessfulTokenArtifacts(t *testing.
 }
 
 func TestDynamicClientLastUsedRequiresSuccessfulCodeGuard(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
@@ -83,6 +85,7 @@ func TestDynamicClientLastUsedRequiresSuccessfulCodeGuard(t *testing.T) {
 }
 
 func TestDynamicClientLastUsedForSuccessfulCodeExchange(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
@@ -123,6 +126,7 @@ func TestDynamicClientLastUsedForSuccessfulCodeExchange(t *testing.T) {
 }
 
 func TestDynamicClientLastUsedDoesNotChangeOnFailedTokenInsert(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
@@ -177,6 +181,7 @@ func dynamicLastUsed(t *testing.T, db *rhiza.DB, clientID string) int64 {
 }
 
 func TestDynamicClientLastUsedPasswordCredentialFence(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	s := oauthTestServer(t, db, randomSecret(t)).store
 	// This exercises storage with an actual password-enabled registration.

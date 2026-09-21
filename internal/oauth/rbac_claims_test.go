@@ -18,6 +18,7 @@ import (
 )
 
 func TestOIDCPrincipalClaimsAreCurrentAndScoped(t *testing.T) {
+	t.Parallel()
 	state := PrincipalClaims{Roles: []string{"viewer"}, Groups: []string{"team/a"}, Revision: 1}
 	resolves := 0
 	server := rbacClaimsServer(t, func(context.Context, string) (PrincipalClaims, error) {
@@ -44,6 +45,7 @@ func TestOIDCPrincipalClaimsAreCurrentAndScoped(t *testing.T) {
 }
 
 func TestOIDCPrincipalClaimsRejectResolverFailureBeforeRefreshCommit(t *testing.T) {
+	t.Parallel()
 	blocked := false
 	server := rbacClaimsServer(t, func(context.Context, string) (PrincipalClaims, error) {
 		if blocked {
@@ -66,6 +68,7 @@ func TestOIDCPrincipalClaimsRejectResolverFailureBeforeRefreshCommit(t *testing.
 }
 
 func TestUserInfoUsesCurrentPrincipalClaimsAndGroupsScope(t *testing.T) {
+	t.Parallel()
 	state := PrincipalClaims{Roles: []string{"viewer"}, Groups: []string{"team/a"}, Revision: 1}
 	server := rbacClaimsServer(t, func(context.Context, string) (PrincipalClaims, error) { return state, nil })
 	withGroups := issueRBACAccessToken(t, server, strings.Repeat("t", 43), "openid groups goauthy.read offline_access")
@@ -88,6 +91,7 @@ func TestUserInfoUsesCurrentPrincipalClaimsAndGroupsScope(t *testing.T) {
 }
 
 func TestOIDCPrincipalClaimsRejectMalformedResolverResult(t *testing.T) {
+	t.Parallel()
 	server := rbacClaimsServer(t, func(context.Context, string) (PrincipalClaims, error) {
 		return PrincipalClaims{Roles: []string{"viewer", "viewer"}, Revision: 1}, nil
 	})
@@ -100,6 +104,7 @@ func TestOIDCPrincipalClaimsRejectMalformedResolverResult(t *testing.T) {
 }
 
 func TestOIDCPrincipalClaimsRejectMissingRevision(t *testing.T) {
+	t.Parallel()
 	server := rbacClaimsServer(t, func(context.Context, string) (PrincipalClaims, error) {
 		return PrincipalClaims{Roles: []string{"viewer"}}, nil
 	})
@@ -112,6 +117,7 @@ func TestOIDCPrincipalClaimsRejectMissingRevision(t *testing.T) {
 }
 
 func TestOIDCPrincipalRevisionGuardRejectsCodeAndRefreshWithoutArtifacts(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name                                      string
 		form                                      func(t *testing.T, server *Server, verifier string) url.Values
@@ -172,6 +178,7 @@ func revisionBumpHook(t *testing.T, server *Server, name string) func() {
 }
 
 func TestPrincipalGroupPolicyRejectsWhitespaceAndBackslash(t *testing.T) {
+	t.Parallel()
 	for _, group := range []string{"team/a", "team-a"} {
 		if _, err := canonicalPrincipalClaims(PrincipalClaims{Roles: []string{}, Groups: []string{group}, Revision: 1}); err != nil {
 			t.Fatalf("valid group %q: %v", group, err)
@@ -185,6 +192,7 @@ func TestPrincipalGroupPolicyRejectsWhitespaceAndBackslash(t *testing.T) {
 }
 
 func TestClientCredentialsRejectGroupsScope(t *testing.T) {
+	t.Parallel()
 	server := rbacClaimsServer(t, func(context.Context, string) (PrincipalClaims, error) {
 		return PrincipalClaims{Roles: []string{"admin"}, Revision: 1}, nil
 	})

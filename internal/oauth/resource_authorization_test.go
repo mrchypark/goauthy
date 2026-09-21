@@ -61,6 +61,7 @@ func base64RawSHA256(value string) string {
 }
 
 func TestAuthorizeUserResourceValidatesHumanBearerAndAtomicGuard(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := resourceAuthorizationServer(t, db, randomSecret(t))
 	token := issueResourceToken(t, server, "goauthy.connections.read")
@@ -102,6 +103,7 @@ func authorityArgs(authority func() (string, []any)) []any {
 }
 
 func TestAuthorizeUserResourcePolicyGuardUsesCurrentDatabaseState(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		policy ClientGroupPolicy
@@ -168,6 +170,7 @@ func TestAuthorizeUserResourcePolicyGuardUsesCurrentDatabaseState(t *testing.T) 
 }
 
 func TestAuthorizeUserResourceRejectsMalformedWrongScopeAndMachineTokens(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := resourceAuthorizationServer(t, db, randomSecret(t))
 	wrong := issueResourceToken(t, server, "goauthy.read")

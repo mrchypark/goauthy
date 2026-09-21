@@ -26,6 +26,7 @@ const (
 )
 
 func TestManagedCrossClientExchangeAudiencesAndPolicyRevision(t *testing.T) {
+	t.Parallel()
 	server, db := crossClientExchangeServer(t)
 	const exchangerID, exchangerSecret = "managed-exchanger", "managed-exchanger-secret"
 	seedCrossExchangeManagedClient(t, db, exchangerID, exchangerSecret, true, []string{TokenExchangeGrantType}, []string{crossExchangeTarget}, []string{crossExchangeDefaultA, crossExchangeDefaultB}, 1)
@@ -64,6 +65,7 @@ func TestManagedCrossClientExchangeAudiencesAndPolicyRevision(t *testing.T) {
 }
 
 func TestManagedCrossClientExchangeRejectsUnauthorizedTargetsAndInputs(t *testing.T) {
+	t.Parallel()
 	server, db := crossClientExchangeServer(t)
 	const enabledID, enabledSecret = "managed-enabled", "managed-enabled-secret"
 	seedCrossExchangeManagedClient(t, db, enabledID, enabledSecret, true, []string{TokenExchangeGrantType}, []string{crossExchangeTarget}, nil, 1)
@@ -101,6 +103,7 @@ func TestManagedCrossClientExchangeRejectsUnauthorizedTargetsAndInputs(t *testin
 }
 
 func TestManagedCrossClientExchangeInputPolicyChangesBeforeIssue(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, changedID, change string
 		actor                   bool
@@ -149,6 +152,7 @@ func TestManagedCrossClientExchangeInputPolicyChangesBeforeIssue(t *testing.T) {
 }
 
 func TestManagedCrossClientExchangeExchangerPolicyChangesBeforeIssue(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, query string }{
 		{name: "default audience revision", query: `UPDATE managed_oauth_clients SET metadata_json=?,revision=revision+1 WHERE id=?`},
 		{name: "generation", query: `UPDATE managed_oauth_clients SET generation='invalidated-exchanger-generation',revision=revision+1 WHERE id=?`},

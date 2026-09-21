@@ -19,6 +19,7 @@ import (
 )
 
 func TestDynamicPasswordHTTPAndRefresh(t *testing.T) {
+	t.Parallel()
 	for _, method := range []string{dcr.TokenEndpointAuthNone, dcr.TokenEndpointAuthClientBasic, dcr.TokenEndpointAuthClientPost} {
 		t.Run(method, func(t *testing.T) {
 			env := map[string]string{"GOAUTHY_RHIZA_PROFILE": "standalone", "GOAUTHY_CLUSTER_ID": "password-recovery", "GOAUTHY_NODE_ID": "password-restart", "GOAUTHY_DATA_DIR": t.TempDir(), "GOAUTHY_RHIZA_OBJECT_STORE_BUCKET": "test", "GOAUTHY_RHIZA_OBJECT_STORE_PREFIX": "password-recovery"}

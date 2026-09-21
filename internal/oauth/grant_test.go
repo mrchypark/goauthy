@@ -35,6 +35,7 @@ type tokenResponse struct {
 }
 
 func TestAuthorizationCodePKCEAndRefreshRotation(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	hmacSecret := randomSecret(t)
 	server := oauthTestServer(t, db, hmacSecret)
@@ -73,6 +74,7 @@ func TestAuthorizationCodePKCEAndRefreshRotation(t *testing.T) {
 }
 
 func TestAuthorizationCodeIsSingleUseUnderConcurrency(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	verifier := strings.Repeat("c", 43)
@@ -117,6 +119,7 @@ func TestAuthorizationCodeIsSingleUseUnderConcurrency(t *testing.T) {
 }
 
 func TestAuthorizationRequiresS256PKCE(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	seedAccountExpiry(t, db, nil)
 	server := oauthTestServer(t, db, randomSecret(t))
@@ -134,6 +137,7 @@ func TestAuthorizationRequiresS256PKCE(t *testing.T) {
 }
 
 func TestAuthorizationRejectsMissingLoginAndRedirectMismatch(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	verifier := strings.Repeat("d", 43)
@@ -160,6 +164,7 @@ func TestAuthorizationRejectsMissingLoginAndRedirectMismatch(t *testing.T) {
 }
 
 func TestAuthorizationIssueRemovesExpiredState(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	issueCode(t, server, strings.Repeat("e", 43))
@@ -184,6 +189,7 @@ func TestAuthorizationIssueRemovesExpiredState(t *testing.T) {
 }
 
 func TestTokenIssueRemovesExpiredState(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	for index, verifier := range []string{strings.Repeat("h", 43), strings.Repeat("i", 43)} {

@@ -19,6 +19,7 @@ import (
 )
 
 func TestClientCredentialsClaimSigningUsesFixedClock(t *testing.T) {
+	t.Parallel()
 	fixed := time.Date(2042, time.March, 4, 5, 6, 7, 0, time.UTC)
 	for _, test := range []struct {
 		name   string
@@ -55,6 +56,7 @@ func TestClientCredentialsClaimSigningUsesFixedClock(t *testing.T) {
 }
 
 func TestBootstrapClientCredentialsClaimsSignedOnly(t *testing.T) {
+	t.Parallel()
 	server, _ := clientCredentialsClaimsServer(t, `{"department":"ops"}`, false)
 	issued := decodeToken(t, postToken(server, url.Values{"grant_type": {"client_credentials"}, "scope": {"goauthy.read"}}))
 	payload := jwtPayload(t, issued.AccessToken)
@@ -76,6 +78,7 @@ func TestBootstrapClientCredentialsClaimsSignedOnly(t *testing.T) {
 }
 
 func TestBootstrapClientCredentialsClaimsRootClearAndCollision(t *testing.T) {
+	t.Parallel()
 	t.Run("root", func(t *testing.T) {
 		server, _ := clientCredentialsClaimsServer(t, `{"tenant":{"id":7}}`, true)
 		issued := decodeToken(t, postToken(server, url.Values{"grant_type": {"client_credentials"}}))
@@ -100,6 +103,7 @@ func TestBootstrapClientCredentialsClaimsRootClearAndCollision(t *testing.T) {
 }
 
 func TestClientCredentialsClaimsExcludeDynamicClients(t *testing.T) {
+	t.Parallel()
 	server, _ := clientCredentialsClaimsServer(t, `{"department":"ops"}`, false)
 	called := 0
 	server.oidc.ResolveClientCredentialsClaims = func(context.Context, string) (claims.ClientCredentialsClaims, error) {
@@ -125,6 +129,7 @@ func TestClientCredentialsClaimsExcludeDynamicClients(t *testing.T) {
 }
 
 func TestClientCredentialsClaimRevisionRaceLeavesNoArtifact(t *testing.T) {
+	t.Parallel()
 	server, db := clientCredentialsClaimsServer(t, `{"department":"ops"}`, false)
 	server.beforeTokenIssue = func() {
 		server.beforeTokenIssue = nil

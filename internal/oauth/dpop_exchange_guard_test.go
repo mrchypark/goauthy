@@ -13,6 +13,7 @@ import (
 )
 
 func TestDPoPPolicyExchangeRebindsSourceCutoff(t *testing.T) {
+	t.Parallel()
 	server := oauthTestServer(t, oauthTestDB(t), randomSecret(t))
 	client, err := server.store.dynamicClients.Create(context.Background(), dcr.CreateRequest{
 		ClientID: "dpop-exchange-cutoff", GrantTypes: []string{"client_credentials"}, Scopes: []string{"goauthy.read"},
@@ -60,6 +61,7 @@ func TestDPoPPolicyExchangeRebindsSourceCutoff(t *testing.T) {
 }
 
 func TestDPoPPolicyActorExchangeRebindsBothCutoffs(t *testing.T) {
+	t.Parallel()
 	server := oauthTestServer(t, oauthTestDB(t), randomSecret(t))
 	client, err := server.store.dynamicClients.Create(context.Background(), dcr.CreateRequest{
 		ClientID: "dpop-actor-exchange-cutoff", GrantTypes: []string{"client_credentials"}, Scopes: []string{"goauthy.read"},

@@ -15,6 +15,7 @@ import (
 )
 
 func TestAuthorizeConnectionUseReturnsDynamicConsumerAndOwnsGuard(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := oauthTestDB(t)
 	server := resourceAuthorizationServer(t, db, randomSecret(t))

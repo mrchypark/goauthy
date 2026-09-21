@@ -13,6 +13,7 @@ import (
 )
 
 func TestManagedClientResourceAudienceUseRefreshAndRemoval(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	s := resourceAuthorizationServer(t, db, randomSecret(t))
 	store := clients.NewStore(db, &oidc.Keyring{})

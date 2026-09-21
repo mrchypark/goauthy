@@ -11,6 +11,7 @@ import (
 )
 
 func TestAccessDefaultAudienceSnapshotCompatibility(t *testing.T) {
+	t.Parallel()
 	const resource = "https://api.example.test/resource"
 	const defaultAudience = "https://api.example.test/default"
 	now := time.Unix(1_800_000_000, 0).UTC()

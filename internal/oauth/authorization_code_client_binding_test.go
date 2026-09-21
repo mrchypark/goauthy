@@ -21,6 +21,7 @@ import (
 // access-token row exists. A replay by A fails and Fosite v0.49 revokes the
 // associated access and refresh tokens.
 func TestAuthorizationCodeClientBinding(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	seedOAuthUser(t, db, "user-1")
 	server := oauthTestServer(t, db, randomSecret(t))

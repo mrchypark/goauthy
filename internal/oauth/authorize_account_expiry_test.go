@@ -17,6 +17,7 @@ import (
 )
 
 func TestAuthorizationAccountExpiryStorageMatrix(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(1_700_000_000, 0).UTC()
 	for _, tc := range []struct {
 		name     string
@@ -70,6 +71,7 @@ func TestAuthorizationAccountExpiryStorageMatrix(t *testing.T) {
 }
 
 func TestAuthorizationAccountExpiryCapsStoredCodeAndPKCE(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	now := time.Now().UTC().Truncate(time.Second)
@@ -84,6 +86,7 @@ func TestAuthorizationAccountExpiryCapsStoredCodeAndPKCE(t *testing.T) {
 }
 
 func TestAuthorizationAccountExpiryRejectsExpiredDeadlineWithoutArtifacts(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	now := time.Unix(1_900_000_000, 0).UTC()
@@ -107,6 +110,7 @@ func TestAuthorizationAccountExpiryRejectsExpiredDeadlineWithoutArtifacts(t *tes
 }
 
 func TestAuthorizationAccountExpirySnapshotRejectsDeadlineChange(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(1_700_000_000, 0).UTC()
 	for _, tc := range []struct {
 		name             string

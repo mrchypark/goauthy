@@ -11,6 +11,7 @@ import (
 )
 
 func TestNonOIDCAuthorizationCodeRecordsSessionClientForLogout(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oidcTestServer(t, db, randomSecret(t), func(context.Context) (oidc.SigningKey, error) { return oidcTestKey(t), nil })
 	const endpoint = "https://rp.example.test/logout"

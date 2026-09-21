@@ -11,6 +11,7 @@ import (
 )
 
 func TestPasswordTransactionBindsAuthenticatedSubject(t *testing.T) {
+	t.Parallel()
 	s := oauthTestServer(t, oauthTestDB(t), randomSecret(t)).store
 	ctx, err := s.beginPasswordTX(t.Context(), "authenticated-user", 1, 1)
 	if err != nil {
@@ -33,6 +34,7 @@ func TestPasswordTransactionBindsAuthenticatedSubject(t *testing.T) {
 }
 
 func TestPasswordTransactionRejectsChangedAuthentication(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"reject refresh write", "expire while queued", "", "UPDATE identity_users SET password_generation=2", "UPDATE identity_authentication_modes SET generation=2", "UPDATE identity_authentication_modes SET mode='passkey'", "UPDATE identity_users SET disabled=1"} {
 		t.Run(change, func(t *testing.T) {
 			db := oauthTestDB(t)

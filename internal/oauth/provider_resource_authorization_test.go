@@ -12,6 +12,7 @@ import (
 )
 
 func TestAuthorizeUserProviderResourceReadWrite(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := resourceAuthorizationServer(t, db, randomSecret(t))
 	for _, scope := range []string{"goauthy.providers.read", "goauthy.providers.write"} {
@@ -33,6 +34,7 @@ func TestAuthorizeUserProviderResourceReadWrite(t *testing.T) {
 }
 
 func TestAuthorizeUserProviderResourceRejectsWrongScopeAudienceAndMachine(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := resourceAuthorizationServer(t, db, randomSecret(t))
 	wrongScope := issueResourceTokenForAudience(t, server, "goauthy.connections.read", resourceAuthorizationAudience)
@@ -51,6 +53,7 @@ func TestAuthorizeUserProviderResourceRejectsWrongScopeAudienceAndMachine(t *tes
 }
 
 func TestAuthorizeUserProviderResourceRevokedTokenInvalidatesLateGuard(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := resourceAuthorizationServer(t, db, randomSecret(t))
 	token := issueResourceTokenForAudience(t, server, "goauthy.providers.write", resourceAuthorizationAudience)

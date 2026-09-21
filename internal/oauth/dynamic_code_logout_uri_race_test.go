@@ -17,6 +17,7 @@ import (
 )
 
 func TestDynamicAuthorizationCodeLogoutURIUsesCurrentMetadataDuringExchange(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name    string
 		current string

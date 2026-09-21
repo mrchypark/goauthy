@@ -10,6 +10,7 @@ import (
 )
 
 func TestForgedSignedAccessTokenNeverQueriesTokenRows(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	valid := issueUserInfoToken(t, server)
 	parts := strings.Split(valid, ".")

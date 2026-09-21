@@ -15,6 +15,7 @@ import (
 )
 
 func TestTokenExchangePreservesNestedActorInJWTAndIntrospection(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	owner := decodeToken(t, postToken(server, url.Values{
 		"grant_type": {"authorization_code"}, "code": {issueExchangeCodeFor(t, server, "user-1", "goauthy.read")},
@@ -69,6 +70,7 @@ func TestTokenExchangePreservesNestedActorInJWTAndIntrospection(t *testing.T) {
 }
 
 func TestNestedActorAncestorDeadlineCapsAndExpiryInactivatesTarget(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	owner, actor, ancestor := nestedActorInputs(t, server)
 	deadline := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second)
@@ -85,6 +87,7 @@ func TestNestedActorAncestorDeadlineCapsAndExpiryInactivatesTarget(t *testing.T)
 }
 
 func TestNestedActorAncestorChangePreventsTargetIssue(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name   string
 		mutate func(t *testing.T, server *Server)

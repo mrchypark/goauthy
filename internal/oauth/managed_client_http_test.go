@@ -18,6 +18,7 @@ import (
 )
 
 func TestManagedClientHTTPCodeRefreshSurviveMetadataChange(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	s := oauthTestServer(t, db, randomSecret(t))
 	store := clients.NewStore(db, &oidc.Keyring{}) // public clients need no secret envelope
@@ -103,6 +104,7 @@ func TestManagedClientHTTPCodeRefreshSurviveMetadataChange(t *testing.T) {
 }
 
 func TestManagedGroupPolicyAuthorizationAdmissionAndRaces(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"allowed", "denied", "membership race", "policy race"} {
 		t.Run(mode, func(t *testing.T) {
 			principal := PrincipalClaims{Groups: []string{"team/blue"}, Revision: 1}
