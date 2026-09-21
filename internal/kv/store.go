@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/mrchypark/goauthy/internal/oidc"
@@ -104,24 +105,91 @@ func changed(r rhiza.ExecuteResponse, err, missing error) error {
 	}
 	return nil
 }
-func (s *Store) ListNamespaces(ctx context.Context) ([]Namespace, error) {
-	rows, err := s.query(ctx, "SELECT name,public FROM kv_namespaces ORDER BY name")
+
+// Growing KV lists are keyset paginated: a page holds at most listLimit rows
+// and carries the position of its last row so the next page resumes exactly
+// after it. Cursors name the listing they came from, so a token cannot be
+// replayed against a different list.
+const (
+	kvListNamespaces = "ns"
+	kvListAccess     = "access"
+	kvListKeys       = "key"
+	kvListValues     = "value"
+	// kvValuePageByteBudget bounds one value page. A single accepted value can
+	// be 64 KiB, so the documented 1,000-row default can request far more than
+	// the engine's per-query result budget in one read.
+	kvValuePageByteBudget = 8 << 20
+)
+
+type kvListCursor struct {
+	Kind     string
+	Position string
+}
+
+// Stored names may contain whitespace and punctuation, so a continuation token
+// is base64url: it stays valid both as a query value and as a header value.
+func encodeKVListCursor(c kvListCursor) string {
+	return base64.RawURLEncoding.EncodeToString([]byte("e1." + c.Kind + "." + c.Position))
+}
+
+// kvListPosition decodes a continuation token and checks that it belongs to the
+// listing asking for it. Anything else is a bad request rather than a silent
+// restart or skip.
+func kvListPosition(kind, cursor string) (string, error) {
+	if cursor == "" {
+		return "", nil
+	}
+	if len(cursor) > 256 {
+		return "", ErrBadRequest
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(cursor)
 	if err != nil {
-		return nil, err
+		return "", ErrBadRequest
+	}
+	parts := strings.Split(string(raw), ".")
+	if len(parts) != 3 || parts[0] != "e1" || parts[1] != kind || !valid(parts[2]) {
+		return "", ErrBadRequest
+	}
+	return parts[2], nil
+}
+
+// ListNamespaces returns one bounded keyset page and the continuation token of
+// the following page, which is empty when the page ends the listing.
+func (s *Store) ListNamespaces(ctx context.Context, limit int, cursor string) ([]Namespace, string, error) {
+	limit, err := listLimit(limit, "")
+	if err != nil {
+		return nil, "", err
+	}
+	after, err := kvListPosition(kvListNamespaces, cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	// One extra row only decides whether a continuation exists; it is never
+	// returned, so every continuation has at least one following row.
+	rows, err := s.query(ctx, "SELECT name,public FROM kv_namespaces WHERE name>? ORDER BY name LIMIT ?", after, int64(limit)+1)
+	if err != nil {
+		return nil, "", err
+	}
+	more := len(rows) > limit
+	if more {
+		rows = rows[:limit]
 	}
 	out := make([]Namespace, 0, len(rows))
 	for _, row := range rows {
 		if len(row) != 2 {
-			return nil, ErrCorrupt
+			return nil, "", ErrCorrupt
 		}
 		n, ok := row[0].(string)
 		p, pok := row[1].(int64)
 		if !ok || !valid(n) || !pok || p < 0 || p > 1 {
-			return nil, ErrCorrupt
+			return nil, "", ErrCorrupt
 		}
 		out = append(out, Namespace{n, p == 1})
 	}
-	return out, nil
+	if !more {
+		return out, "", nil
+	}
+	return out, encodeKVListCursor(kvListCursor{Kind: kvListNamespaces, Position: out[len(out)-1].Name}), nil
 }
 func (s *Store) namespaceIdentity(ctx context.Context, name string) (Namespace, string, error) {
 	if !valid(name) {
@@ -202,23 +270,42 @@ func (s *Store) decodeAccess(row []any) (Access, error) {
 	}
 	return Access{ID: id, Namespace: ns, Secret: string(sec), Name: name, Enabled: enabled == 1, digest: d}, nil
 }
-func (s *Store) Accesses(ctx context.Context, ns string) ([]Access, error) {
+
+// Accesses returns one bounded keyset page of namespace credentials and the
+// continuation token of the following page, which is empty when the listing
+// ends.
+func (s *Store) Accesses(ctx context.Context, ns string, limit int, cursor string) ([]Access, string, error) {
 	if _, err := s.Namespace(ctx, ns); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	rows, err := s.query(ctx, "SELECT id,namespace,secret,enabled,name,secret_digest FROM kv_access WHERE namespace=? ORDER BY id", ns)
+	limit, err := listLimit(limit, "")
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	after, err := kvListPosition(kvListAccess, cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	rows, err := s.query(ctx, "SELECT id,namespace,secret,enabled,name,secret_digest FROM kv_access WHERE namespace=? AND id>? ORDER BY id LIMIT ?", ns, after, int64(limit)+1)
+	if err != nil {
+		return nil, "", err
+	}
+	more := len(rows) > limit
+	if more {
+		rows = rows[:limit]
 	}
 	out := make([]Access, 0, len(rows))
 	for _, row := range rows {
 		a, err := s.decodeAccess(row)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		out = append(out, a)
 	}
-	return out, nil
+	if !more {
+		return out, "", nil
+	}
+	return out, encodeKVListCursor(kvListCursor{Kind: kvListAccess, Position: out[len(out)-1].ID}), nil
 }
 func nullableName(name *string) any {
 	if name == nil {
@@ -438,60 +525,142 @@ func listLimit(limit int, search string) (int, error) {
 	}
 	return limit, nil
 }
-func (s *Store) valueRows(ctx context.Context, a Access, limit int, search string) ([][]any, error) {
+
+// valueRows reads one keyset page of value rows in key order and reports
+// whether a further row exists, which is how the caller detects a continuation.
+// Pages are bounded by kvValuePageByteBudget: a single accepted value may be
+// 64 KiB, so the documented 1,000-row default would otherwise ask one query for
+// far more than the engine's result budget and fail for valid stored data.
+//
+// ponytail: the page boundary is byte-budgeted, not snapshot-isolated, so a
+// concurrent write can hide a row inserted behind the cursor. Upgrade path: pin
+// the read when the pinned Rhiza API exposes a snapshot handle.
+func (s *Store) valueRows(ctx context.Context, a Access, limit int, search, cursor string) ([][]any, bool, error) {
 	limit, err := listLimit(limit, search)
 	if err != nil || !valid(a.Namespace) {
-		return nil, ErrBadRequest
+		return nil, false, ErrBadRequest
 	}
-	guard, args := accessGuard(a)
-	args = append([]any{a.Namespace, search}, args...)
-	args = append(args, int64(limit))
-	// Literal substring matching avoids treating key punctuation as SQL patterns.
-	return s.query(ctx, "SELECT v.key,v.encrypted,v.value,n.identity FROM kv_values v JOIN kv_namespaces n ON n.name=v.namespace WHERE v.namespace=? AND instr(v.key,?)>0 AND "+guard+" ORDER BY v.key LIMIT ?", args...)
+	after, err := kvListPosition(kvListValues, cursor)
+	if err != nil {
+		return nil, false, err
+	}
+	guard, guardArgs := accessGuard(a)
+	args := append(append([]any{a.Namespace, search}, guardArgs...), after, int64(limit)+1)
+	rows, err := s.query(ctx, "SELECT "+valueListColumns+",run FROM (SELECT key,encrypted,value,identity,"+valueRowRun+" AS run FROM ("+
+		"SELECT v.key AS key,v.encrypted AS encrypted,v.value AS value,n.identity AS identity FROM kv_values v JOIN kv_namespaces n ON n.name=v.namespace "+
+		"WHERE v.namespace=? AND instr(v.key,?)>0 AND "+guard+" AND v.key>? ORDER BY v.key LIMIT ?"+
+		")) WHERE run<="+strconv.Itoa(kvValuePageByteBudget)+" OR run-"+valueRowCost+"<="+strconv.Itoa(kvValuePageByteBudget)+" ORDER BY key", args...)
+	if err != nil {
+		return nil, false, err
+	}
+	more := len(rows) > limit
+	if more {
+		rows = rows[:limit]
+	}
+	if n := len(rows); n > 0 {
+		if run, ok := rows[n-1][4].(int64); !ok || run > kvValuePageByteBudget {
+			// The trailing row pushes the page past the byte budget; keep the rows
+			// that fit and resume from this one on the next page.
+			rows = rows[:n-1]
+			more = true
+		}
+	}
+	out := make([][]any, 0, len(rows))
+	for _, row := range rows {
+		if len(row) != 5 {
+			return nil, false, ErrCorrupt
+		}
+		out = append(out, row[:4])
+	}
+	return out, more, nil
 }
-func (s *Store) keyRows(ctx context.Context, a Access, limit int, search string) ([][]any, error) {
+
+// valueListColumns is the projection decodeValue expects. valueRows appends the
+// running byte estimate and trims it before returning, so callers keep the
+// four-column contract.
+const valueListColumns = "key,encrypted,value,identity"
+
+// Every stored byte can expand into a 6-byte JSON escape, so the cost
+// over-estimates the encoded row; 64 more bytes cover its quotes and separators.
+const valueRowCost = "((COALESCE(octet_length(value),0)+octet_length(key)+octet_length(identity))*6+64)"
+
+// The first row of a page is always kept, so a row larger than the budget
+// cannot stall the enumeration.
+const valueRowRun = "SUM(" + valueRowCost + ") OVER (ORDER BY key ROWS UNBOUNDED PRECEDING)"
+
+func (s *Store) keyRows(ctx context.Context, a Access, limit int, search, cursor string) ([][]any, error) {
 	limit, err := listLimit(limit, search)
 	if err != nil || !valid(a.Namespace) {
 		return nil, ErrBadRequest
 	}
+	after, err := kvListPosition(kvListKeys, cursor)
+	if err != nil {
+		return nil, err
+	}
 	guard, args := accessGuard(a)
 	args = append([]any{a.Namespace, search}, args...)
-	args = append(args, int64(limit))
+	args = append(args, after, int64(limit)+1)
 	// Key names alone, like valueRows with the same authority predicate: listing
 	// names must not read or decrypt payloads, which would spend the storage
 	// result budget on data the caller did not ask for.
-	return s.query(ctx, "SELECT v.key FROM kv_values v WHERE v.namespace=? AND instr(v.key,?)>0 AND "+guard+" ORDER BY v.key LIMIT ?", args...)
+	return s.query(ctx, "SELECT v.key FROM kv_values v WHERE v.namespace=? AND instr(v.key,?)>0 AND "+guard+" AND v.key>? ORDER BY v.key LIMIT ?", args...)
 }
-func (s *Store) Keys(ctx context.Context, a Access, limit int, search string) ([]string, error) {
-	rows, err := s.keyRows(ctx, a, limit, search)
+
+// Keys returns one bounded keyset page of key names and the continuation token
+// of the following page, which is empty when the listing ends.
+func (s *Store) Keys(ctx context.Context, a Access, limit int, search, cursor string) ([]string, string, error) {
+	// The row reader validates the same limit; normalizing here keeps the page
+	// boundary and the requested page size the same number.
+	limit, err := listLimit(limit, search)
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	rows, err := s.keyRows(ctx, a, limit, search, cursor)
+	if err != nil {
+		return nil, "", err
+	}
+	more := len(rows) > limit
+	if more {
+		rows = rows[:limit]
 	}
 	out := make([]string, 0, len(rows))
 	for _, row := range rows {
 		if len(row) != 1 {
-			return nil, ErrCorrupt
+			return nil, "", ErrCorrupt
 		}
 		key, ok := row[0].(string)
 		if !ok || !valid(key) || strings.ContainsRune(key, '\x00') {
-			return nil, ErrCorrupt
+			return nil, "", ErrCorrupt
 		}
 		out = append(out, key)
 	}
-	return out, nil
+	if !more {
+		return out, "", nil
+	}
+	return out, encodeKVListCursor(kvListCursor{Kind: kvListKeys, Position: out[len(out)-1]}), nil
 }
-func (s *Store) Values(ctx context.Context, a Access, limit int, search string) ([]Value, error) {
-	rows, err := s.valueRows(ctx, a, limit, search)
+
+// Values returns one bounded keyset page of values and the continuation token
+// of the following page, which is empty when the listing ends.
+func (s *Store) Values(ctx context.Context, a Access, limit int, search, cursor string) ([]Value, string, error) {
+	limit, err := listLimit(limit, search)
 	if err != nil {
-		return nil, err
+		return nil, "", err
+	}
+	rows, more, err := s.valueRows(ctx, a, limit, search, cursor)
+	if err != nil {
+		return nil, "", err
 	}
 	out := make([]Value, 0, len(rows))
 	for _, row := range rows {
 		v, err := s.decodeValue(row)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		out = append(out, v)
 	}
-	return out, nil
+	if !more {
+		return out, "", nil
+	}
+	return out, encodeKVListCursor(kvListCursor{Kind: kvListValues, Position: out[len(out)-1].Key}), nil
 }

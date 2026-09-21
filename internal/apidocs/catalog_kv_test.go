@@ -83,4 +83,26 @@ func TestKVOperationsCatalogMatchesAllRoutes(t *testing.T) {
 			t.Fatalf("value %T rejected: %v", raw, err)
 		}
 	}
+	// Every listing is a keyset page: it accepts a cursor and answers a
+	// continuing page with 206 plus the token that resumes it.
+	for path, operationID := range map[string]string{
+		"/auth/v1/kv/ns":             "GET",
+		"/auth/v1/kv/ns/{ns}/access": "GET",
+		"/auth/v1/kv/ns/{ns}/values": "GET",
+		"/auth/v1/kv/keys":           "GET",
+		"/auth/v1/kv/values":         "GET",
+	} {
+		op := doc.Paths.Value(path).GetOperation(operationID)
+		var cursor bool
+		for _, p := range op.Parameters {
+			cursor = cursor || p.Value.Name == "cursor"
+		}
+		if !cursor {
+			t.Fatalf("%s must accept a cursor", path)
+		}
+		partial := op.Responses.Value("206")
+		if partial == nil || partial.Value.Headers["x-continuation-token"] == nil {
+			t.Fatalf("%s must document 206 with a continuation token", path)
+		}
+	}
 }

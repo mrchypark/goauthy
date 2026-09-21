@@ -52,11 +52,11 @@ func (h *Handler) Routes(m *http.ServeMux) {
 			fn(w, r)
 		})
 	}
-	mount("GET", "/ns", false, false, h.namespaces)
+	mount("GET", "/ns", false, true, h.namespaces)
 	mount("POST", "/ns", true, false, h.namespaces)
 	mount("PUT", "/ns/{ns}", true, false, h.namespace)
 	mount("DELETE", "/ns/{ns}", false, false, h.namespace)
-	mount("GET", "/ns/{ns}/access", false, false, h.accesses)
+	mount("GET", "/ns/{ns}/access", false, true, h.accesses)
 	mount("POST", "/ns/{ns}/access", true, false, h.accesses)
 	mount("PUT", "/ns/{ns}/access/{id}", true, false, h.access)
 	mount("DELETE", "/ns/{ns}/access/{id}", false, false, h.access)
@@ -113,6 +113,16 @@ func jsonw(w http.ResponseWriter, v any) {
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(v)
 }
+
+// jsonPage writes a list response. A listing that continues on a following page
+// is partial content carrying the token that resumes exactly after this page.
+func jsonPage(w http.ResponseWriter, v any, next string) {
+	if next != "" {
+		w.Header().Set("X-Continuation-Token", next)
+		w.WriteHeader(http.StatusPartialContent)
+	}
+	jsonw(w, v)
+}
 func errw(w http.ResponseWriter, e error) {
 	if e == nil {
 		w.WriteHeader(200)
@@ -136,52 +146,49 @@ func errw(w http.ResponseWriter, e error) {
 	w.WriteHeader(c)
 }
 func allow(w http.ResponseWriter, a string) { w.Header().Set("Allow", a); w.WriteHeader(405) }
-func q(r *http.Request) (int, string, error) {
+func q(r *http.Request) (int, string, string, error) {
 	vals, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
-		return 0, "", ErrBadRequest
+		return 0, "", "", ErrBadRequest
 	}
 	for k := range vals {
-		if k != "limit" && k != "search" {
-			return 0, "", ErrBadRequest
+		if k != "limit" && k != "search" && k != "cursor" {
+			return 0, "", "", ErrBadRequest
 		}
 	}
-	if len(vals["limit"]) > 1 || len(vals["search"]) > 1 {
-		return 0, "", ErrBadRequest
+	if len(vals["limit"]) > 1 || len(vals["search"]) > 1 || len(vals["cursor"]) > 1 {
+		return 0, "", "", ErrBadRequest
 	}
 	n := 0
 	if x := vals.Get("limit"); x != "" {
 		var e error
 		n, e = strconv.Atoi(x)
 		if e != nil || n < 0 || n > 1000 {
-			return 0, "", ErrBadRequest
+			return 0, "", "", ErrBadRequest
 		}
 	}
 	s := vals.Get("search")
 	if len(s) > 64 {
-		return 0, "", ErrBadRequest
+		return 0, "", "", ErrBadRequest
 	}
-	return n, s, nil
+	return n, s, vals.Get("cursor"), nil
 }
 func (h *Handler) namespaces(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
-		if r.URL.RawQuery != "" {
-			errw(w, ErrBadRequest)
-			return
-		}
-		if _, _, e := q(r); e != nil {
+		n, _, cursor, e := q(r)
+		if e != nil {
 			errw(w, e)
 			return
 		}
 		if !h.adminOK(w, clean(r), false) {
 			return
 		}
-		v, e := h.store.ListNamespaces(r.Context())
+		v, next, e := h.store.ListNamespaces(r.Context(), n, cursor)
 		if e != nil {
 			errw(w, e)
 			return
 		}
-		jsonw(w, v)
+		jsonPage(w, v, next)
 		return
 	}
 	if r.Method != "POST" {
@@ -234,16 +241,26 @@ func (h *Handler) namespace(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) accesses(w http.ResponseWriter, r *http.Request) {
 	n := r.PathValue("ns")
-	if !h.adminOK(w, r, r.Method != "GET") {
-		return
-	}
 	if r.Method == "GET" {
-		v, e := h.store.Accesses(r.Context(), n)
+		n2, _, cursor, e := q(r)
 		if e != nil {
 			errw(w, e)
 			return
 		}
-		jsonw(w, v)
+		// The admin gate rejects any query string, so the validated listing
+		// parameters are stripped before the session check.
+		if !h.adminOK(w, clean(r), false) {
+			return
+		}
+		v, next, e := h.store.Accesses(r.Context(), n, n2, cursor)
+		if e != nil {
+			errw(w, e)
+			return
+		}
+		jsonPage(w, v, next)
+		return
+	}
+	if !h.adminOK(w, r, true) {
 		return
 	}
 	if r.Method != "POST" {
@@ -308,7 +325,7 @@ func (h *Handler) adminValues(w http.ResponseWriter, r *http.Request) {
 		allow(w, "GET")
 		return
 	}
-	n, s, e := q(r)
+	n, s, cursor, e := q(r)
 	if e != nil {
 		errw(w, e)
 		return
@@ -316,12 +333,12 @@ func (h *Handler) adminValues(w http.ResponseWriter, r *http.Request) {
 	if !h.adminOK(w, clean(r), false) {
 		return
 	}
-	v, e := h.store.Values(r.Context(), Access{Namespace: r.PathValue("ns")}, n, s)
+	v, next, e := h.store.Values(r.Context(), Access{Namespace: r.PathValue("ns")}, n, s, cursor)
 	if e != nil {
 		errw(w, e)
 		return
 	}
-	jsonw(w, v)
+	jsonPage(w, v, next)
 }
 func (h *Handler) adminValue(w http.ResponseWriter, r *http.Request) {
 	if !h.adminOK(w, r, r.Method != "GET") {
@@ -365,17 +382,17 @@ func (h *Handler) keys(w http.ResponseWriter, r *http.Request) {
 		errw(w, e)
 		return
 	}
-	n, s, e := q(r)
+	n, s, cursor, e := q(r)
 	if e != nil {
 		errw(w, e)
 		return
 	}
-	v, e := h.store.Keys(r.Context(), a, n, s)
+	v, next, e := h.store.Keys(r.Context(), a, n, s, cursor)
 	if e != nil {
 		errw(w, e)
 		return
 	}
-	jsonw(w, v)
+	jsonPage(w, v, next)
 }
 func (h *Handler) values(w http.ResponseWriter, r *http.Request) {
 	a, e := h.bearer(r)
@@ -396,17 +413,17 @@ func (h *Handler) values(w http.ResponseWriter, r *http.Request) {
 		allow(w, "GET, PUT")
 		return
 	}
-	n, s, e := q(r)
+	n, s, cursor, e := q(r)
 	if e != nil {
 		errw(w, e)
 		return
 	}
-	v, e := h.store.Values(r.Context(), a, n, s)
+	v, next, e := h.store.Values(r.Context(), a, n, s, cursor)
 	if e != nil {
 		errw(w, e)
 		return
 	}
-	jsonw(w, v)
+	jsonPage(w, v, next)
 }
 func (h *Handler) key(w http.ResponseWriter, r *http.Request) {
 	a, e := h.bearer(r)

@@ -83,32 +83,41 @@ func addKVOperations(doc *openapi3.T, features Features) error {
 		if query {
 			op.AddParameter(openapi3.NewQueryParameter("limit").WithSchema(openapi3.NewIntegerSchema().WithMin(0).WithMax(1000)))
 			op.AddParameter(openapi3.NewQueryParameter("search").WithSchema(openapi3.NewStringSchema().WithMaxLength(64)))
+			op.AddParameter(openapi3.NewQueryParameter("cursor").WithSchema(openapi3.NewStringSchema().WithMaxLength(128)))
 		}
 		if body != nil {
 			op.RequestBody = &openapi3.RequestBodyRef{Value: openapi3.NewRequestBody().WithRequired(true).WithJSONSchema(body.Value)}
 		}
 		op.Responses = openapi3.NewResponses()
-		for _, status := range statuses {
-			var schema *openapi3.SchemaRef
+		schemaFor := func(operationID string) *openapi3.SchemaRef {
 			switch operationID {
 			case "listKVNamespaces":
-				schema = nsResponse
+				return nsResponse
 			case "listKVAccess":
-				schema = accessResponse
+				return accessResponse
 			case "createKVAccess", "rotateKVAccessSecret":
-				schema = accessObjectResponse
+				return accessObjectResponse
 			case "listKVNamespaceValues", "listKVValues":
-				schema = valueResponse
+				return valueResponse
 			case "listKVKeys":
-				schema = keyResponse
+				return keyResponse
 			case "getPublicKVValue", "getKVValue":
-				schema = rawResponse
+				return rawResponse
 			case "testKVAccess":
-				schema = strict(map[string]*openapi3.SchemaRef{"id": {Value: openapi3.NewStringSchema().WithPattern(`^[A-Za-z0-9]{16}$`)}, "ns": str(), "name": {Value: str().Value.WithNullable()}}, "id", "ns", "name")
-			default:
-				schema = nil
+				return strict(map[string]*openapi3.SchemaRef{"id": {Value: openapi3.NewStringSchema().WithPattern(`^[A-Za-z0-9]{16}$`)}, "ns": str(), "name": {Value: str().Value.WithNullable()}}, "id", "ns", "name")
 			}
-			op.Responses.Set(fmt.Sprint(status), jsonResponse(status, schema))
+			return nil
+		}
+		for _, status := range statuses {
+			op.Responses.Set(fmt.Sprint(status), jsonResponse(status, schemaFor(operationID)))
+		}
+		if query {
+			// A listing that continues is partial content carrying the token that
+			// resumes exactly after the returned page.
+			partial := openapi3.NewResponse().WithDescription("Partial content").
+				WithContent(openapi3.NewContentWithJSONSchema(schemaFor(operationID).Value))
+			partial.Headers = openapi3.Headers{"x-continuation-token": {Value: &openapi3.Header{Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema().WithMaxLength(128)}}}}
+			op.Responses.Set("206", &openapi3.ResponseRef{Value: partial})
 		}
 		doc.AddOperation(path, method, op)
 	}
@@ -120,11 +129,11 @@ func addKVOperations(doc *openapi3.T, features Features) error {
 	writeAdmin := []int{http.StatusOK, http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable}
 	readBearer := []int{http.StatusOK, http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusServiceUnavailable}
 	writeBearer := readBearer
-	add("/auth/v1/kv/ns", "GET", "listKVNamespaces", nil, readAdmin, adminRead, false)
+	add("/auth/v1/kv/ns", "GET", "listKVNamespaces", nil, readAdmin, adminRead, true)
 	add("/auth/v1/kv/ns", "POST", "createKVNamespace", nsBody, writeAdmin, adminWrite, false)
 	add("/auth/v1/kv/ns/{ns}", "PUT", "updateKVNamespace", nsBody, writeAdmin, adminWrite, false, "ns")
 	add("/auth/v1/kv/ns/{ns}", "DELETE", "deleteKVNamespace", nil, readAdmin, adminWrite, false, "ns")
-	add("/auth/v1/kv/ns/{ns}/access", "GET", "listKVAccess", nil, readAdmin, adminRead, false, "ns")
+	add("/auth/v1/kv/ns/{ns}/access", "GET", "listKVAccess", nil, readAdmin, adminRead, true, "ns")
 	add("/auth/v1/kv/ns/{ns}/access", "POST", "createKVAccess", accessBody, []int{http.StatusCreated, http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable}, adminWrite, false, "ns")
 	add("/auth/v1/kv/ns/{ns}/access/{id}", "PUT", "updateKVAccess", accessBody, readAdmin, adminWrite, false, "ns", "id")
 	add("/auth/v1/kv/ns/{ns}/access/{id}", "DELETE", "deleteKVAccess", nil, readAdmin, adminWrite, false, "ns", "id")
