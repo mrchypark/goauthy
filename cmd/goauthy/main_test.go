@@ -21,6 +21,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -873,6 +874,58 @@ func TestBackchannelSettings(t *testing.T) {
 				t.Fatalf("default retry=%s", retry)
 			}
 		})
+	}
+}
+
+// GA-FED-005: a deployment that registers logout URIs only through the API has
+// no bootstrap logout URI, so delivery must start anyway and consume the queued
+// managed-client row instead of leaving attempts=0 with both timestamps null.
+func TestBackchannelDeliveryStartsWithoutBootstrapLogoutURI(t *testing.T) {
+	ctx := context.Background()
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "backchannel-startup-test", DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := storage.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "backchannel-startup-delivery", SQL: `INSERT INTO oidc_backchannel_deliveries
+		(event_id,client_id,sid,subject,logout_uri,allow_private,allow_http,attempts,next_attempt_at_unix_ms,created_at_unix_ms)
+		VALUES ('event-managed','managed-client',NULL,'user-1','http://127.0.0.1:1/logout',0,0,0,?,?)`, Args: []any{now.UnixMilli(), now.UnixMilli()}}); err != nil {
+		t.Fatal(err)
+	}
+	workerCtx, cancel := context.WithCancel(ctx)
+	var workers sync.WaitGroup
+	if err := startBackchannelDelivery(workerCtx, &workers, func(string) string { return "" }, db, "https://id.example.test", "test-node", nil, func(context.Context) (oidc.SigningKey, error) {
+		return oidc.SigningKey{}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cancel()
+		workers.Wait()
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		row, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT attempts, failed_at_unix_ms FROM oidc_backchannel_deliveries WHERE event_id='event-managed' AND client_id='managed-client'`, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil || len(row.Rows) != 1 {
+			t.Fatalf("delivery row=%#v err=%v", row.Rows, err)
+		}
+		attempts := row.Rows[0][0].(int64)
+		if attempts > 0 {
+			// No network exception is configured, so the worker refuses the
+			// plain-HTTP endpoint after claiming the row.
+			if row.Rows[0][1] == nil {
+				t.Fatalf("delivery attempts=%d is not terminal", attempts)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("back-channel delivery never started without a bootstrap logout URI")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

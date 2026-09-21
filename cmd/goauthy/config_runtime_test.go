@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -23,11 +24,16 @@ func writeTestFile(t *testing.T, dir, name, content string) string {
 
 func applicationConfigTestEnv(t *testing.T, overrides map[string]string) func(string) string {
 	t.Helper()
+	secretDir := t.TempDir()
 	values := map[string]string{
 		"GOAUTHY_RHIZA_PROFILE": "dev",
 		"GOAUTHY_CLUSTER_ID":    "test-cluster",
 		"GOAUTHY_NODE_ID":       "test-node",
 		"GOAUTHY_DATA_DIR":      filepath.Join(t.TempDir(), "data"),
+		// GA-CONFIG-001: the preflight loads both deployment secrets, so a valid
+		// configuration needs readable files unless a case overrides the path.
+		"GOAUTHY_OAUTH_HMAC_SECRET_FILE":       writeTestFile(t, secretDir, "oauth-hmac", base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32))),
+		"GOAUTHY_BOOTSTRAP_CLIENT_SECRET_FILE": writeTestFile(t, secretDir, "bootstrap-client", strings.Repeat("c", 32)),
 	}
 	for name, value := range overrides {
 		values[name] = value
@@ -238,5 +244,62 @@ func TestRunConfigCommandValidatesRuntimeFiles(t *testing.T) {
 				t.Fatalf("error = %v want %q", err, test.wantErr)
 			}
 		})
+	}
+}
+
+// GA-CONFIG-001: the preflight loads both deployment secrets, so a missing or
+// undecodable file at its default path is rejected before the configuration
+// command can touch storage. Startup loads these in loadApplicationConfig, so
+// the check no longer accepts a configuration that would fail after the
+// storage migration and bootstrap mutations commit.
+func TestRunConfigCommandRejectsInvalidDeploymentSecrets(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	dataDir := filepath.Join(dir, "data")
+	env := func(name string) string {
+		switch name {
+		case "GOAUTHY_RHIZA_PROFILE":
+			return "dev"
+		case "GOAUTHY_CLUSTER_ID":
+			return "test-cluster"
+		case "GOAUTHY_NODE_ID":
+			return "test-node"
+		case "GOAUTHY_DATA_DIR":
+			return dataDir
+		default:
+			return ""
+		}
+	}
+
+	assertRejected := func(t *testing.T, wantErr string) {
+		t.Helper()
+		var out bytes.Buffer
+		err := runConfigCommand([]string{"check"}, env, &out)
+		if err == nil || !strings.Contains(err.Error(), wantErr) {
+			t.Fatalf("error = %v want %q", err, wantErr)
+		}
+		if out.Len() != 0 {
+			t.Fatalf("rejected configuration wrote output = %q", out.String())
+		}
+		if _, statErr := os.Stat(dataDir); statErr == nil {
+			t.Fatalf("configuration rejection opened storage at %s", dataDir)
+		}
+	}
+
+	// Empty env values fall back to ./secrets/*, which do not exist yet.
+	assertRejected(t, "OAuth HMAC secret")
+
+	// A valid HMAC secret still leaves the bootstrap client secret validated.
+	if err := os.MkdirAll(filepath.Join(dir, "secrets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(dir, "secrets"), "oauth-hmac", base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32)))
+	assertRejected(t, "bootstrap OAuth client secret")
+
+	// Both secrets present makes the configuration valid again.
+	writeTestFile(t, filepath.Join(dir, "secrets"), "bootstrap-client", strings.Repeat("c", 32))
+	var out bytes.Buffer
+	if err := runConfigCommand([]string{"check"}, env, &out); err != nil {
+		t.Fatalf("valid deployment secrets rejected: %v", err)
 	}
 }
