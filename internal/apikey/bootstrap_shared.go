@@ -66,8 +66,8 @@ func (s *Store) BootstrapWithSharedGeneratedSecrets(ctx context.Context, path, k
 		return err
 	}
 	defer wipeBootstrapKeys(keys)
-	if !hasGeneratedBootstrapKey(keys) {
-		return errors.New("shared generated bootstrap requires a Generate API key")
+	if err := validateBootstrapBatch(keys, true); err != nil {
+		return err
 	}
 	deadlineUnix := deadline.Unix()
 	if deadline.IsZero() {

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -433,6 +434,80 @@ func TestValidateBootstrapFileAcceptsEmptyArray(t *testing.T) {
 	path := writeBootstrapTestFile(t, dir, "empty.json", "[]")
 	if err := ValidateBootstrapFile(path, nil, false); err != nil {
 		t.Fatalf("empty array rejected: %v", err)
+	}
+}
+
+// GA-CONFIG-001-A: the generated-secret configuration selects the shared
+// generated-secret path, which requires a Generate entry. A plain-only document
+// used to pass the preflight and then fail startup after Rhiza was opened.
+func TestValidateBootstrapFileRejectsPlainOnlyDocumentWithGeneratedExport(t *testing.T) {
+	dir := t.TempDir()
+	plain := "[{\"name\":\"runner\",\"secret\":{\"Plain\":\"" + bootstrapTestSecret + "\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]"
+	path := writeBootstrapTestFile(t, dir, "plain-only.json", plain)
+	err := ValidateBootstrapFile(path, nil, true)
+	if err == nil || !strings.Contains(err.Error(), "Generate API key") {
+		t.Fatalf("plain-only document with generated export err=%v", err)
+	}
+	// An empty array follows the same missing-Generate branch on the shared path.
+	empty := writeBootstrapTestFile(t, dir, "empty-shared.json", "[]")
+	if err := ValidateBootstrapFile(empty, nil, true); err == nil || !strings.Contains(err.Error(), "Generate API key") {
+		t.Fatalf("empty document with generated export err=%v", err)
+	}
+	if err := ValidateBootstrapFile(empty, nil, false); err != nil {
+		t.Fatalf("empty document without generated export rejected: %v", err)
+	}
+}
+
+// GA-CONFIG-001-B: the shared generated-secret path prepends the
+// generated_api_key_bootstrap row and ExecuteEnvelope appends the master-key
+// retirement fence to the same command, so a document that fits the budget on
+// the plain path exceeds it on the shared path. The preflight has to apply the
+// budget of the path startup actually selects.
+func TestValidateBootstrapFileBudgetMatchesSelectedPath(t *testing.T) {
+	dir := t.TempDir()
+	// Two statements per key plus one per access right. 20 generated keys with
+	// two extra rights are 62 key statements, and the shared command adds its own
+	// two for exactly 64. 21 keys with one right each are 63 key statements:
+	// inside the ordinary budget, over the shared one.
+	document := func(keys, extraRights int, secret string) string {
+		entries := make([]string, 0, keys)
+		for i := 0; i < keys; i++ {
+			rights := "[\"read\"]"
+			if i < extraRights {
+				rights = "[\"read\",\"create\"]"
+			}
+			entries = append(entries, fmt.Sprintf("{\"name\":\"gen-%02d\",\"secret\":%s,\"access\":[{\"group\":\"Clients\",\"access_rights\":%s}]}", i, secret, rights))
+		}
+		return "[" + strings.Join(entries, ",") + "]"
+	}
+	generate := "\"generate\""
+	plain := "{\"Plain\":\"" + bootstrapTestSecret + "\"}"
+	within := writeBootstrapTestFile(t, dir, "shared-within.json", document(20, 2, generate))
+	if err := ValidateBootstrapFile(within, nil, true); err != nil {
+		t.Fatalf("shared document at the statement budget rejected: %v", err)
+	}
+	boundary := writeBootstrapTestFile(t, dir, "boundary.json", document(21, 0, plain))
+	if err := ValidateBootstrapFile(boundary, nil, false); err != nil {
+		t.Fatalf("plain document at the statement budget rejected: %v", err)
+	}
+	err := ValidateBootstrapFile(boundary, nil, true)
+	if err == nil || !strings.Contains(err.Error(), "too many entries") {
+		t.Fatalf("shared document over the statement budget with its own row err=%v", err)
+	}
+	// The shared path itself refuses the same oversized batch, so the preflight
+	// limit is not stricter than the path it predicts.
+	_, keyDir, artifact := generatedBootstrapFiles(t, "runner", time.Time{})
+	store, err := NewStore(bootstrapTestDB(t, "shared-budget"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyring, err := oidc.LoadKeyring(keyDir, "dev-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	over := writeBootstrapTestFile(t, dir, "shared-over.json", document(21, 0, generate))
+	if err := store.BootstrapWithSharedGeneratedSecrets(context.Background(), over, keyDir, artifact, keyring, time.Time{}); err == nil || !strings.Contains(err.Error(), "too many entries") {
+		t.Fatalf("shared runtime over the statement budget err=%v", err)
 	}
 }
 

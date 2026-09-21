@@ -19,7 +19,7 @@ import (
 
 const (
 	maxBootstrapFileBytes  = 1 << 20
-	maxBootstrapStatements = 64 // GoAuthy policy cap; Rhiza v0.9.0 permits 128.
+	maxBootstrapStatements = 64 // Rhiza's materializer rejects more than 64 statements per command.
 	// SQLite stores expiry timestamps as signed milliseconds.  Bootstrap
 	// accepts Unix seconds, so this is the largest value that can be scaled
 	// without overflowing that column.
@@ -166,10 +166,12 @@ func (s *Store) bootstrapOptions(ctx context.Context, path string, decrypt func(
 		}
 	}
 
-	statements, minimumRows := bootstrapStatements(keys, s.timeNow().UnixMilli())
-	if len(statements) > maxBootstrapStatements {
-		return fmt.Errorf("API-key bootstrap contains too many entries")
+	// GA-CONFIG-001-B: one batch decision for the preflight and every runtime
+	// path, so the accepted document cannot depend on which path runs.
+	if err := validateBootstrapBatch(keys, false); err != nil {
+		return err
 	}
+	statements, minimumRows := bootstrapStatements(keys, s.timeNow().UnixMilli())
 
 	// One Rhiza command is one replicated SQLite transaction. If any key or
 	// access row fails, Rhiza rolls the complete command back.
@@ -236,7 +238,9 @@ func readBootstrapFile(path string) ([]byte, error) {
 // entries and the statement budget are all still checked. Generate entries are
 // validated against allowGenerate, which the caller sets from the same
 // generated-secret configuration startup uses, so a generate entry without
-// that configuration is rejected here instead of after Rhiza is open.
+// that configuration is rejected here instead of after Rhiza is open. With that
+// configuration present the caller reaches the shared generated-secret path, so
+// the batch rules that path enforces are checked here too.
 //
 // The function is side-effect-free: it does not touch the database, Rhiza,
 // or global state and does not create the key directory or write anything.
@@ -257,9 +261,28 @@ func ValidateBootstrapFile(path string, decrypt func([]byte) ([]byte, error), al
 	defer wipeBootstrapKeys(keys)
 	// GA-CONFIG-001: the store rejects an oversized statement batch only after
 	// Rhiza is open and the generated-secret artifact may already be written, so
-	// the preflight applies the same helper and limit.
-	if statements, _ := bootstrapStatements(keys, 0); len(statements) > maxBootstrapStatements {
+	// the preflight applies the same batch decision as the path startup selects.
+	return validateBootstrapBatch(keys, allowGenerate)
+}
+
+// validateBootstrapBatch applies the batch rules of the runtime path selected
+// by allowGenerate: the statement budget every bootstrap path enforces and, for
+// the shared generated-secret path, the requirement that the document contains
+// a Generate entry. One shared decision keeps the preflight and that path from
+// accepting different documents.
+func validateBootstrapBatch(keys []bootstrapKey, sharedGenerated bool) error {
+	extra := 0
+	if sharedGenerated {
+		// The shared path prepends the generated_api_key_bootstrap row and
+		// storage.ExecuteEnvelope appends the master-key retirement fence to the
+		// same command, so its budget covers both statements.
+		extra = 2
+	}
+	if statements, _ := bootstrapStatements(keys, 0); len(statements)+extra > maxBootstrapStatements {
 		return errors.New("API-key bootstrap contains too many entries")
+	}
+	if sharedGenerated && !hasGeneratedBootstrapKey(keys) {
+		return errors.New("shared generated bootstrap requires a Generate API key")
 	}
 	return nil
 }

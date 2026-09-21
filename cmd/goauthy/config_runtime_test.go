@@ -174,6 +174,21 @@ func TestRunConfigCommandRejectsInvalidRuntimeConfiguration(t *testing.T) {
 		// too, so an oversized batch is rejected before the generated-secret
 		// artifact can be written.
 		{name: "bootstrap statement budget", env: map[string]string{"GOAUTHY_API_KEY_BOOTSTRAP_FILE": writeTestFile(t, credentialDir, "over-budget.json", bootstrapOverBudgetFile(t))}, wantErr: "too many entries"},
+		// GA-CONFIG-001-C: the generated-secret export selects the shared path,
+		// which requires a Generate entry in the selected document.
+		{name: "generated secrets with plain-only bootstrap input", env: map[string]string{
+			"GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_FILE":        filepath.Join(credentialDir, "generated-secrets.json"),
+			"GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_TTL_SECONDS": "900",
+			"GOAUTHY_API_KEY_BOOTSTRAP_FILE":                  writeTestFile(t, credentialDir, "plain-only-shared.json", bootstrapPlainOnlyFile(t)),
+		}, wantErr: "Generate API key"},
+		// GA-CONFIG-001-B: the shared command adds its own two statements, so the
+		// preflight budget covers them instead of accepting a batch the shared
+		// path rejects after Rhiza is open.
+		{name: "shared bootstrap statement budget", env: map[string]string{
+			"GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_FILE":        filepath.Join(credentialDir, "generated-secrets.json"),
+			"GOAUTHY_BOOTSTRAP_GENERATED_SECRETS_TTL_SECONDS": "900",
+			"GOAUTHY_API_KEY_BOOTSTRAP_FILE":                  writeTestFile(t, credentialDir, "shared-over-budget.json", bootstrapSharedOverBudgetFile(t)),
+		}, wantErr: "too many entries"},
 		{name: "bootstrap redirect uri", env: map[string]string{"GOAUTHY_BOOTSTRAP_REDIRECT_URI": "not-a-url"}, wantErr: "invalid bootstrap OAuth redirect URI"},
 		{name: "bootstrap redirect uri without https", env: map[string]string{"GOAUTHY_BOOTSTRAP_REDIRECT_URI": "http://id.example.test/callback"}, wantErr: "invalid bootstrap OAuth redirect URI"},
 	} {
@@ -205,6 +220,24 @@ func bootstrapOverBudgetFile(t *testing.T) string {
 	entries := make([]string, 0, 22)
 	for i := 0; i < 22; i++ {
 		entries = append(entries, fmt.Sprintf("{\"name\":\"key-%02d\",\"secret\":{\"Plain\":\"%s\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}", i, strings.Repeat("a", 64)))
+	}
+	return "[" + strings.Join(entries, ",") + "]"
+}
+
+// bootstrapPlainOnlyFile builds a valid document with no Generate entry.
+func bootstrapPlainOnlyFile(t *testing.T) string {
+	t.Helper()
+	return fmt.Sprintf("[{\"name\":\"plain-key\",\"secret\":{\"Plain\":\"%s\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]", strings.Repeat("a", 64))
+}
+
+// bootstrapSharedOverBudgetFile builds a generated-secret document whose key
+// statements fit the ordinary budget but not the shared command, which adds the
+// generated-secret record and the retirement fence.
+func bootstrapSharedOverBudgetFile(t *testing.T) string {
+	t.Helper()
+	entries := make([]string, 0, 21)
+	for i := 0; i < 21; i++ {
+		entries = append(entries, fmt.Sprintf("{\"name\":\"gen-%02d\",\"secret\":\"generate\",\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}", i))
 	}
 	return "[" + strings.Join(entries, ",") + "]"
 }
