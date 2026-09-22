@@ -112,30 +112,36 @@ func TestAccountPasskeyUIAcrossPods(t *testing.T) {
 	}
 
 	if os.Getenv("GOAUTHY_E2E_DEVICE_LOGIN_FLOW") == "1" {
-		checkPasskeyDeviceApproval(t, auth.ctx, primary, secondary, email, clientSecret)
+		checkDeviceApprovalLoginUI(t, auth.ctx, primary, secondary, email, password, clientSecret)
+		checkDeviceApprovalLoginUI(t, auth.ctx, primary, secondary, email, "", clientSecret)
 	}
 }
 
 // Reuse the credential registered through the account UI, but remove all browser
-// sessions so the approval entry must complete its own real WebAuthn ceremony.
-func checkPasskeyDeviceApproval(t *testing.T, ctx context.Context, primary, secondary, username, secret string) {
+// sessions so each approval entry must authenticate afresh. An empty password
+// selects the real WebAuthn ceremony; otherwise use the native password form.
+func checkDeviceApprovalLoginUI(t *testing.T, ctx context.Context, primary, secondary, username, password, secret string) {
 	t.Helper()
 	client := newBrowserClient(t)
 	grant := startDeviceAuthorizationOffline(t, client, primary, "goauthy-dev", secret)
+	login := chromedp.Tasks{chromedp.Click(`#passkey-btn`)}
+	if password != "" {
+		login = chromedp.Tasks{chromedp.SetValue(`input[name="password"]`, password), chromedp.Click(`#login-form button[type="submit"]`)}
+	}
 	var reviewedCode string
 	if err := chromedp.Run(ctx,
 		network.ClearBrowserCookies(),
 		chromedp.Navigate(grant.VerificationURIComplete),
 		chromedp.WaitVisible(`#passkey-btn`),
 		chromedp.SetValue(`input[name="username"]`, username),
-		chromedp.Click(`#passkey-btn`),
+		login,
 		chromedp.WaitVisible(`button[name="action"][value="approve"]`),
 		chromedp.Value(`input[name="user_code"]`, &reviewedCode),
 	); err != nil {
-		t.Fatalf("cold Device passkey login: %v", err)
+		t.Fatalf("cold Device approval login: %v", err)
 	}
 	if reviewedCode != grant.UserCode {
-		t.Fatal("passkey login changed the Device approval target")
+		t.Fatal("login changed the Device approval target")
 	}
 	assertDeviceTokenError(t, client, secondary, secret, grant.DeviceCode, "authorization_pending")
 	// RFC 8628 requires the returned polling interval even after user approval.
@@ -155,7 +161,7 @@ func checkPasskeyDeviceApproval(t *testing.T, ctx context.Context, primary, seco
 	}
 	tokens := deviceToken(t, client, secondary, secret, grant.DeviceCode)
 	if tokens.AccessToken == "" || tokens.RefreshToken == "" {
-		t.Fatal("passkey-approved Device did not issue tokens")
+		t.Fatal("approved Device did not issue tokens")
 	}
 	assertDeviceTokenError(t, client, secondary, secret, grant.DeviceCode, "expired_token")
 }
