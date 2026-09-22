@@ -29,14 +29,14 @@ func TestSharedGeneratedBootstrapRecoversAfterSIGKILL(t *testing.T) {
 	if err := setupSharedGeneratedBootstrapCrashFiles(root); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	childCtx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestSharedGeneratedBootstrapRecoversAfterSIGKILL$")
+	cmd := exec.CommandContext(childCtx, os.Args[0], "-test.run=^TestSharedGeneratedBootstrapRecoversAfterSIGKILL$")
 	cmd.Env = append(os.Environ(), "GOAUTHY_SHARED_BOOTSTRAP_CRASH_ROOT="+root)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if err := waitForSharedBootstrapCrashMarker(ctx, filepath.Join(root, "ready")); err != nil {
+	if err := waitForSharedBootstrapCrashMarker(childCtx, filepath.Join(root, "ready")); err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		t.Fatal(err)
@@ -48,10 +48,13 @@ func TestSharedGeneratedBootstrapRecoversAfterSIGKILL(t *testing.T) {
 	if err := cmd.Wait(); err == nil {
 		t.Fatal("shared bootstrap child exited without SIGKILL")
 	}
-	if err := ctx.Err(); err != nil {
+	if err := childCtx.Err(); err != nil {
 		t.Fatal(err)
 	}
 
+	// Recovery has its own budget; child startup must not consume it.
+	ctx, cancelRecovery := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancelRecovery()
 	now := sharedGeneratedBootstrapCrashNow()
 	deadline := now.Add(time.Hour)
 	keyDir := filepath.Join(root, "keys")
