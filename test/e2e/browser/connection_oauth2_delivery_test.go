@@ -169,7 +169,7 @@ func oauth2DeliveryProbe(t *testing.T, owner *http.Client, primary string, cooki
 		"grant_id": grantDoc.ID, "provider_id": providerID, "connection_generation": grantDoc.Generation, "account_id": "fixture-subject", "resource": useGrantResource, "consumer_client_id": consumerID, "endpoint": strings.TrimRight(fixtureBase, "/") + "/v1/chat/completions", "scopes": []string{"account"}, "credential_version": initialVersion,
 	}, fixture)
 	var deliveredToken string
-	var deliveredVersion int64
+	deliveredVersion := initialVersion
 	check := func(version int64) {
 		before := readOAuth2FixtureStats(t, fixture, fixtureBase)
 		deliver := do(t, newBrowserClient(t), http.MethodPost, primary+"/auth/v1/connection-grants/"+url.PathEscape(grantDoc.ID)+"/credential", nil, bearer)
@@ -198,10 +198,10 @@ func oauth2DeliveryProbe(t *testing.T, owner *http.Client, primary string, cooki
 			t.Fatal("credential delivery caused an external provider request")
 		}
 		credentialStatus(consumerToken, grantDoc.ID, http.StatusOK, version)
-		if deliveredVersion != 0 && version != deliveredVersion && got.AccessToken == deliveredToken {
+		if deliveredToken != "" && version != deliveredVersion && got.AccessToken == deliveredToken {
 			t.Fatal("OAuth2 delivery returned the pre-refresh access token")
 		}
-		if deliveredVersion == version && got.AccessToken != deliveredToken {
+		if deliveredToken != "" && deliveredVersion == version && got.AccessToken != deliveredToken {
 			t.Fatal("OAuth2 delivery changed the access token without a version change")
 		}
 		deliveredToken = got.AccessToken
@@ -240,7 +240,7 @@ func oauth2DeliveryProbe(t *testing.T, owner *http.Client, primary string, cooki
 		revoked = true
 		denied()
 		if allowRefresh {
-			refreshDenied(consumerToken, grantDoc.ID, "2", http.StatusNotFound)
+			refreshDenied(consumerToken, grantDoc.ID, strconv.FormatInt(deliveredVersion, 10), http.StatusNotFound)
 		}
 		credentialStatus(consumerToken, grantDoc.ID, http.StatusNotFound, 0)
 	}

@@ -69,12 +69,7 @@ func oauthConsumerBridge(t *testing.T, issuer, endpoint, token string, binding m
 		}
 		cmd := exec.CommandContext(t.Context(), "go", args...)
 		cmd.Dir = project
-		for _, v := range os.Environ() {
-			if !strings.HasPrefix(v, "BEESUH_E2E_GOAUTHY_OAUTH_FIXTURE=") {
-				cmd.Env = append(cmd.Env, v)
-			}
-		}
-		cmd.Env = append(cmd.Env, "BEESUH_E2E_GOAUTHY_OAUTH_FIXTURE="+fixtureFile)
+		cmd.Env = oauthConsumerEnvironment(fixtureFile)
 		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 		before := modelCalls()
 		if cmd.Run() != nil {
@@ -88,5 +83,48 @@ func oauthConsumerBridge(t *testing.T, issuer, endpoint, token string, binding m
 			t.Fatal("unexpected consumer provider dispatch count")
 		}
 		t.Logf("real Beesuh OAuth consumer: denied=%t model calls=%d", denied, want)
+	}
+}
+
+// Keep issuer/provider credentials and ambient workspace settings out of the
+// consumer. Runtime dependencies must already be present in the runner cache.
+func oauthConsumerEnvironment(fixtureFile string) []string {
+	env := []string{"GOWORK=off", "GOENV=off", "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local", "BEESUH_E2E_GOAUTHY_OAUTH_FIXTURE=" + fixtureFile}
+	for _, name := range []string{"PATH", "HOME", "TMPDIR", "TMP", "TEMP", "GOCACHE", "GOPATH", "GOROOT", "CGO_ENABLED", "CC", "CXX", "PKG_CONFIG", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"} {
+		if value, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+value)
+		}
+	}
+	return env
+}
+
+func TestOAuthConsumerEnvironmentIsolation(t *testing.T) {
+	if os.Getenv("GOAUTHY_TEST_ENV_CHILD") == "1" {
+		for _, name := range []string{"GOAUTHY_E2E_OAUTH2_CLIENT_SECRET", "GOAUTHY_E2E_BROWSER_PASSWORD", "GOAUTHY_E2E_CLIENT_SECRET", "GOFLAGS"} {
+			if _, exists := os.LookupEnv(name); exists {
+				t.Fatalf("parent variable inherited: %s", name)
+			}
+		}
+		for _, name := range []string{"GOWORK", "GOENV", "GOPROXY", "GOSUMDB"} {
+			if os.Getenv(name) != "off" {
+				t.Fatalf("%s not disabled", name)
+			}
+		}
+		if os.Getenv("BEESUH_E2E_GOAUTHY_OAUTH_FIXTURE") != "fixture-only" {
+			t.Fatal("missing fixture reference")
+		}
+		return
+	}
+	for _, name := range []string{"GOAUTHY_E2E_OAUTH2_CLIENT_SECRET", "GOAUTHY_E2E_BROWSER_PASSWORD", "GOAUTHY_E2E_CLIENT_SECRET", "GOFLAGS", "GOWORK", "GOENV"} {
+		t.Setenv(name, "must-not-inherit")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(t.Context(), executable, "-test.run=^TestOAuthConsumerEnvironmentIsolation$")
+	cmd.Env = append(oauthConsumerEnvironment("fixture-only"), "GOAUTHY_TEST_ENV_CHILD=1")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("child environment: %v: %s", err, output)
 	}
 }
