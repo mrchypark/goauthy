@@ -170,3 +170,46 @@ func TestOAuthFixtureRejectsClientAndServesUserinfoStats(t *testing.T) {
 		t.Fatalf("stats=%s err=%v", w.Body.String(), err)
 	}
 }
+
+func TestModelRequiresIssuedAccessToken(t *testing.T) {
+	h := testHandler(t)
+	code := testAuthorize(t, h)
+	token := testToken(t, h, url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {h.cfg.redirectURI}, "code_verifier": {testVerifier}}, fixtureSecret)
+	var issued struct {
+		Access  string `json:"access_token"`
+		Refresh string `json:"refresh_token"`
+	}
+	if token.Code != 200 || json.Unmarshal(token.Body.Bytes(), &issued) != nil || issued.Access == "" {
+		t.Fatal("issue token")
+	}
+	for _, tc := range []struct {
+		name, credential, body string
+		want                   int
+	}{
+		{"issued", issued.Access, `{"messages":[{"role":"user","content":"hello"}]}`, 200},
+		{"unknown", "unknown", `{"messages":[{}]}`, 401},
+		{"refresh", issued.Refresh, `{"messages":[{}]}`, 401},
+		{"empty", issued.Access, `{"messages":[]}`, 400},
+		{"stream", issued.Access, `{"messages":[{}],"stream":true}`, 400},
+		{"trailing", issued.Access, `{"messages":[{}]}{}`, 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(tc.body))
+			r.Header.Set("Authorization", "Bearer "+tc.credential)
+			w := httptest.NewRecorder()
+			h.serveHTTP(w, r)
+			if w.Code != tc.want {
+				t.Fatalf("status=%d want=%d", w.Code, tc.want)
+			}
+			if tc.want == 200 && !strings.Contains(w.Body.String(), "fixture-model-ok") {
+				t.Fatal("missing completion")
+			}
+			if strings.Contains(w.Body.String(), issued.Access) || strings.Contains(w.Body.String(), issued.Refresh) {
+				t.Fatal("credential echoed")
+			}
+		})
+	}
+	if h.stats.Model != 6 || h.stats.ModelFailures != 5 {
+		t.Fatalf("unexpected counters: %+v", h.stats)
+	}
+}
