@@ -362,6 +362,9 @@ if [ "${GOAUTHY_E2E_PROVIDER_REGISTRATION:-0}" = 1 ] || [ "${GOAUTHY_E2E_DEVICE_
 	if [ "${GOAUTHY_E2E_USE_GRANTS:-0}" = 1 ]; then
 		pilot_tests='^TestConnectionUseGrantLive$'
 	fi
+	if [ "${GOAUTHY_E2E_ACCOUNT_PASSKEY_UI:-0}" = 1 ] && [ "${GOAUTHY_E2E_DEVICE_LOGIN_FLOW:-0}" = 1 ]; then
+		pilot_tests="$pilot_tests|^TestAccountPasskeyUIAcrossPods$"
+	fi
 	go test -mod=readonly -count=1 -v -timeout=5m ./test/e2e ./test/e2e/browser -run "$pilot_tests"
 	stop_goauthy
 	start_goauthy
