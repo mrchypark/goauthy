@@ -1,8 +1,11 @@
 package browser
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -79,7 +82,8 @@ func oauthConsumerBridge(t *testing.T, issuer, endpoint, token string, binding m
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ack.Close(); childAck.Close() })
-	cmd := exec.CommandContext(t.Context(), binary, "-test.run=^TestGoAuthyOAuthLiveBridge$", "-test.timeout=5m")
+	// The test context is cancelled before Cleanup. Cleanup owns shutdown.
+	cmd := exec.Command(binary, "-test.run=^TestGoAuthyOAuthLiveBridge$", "-test.timeout=5m")
 	cmd.Dir, cmd.Env = project, oauthConsumerEnvironment(fixtureFile)
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	cmd.ExtraFiles = []*os.File{childAck}
@@ -93,8 +97,7 @@ func oauthConsumerBridge(t *testing.T, issuer, endpoint, token string, binding m
 	}
 	childAck.Close()
 	t.Cleanup(func() {
-		commands.Close()
-		if err := cmd.Wait(); err != nil && !t.Failed() {
+		if err := stopOAuthConsumer(cmd, commands, 5*time.Second); err != nil && !t.Failed() {
 			t.Error("consumer harness did not exit cleanly")
 		}
 	})
@@ -202,4 +205,108 @@ func TestOAuthConsumerIgnoresAmbientWorkspace(t *testing.T) {
 			t.Fatalf("consumer file changed: %s", name)
 		}
 	}
+}
+
+// Exactly one caller reaps the process, including timeout and early-exit cases.
+func stopOAuthConsumer(cmd *exec.Cmd, commands io.Closer, timeout time.Duration) error {
+	_ = commands.Close()
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		_ = cmd.Process.Kill()
+		<-done
+		return context.DeadlineExceeded
+	}
+}
+
+func TestOAuthConsumerLifetime(t *testing.T) {
+	if mode := os.Getenv("GOAUTHY_TEST_LIFETIME_CHILD"); mode != "" {
+		ack := os.NewFile(3, "ack")
+		defer ack.Close()
+		if mode == "exit" {
+			os.Exit(2)
+		}
+		if mode == "hang" {
+			_, _ = ack.Write([]byte("!"))
+			time.Sleep(time.Hour)
+			return
+		}
+		if _, err := io.Copy(ack, os.Stdin); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := func(t *testing.T, mode string) (*exec.Cmd, io.WriteCloser, *os.File) {
+		t.Helper()
+		ack, writer, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { ack.Close(); writer.Close() })
+		cmd := exec.Command(executable, "-test.run=^TestOAuthConsumerLifetime$")
+		cmd.Env = append(oauthConsumerEnvironment(""), "GOAUTHY_TEST_LIFETIME_CHILD="+mode)
+		cmd.ExtraFiles = []*os.File{writer}
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.Start(); err != nil {
+			stdin.Close()
+			t.Fatal(err)
+		}
+		writer.Close()
+		return cmd, stdin, ack
+	}
+	for _, count := range []int{1, 2} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			for i := 0; i < count; i++ {
+				cmd, stdin, ack := start(t, "echo")
+				t.Cleanup(func() {
+					if t.Context().Err() == nil {
+						t.Error("test cancellation ordering not exercised")
+					}
+					if err := stopOAuthConsumer(cmd, stdin, time.Second); err != nil {
+						t.Errorf("normal shutdown: %v", err)
+					}
+				})
+				for j := 0; j < 3; j++ {
+					if _, err := stdin.Write([]byte("!")); err != nil {
+						t.Fatal(err)
+					}
+					var response [1]byte
+					if _, err := io.ReadFull(ack, response[:]); err != nil || response[0] != '!' {
+						t.Fatal("checkpoint failed")
+					}
+				}
+			}
+		})
+	}
+	t.Run("premature-exit", func(t *testing.T) {
+		cmd, stdin, _ := start(t, "exit")
+		if err := stopOAuthConsumer(cmd, stdin, time.Second); err == nil {
+			t.Fatal("early exit accepted")
+		}
+	})
+	t.Run("shutdown-timeout", func(t *testing.T) {
+		cmd, stdin, ack := start(t, "hang")
+		var ready [1]byte
+		if _, err := io.ReadFull(ack, ready[:]); err != nil {
+			t.Fatal(err)
+		}
+		if err := stopOAuthConsumer(cmd, stdin, 20*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("shutdown result: %v", err)
+		}
+		if cmd.ProcessState == nil || cmd.ProcessState.Success() {
+			t.Fatal("hung child not killed and reaped")
+		}
+	})
 }
