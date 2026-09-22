@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math/big"
 	"mime"
 	"net/http"
 	"sync"
@@ -278,7 +279,7 @@ func decodeIDTokenClaims(payload []byte) (*IDTokenClaims, error) {
 		Nonce              string          `json:"nonce"`
 		ExpiresAt          int64           `json:"exp"`
 		IssuedAt           int64           `json:"iat"`
-		AuthenticationTime int64           `json:"auth_time"`
+		AuthenticationTime json.RawMessage `json:"auth_time"`
 		NotBefore          int64           `json:"nbf"`
 		Email              *string         `json:"email"`
 		EmailVerified      *bool           `json:"email_verified"`
@@ -287,6 +288,16 @@ func decodeIDTokenClaims(payload []byte) (*IDTokenClaims, error) {
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return nil, err
+	}
+	var authenticationTime int64
+	if len(raw.AuthenticationTime) != 0 && string(raw.AuthenticationTime) != "null" {
+		// NumericDate permits decimals and exponent notation. Round down before
+		// truncating to our whole-second policy so stale proof cannot round up.
+		value, _, err := big.ParseFloat(string(raw.AuthenticationTime), 10, 64, big.ToNegativeInf)
+		if err != nil || value.IsInf() {
+			return nil, ErrIDTokenVerification
+		}
+		authenticationTime, _ = value.Int64()
 	}
 	var audience []string
 	if json.Unmarshal(raw.Audience, &audience) != nil {
@@ -304,7 +315,7 @@ func decodeIDTokenClaims(payload []byte) (*IDTokenClaims, error) {
 	return &IDTokenClaims{
 		Issuer: raw.Issuer, Subject: raw.Subject, SessionID: raw.SessionID,
 		Audience: audience, Azp: raw.Azp, Nonce: raw.Nonce,
-		ExpiresAt: raw.ExpiresAt, IssuedAt: raw.IssuedAt, NotBefore: raw.NotBefore, AuthenticationTime: raw.AuthenticationTime,
+		ExpiresAt: raw.ExpiresAt, IssuedAt: raw.IssuedAt, NotBefore: raw.NotBefore, AuthenticationTime: authenticationTime,
 		Email: raw.Email, EmailVerified: raw.EmailVerified,
 		GivenName: raw.GivenName, FamilyName: raw.FamilyName,
 		rawClaims: rawClaims,
