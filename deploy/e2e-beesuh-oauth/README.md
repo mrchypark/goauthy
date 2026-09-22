@@ -2,7 +2,13 @@
 
 This opt-in test overlays a GoAuthy-owned harness into a selected Beesuh checkout.
 The actual Beesuh Runtime and OAuth delivery adapter perform two model calls for
-each receipt check. GoAuthy's existing registered-provider lifecycle supplies the
+each receipt check. One child process keeps the same OAuth client and Runtime
+alive across refresh and revocation checkpoints; reconnect creates a second
+consumer for the new consent while retaining the old binding for denial checks.
+Each dispatch must revalidate the exact GoAuthy credential endpoint: success
+requires HTTP 200 and authority denial requires HTTP 404. Transport failures,
+5xx responses and missing authority requests fail qualification.
+GoAuthy's existing registered-provider lifecycle supplies the
 owner, confidential consumer, consent and authorized refresh. Revoked or obsolete
 grants must result in zero provider model calls. The synthetic provider accepts
 only access tokens it actually issued; refresh tokens are rejected at the model
@@ -43,6 +49,11 @@ route on the host. Runtime dependencies are already downloaded; `GOPROXY=off`
 and `GOSUMDB=off` remain inherited. No host ports, directories or Docker socket
 are mounted. The runtime harness uses private temporary files for the human token
 and fixture CA, suppresses child output, and checks model dispatch counters.
+The child receives an explicit toolchain environment allowlist, not parent
+provider/owner credentials. `GOWORK=off` and `GOENV=off` disable ambient workspace
+and saved Go configuration; dependencies must be prepared before execution.
+The parent initiates the explicit consented refresh operation. This checks the
+consumer's subsequent dispatch, not an adapter-owned refresh scheduler.
 
 The example uses owner HTTP APIs for consent. For the existing graphical
 reconnect profile, enable `GOAUTHY_E2E_OAUTH2_GRANT_UI=1`,

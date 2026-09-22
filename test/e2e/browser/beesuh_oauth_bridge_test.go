@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 //go:embed testdata/beesuh_oauth_live_test.go
@@ -57,23 +58,65 @@ func oauthConsumerBridge(t *testing.T, issuer, endpoint, token string, binding m
 		}
 		return stats.Model
 	}
-	return func(denied bool) {
-		raw, _ := json.Marshal(map[string]any{"issuer": issuer, "ca_file": caFile, "token_file": tokenFile, "binding": binding, "denied": denied})
-		write("fixture.json", raw)
-		args := []string{"test", "-mod=readonly", "-overlay=" + overlayFile, "-count=1", "-run", "^TestGoAuthyOAuthLiveBridge$", "."}
-		if mod := os.Getenv("GOAUTHY_E2E_BEESUH_OAUTH_MODFILE"); mod != "" {
-			if !filepath.IsAbs(mod) {
-				t.Fatal("consumer modfile must be absolute")
-			}
-			args = append([]string{"test", "-modfile=" + mod}, args[1:]...)
+	raw, _ := json.Marshal(map[string]any{"issuer": issuer, "ca_file": caFile, "token_file": tokenFile, "binding": binding})
+	write("fixture.json", raw)
+	binary := filepath.Join(dir, "consumer.test")
+	args := []string{"test", "-mod=readonly", "-overlay=" + overlayFile, "-c", "-o", binary, "."}
+	if mod := os.Getenv("GOAUTHY_E2E_BEESUH_OAUTH_MODFILE"); mod != "" {
+		if !filepath.IsAbs(mod) {
+			t.Fatal("consumer modfile must be absolute")
 		}
-		cmd := exec.CommandContext(t.Context(), "go", args...)
-		cmd.Dir = project
-		cmd.Env = oauthConsumerEnvironment(fixtureFile)
-		cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+		args = append([]string{"test", "-modfile=" + mod}, args[1:]...)
+	}
+	build := exec.CommandContext(t.Context(), "go", args...)
+	build.Dir, build.Env = project, oauthConsumerEnvironment(fixtureFile)
+	build.Stdout, build.Stderr = io.Discard, io.Discard
+	if build.Run() != nil {
+		t.Fatal("compile real consumer harness")
+	}
+	ack, childAck, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ack.Close(); childAck.Close() })
+	cmd := exec.CommandContext(t.Context(), binary, "-test.run=^TestGoAuthyOAuthLiveBridge$", "-test.timeout=5m")
+	cmd.Dir, cmd.Env = project, oauthConsumerEnvironment(fixtureFile)
+	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
+	cmd.ExtraFiles = []*os.File{childAck}
+	commands, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd.Start() != nil {
+		commands.Close()
+		t.Fatal("start real consumer harness")
+	}
+	childAck.Close()
+	t.Cleanup(func() {
+		commands.Close()
+		if err := cmd.Wait(); err != nil && !t.Failed() {
+			t.Error("consumer harness did not exit cleanly")
+		}
+	})
+	encoder, decoder := json.NewEncoder(commands), json.NewDecoder(ack)
+	return func(denied bool) {
 		before := modelCalls()
-		if cmd.Run() != nil {
-			t.Fatal("real Beesuh OAuth consumer failed")
+		if encoder.Encode(denied) != nil {
+			t.Fatal("send consumer checkpoint")
+		}
+		done := make(chan bool, 1)
+		go func() { var ok bool; err := decoder.Decode(&ok); done <- err == nil && ok }()
+		select {
+		case ok := <-done:
+			if !ok {
+				t.Fatal("real consumer checkpoint failed")
+			}
+		case <-time.After(30 * time.Second):
+			_ = cmd.Process.Kill()
+			t.Fatal("real consumer checkpoint timed out")
+		case <-t.Context().Done():
+			_ = cmd.Process.Kill()
+			t.Fatal("consumer checkpoint cancelled")
 		}
 		want := 2
 		if denied {
@@ -82,7 +125,7 @@ func oauthConsumerBridge(t *testing.T, issuer, endpoint, token string, binding m
 		if modelCalls()-before != want {
 			t.Fatal("unexpected consumer provider dispatch count")
 		}
-		t.Logf("real Beesuh OAuth consumer: denied=%t model calls=%d", denied, want)
+		t.Logf("persistent Beesuh consumer: denied=%t model calls=%d", denied, want)
 	}
 }
 
