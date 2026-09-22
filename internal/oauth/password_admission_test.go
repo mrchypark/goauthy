@@ -53,7 +53,7 @@ func TestPasswordHTTPAdmission(t *testing.T) {
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		r = r.WithContext(browser.ContextWithPeerIP(r.Context(), peer))
 		w := httptest.NewRecorder()
-		s.TokenHandler().ServeHTTP(w, r)
+		s.TokenHandler().ServeHTTP(&passwordDeadlineRecorder{ResponseRecorder: w}, r)
 		return w
 	}
 	policy := loginpolicy.NewStore(db)

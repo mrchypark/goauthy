@@ -126,7 +126,7 @@ func testPasswordHTTP(t *testing.T, confidential bool) {
 			r.SetBasicAuth(client.ID, suppliedSecret)
 		}
 		w := httptest.NewRecorder()
-		s.TokenHandler().ServeHTTP(w, r)
+		s.TokenHandler().ServeHTTP(&passwordDeadlineRecorder{ResponseRecorder: w}, r)
 		return w
 	}
 	if confidential {

@@ -29,6 +29,7 @@ var (
 )
 
 type passwordAuthenticationKey struct{}
+type passwordWriteDeadlineKey struct{}
 
 type passwordGrantHandler struct {
 	*oauth2.ResourceOwnerPasswordCredentialsGrantHandler
@@ -98,7 +99,13 @@ func (h *passwordGrantHandler) Authenticate(ctx context.Context, username, passw
 		if _, _, failureErr := h.locks.RecordAccountFailure(ctx, loginpolicy.AccountStuffingDigest(username), peer, time.Now().UTC()); failureErr != nil {
 			return "", fosite.ErrServerError
 		}
-		timer := time.NewTimer(loginpolicy.Delay(status, time.Since(started)))
+		delay := loginpolicy.Delay(status, time.Since(started))
+		if setDeadline, ok := ctx.Value(passwordWriteDeadlineKey{}).(func(time.Time) error); ok && delay > 0 {
+			if err := setDeadline(time.Now().Add(delay + 5*time.Second)); err != nil {
+				return "", fosite.ErrServerError
+			}
+		}
+		timer := time.NewTimer(delay)
 		defer timer.Stop()
 		select {
 		case <-ctx.Done():

@@ -557,6 +557,7 @@ func (s *Server) TokenHandler() http.Handler {
 			}
 			r = r.WithContext(browser.ContextWithPeerIP(r.Context(), peer))
 		}
+		r = r.WithContext(context.WithValue(r.Context(), passwordWriteDeadlineKey{}, http.NewResponseController(w).SetWriteDeadline))
 		request, err := s.provider.NewAccessRequest(r.Context(), r, &fosite.DefaultSession{})
 		responseStarted := false
 		if request != nil && request.GetGrantTypes().ExactOne(DeviceGrantType) {

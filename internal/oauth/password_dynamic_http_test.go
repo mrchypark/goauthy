@@ -74,7 +74,7 @@ func TestDynamicPasswordHTTPAndRefresh(t *testing.T) {
 					r.SetBasicAuth(c.ClientID, c.ClientSecret)
 				}
 				w := httptest.NewRecorder()
-				s.TokenHandler().ServeHTTP(w, r)
+				s.TokenHandler().ServeHTTP(&passwordDeadlineRecorder{ResponseRecorder: w}, r)
 				return w
 			}
 			loginTime := func() int64 {

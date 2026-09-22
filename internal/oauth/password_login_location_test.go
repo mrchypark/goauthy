@@ -75,7 +75,7 @@ func TestPasswordLoginObserverHTTP(t *testing.T) {
 		r.Header.Set("X-Test-Request", "password-observer")
 		r.SetBasicAuth(client.ClientID, client.ClientSecret)
 		w := httptest.NewRecorder()
-		server.TokenHandler().ServeHTTP(w, r)
+		server.TokenHandler().ServeHTTP(&passwordDeadlineRecorder{ResponseRecorder: w}, r)
 		return w
 	}
 
