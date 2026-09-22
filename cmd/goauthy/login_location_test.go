@@ -26,6 +26,7 @@ import (
 )
 
 func TestLoginLocationObserverRevokeFlowAndBrowserIdentity(t *testing.T) {
+	t.Parallel()
 	address, received := startLoginLocationSMTPFixture(t)
 	host, port := splitLoginLocationSMTPAddress(t, address)
 	sender, err := recovery.NewSMTPSender(recovery.SMTPConfig{

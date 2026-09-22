@@ -16,6 +16,7 @@ import (
 )
 
 func TestEncodeRequestDropsTransientFormFieldsWithoutMutatingRequest(t *testing.T) {
+	t.Parallel()
 	server := oauthTestServer(t, oauthTestDB(t), randomSecret(t))
 	form := url.Values{
 		"grant_type":            {"authorization_code"},
@@ -65,6 +66,7 @@ func TestEncodeRequestDropsTransientFormFieldsWithoutMutatingRequest(t *testing.
 }
 
 func TestPersistedRequestRowsDropTransientFormsAcrossGrantPaths(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	db := server.store.db
 	verifier := strings.Repeat("v", 43)

@@ -14,6 +14,7 @@ import (
 )
 
 func TestRevokeUpstreamSessionsDurablyRevokesExactBindings(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	store := &Store{db: db, now: func() time.Time { return now }}
@@ -58,6 +59,7 @@ func TestRevokeUpstreamSessionsDurablyRevokesExactBindings(t *testing.T) {
 }
 
 func TestRevokeUpstreamSessionsSubjectOrSIDAndRollback(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	store := &Store{db: db, now: func() time.Time { return now }}
@@ -94,6 +96,7 @@ func TestRevokeUpstreamSessionsSubjectOrSIDAndRollback(t *testing.T) {
 }
 
 func TestRevokeUpstreamSessionsRequiresBeforeAckDurability(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	objectStore := t.TempDir()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "upstream-logout-before-ack", DataDir: t.TempDir(), ObjStoreProvider: rhiza.ObjectStoreProviderFilesystem, ObjStoreDir: objectStore, ObjStoreDurability: rhiza.ObjectStoreDurabilityBeforeAck})
@@ -174,6 +177,7 @@ func assertUpstreamLogoutCount(t *testing.T, db *rhiza.DB, sql string, want int6
 }
 
 func TestUpstreamLogoutReceiptSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	cfg := rhiza.Config{NodeID: "upstream-logout-restart", DataDir: t.TempDir()}
 	db, err := rhiza.Open(ctx, cfg)
@@ -230,6 +234,7 @@ func TestUpstreamLogoutReceiptSurvivesRestart(t *testing.T) {
 }
 
 func TestUpstreamLogoutConcurrentReplayAndConflictingJTI(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	store := &Store{db: db, now: func() time.Time { return now }}

@@ -26,6 +26,7 @@ import (
 func init() { bcryptHashCost = bcrypt.MinCost }
 
 func TestSecretFilesAreValidated(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	hmacPath := directory + "/hmac"
 	clientPath := directory + "/client"
@@ -54,6 +55,7 @@ func TestSecretFilesAreValidated(t *testing.T) {
 }
 
 func TestClientCredentialsToken(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -153,6 +155,7 @@ func TestClientCredentialsToken(t *testing.T) {
 }
 
 func TestDynamicClientsResolveForTokenAndAuthorize(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "dynamic-client-test", DataDir: t.TempDir()})
 	if err != nil {
@@ -230,6 +233,7 @@ func TestDynamicClientsResolveForTokenAndAuthorize(t *testing.T) {
 }
 
 func TestDynamicCustomScopesUseDefaultsAndFailClosedWhenDeleted(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := oauthTestDB(t)
 	catalog := map[string]bool{"employee": true}
@@ -261,6 +265,7 @@ func TestDynamicCustomScopesUseDefaultsAndFailClosedWhenDeleted(t *testing.T) {
 }
 
 func TestDynamicCustomScopesAreRejectedForClientCredentials(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := oauthTestDB(t)
 	server, err := NewServerWithOIDC(ctx, db, randomSecret(t), testClientID, testClientSecret, testRedirectURI, nil, OIDCConfig{
@@ -285,6 +290,7 @@ func TestDynamicCustomScopesAreRejectedForClientCredentials(t *testing.T) {
 }
 
 func TestOIDCAuthorizationForceMFAPolicy(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := oauthTestDB(t)
 	server, err := NewServerWithOIDC(ctx, db, randomSecret(t), testClientID, testClientSecret, testRedirectURI, nil, OIDCConfig{
@@ -326,6 +332,7 @@ func TestOIDCAuthorizationForceMFAPolicy(t *testing.T) {
 }
 
 func TestRFC8252AuthorizationRedirectPolicy(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "loopback-policy-test", DataDir: t.TempDir()})
 	if err != nil {
@@ -398,6 +405,7 @@ func TestRFC8252AuthorizationRedirectPolicy(t *testing.T) {
 }
 
 func TestClientCredentialsTokenUsesClientLifespan(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "lifespan-test", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -432,6 +440,7 @@ func TestClientCredentialsTokenUsesClientLifespan(t *testing.T) {
 }
 
 func TestClientCredentialsTokenLifetimeCannotOutliveSigningKeyRetention(t *testing.T) {
+	t.Parallel()
 	_, err := NewServerWithOIDC(context.Background(), oauthTestDB(t), randomSecret(t), testClientID, testClientSecret, testRedirectURI, nil, OIDCConfig{
 		Issuer: oidcTestIssuer, LoadSigningKey: func(context.Context) (oidc.SigningKey, error) { return oidcTestKey(t), nil },
 		ClientCredentialsTokenLifespan: oidc.MaxAccessTokenLifetime + time.Second,

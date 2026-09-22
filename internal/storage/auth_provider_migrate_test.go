@@ -8,6 +8,7 @@ import (
 )
 
 func TestMigrationV95CreatesFinalAuthProvidersShape(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "auth-provider-migration", DataDir: t.TempDir()})
 	if err != nil {
@@ -92,8 +93,9 @@ func TestMigrationV95CreatesFinalAuthProvidersShape(t *testing.T) {
 }
 
 func TestMigrationV95FullPathIsIdempotentAndReady(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "auth-provider-migration-full", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "auth-provider-migration-full", DataDir: testDatabaseDir(t, "auth-provider-migration-full")})
 	if err != nil {
 		t.Fatal(err)
 	}

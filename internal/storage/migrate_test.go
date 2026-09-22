@@ -13,7 +13,8 @@ import (
 )
 
 func TestMigrateIsIdempotentAndReady(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +31,8 @@ func TestMigrateIsIdempotentAndReady(t *testing.T) {
 }
 
 func TestMigrationV2ReplaysAfterReceiptExpiry(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +49,8 @@ func TestMigrationV2ReplaysAfterReceiptExpiry(t *testing.T) {
 }
 
 func TestMigrationV6ReplaysAfterReceiptExpiry(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,6 +64,7 @@ func TestMigrationV6ReplaysAfterReceiptExpiry(t *testing.T) {
 }
 
 func TestMigrationV7InitializesExistingSessionAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -86,7 +90,8 @@ func TestMigrationV7InitializesExistingSessionAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV8CreatesBackchannelTablesAndIsIdempotent(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +117,8 @@ func TestMigrationV8CreatesBackchannelTablesAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV9CreatesDynamicClientTableAndIsIdempotent(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +149,8 @@ func TestMigrationV9CreatesDynamicClientTableAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV44AddsDynamicClientURI(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +169,7 @@ func TestMigrationV44AddsDynamicClientURI(t *testing.T) {
 }
 
 func TestMigrationV44PreservesLegacyDynamicClientMetadata(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -207,6 +215,7 @@ func TestMigrationV44PreservesLegacyDynamicClientMetadata(t *testing.T) {
 }
 
 func TestMigrationV27AddsDefaultDynamicClientScopes(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -255,6 +264,7 @@ func TestMigrationV27AddsDefaultDynamicClientScopes(t *testing.T) {
 }
 
 func TestMigrationV28APIKeySchemaFromV27IsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v28", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -300,6 +310,7 @@ func TestMigrationV28APIKeySchemaFromV27IsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV29BootstrapClientCredentialsClaimsFromV28IsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v29", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -352,6 +363,7 @@ func TestMigrationV29BootstrapClientCredentialsClaimsFromV28IsIdempotent(t *test
 }
 
 func TestMigrationV30PoWIssuanceAdmissionFromV29IsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v30", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -388,6 +400,7 @@ func TestMigrationV30PoWIssuanceAdmissionFromV29IsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV31AddsPeerIPColumnFromV30IsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v31", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -438,7 +451,8 @@ func TestMigrationV31AddsPeerIPColumnFromV30IsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV10CreatesDeviceGrantTableAndIsIdempotent(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,7 +475,8 @@ func TestMigrationV10CreatesDeviceGrantTableAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV11CreatesDPoPTablesAndIsIdempotent(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +499,8 @@ func TestMigrationV11CreatesDPoPTablesAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV13CreatesCIMDCacheAndReplays(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,7 +542,8 @@ func TestMigrationV13CreatesCIMDCacheAndReplays(t *testing.T) {
 }
 
 func TestMigrationV26CreatesUserAttributeTablesAndReplays(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,6 +581,7 @@ func TestMigrationV26CreatesUserAttributeTablesAndReplays(t *testing.T) {
 }
 
 func TestMigrationV14UpgradesIdentitySchemaAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -625,7 +643,8 @@ func TestMigrationV14UpgradesIdentitySchemaAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV14FreshInstallDefaultsAndReady(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,6 +665,7 @@ func TestMigrationV14FreshInstallDefaultsAndReady(t *testing.T) {
 }
 
 func TestMigrationV15UpgradesLegacySchemaAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -680,7 +700,8 @@ func TestMigrationV15UpgradesLegacySchemaAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV15ResetTokenConstraints(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -741,6 +762,7 @@ func TestMigrationV15ResetTokenConstraints(t *testing.T) {
 }
 
 func TestMigrationV16UpgradesV15SchemaAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -780,7 +802,8 @@ func TestMigrationV16UpgradesV15SchemaAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV16RecoveryEmailConstraintsAndReady(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -817,6 +840,7 @@ func TestMigrationV16RecoveryEmailConstraintsAndReady(t *testing.T) {
 }
 
 func TestMigrationV17UpgradesV16SchemaAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -848,7 +872,8 @@ func TestMigrationV17UpgradesV16SchemaAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV17PasswordResetPoWChallengeConstraintsAndReady(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -899,6 +924,7 @@ func TestMigrationV17PasswordResetPoWChallengeConstraintsAndReady(t *testing.T) 
 }
 
 func TestMigrationV18UpgradesV17SchemaAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -932,7 +958,8 @@ func TestMigrationV18UpgradesV17SchemaAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV18PasskeyAndMFAModTokenConstraintsAndReady(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1080,6 +1107,7 @@ func TestMigrationV18PasskeyAndMFAModTokenConstraintsAndReady(t *testing.T) {
 }
 
 func TestMigrationV19UpgradesV18SchemaAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -1119,7 +1147,8 @@ func TestMigrationV19UpgradesV18SchemaAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV19AuthenticationModeConstraintsAndCAS(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1171,6 +1200,7 @@ func TestMigrationV19AuthenticationModeConstraintsAndCAS(t *testing.T) {
 }
 
 func TestMigrationV20UpgradesV19SchemaAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -1217,7 +1247,8 @@ func TestMigrationV20UpgradesV19SchemaAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV20MFACeremonyAndProofConstraintsAndReady(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1314,6 +1345,9 @@ func TestMigrationV20MFACeremonyAndProofConstraintsAndReady(t *testing.T) {
 }
 
 func TestReadyRejectsUninitializedAndFutureSchema(t *testing.T) {
+	t.Parallel()
+	// This test asserts that Ready rejects a database with no schema marker, so
+	// it needs a genuinely unmigrated database rather than a migrated template.
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -1339,7 +1373,8 @@ func TestReadyRejectsUninitializedAndFutureSchema(t *testing.T) {
 }
 
 func TestMigrationV21CreatesServicePurposeTablesAndLegacyRowsRemainUnmarked(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1368,6 +1403,7 @@ func TestMigrationV21CreatesServicePurposeTablesAndLegacyRowsRemainUnmarked(t *t
 }
 
 func TestMigrationV22RecordsSessionAMRAndRevokesLegacyAuthenticatedSessions(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -1423,6 +1459,7 @@ func TestMigrationV22RecordsSessionAMRAndRevokesLegacyAuthenticatedSessions(t *t
 }
 
 func TestMigrationV23UpgradesResetTokensAndProfilesIdempotently(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -1459,7 +1496,8 @@ func TestMigrationV23UpgradesResetTokensAndProfilesIdempotently(t *testing.T) {
 }
 
 func TestMigrationV23OpenRegistrationConstraintsAndReady(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1503,6 +1541,7 @@ func TestMigrationV23OpenRegistrationConstraintsAndReady(t *testing.T) {
 }
 
 func TestMigrationV24UpgradesFromV23Idempotently(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -1529,6 +1568,7 @@ func TestMigrationV24UpgradesFromV23Idempotently(t *testing.T) {
 }
 
 func TestMigrationV25UpgradesFromV24Idempotently(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -1563,7 +1603,8 @@ func TestMigrationV25UpgradesFromV24Idempotently(t *testing.T) {
 }
 
 func TestMigrationV24RBACConstraintsAndReady(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1614,7 +1655,8 @@ func TestMigrationV24RBACConstraintsAndReady(t *testing.T) {
 }
 
 func TestExecuteRejectsRejectedReceipt(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: testDatabaseDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1633,6 +1675,7 @@ func TestExecuteRejectsRejectedReceipt(t *testing.T) {
 }
 
 func TestExecuteRecoversCommittedStatementResultsAfterCommitUnknown(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	storeDir := t.TempDir()
 	db, err := rhiza.Open(ctx, rhiza.Config{
@@ -1705,8 +1748,9 @@ func TestExecuteRecoversCommittedStatementResultsAfterCommitUnknown(t *testing.T
 }
 
 func TestMigrationV45AuditPreservesV44DataAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "test-v45", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "test-v45", DataDir: testDatabaseDir(t, "test-v45")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1737,6 +1781,7 @@ func TestMigrationV45AuditPreservesV44DataAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV46AddsContactsAndPreservesLegacyDynamicClients(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "test-v46", DataDir: t.TempDir()})
 	if err != nil {
@@ -1787,6 +1832,7 @@ func TestMigrationV46AddsContactsAndPreservesLegacyDynamicClients(t *testing.T) 
 }
 
 func TestMigrationV47AddsURIClientMetadataAndPreservesLegacyDynamicClients(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "test-v47", DataDir: t.TempDir()})
 	if err != nil {
@@ -1840,6 +1886,7 @@ func TestMigrationV47AddsURIClientMetadataAndPreservesLegacyDynamicClients(t *te
 }
 
 func TestExecuteValidatesBeforeSubmission(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -1855,6 +1902,7 @@ func TestExecuteValidatesBeforeSubmission(t *testing.T) {
 }
 
 func TestMigrationV32IPBlacklistFromV31IsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v32", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -1954,6 +2002,7 @@ func TestMigrationV32IPBlacklistFromV31IsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV33RateLimitExpiryFromV32IsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v33", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -2062,7 +2111,8 @@ func TestMigrationV33RateLimitExpiryFromV32IsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV34DCRIdempotencySchema(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v34", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v34", DataDir: testDatabaseDir(t, "test-v34")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2107,6 +2157,7 @@ func TestMigrationV34DCRIdempotencySchema(t *testing.T) {
 }
 
 func TestMigrationV35UpstreamProviderSchema(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v35", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -2171,6 +2222,7 @@ func TestMigrationV35UpstreamProviderSchema(t *testing.T) {
 }
 
 func TestMigrationV36AllowsExternalBrowserSessionsAndPreservesRows(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v36", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -2225,6 +2277,7 @@ func TestMigrationV36AllowsExternalBrowserSessionsAndPreservesRows(t *testing.T)
 }
 
 func TestMigrationV37CreatesSCIMOutboxAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v37", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -2260,6 +2313,7 @@ func TestMigrationV37CreatesSCIMOutboxAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV39CreatesSCIMTombstonesAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v39", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -2300,6 +2354,7 @@ func TestMigrationV39CreatesSCIMTombstonesAndIsIdempotent(t *testing.T) {
 }
 
 func TestMigrationV40AddsAnonymousDynamicClients(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v40", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -2336,6 +2391,7 @@ func TestMigrationV40AddsAnonymousDynamicClients(t *testing.T) {
 }
 
 func TestMigrationV41AddsSCIMTombstoneProviderSnapshotFromV40(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v41", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -2403,6 +2459,7 @@ func TestMigrationV41AddsSCIMTombstoneProviderSnapshotFromV40(t *testing.T) {
 }
 
 func TestMigrationV42AddsSCIMTombstoneGenerationFromV41(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-v42", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -2451,8 +2508,9 @@ func TestMigrationV42AddsSCIMTombstoneGenerationFromV41(t *testing.T) {
 }
 
 func TestMigrationV48CreatesInertMasterKeyRetirementSchema(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "test-v48", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "test-v48", DataDir: testDatabaseDir(t, "test-v48")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2484,6 +2542,7 @@ func TestMigrationV48CreatesInertMasterKeyRetirementSchema(t *testing.T) {
 }
 
 func TestMigrationV49OrdersLegacyAuditRowsDeterministically(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "test-v49", DataDir: t.TempDir()})
 	if err != nil {
@@ -2562,6 +2621,7 @@ func TestMigrationV49OrdersLegacyAuditRowsDeterministically(t *testing.T) {
 }
 
 func TestMigrationV50UpgradesMarkedV48RetirementRows(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "test-v50", DataDir: t.TempDir()})
 	if err != nil {
@@ -2629,6 +2689,7 @@ func TestMigrationV50UpgradesMarkedV48RetirementRows(t *testing.T) {
 }
 
 func TestMigrationV51RejectsMalformedMarkedV49AuditRows(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "test-v51-malformed", DataDir: t.TempDir()})
 	if err != nil {
@@ -2660,6 +2721,7 @@ func TestMigrationV51RejectsMalformedMarkedV49AuditRows(t *testing.T) {
 }
 
 func TestMigrationV52ExtendsAuditConstraintsWithoutChangingSequence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "test-v52", DataDir: t.TempDir()})
 	if err != nil {
@@ -2694,6 +2756,7 @@ func TestMigrationV52ExtendsAuditConstraintsWithoutChangingSequence(t *testing.T
 }
 
 func TestMigrationV86PreservesExistingUsers(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "migration-86", DataDir: t.TempDir()})
 	if err != nil {
@@ -2725,6 +2788,7 @@ func TestMigrationV86PreservesExistingUsers(t *testing.T) {
 }
 
 func TestMigrationV87Qualification(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "migration-87", DataDir: t.TempDir()})
 	if err != nil {
@@ -2801,6 +2865,7 @@ func TestMigrationV87Qualification(t *testing.T) {
 }
 
 func TestMigrationV86RecoveryAfterCommitUnknown(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v86-recovery", DataDir: t.TempDir()})
 	if err != nil {
@@ -2868,11 +2933,12 @@ func TestMigrationV86RecoveryAfterCommitUnknown(t *testing.T) {
 }
 
 func TestMigrateConcurrentStartSafety(t *testing.T) {
+	t.Parallel()
 	// Verify that the full migration path v1→v87 is idempotent and produces
 	// a valid schema. Running Migrate multiple times on the same instance
 	// must not corrupt the database.
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "concurrent-safety", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "concurrent-safety", DataDir: testDatabaseDir(t, "concurrent-safety")})
 	if err != nil {
 		t.Fatal(err)
 	}

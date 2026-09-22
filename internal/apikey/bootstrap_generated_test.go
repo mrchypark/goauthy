@@ -32,6 +32,7 @@ func generatedBootstrapFiles(t *testing.T, name string, deadline time.Time) (str
 }
 
 func TestBootstrapGeneratedImportAuthenticatesAndRetriesSameArtifact(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(2_100_000_000, 0).UTC()
 	config, keyDir, artifact := generatedBootstrapFiles(t, "runner", now.Add(time.Hour))
 	db := bootstrapTestDB(t, "bootstrap-generated-import")
@@ -79,6 +80,7 @@ func TestBootstrapGeneratedImportAuthenticatesAndRetriesSameArtifact(t *testing.
 }
 
 func TestBootstrapGeneratedPrewrittenArtifactImportsAfterDBCrash(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(2_100_000_000, 0).UTC()
 	config, keyDir, artifact := generatedBootstrapFiles(t, "crash-safe", now.Add(time.Hour))
 	secret := bootstrapTestSecret
@@ -101,6 +103,7 @@ func TestBootstrapGeneratedPrewrittenArtifactImportsAfterDBCrash(t *testing.T) {
 }
 
 func TestBootstrapGeneratedRejectsInvalidArtifactWithoutPartialDB(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		prep func(t *testing.T, artifact, keyDir string, now time.Time)

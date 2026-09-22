@@ -10,6 +10,7 @@ import (
 )
 
 func TestLoadUpstreamProvidersStrictAndOptIn(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	secret := filepath.Join(dir, "secret")
 	if err := os.WriteFile(secret, []byte("upstream-secret-123"), 0600); err != nil {
@@ -53,6 +54,7 @@ func TestLoadUpstreamProvidersStrictAndOptIn(t *testing.T) {
 }
 
 func TestLoadUpstreamProvidersGitHub(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	secret := filepath.Join(dir, "secret")
 	if err := os.WriteFile(secret, []byte("github-secret-123456"), 0600); err != nil {
@@ -104,6 +106,7 @@ func TestLoadUpstreamProvidersGitHub(t *testing.T) {
 }
 
 func TestLoadUpstreamProvidersMixedOIDCAndGitHub(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	secret := filepath.Join(dir, "secret")
 	if err := os.WriteFile(secret, []byte("github-secret-123456"), 0600); err != nil {
@@ -124,6 +127,7 @@ func TestLoadUpstreamProvidersMixedOIDCAndGitHub(t *testing.T) {
 }
 
 func TestValidUpstreamScopes(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		s    []string
@@ -145,6 +149,7 @@ func TestValidUpstreamScopes(t *testing.T) {
 }
 
 func TestValidGitHubScopes(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		s    []string
@@ -164,6 +169,7 @@ func TestValidGitHubScopes(t *testing.T) {
 }
 
 func TestLoadUpstreamClientSecret(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for _, tc := range []struct {
 		name string
@@ -191,6 +197,7 @@ func TestLoadUpstreamClientSecret(t *testing.T) {
 }
 
 func TestUpstreamCallbackRequiresHTTPS(t *testing.T) {
+	t.Parallel()
 	if validUpstreamCallback("http://localhost:8080/upstream/example/callback", "http://localhost:8080", "example") {
 		t.Fatal("accepted HTTP upstream callback")
 	}
@@ -210,6 +217,7 @@ func TestUpstreamCallbackRequiresHTTPS(t *testing.T) {
 }
 
 func TestUpstreamCallbackUsesIssuerBasePath(t *testing.T) {
+	t.Parallel()
 	if !validUpstreamCallback("https://issuer.example.test/tenant/upstream/example/callback", "https://issuer.example.test/tenant", "example") {
 		t.Fatal("rejected path issuer callback")
 	}
@@ -219,6 +227,7 @@ func TestUpstreamCallbackUsesIssuerBasePath(t *testing.T) {
 }
 
 func TestUpstreamHandlerFromEnvDisabledWhenUnset(t *testing.T) {
+	t.Parallel()
 	runtime, err := upstreamHandlerFromEnv(func(string) string { return "" }, nil, nil, "https://goauthy.example.test", nil, nil, nil)
 	if err != nil || runtime != nil {
 		t.Fatalf("runtime=%v err=%v", runtime, err)
@@ -226,6 +235,7 @@ func TestUpstreamHandlerFromEnvDisabledWhenUnset(t *testing.T) {
 }
 
 func TestUpstreamRuntimeProviderIDsAreSortedCopies(t *testing.T) {
+	t.Parallel()
 	runtime := &upstreamRuntime{providerIDs_: []string{"example", "google"}}
 	ids := runtime.providerIDs()
 	if strings.Join(ids, ",") != "example,google" {
@@ -249,6 +259,7 @@ func TestUpstreamRuntimeProviderIDsAreSortedCopies(t *testing.T) {
 }
 
 func TestUpstreamStartRouteRequiresConfiguredCallback(t *testing.T) {
+	t.Parallel()
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.PathValue("providerID"); got != "example" {
 			t.Fatalf("provider ID %q", got)
@@ -274,6 +285,7 @@ func TestUpstreamStartRouteRequiresConfiguredCallback(t *testing.T) {
 }
 
 func TestUpstreamCallbackSetsSecurityHeaders(t *testing.T) {
+	t.Parallel()
 	route := upstreamCallbackRoute("example", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -300,6 +312,7 @@ func assertUpstreamSecurityHeaders(t *testing.T, response *httptest.ResponseReco
 }
 
 func TestDecodeUpstreamProviderFileConfigProtocolFlags(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		json      string
@@ -335,6 +348,7 @@ func TestDecodeUpstreamProviderFileConfigProtocolFlags(t *testing.T) {
 }
 
 func TestValidateUpstreamProviderProtocolRuntimeConfig(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	secret := filepath.Join(dir, "secret")
 	if err := os.WriteFile(secret, []byte("0123456789abcdef"), 0600); err != nil {
@@ -373,6 +387,7 @@ func TestValidateUpstreamProviderProtocolRuntimeConfig(t *testing.T) {
 }
 
 func TestUpstreamConfigProtocolInvariant(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	secret := filepath.Join(dir, "secret")
 	if err := os.WriteFile(secret, []byte("0123456789abcdef"), 0600); err != nil {
@@ -410,6 +425,7 @@ func TestUpstreamConfigProtocolInvariant(t *testing.T) {
 }
 
 func TestUpstreamConfigGitHubFlagPropagation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	secret := filepath.Join(dir, "secret")
 	if err := os.WriteFile(secret, []byte("github-secret-123456"), 0600); err != nil {

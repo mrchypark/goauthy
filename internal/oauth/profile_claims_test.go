@@ -14,6 +14,7 @@ import (
 )
 
 func TestProfileClaimsCodeRefreshUserInfoAndScopeIsolation(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	key := oidcTestKey(t)
 	name, email, locale, phone := "Before", "member@example.test", "de", "+49123456789"

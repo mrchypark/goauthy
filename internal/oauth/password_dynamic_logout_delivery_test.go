@@ -21,6 +21,7 @@ import (
 )
 
 func TestDynamicPasswordLoginDeletionDeliversSignedLogout(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"original", "updated", "removed", "inflight-update", "inflight-remove"} {
 		t.Run(mode, func(t *testing.T) { testDynamicPasswordLogoutDelivery(t, mode) })
 	}

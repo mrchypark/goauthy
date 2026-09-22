@@ -13,6 +13,7 @@ import (
 )
 
 func TestMasterKeyLifecycleRejectsTamperedOrphanSaaSCredential(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	keys := retirementCmdKeyring(t, "key-b")
@@ -49,6 +50,7 @@ func TestMasterKeyLifecycleRejectsTamperedOrphanSaaSCredential(t *testing.T) {
 }
 
 func TestMasterKeyRewrapSaaSCursorOnlyAdvancesOnSuccess(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	w, err := newMasterKeyRewrapWorker(retirementCmdDB(t, true), retirementCmdKeyring(t, "key-b"), "http://localhost:8080")
 	if err != nil {

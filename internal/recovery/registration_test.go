@@ -8,6 +8,7 @@ import (
 )
 
 func TestRegistrationConfigValidate(t *testing.T) {
+	t.Parallel()
 	validator := ExactRedirectURIs([]string{"https://app.example.test/registered"})
 	for _, test := range []struct {
 		name   string
@@ -30,6 +31,7 @@ func TestRegistrationConfigValidate(t *testing.T) {
 }
 
 func TestRegistrationValidateRequest(t *testing.T) {
+	t.Parallel()
 	name := func(value string) *string { return &value }
 	config := RegistrationConfig{Enabled: true, AllowedDomains: []string{"example.test"}, RedirectValidator: ExactRedirectURIs([]string{"https://app.example.test/registered"})}
 	valid := RegistrationRequest{Email: "Alice@Example.Test", PreferredUsername: name("alice_user"), FamilyName: "O'Neil", GivenName: "Alice", UserValues: &UserValues{Birthdate: "2000-01-02", Phone: "+82101234", Timezone: "Asia/Seoul"}, ProofOfWork: "1:10:123:abcdefghijklmnop:abcdefghijklmnop:1", RedirectURI: "https://app.example.test/registered"}
@@ -71,6 +73,7 @@ func TestRegistrationValidateRequest(t *testing.T) {
 }
 
 func TestRegistrationRedirectAllowsConfiguredHTTPExactly(t *testing.T) {
+	t.Parallel()
 	config := RegistrationConfig{Enabled: true, AllowHTTPRedirectURI: true, RedirectValidator: ExactRedirectURIs([]string{"http://localhost:8080/callback"})}
 	_, err := config.ValidateRequest(RegistrationRequest{Email: "a@example.test", GivenName: "Alice", ProofOfWork: "proof", RedirectURI: "http://localhost:8080/callback"})
 	if err != nil {
@@ -79,6 +82,7 @@ func TestRegistrationRedirectAllowsConfiguredHTTPExactly(t *testing.T) {
 }
 
 func TestRegistrationUserValuesPolicy(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name          string
 		policy        identity.UserValuesPolicy

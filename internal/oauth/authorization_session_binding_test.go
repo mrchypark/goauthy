@@ -15,6 +15,7 @@ import (
 )
 
 func TestNonOIDCAuthorizationBindsBrowserSession(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oidcTestServer(t, db, randomSecret(t), func(context.Context) (oidc.SigningKey, error) { return oidcTestKey(t), nil })
 	code := issueNonOIDCCode(t, server, strings.Repeat("b", 43))
@@ -39,6 +40,7 @@ func TestNonOIDCAuthorizationBindsBrowserSession(t *testing.T) {
 }
 
 func TestNonOIDCAuthorizationRejectsInvalidBrowserSessionBinding(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		setup func(*testing.T, *rhiza.DB, string)

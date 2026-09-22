@@ -33,6 +33,7 @@ func (tokenLoggingTestProvider) WriteAccessError(context.Context, http.ResponseW
 }
 
 func TestTokenIssuanceLogRedactsErrorDetails(t *testing.T) {
+	t.Parallel()
 	const (
 		bearerToken  = "sentinel-bearer-token"
 		code         = "sentinel-authorization-code"

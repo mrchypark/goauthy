@@ -16,6 +16,7 @@ type emptyDeviceRequestID struct{ *fosite.AccessRequest }
 func (r emptyDeviceRequestID) GetID() string { return "" }
 
 func TestDevicePreissuanceCleanupBeginTXFailureReleasesClaim(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	request := claimedDeviceRequest(t, server, db)
@@ -36,6 +37,7 @@ func TestDevicePreissuanceCleanupBeginTXFailureReleasesClaim(t *testing.T) {
 }
 
 func TestDevicePreissuanceCleanupSetRequestIDFailureReleasesClaim(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	request := claimedDeviceRequest(t, server, db)

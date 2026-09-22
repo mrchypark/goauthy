@@ -25,6 +25,7 @@ import (
 )
 
 func TestPasswordHTTPManagedClientAndRefresh(t *testing.T) {
+	t.Parallel()
 	for _, confidential := range []bool{false, true} {
 		name := "public"
 		if confidential {

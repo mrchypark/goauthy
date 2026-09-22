@@ -11,6 +11,7 @@ import (
 )
 
 func TestLoginRevokeEnvelopeStatusAndRewrapPreserveSharedCode(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	old, active := fixedKeyring("master-a"), fixedKeyring("master-b")
@@ -64,6 +65,7 @@ func TestLoginRevokeEnvelopeStatusAndRewrapPreserveSharedCode(t *testing.T) {
 }
 
 func TestLoginRevokeEnvelopePurposeBindsSubjectAndGeneration(t *testing.T) {
+	t.Parallel()
 	keyring := fixedKeyring("master-a")
 	subject, generation := "subject", "generation"
 	purpose := LoginRevokeCodePurpose(subject, generation)
@@ -82,6 +84,7 @@ func TestLoginRevokeEnvelopePurposeBindsSubjectAndGeneration(t *testing.T) {
 }
 
 func TestRewrapLoginRevokeCodeHonorsFencedOldWriter(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	subject, generation := "login-revoke-fenced", strings.Repeat("f", 22)

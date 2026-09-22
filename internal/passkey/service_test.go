@@ -35,7 +35,10 @@ func (r *deterministicReader) Read(p []byte) (int, error) {
 
 func newTestService(t *testing.T) (*Service, *rhiza.DB, time.Time) {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "passkey-test", DataDir: t.TempDir()})
+	tmpl := buildPasskeyTemplate(t)
+	dir := t.TempDir()
+	cpDir(t, tmpl, dir)
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "passkey-test", DataDir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}

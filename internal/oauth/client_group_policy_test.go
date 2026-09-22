@@ -15,6 +15,7 @@ import (
 )
 
 func TestClientGroupPolicyFinalAuthorizationAndRaces(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name    string
 		groups  []string
@@ -63,6 +64,7 @@ func TestClientGroupPolicyFinalAuthorizationAndRaces(t *testing.T) {
 }
 
 func TestClientGroupPolicyForwardAuthUsesCurrentGroups(t *testing.T) {
+	t.Parallel()
 	state := PrincipalClaims{Roles: []string{"viewer"}, Groups: []string{"team/a"}, Revision: 1}
 	server := clientGroupPolicyServer(t, &state)
 	codeResponse := policyAuthorize(t, server, 9)
@@ -80,6 +82,7 @@ func TestClientGroupPolicyForwardAuthUsesCurrentGroups(t *testing.T) {
 }
 
 func TestClientGroupPolicyCodeAndRefreshUseCurrentGroups(t *testing.T) {
+	t.Parallel()
 	state := PrincipalClaims{Roles: []string{"viewer"}, Groups: []string{"team/a"}, Revision: 1}
 	server := clientGroupPolicyServer(t, &state)
 	codeResponse := policyAuthorize(t, server, 10)
@@ -108,6 +111,7 @@ func TestClientGroupPolicyCodeAndRefreshUseCurrentGroups(t *testing.T) {
 }
 
 func TestClientGroupPolicyDoesNotEmitGroupsWithoutScope(t *testing.T) {
+	t.Parallel()
 	state := PrincipalClaims{Roles: []string{"viewer"}, Groups: []string{"team/a"}, Revision: 1}
 	server := clientGroupPolicyServer(t, &state)
 	response := policyAuthorize(t, server, 12)
@@ -120,6 +124,7 @@ func TestClientGroupPolicyDoesNotEmitGroupsWithoutScope(t *testing.T) {
 }
 
 func TestClearedClientGroupPolicyIsRevisionBoundUnrestricted(t *testing.T) {
+	t.Parallel()
 	state := PrincipalClaims{Roles: []string{"viewer"}, Groups: []string{"other"}, Revision: 1}
 	server := clientGroupPolicyServer(t, &state)
 	if _, err := storage.Execute(context.Background(), server.store.db, rhiza.ExecuteRequest{RequestID: "client-policy-clear", SQL: `UPDATE bootstrap_client_login_restrictions SET restrict_group_prefix=NULL,revision=2 WHERE client_id='browser-client'`}); err != nil {

@@ -12,6 +12,7 @@ import (
 )
 
 func TestAutomaticBlacklistThresholdsAndIPv6(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	blacklist := ipblacklist.NewStore(db, 10000)
 	store := NewStoreWithBlacklist(db, blacklist)
@@ -55,6 +56,7 @@ func TestAutomaticBlacklistThresholdsAndIPv6(t *testing.T) {
 }
 
 func TestFailureClockRejectsBackwardAndLargeForwardJumps(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
@@ -89,6 +91,7 @@ func TestFailureClockRejectsBackwardAndLargeForwardJumps(t *testing.T) {
 }
 
 func TestAutomaticBlacklistReclaimsExpiredFiniteEntriesAtCap(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	blacklist := ipblacklist.NewStore(db, 1)
 	store := NewStoreWithBlacklist(db, blacklist)
@@ -111,6 +114,7 @@ func TestAutomaticBlacklistReclaimsExpiredFiniteEntriesAtCap(t *testing.T) {
 }
 
 func TestAutomaticBlacklistConcurrentCrossStoreAndPermanentManualEntry(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	blacklist := ipblacklist.NewStore(db, 10000)
 	first, second := NewStoreWithBlacklist(db, blacklist), NewStoreWithBlacklist(db, blacklist)
@@ -159,6 +163,7 @@ func TestAutomaticBlacklistConcurrentCrossStoreAndPermanentManualEntry(t *testin
 }
 
 func TestAutomaticBlacklistStaleFailureResetDoesNotReblacklist(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	blacklist := ipblacklist.NewStore(db, 10000)
 	store := NewStoreWithBlacklist(db, blacklist)

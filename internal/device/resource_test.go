@@ -12,6 +12,7 @@ import (
 )
 
 func TestDeviceResourceRoundTripAndRecovery(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	resource := "https://resource.example.test/api"
@@ -39,6 +40,7 @@ func TestDeviceResourceRoundTripAndRecovery(t *testing.T) {
 }
 
 func TestDeviceResourceValidation(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	for _, resource := range []string{"http://resource.example.test", "https://resource.example.test?x=1", "https://resource.example.test#x", "https://resource.example.test?", "https://resource.example.test#", "https://:443", "https://user:pass@resource.example.test", " https://resource.example.test", "https://resource.example.test/\n"} {
 		if _, err := store.CreateWithBinding(ctx, "client", nil, ClientBinding{Resource: resource}, time.UnixMilli(1_700_000_000_000).UTC()); !errors.Is(err, ErrInvalidTarget) {
@@ -48,6 +50,7 @@ func TestDeviceResourceValidation(t *testing.T) {
 }
 
 func TestDeviceHTTPRejectsMalformedOrUnauthorizedResource(t *testing.T) {
+	t.Parallel()
 	_, store, _ := testStore(t)
 	h, err := NewHandler(store, "https://issuer.example.test", func(r *http.Request, clientID string, scopes []string) error {
 		if r.PostForm.Get("resource") == "https://resource.example.test/api" {

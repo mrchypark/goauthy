@@ -8,7 +8,8 @@ import (
 )
 
 func TestMigrationV85GeneratedAPIKeyBootstrapContract(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "generated-bootstrap-v85", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "generated-bootstrap-v85", DataDir: testDatabaseDir(t, "generated-bootstrap-v85")})
 	if err != nil {
 		t.Fatal(err)
 	}

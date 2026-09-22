@@ -24,6 +24,7 @@ func scimFailureEventCount(t *testing.T, o *Outbox) int64 {
 }
 
 func TestScimStepFailureEventOnlyAtRetryLimit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var o *Outbox
 	var calls atomic.Int64
@@ -66,6 +67,7 @@ func TestScimStepFailureEventOnlyAtRetryLimit(t *testing.T) {
 }
 
 func TestScimStepSuccessAndPermanentFailureEmitNoFailureEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for name, resolve := range map[string]ClientResolver{
 		"success": func(context.Context, string) (Reconciler, error) {
@@ -78,6 +80,7 @@ func TestScimStepSuccessAndPermanentFailureEmitNoFailureEvent(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			o := newOutboxTest(t, resolve, OutboxConfig{Random: bytes.NewReader(bytes.Repeat([]byte{5}, 128))})
 			now := time.UnixMilli(1_704_067_201_000).UTC()
 			if _, err := o.EnqueueUser(ctx, "client-1", testUser(), now); err != nil {
@@ -94,6 +97,7 @@ func TestScimStepSuccessAndPermanentFailureEmitNoFailureEvent(t *testing.T) {
 }
 
 func TestScimStaleRevisionCompletionDoesNotEmitFailureEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var o *Outbox
 	o = newOutboxTest(t, func(context.Context, string) (Reconciler, error) {
@@ -121,6 +125,7 @@ func TestScimStaleRevisionCompletionDoesNotEmitFailureEvent(t *testing.T) {
 }
 
 func TestScimStaleLeaseCannotEmitFailureEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	o := newOutboxTest(t, func(context.Context, string) (Reconciler, error) { return fakeReconciler(nil), nil }, OutboxConfig{MaxAttempts: 1, Random: bytes.NewReader(bytes.Repeat([]byte{7}, 128))})
 	now := time.UnixMilli(1_704_067_203_000).UTC()
@@ -141,6 +146,7 @@ func TestScimStaleLeaseCannotEmitFailureEvent(t *testing.T) {
 }
 
 func TestScimNewRevisionGetsDistinctFailureEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	o := newOutboxTest(t, func(context.Context, string) (Reconciler, error) {
 		return fakeReconciler(func(context.Context, Request) (Result, error) { return Result{}, ErrRetryable }), nil
@@ -171,6 +177,7 @@ func TestScimNewRevisionGetsDistinctFailureEvent(t *testing.T) {
 }
 
 func TestScimConcurrentFinalClaimEmitsOneFailureEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var calls atomic.Int64
 	resolve := func(context.Context, string) (Reconciler, error) {
@@ -213,6 +220,7 @@ func TestScimConcurrentFinalClaimEmitsOneFailureEvent(t *testing.T) {
 }
 
 func TestScimCurrentIdentityMismatchDoesNotEmitFailureEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var calls atomic.Int64
 	o := newOutboxTest(t, func(context.Context, string) (Reconciler, error) {

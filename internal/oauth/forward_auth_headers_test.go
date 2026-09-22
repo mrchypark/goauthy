@@ -7,6 +7,7 @@ import (
 )
 
 func TestForwardAuthHeadersOverwriteSpoofedValuesAndCanonicalize(t *testing.T) {
+	t.Parallel()
 	headers := http.Header{
 		"x-forwarded-user":        {"attacker"},
 		"X-FORWARDED-USER-ROLES":  {"attacker-role"},
@@ -59,6 +60,7 @@ func TestForwardAuthHeadersOverwriteSpoofedValuesAndCanonicalize(t *testing.T) {
 }
 
 func TestForwardAuthHeadersDisabledClearsAllManagedNames(t *testing.T) {
+	t.Parallel()
 	headers := make(http.Header)
 	for i, name := range managedForwardAuthHeaders {
 		if i%2 == 0 {
@@ -84,6 +86,7 @@ func TestForwardAuthHeadersDisabledClearsAllManagedNames(t *testing.T) {
 }
 
 func TestForwardAuthHeadersRejectHostileIdentityAndClear(t *testing.T) {
+	t.Parallel()
 	for name, identity := range map[string]ForwardAuthIdentity{
 		"crlf":           {Subject: "user\r\nX-Evil: 1"},
 		"control":        {Subject: "user\x7f"},
@@ -116,6 +119,7 @@ func TestForwardAuthHeadersRejectHostileIdentityAndClear(t *testing.T) {
 }
 
 func TestForwardAuthHeadersMissingSubjectAndNilHeaderFailClosed(t *testing.T) {
+	t.Parallel()
 	headers := http.Header{}
 	headers.Set(ForwardAuthUserHeader, "spoof")
 	if err := ApplyForwardAuthHeaders(headers, ForwardAuthIdentity{}, true); err == nil {

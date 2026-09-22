@@ -25,6 +25,7 @@ type accountExpiryTokenResponse struct {
 }
 
 func TestAccountExpiryCapsHTTPTokenLifetimes(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	server := oidcTestServer(t, db, randomSecret(t), func(context.Context) (oidc.SigningKey, error) { return key, nil })
@@ -39,6 +40,7 @@ func TestAccountExpiryCapsHTTPTokenLifetimes(t *testing.T) {
 }
 
 func TestAccountExpirySnapshotShorteningRejectsAndPreservesCode(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	server := oidcTestServer(t, db, randomSecret(t), func(context.Context) (oidc.SigningKey, error) { return key, nil })
@@ -66,6 +68,7 @@ func TestAccountExpirySnapshotShorteningRejectsAndPreservesCode(t *testing.T) {
 }
 
 func TestAccountExpiryNullableNeighborStillIssues(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	server := oidcTestServer(t, db, randomSecret(t), func(context.Context) (oidc.SigningKey, error) { return key, nil })
@@ -78,6 +81,7 @@ func TestAccountExpiryNullableNeighborStillIssues(t *testing.T) {
 }
 
 func TestAccountExpiryCapsTokenExchangeToOwnerAndActor(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	ownerDeadline := time.Now().UTC().Add(10 * time.Minute).Truncate(time.Second)
 	actorDeadline := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second)
@@ -105,6 +109,7 @@ func TestAccountExpiryCapsTokenExchangeToOwnerAndActor(t *testing.T) {
 }
 
 func TestAccountExpiryActorSnapshotShorteningRejectsExchange(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	seedAccountExpiry(t, server.store.db, time.Now().UTC().Add(10*time.Minute))
 	seedAccountExpiryForSubject(t, server.store.db, "actor-2", time.Now().UTC().Add(10*time.Minute))
@@ -133,6 +138,7 @@ func TestAccountExpiryActorSnapshotShorteningRejectsExchange(t *testing.T) {
 }
 
 func TestAccountExpiryCapsDeviceTokens(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	deadline := time.Now().UTC().Add(10 * time.Minute).Truncate(time.Second)
@@ -163,6 +169,7 @@ func TestAccountExpiryCapsDeviceTokens(t *testing.T) {
 }
 
 func TestAccountExpiryDeviceSnapshotShorteningPreservesClaim(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	seedDeviceUser(t, db, "device-user", time.Now().UTC().Add(10*time.Minute).UnixMilli())

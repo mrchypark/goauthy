@@ -8,7 +8,8 @@ import (
 )
 
 func TestMigrationV79UseHandoffsFreshAndReplay(t *testing.T) {
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "use-handoffs-v78", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "use-handoffs-v78", DataDir: testDatabaseDir(t, "use-handoffs-v78")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +38,7 @@ func TestMigrationV79UseHandoffsFreshAndReplay(t *testing.T) {
 }
 
 func TestMigrationV79UseHandoffsRebuildsV78Rows(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "use-handoffs-v79-rebuild", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +108,7 @@ func TestMigrationV79UseHandoffsRebuildsV78Rows(t *testing.T) {
 }
 
 func TestMigrationV78UseHandoffsPreservesV77FixtureAndConstraints(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "use-handoffs-v77-fixture", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)

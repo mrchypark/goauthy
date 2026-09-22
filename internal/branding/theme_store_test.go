@@ -14,6 +14,7 @@ import (
 )
 
 func TestThemeStoreFallbackAndCrossStoreUpdates(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	first, err := NewThemeStore(db)
 	if err != nil {
@@ -82,6 +83,7 @@ func TestThemeStoreFallbackAndCrossStoreUpdates(t *testing.T) {
 }
 
 func TestThemeMutationsRejectRevokedAPIKey(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewThemeStore(db)
 	if err != nil {
@@ -131,6 +133,7 @@ func TestThemeMutationsRejectRevokedAPIKey(t *testing.T) {
 }
 
 func TestThemePutCannotRecreateDeletedClientTheme(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewThemeStore(db)
 	if err != nil {
@@ -155,6 +158,7 @@ func TestThemePutCannotRecreateDeletedClientTheme(t *testing.T) {
 }
 
 func TestThemeStylesheetURLTracksEffectiveFallback(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewThemeStore(db)
 	if err != nil {

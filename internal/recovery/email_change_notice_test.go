@@ -17,6 +17,7 @@ import (
 )
 
 func TestNotifyUserUpdateBothAddressesAndFailures(t *testing.T) {
+	t.Parallel()
 	s, sender := testService(t, "notice-user", "notice-user")
 	ctx := context.Background()
 	if err := s.BindEmail(ctx, "notice-user", "old@example.test"); err != nil {
@@ -59,6 +60,7 @@ func TestNotifyUserUpdateBothAddressesAndFailures(t *testing.T) {
 }
 
 func TestEmailChangeSMTPNineLanguagesAndEscaping(t *testing.T) {
+	t.Parallel()
 	s := testSMTPSender(t)
 	for _, lang := range []string{"de", "en", "fr", "ko", "nb", "nl", "ru", "uk", "zhhans"} {
 		s.send = func(_ context.Context, msg *mail.Msg) error {
@@ -105,6 +107,7 @@ func TestEmailChangeSMTPNineLanguagesAndEscaping(t *testing.T) {
 }
 
 func TestEmailChangeTemplatesOverrideAndLocalSMTP(t *testing.T) {
+	t.Parallel()
 	path := writeEmailTemplates(t, "[[templates]]\ntyp = 'email_change_confirm'\nlang = 'en'\nsubject = 'Changed address'\nheader = '<header>'\ntext = 'Changed to:'\nfooter = 'Administrator action'\n")
 	copy, err := LoadEmailTemplates(path)
 	if err != nil {

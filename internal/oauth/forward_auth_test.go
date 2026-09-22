@@ -15,6 +15,7 @@ import (
 )
 
 func TestForwardAuthAcceptsOpenIDUserToken(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	response := forwardAuthResponse(server, forwardAuthRequest(http.MethodGet, issueUserInfoToken(t, server), nil))
 	if response.Code != http.StatusOK || response.Body.Len() != 0 || response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" || response.Header().Get("X-Forwarded-User") != "" {
@@ -23,6 +24,7 @@ func TestForwardAuthAcceptsOpenIDUserToken(t *testing.T) {
 }
 
 func TestForwardAuthEmitsCurrentIdentityOnlyWhenEnabled(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	token := issueUserInfoToken(t, server)
 	server.oidc.ForwardAuthEnabled = true
@@ -42,6 +44,7 @@ func TestForwardAuthEmitsCurrentIdentityOnlyWhenEnabled(t *testing.T) {
 }
 
 func TestForwardAuthEnabledRequiresCurrentResolvers(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	server.oidc.ForwardAuthEnabled = true
 	response := forwardAuthResponse(server, forwardAuthRequest(http.MethodGet, issueUserInfoToken(t, server), nil))
@@ -51,6 +54,7 @@ func TestForwardAuthEnabledRequiresCurrentResolvers(t *testing.T) {
 }
 
 func TestForwardAuthRejectsInvalidTokenAndTransport(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := userInfoTestServer(t, db, nil)
 	revoked := issueUserInfoToken(t, server)
@@ -87,6 +91,7 @@ func TestForwardAuthRejectsInvalidTokenAndTransport(t *testing.T) {
 }
 
 func TestForwardAuthRejectsDPoPBoundAndInvalidSubject(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := userInfoTestServer(t, db, nil)
 	bound := issueUserInfoToken(t, server)

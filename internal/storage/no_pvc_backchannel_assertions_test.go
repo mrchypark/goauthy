@@ -23,6 +23,7 @@ import (
 )
 
 func TestNoPVCBackchannelDeliveryRecovery(t *testing.T) {
+	t.Parallel()
 	const (
 		clientID = "recovered-backchannel-client"
 		subject  = "recovered-backchannel-user"

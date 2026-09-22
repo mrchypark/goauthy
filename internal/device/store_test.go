@@ -3,6 +3,10 @@ package device
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"testing"
@@ -13,6 +17,7 @@ import (
 )
 
 func TestDeviceGrantLifecycleAndSlowDown(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	grant, err := store.Create(ctx, "client", []string{"goauthy.read"}, now)
@@ -61,6 +66,7 @@ func TestDeviceGrantLifecycleAndSlowDown(t *testing.T) {
 }
 
 func TestDeviceGrantDeniedAndExpired(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	grant, err := store.Create(ctx, "client", nil, now)
@@ -81,6 +87,7 @@ func TestDeviceGrantDeniedAndExpired(t *testing.T) {
 }
 
 func TestDeviceDecisionsRejectAlreadyDecidedAndUnknown(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	if err := store.Approve(ctx, "missing", "subject", now); !errors.Is(err, ErrInvalid) {
@@ -102,6 +109,7 @@ func TestDeviceDecisionsRejectAlreadyDecidedAndUnknown(t *testing.T) {
 }
 
 func TestConcurrentPollDoesNotOverwriteSchedule(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	grant, err := store.Create(ctx, "client", nil, now)
@@ -150,6 +158,7 @@ func TestConcurrentPollDoesNotOverwriteSchedule(t *testing.T) {
 }
 
 func TestAllowIsDistributedAndDoesNotStoreRawKey(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	const limit = 3
@@ -196,6 +205,7 @@ func TestAllowIsDistributedAndDoesNotStoreRawKey(t *testing.T) {
 }
 
 func TestCreateDoesNotMaskInfrastructureFailureAsCollision(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "device-unmigrated", DataDir: t.TempDir()})
 	if err != nil {
@@ -209,6 +219,7 @@ func TestCreateDoesNotMaskInfrastructureFailureAsCollision(t *testing.T) {
 }
 
 func TestAllowExpiryIsSetAndTriggerDeletesExpired(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	const limit = 3
@@ -277,6 +288,7 @@ func TestAllowExpiryIsSetAndTriggerDeletesExpired(t *testing.T) {
 }
 
 func TestTriggerCleanupBounded64RowProgress(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	const limit = 3
@@ -327,6 +339,7 @@ func TestTriggerCleanupBounded64RowProgress(t *testing.T) {
 }
 
 func TestTriggerCleanupExpiryEquality(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	const limit = 3
@@ -381,6 +394,7 @@ func TestTriggerCleanupExpiryEquality(t *testing.T) {
 }
 
 func TestAllowActiveRowPreservation(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	const limit = 3
@@ -410,6 +424,7 @@ func TestAllowActiveRowPreservation(t *testing.T) {
 }
 
 func TestAllowConcurrentCleanupAndAdmission(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	const limit = 3
@@ -481,6 +496,7 @@ func TestAllowConcurrentCleanupAndAdmission(t *testing.T) {
 }
 
 func TestAllowRestartPersistence(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	const limit = 3
@@ -516,15 +532,97 @@ func TestAllowRestartPersistence(t *testing.T) {
 func testStore(t *testing.T) (context.Context, *Store, *rhiza.DB) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "device-test", DataDir: t.TempDir()})
+	db := openTestDB(t, "device-test")
+	return ctx, NewStore(db), db
+}
+
+// Rhiza applies every migration statement through replicated consensus, which
+// costs several seconds for a fresh database under -race. The migrated schema is
+// built once per test binary and each test opens a private copy of it, which
+// keeps per-test isolation and still exercises the idempotent migrate path.
+var (
+	deviceTemplateOnce      sync.Once
+	deviceTemplateDirectory string
+	deviceTemplateErr       error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if deviceTemplateDirectory != "" {
+		_ = os.RemoveAll(deviceTemplateDirectory)
+	}
+	os.Exit(code)
+}
+
+func deviceMigratedTemplate(t *testing.T) string {
+	t.Helper()
+	deviceTemplateOnce.Do(func() {
+		directory, err := os.MkdirTemp("", "goauthy-device-template-")
+		if err != nil {
+			deviceTemplateErr = err
+			return
+		}
+		db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "device-test", DataDir: directory})
+		if err != nil {
+			_ = os.RemoveAll(directory)
+			deviceTemplateErr = fmt.Errorf("open device test template: %w", err)
+			return
+		}
+		if err := storage.Migrate(context.Background(), db); err != nil {
+			_ = db.Close()
+			_ = os.RemoveAll(directory)
+			deviceTemplateErr = fmt.Errorf("migrate device test template: %w", err)
+			return
+		}
+		if err := db.Close(); err != nil {
+			_ = os.RemoveAll(directory)
+			deviceTemplateErr = fmt.Errorf("close device test template: %w", err)
+			return
+		}
+		deviceTemplateDirectory = directory
+	})
+	if deviceTemplateErr != nil {
+		t.Fatal(deviceTemplateErr)
+	}
+	return deviceTemplateDirectory
+}
+
+func openTestDB(t *testing.T, nodeID string) *rhiza.DB {
+	t.Helper()
+	directory := t.TempDir()
+	if err := copyDirTree(deviceMigratedTemplate(t), directory); err != nil {
+		t.Fatal(err)
+	}
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: nodeID, DataDir: directory})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
+	if err := storage.Migrate(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
-	return ctx, NewStore(db), db
+	return db
+}
+
+func copyDirTree(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, content, 0o644)
+	})
 }
 func stringsLower(v string) string {
 	b := []byte(v)

@@ -6,6 +6,7 @@ import (
 )
 
 func TestMigrationV93LogoResolutions(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "logo-migration", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)

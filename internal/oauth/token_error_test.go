@@ -33,6 +33,7 @@ func (tokenErrorProvider) WriteAccessError(ctx context.Context, w http.ResponseW
 }
 
 func TestTokenEndpointInternalErrorResponse(t *testing.T) {
+	t.Parallel()
 	const secret = "private-storage-error-sentinel"
 	for _, tc := range []struct {
 		name         string
@@ -89,6 +90,7 @@ func TestTokenEndpointInternalErrorResponse(t *testing.T) {
 }
 
 func TestTokenEndpointBootstrapScopeAvailabilityUsesServerError(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	var scopeReads atomic.Int32
 	scopeStore := claims.NewStore(db)

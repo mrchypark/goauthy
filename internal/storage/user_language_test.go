@@ -31,6 +31,7 @@ func languageFixtureAt(t *testing.T, node, dataDir string) *rhiza.DB {
 }
 
 func TestMigrationV57LanguageLegacyValidAndIdempotent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := languageFixture(t, "language-v57")
 	defer db.Close()
@@ -60,6 +61,7 @@ func TestMigrationV57LanguageLegacyValidAndIdempotent(t *testing.T) {
 }
 
 func TestMigrationV57RejectsPartialStateAndConcurrentCallers(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := languageFixture(t, "language-concurrent")
 	defer db.Close()
@@ -85,6 +87,7 @@ func TestMigrationV57RejectsPartialStateAndConcurrentCallers(t *testing.T) {
 }
 
 func TestMigrationV57RejectsUnmarkedColumnAndMissingTable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	partial := languageFixture(t, "language-unmarked")
 	defer partial.Close()
@@ -109,6 +112,7 @@ func TestMigrationV57RejectsUnmarkedColumnAndMissingTable(t *testing.T) {
 }
 
 func TestMigrationV57PersistsAcrossReopen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	db := languageFixtureAt(t, "language-reopen", dir)

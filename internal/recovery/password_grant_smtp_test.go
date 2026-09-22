@@ -24,6 +24,7 @@ import (
 )
 
 func TestExpiredPasswordGrantDeliversResetSMTP(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	ctx := t.Context()
 	if err := service.BindEmail(ctx, "subject-1", "alice@example.test"); err != nil {

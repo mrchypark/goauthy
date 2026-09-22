@@ -7,7 +7,8 @@ import (
 )
 
 func TestSchemaV87BackchannelLogoutURIMigration(t *testing.T) {
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "backchannel-migration", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "backchannel-migration", DataDir: testDatabaseDir(t, "backchannel-migration")})
 	if err != nil {
 		t.Fatal(err)
 	}

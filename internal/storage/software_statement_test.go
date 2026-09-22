@@ -11,8 +11,9 @@ import (
 )
 
 func TestDCRSoftwareStatementTrustFencesExactTopologies(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "trust-fence", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "trust-fence", DataDir: testDatabaseDir(t, "trust-fence")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +35,7 @@ func TestDCRSoftwareStatementTrustFencesExactTopologies(t *testing.T) {
 		t.Fatalf("policy mismatch err=%v", err)
 	}
 
-	clusterDB, err := rhiza.Open(ctx, rhiza.Config{NodeID: "trust-cluster", DataDir: t.TempDir()})
+	clusterDB, err := rhiza.Open(ctx, rhiza.Config{NodeID: "trust-cluster", DataDir: testDatabaseDir(t, "trust-cluster")})
 	if err != nil {
 		t.Fatal(err)
 	}

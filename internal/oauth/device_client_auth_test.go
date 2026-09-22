@@ -14,6 +14,7 @@ import (
 )
 
 func TestAuthenticateDeviceClientHTTPMethodsAndFailures(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name               string
 		basic              bool
@@ -46,6 +47,7 @@ func TestAuthenticateDeviceClientHTTPMethodsAndFailures(t *testing.T) {
 }
 
 func TestAuthenticateDeviceClientHTTPDynamicMethods(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name, method string
 		auth         bool
@@ -112,6 +114,7 @@ func assertDeviceGrantCount(t *testing.T, db *rhiza.DB, wantOne bool) {
 }
 
 func TestAuthenticateDeviceClientHTTPRejectsAmbiguousCredentials(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	h, err := device.NewHandler(device.NewStore(db), "https://id.example.test", server.AuthenticateDeviceClient, nil)

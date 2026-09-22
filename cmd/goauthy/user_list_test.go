@@ -3,6 +3,7 @@ package main
 import "testing"
 
 func TestUserListThresholdFromEnv(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		raw  string
 		want uint16

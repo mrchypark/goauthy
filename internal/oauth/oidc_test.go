@@ -27,6 +27,7 @@ const oidcTestIssuer = "https://issuer.example.test"
 var oidcTestAuthTime = time.Unix(1_700_000_000, 0).UTC()
 
 func TestOIDCNonceBoundaryAndOAuthOnlyRejection(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	oauthOnly := oauthTestServer(t, db, randomSecret(t))
 	values := oidcAuthorizationValues(strings.Repeat("a", 43), "nonce")
@@ -53,6 +54,7 @@ func TestOIDCNonceBoundaryAndOAuthOnlyRejection(t *testing.T) {
 }
 
 func TestOIDCAuthorizationCodeAndRefreshIDTokens(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	server := oidcTestServer(t, db, randomSecret(t), func(context.Context) (oidc.SigningKey, error) { return key, nil })
@@ -79,6 +81,7 @@ func TestOIDCAuthorizationCodeAndRefreshIDTokens(t *testing.T) {
 }
 
 func TestOIDCSigningKeyLoadsOncePerIDTokenResponse(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	loads := 0
@@ -117,6 +120,7 @@ func TestOIDCSigningKeyLoadsOncePerIDTokenResponse(t *testing.T) {
 }
 
 func TestOIDCDoesNotIssueWithoutOpenIDOrForClientCredentials(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	server := oidcTestServer(t, db, randomSecret(t), func(context.Context) (oidc.SigningKey, error) { return key, nil })
@@ -135,6 +139,7 @@ func TestOIDCDoesNotIssueWithoutOpenIDOrForClientCredentials(t *testing.T) {
 }
 
 func TestRevokeOIDCSessionInvalidatesTokensAndPendingCode(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	server := oidcTestServer(t, db, randomSecret(t), func(context.Context) (oidc.SigningKey, error) { return key, nil })
@@ -184,6 +189,7 @@ func TestRevokeOIDCSessionInvalidatesTokensAndPendingCode(t *testing.T) {
 }
 
 func TestRevokeOIDCSessionRejectsInvalidID(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oidcTestServer(t, db, randomSecret(t), func(context.Context) (oidc.SigningKey, error) { return oidcTestKey(t), nil })
 	if err := server.RevokeOIDCSession(context.Background(), "not-a-session-id"); err == nil {
@@ -195,6 +201,7 @@ func TestRevokeOIDCSessionRejectsInvalidID(t *testing.T) {
 }
 
 func TestOIDCBackchannelNetworkExceptionsRequireEndpoint(t *testing.T) {
+	t.Parallel()
 	_, err := NewServerWithOIDC(context.Background(), oauthTestDB(t), randomSecret(t), testClientID, testClientSecret, testRedirectURI, nil, OIDCConfig{
 		Issuer: oidcTestIssuer, LoadSigningKey: func(context.Context) (oidc.SigningKey, error) { return oidcTestKey(t), nil },
 		BackChannelLogoutAllowHTTP: true,
@@ -205,6 +212,7 @@ func TestOIDCBackchannelNetworkExceptionsRequireEndpoint(t *testing.T) {
 }
 
 func TestOIDCBackchannelAssociationIsCreatedOnlyAfterExchangeAndFanoutIsOnce(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	server, err := NewServerWithOIDC(context.Background(), db, randomSecret(t), testClientID, testClientSecret, testRedirectURI, nil, OIDCConfig{
@@ -252,6 +260,7 @@ func assertUserClientRows(t *testing.T, db *rhiza.DB, want int64) {
 }
 
 func TestOIDCUserClientInsertFailureRollsBackIssuance(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	server, err := NewServerWithOIDC(context.Background(), db, randomSecret(t), testClientID, testClientSecret, testRedirectURI, nil, OIDCConfig{
@@ -285,6 +294,7 @@ func TestOIDCUserClientInsertFailureRollsBackIssuance(t *testing.T) {
 }
 
 func TestOIDCBackchannelExchangeVsLogoutLeavesNoAssociation(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	server, err := NewServerWithOIDC(context.Background(), db, randomSecret(t), testClientID, testClientSecret, testRedirectURI, nil, OIDCConfig{
@@ -335,6 +345,7 @@ func assertBackchannelRows(t *testing.T, db *rhiza.DB, sid string, mappings, del
 }
 
 func TestOIDCKeyLoadFailureDoesNotConsumeAuthorizationCode(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	mode := 0
@@ -363,6 +374,7 @@ func TestOIDCKeyLoadFailureDoesNotConsumeAuthorizationCode(t *testing.T) {
 }
 
 func TestOIDCMalformedStoredAuthMethodDoesNotConsumeAuthorizationCode(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	server := oidcTestServer(t, db, randomSecret(t), func(context.Context) (oidc.SigningKey, error) { return key, nil })
@@ -383,6 +395,7 @@ func TestOIDCMalformedStoredAuthMethodDoesNotConsumeAuthorizationCode(t *testing
 }
 
 func TestOIDCSessionClaimsRejectMissingAndMalformedAuthMethod(t *testing.T) {
+	t.Parallel()
 	valid := map[string]interface{}{
 		oidcAuthTimeExtra: "1", oidcSessionIDExtra: oidcTestSessionID(0), oidcNonceExtra: "nonce", oidcAuthMethodExtra: oidcAuthMethodPwd,
 	}
@@ -542,6 +555,7 @@ func verifyOIDCTestToken(t *testing.T, token string, key oidc.SigningKey, now ti
 }
 
 func TestOIDCCodeRecordsLoginWithoutBackchannelURI(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	server, err := NewServerWithOIDC(t.Context(), db, randomSecret(t), testClientID, testClientSecret, testRedirectURI, nil, OIDCConfig{Issuer: oidcTestIssuer, LoadSigningKey: func(context.Context) (oidc.SigningKey, error) { return key, nil }})

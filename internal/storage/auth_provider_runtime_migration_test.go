@@ -7,6 +7,7 @@ import (
 )
 
 func TestMigrationV96CreatesRuntimeVersionTable(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "runtime-version-migration", DataDir: t.TempDir()})
 	if err != nil {
@@ -54,6 +55,7 @@ func TestMigrationV96CreatesRuntimeVersionTable(t *testing.T) {
 }
 
 func TestMigrationV96BackfillsExistingProviders(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "runtime-version-backfill", DataDir: t.TempDir()})
 	if err != nil {
@@ -112,8 +114,9 @@ func TestMigrationV96BackfillsExistingProviders(t *testing.T) {
 }
 
 func TestMigrationV96FullPathIsIdempotentAndReady(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "runtime-version-full", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "runtime-version-full", DataDir: testDatabaseDir(t, "runtime-version-full")})
 	if err != nil {
 		t.Fatal(err)
 	}

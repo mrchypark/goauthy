@@ -9,6 +9,7 @@ import (
 )
 
 func TestExecuteEnvelopeFenceStates(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"none", MasterKeyRetirementPrepared, MasterKeyRetirementAborted, MasterKeyRetirementFenced, MasterKeyRetirementReady} {
 		t.Run(state, func(t *testing.T) {
 			ctx := context.Background()
@@ -42,6 +43,7 @@ func TestExecuteEnvelopeFenceStates(t *testing.T) {
 }
 
 func TestExecuteEnvelopeAllowsReplacementAndPreservesRows(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := envelopeTestDB(t, MasterKeyRetirementFenced)
 	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "envelope-create-replacement", SQL: `CREATE TABLE envelope_replacement (value TEXT NOT NULL) STRICT`}); err != nil {
@@ -66,6 +68,7 @@ func TestExecuteEnvelopeAllowsReplacementAndPreservesRows(t *testing.T) {
 }
 
 func TestExecuteEnvelopeRejectsThirdKeyAndRollsBack(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := envelopeTestDB(t, MasterKeyRetirementFenced)
 	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "envelope-create-third-key", SQL: `CREATE TABLE envelope_third_key (value TEXT NOT NULL) STRICT`}); err != nil {
@@ -87,6 +90,7 @@ func TestExecuteEnvelopeRejectsThirdKeyAndRollsBack(t *testing.T) {
 }
 
 func TestExecuteEnvelopeValidatesInputs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	if _, err := ExecuteEnvelope(ctx, nil, "key-a", rhiza.ExecuteRequest{RequestID: "nil-db", SQL: "SELECT 1"}); err == nil {
 		t.Fatal("nil database accepted")

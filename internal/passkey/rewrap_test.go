@@ -62,6 +62,7 @@ func newRewrapServices(t *testing.T) (context.Context, *rhiza.DB, *Service, *Ser
 }
 
 func TestDurablePasskeyWritesRespectMasterKeyFence(t *testing.T) {
+	t.Parallel()
 	ctx, db, old, replacement := newRewrapServices(t)
 	now := old.now()
 	staleDigest := challengeDigest("stale-ceremony")
@@ -104,6 +105,7 @@ func TestDurablePasskeyWritesRespectMasterKeyFence(t *testing.T) {
 }
 
 func TestPasskeyEnvelopeWriteUsesAuthenticatedSealedKeyAsWriter(t *testing.T) {
+	t.Parallel()
 	ctx, db, _, replacement := newRewrapServices(t)
 	now := time.UnixMilli(1_900_000_000_000).UTC()
 	if _, err := storage.PrepareMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementPrepareRequest{Epoch: 1, OldKeyID: "master-a", ReplacementKeyID: "master-b", MemberIDs: []string{"node-0", "node-1", "node-2"}, PreparedAt: now}); err != nil {
@@ -140,6 +142,7 @@ type interposedPasskeyKeyring struct {
 func (k *interposedPasskeyKeyring) ActiveMasterKeyID() (string, error) { return k.active, nil }
 
 func TestPasskeyRewrapUsesMasterKeyFence(t *testing.T) {
+	t.Parallel()
 	ctx, db, old, replacement := newRewrapServices(t)
 	now := old.now()
 	credentialID := testCredentialID("fenced-rewrap")
@@ -256,6 +259,7 @@ func insertPasskeyMFACeremony(t *testing.T, ctx context.Context, db *rhiza.DB, s
 }
 
 func TestRewrapBatchConvertsLegacyRowsAndSurvivesOldKeyRemoval(t *testing.T) {
+	t.Parallel()
 	ctx, db, old, rotated := newRewrapServices(t)
 	subject := "subject-legacy"
 	credentialID := testCredentialID("credential-legacy")
@@ -322,6 +326,7 @@ func mustOpenLegacy(t *testing.T, service *Service, encoded string, aad []byte) 
 }
 
 func TestRewrapBatchConvertsOldGAOPAndRejectsWrongContextOrTamper(t *testing.T) {
+	t.Parallel()
 	ctx, db, old, rotated := newRewrapServices(t)
 	validID := testCredentialID("credential-valid")
 	validSubject := "subject-valid"
@@ -369,6 +374,7 @@ func TestRewrapBatchConvertsOldGAOPAndRejectsWrongContextOrTamper(t *testing.T) 
 }
 
 func TestRewrapBatchConcurrentWorkersAreZeroOrN(t *testing.T) {
+	t.Parallel()
 	ctx, db, old, rotated := newRewrapServices(t)
 	for i := 0; i < 3; i++ {
 		insertPasskeyCredential(t, ctx, db, old, testCredentialID(fmt.Sprintf("credential-worker-%d", i)), fmt.Sprintf("subject-worker-%d", i), false)
@@ -408,6 +414,7 @@ func TestRewrapBatchConcurrentWorkersAreZeroOrN(t *testing.T) {
 }
 
 func TestRewrapBatchIsBoundedAcrossAllPhases(t *testing.T) {
+	t.Parallel()
 	ctx, db, old, rotated := newRewrapServices(t)
 	for i := 0; i < 33; i++ {
 		insertPasskeyCredential(t, ctx, db, old, testCredentialID(fmt.Sprintf("credential-%03d", i)), fmt.Sprintf("subject-%03d", i), true)
@@ -457,6 +464,7 @@ func (k *blockingPasskeyKeyring) SealEnvelope(purpose string, plaintext []byte) 
 }
 
 func TestRewrapBatchRetriesConcurrentCredentialVersionAndCeremonyConsume(t *testing.T) {
+	t.Parallel()
 	ctx, db, old, rotated := newRewrapServices(t)
 	credentialID := testCredentialID("credential-version")
 	insertPasskeyCredential(t, ctx, db, old, credentialID, "subject-version", false)

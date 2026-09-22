@@ -7,6 +7,7 @@ import (
 )
 
 func TestDCRBackchannelLogoutURIPersistsAcrossCleanReopen(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	dir := t.TempDir()
 	const nodeID = "dcr-backchannel-reopen"

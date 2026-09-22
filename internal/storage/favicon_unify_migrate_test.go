@@ -9,6 +9,7 @@ import (
 )
 
 func TestMigrationV94UnifiesLegacyClientFavicons(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "favicon-unify", DataDir: t.TempDir()})
 	if err != nil {
@@ -98,8 +99,9 @@ func TestMigrationV94UnifiesLegacyClientFavicons(t *testing.T) {
 }
 
 func TestMigrationV94FullPathIsIdempotentAndReady(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "favicon-unify-full", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "favicon-unify-full", DataDir: testDatabaseDir(t, "favicon-unify-full")})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,6 +18,7 @@ import (
 )
 
 func TestLoginRevokeHandlerUsesTypedQueryIPAndCore(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	keyring := loginRevokeTestKeyring(t)
 	ctx := context.Background()
@@ -65,6 +66,7 @@ func TestLoginRevokeHandlerUsesTypedQueryIPAndCore(t *testing.T) {
 }
 
 func TestLoginRevokeHandlerLocationLookupUsesQueryIP(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	keyring := loginRevokeTestKeyring(t)
 	code, err := service.identity.FindOrCreateLoginRevokeCode(context.Background(), keyring, "subject-1")
@@ -92,6 +94,7 @@ func TestLoginRevokeHandlerLocationLookupUsesQueryIP(t *testing.T) {
 }
 
 func TestLoginRevokeHandlerLocationLookupFailureFallsBackToNil(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	keyring := loginRevokeTestKeyring(t)
 	code, err := service.identity.FindOrCreateLoginRevokeCode(context.Background(), keyring, "subject-1")
@@ -113,6 +116,7 @@ func TestLoginRevokeHandlerLocationLookupFailureFallsBackToNil(t *testing.T) {
 }
 
 func TestLoginRevokeHandlerMethodAndMissingIP(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	handler := NewLoginRevokeHandler(service.identity, loginRevokeTestKeyring(t))
 	for _, request := range []*http.Request{
@@ -135,6 +139,7 @@ func TestLoginRevokeHandlerMethodAndMissingIP(t *testing.T) {
 }
 
 func TestLoginRevokeHandlerUsesPinnedLanguageCopy(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	keyring := loginRevokeTestKeyring(t)
 	code, err := service.identity.FindOrCreateLoginRevokeCode(context.Background(), keyring, "subject-1")

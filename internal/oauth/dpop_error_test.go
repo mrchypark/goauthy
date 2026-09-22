@@ -9,6 +9,7 @@ import (
 )
 
 func TestDPoPTokenMalformedProofError(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	for _, tc := range []struct {
 		name   string

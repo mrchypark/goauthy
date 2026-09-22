@@ -8,7 +8,8 @@ import (
 )
 
 func TestMigrationV63ManagedClientsContract(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "managed-clients-v63", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "managed-clients-v63", DataDir: testDatabaseDir(t, "managed-clients-v63")})
 	if err != nil {
 		t.Fatal(err)
 	}

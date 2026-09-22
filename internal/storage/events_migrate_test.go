@@ -19,6 +19,7 @@ func eventSchemaDB(t *testing.T) (*rhiza.DB, context.Context) {
 }
 
 func TestMigrationV59CreatesIdempotentEventLogAndPreservesRows(t *testing.T) {
+	t.Parallel()
 	db, ctx := eventSchemaDB(t)
 	if err := Migrate(ctx, db); err != nil {
 		t.Fatal(err)
@@ -37,6 +38,7 @@ func TestMigrationV59CreatesIdempotentEventLogAndPreservesRows(t *testing.T) {
 }
 
 func TestEventLogV59StrictConstraints(t *testing.T) {
+	t.Parallel()
 	db, ctx := eventSchemaDB(t)
 	if err := Migrate(ctx, db); err != nil {
 		t.Fatal(err)
@@ -65,6 +67,7 @@ func TestEventLogV59StrictConstraints(t *testing.T) {
 }
 
 func TestMigrationV59FromV58PreservesPriorTables(t *testing.T) {
+	t.Parallel()
 	db, ctx := eventSchemaDB(t)
 	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "event-v58-base", Statements: []rhiza.SQLStatement{
 		{SQL: `CREATE TABLE goauthy_schema_migrations(version INTEGER PRIMARY KEY) STRICT`},
@@ -84,6 +87,7 @@ func TestMigrationV59FromV58PreservesPriorTables(t *testing.T) {
 }
 
 func TestMigrationV59RejectsInconsistentTableAndMarker(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name string }{
 		{"marker without table"},
 		{"table without marker"},

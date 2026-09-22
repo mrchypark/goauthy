@@ -17,6 +17,7 @@ import (
 )
 
 func TestGeneratedBootstrapConfiguration(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, path, ttl string
 		valid           bool
@@ -55,6 +56,7 @@ func TestGeneratedBootstrapConfiguration(t *testing.T) {
 }
 
 func TestBootstrapAPIKeysSharedStartupAndRetry(t *testing.T) {
+	t.Parallel()
 	db := retirementCmdDB(t, true)
 	store, err := apikey.NewStore(db)
 	if err != nil {
@@ -102,6 +104,7 @@ func TestBootstrapAPIKeysSharedStartupAndRetry(t *testing.T) {
 }
 
 func TestGeneratedBootstrapPurgeWorkerExpiresBothCopiesAndStops(t *testing.T) {
+	t.Parallel()
 	db := retirementCmdDB(t, true)
 	store, err := apikey.NewStore(db)
 	if err != nil {

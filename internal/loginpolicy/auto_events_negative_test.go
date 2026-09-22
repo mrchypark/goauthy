@@ -22,6 +22,7 @@ func autoBlacklistEventCount(t *testing.T, db *rhiza.DB) int64 {
 }
 
 func TestAutomaticBlacklistNegativePathsEmitNoEvents(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	now := time.UnixMilli(1_704_067_200_000).UTC()
 
@@ -85,6 +86,7 @@ func TestAutomaticBlacklistNegativePathsEmitNoEvents(t *testing.T) {
 }
 
 func TestAutomaticBlacklistEventUsesStoredLongerExpiry(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	store := NewStoreWithBlacklist(db, ipblacklist.NewStore(db, 1))
@@ -104,6 +106,7 @@ func TestAutomaticBlacklistEventUsesStoredLongerExpiry(t *testing.T) {
 }
 
 func TestAutomaticBlacklistBackwardInterpositionRejectsWithoutMutation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	blacklist := ipblacklist.NewStore(db, 100)
@@ -151,6 +154,7 @@ func TestAutomaticBlacklistBackwardInterpositionRejectsWithoutMutation(t *testin
 }
 
 func TestAutomaticBlacklistLargeForwardJumpRequiresFreshObservation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	blacklist := ipblacklist.NewStore(db, 100)

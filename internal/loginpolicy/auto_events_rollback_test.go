@@ -48,6 +48,7 @@ func insertExpiredAutoEventVictim(t *testing.T, db *rhiza.DB, now time.Time) {
 }
 
 func TestAutomaticBlacklistEventAbortRollsBackAllState(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	blacklist := ipblacklist.NewStore(db, 1)
 	store := NewStoreWithBlacklist(db, blacklist)
@@ -113,6 +114,7 @@ func TestAutomaticBlacklistEventAbortRollsBackAllState(t *testing.T) {
 }
 
 func TestAutomaticBlacklistEventOrderAbortRollsBackAllState(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	blacklist := ipblacklist.NewStore(db, 1)
 	store := NewStoreWithBlacklist(db, blacklist)

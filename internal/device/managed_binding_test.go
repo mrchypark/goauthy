@@ -19,6 +19,7 @@ func seedManagedBinding(t *testing.T, ctx context.Context, store *Store, id, gen
 }
 
 func TestCreateWithBindingRejectsStaleRevisionAndGeneration(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	now := time.UnixMilli(1_700_000_000_000).UTC()
 	seedManagedBinding(t, ctx, store, "managed-device", "gen-a", 1, 1)
@@ -50,6 +51,7 @@ func TestCreateWithBindingRejectsStaleRevisionAndGeneration(t *testing.T) {
 }
 
 func TestCreateWithoutBindingRejectsManagedID(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	seedManagedBinding(t, ctx, store, "managed-device", "gen-a", 1, 1)
 	if _, err := store.Create(ctx, "managed-device", []string{"goauthy.read"}, time.UnixMilli(1_700_000_000_000).UTC()); !errors.Is(err, ErrInvalid) {

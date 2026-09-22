@@ -15,6 +15,7 @@ func eventSequenceInsert(t *testing.T, db *rhiza.DB, requestID, id string, times
 }
 
 func TestEventLogSequenceBackfillMonotonicAndRetention(t *testing.T) {
+	t.Parallel()
 	db, ctx := eventSchemaDB(t)
 	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "event-seq-v59-state", Statements: []rhiza.SQLStatement{
 		{SQL: `CREATE TABLE goauthy_schema_migrations(version INTEGER PRIMARY KEY) STRICT`},
@@ -44,6 +45,7 @@ func TestEventLogSequenceBackfillMonotonicAndRetention(t *testing.T) {
 }
 
 func TestEventLogSequenceDuplicateDoesNotAppendOrder(t *testing.T) {
+	t.Parallel()
 	db, ctx := eventSchemaDB(t)
 	if err := Migrate(ctx, db); err != nil {
 		t.Fatal(err)
@@ -60,6 +62,7 @@ func TestEventLogSequenceDuplicateDoesNotAppendOrder(t *testing.T) {
 }
 
 func TestMigrationV60RejectsPartialTriggerState(t *testing.T) {
+	t.Parallel()
 	db, ctx := eventSchemaDB(t)
 	if err := Migrate(ctx, db); err != nil {
 		t.Fatal(err)
@@ -73,6 +76,7 @@ func TestMigrationV60RejectsPartialTriggerState(t *testing.T) {
 }
 
 func TestEventLogSequencePersistsAcrossReopenAndMigration(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "events-v60-reopen", DataDir: dir})

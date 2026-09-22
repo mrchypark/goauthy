@@ -13,6 +13,7 @@ import (
 )
 
 func TestDeviceOIDCGroupPolicyAllowsAndDenies(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name    string
 		groups  []string
@@ -40,6 +41,7 @@ func TestDeviceOIDCGroupPolicyAllowsAndDenies(t *testing.T) {
 }
 
 func TestDeviceOIDCGroupPolicyRevisionRaceLeavesNoTokenArtifacts(t *testing.T) {
+	t.Parallel()
 	state := &PrincipalClaims{Groups: []string{"team/device"}, Revision: 1}
 	server := clientGroupPolicyServer(t, state)
 	deviceCode := grantDeviceOIDC(t, server, "user-1")

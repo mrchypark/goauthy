@@ -17,6 +17,7 @@ import (
 )
 
 func TestManagedDefaultAudienceAcrossGrants(t *testing.T) {
+	t.Parallel()
 	s, db := crossClientExchangeServer(t)
 	const id = "managed-defaults"
 	dir := t.TempDir()

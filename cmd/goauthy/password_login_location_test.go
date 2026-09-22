@@ -10,6 +10,7 @@ import (
 )
 
 func TestPasswordLoginLocationMetadata(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, ip, ua, id string
 		valid            bool
@@ -48,6 +49,7 @@ func TestPasswordLoginLocationMetadata(t *testing.T) {
 }
 
 func TestLoginLocationLookupFailureIsSynchronous(t *testing.T) {
+	t.Parallel()
 	failure := errors.New("location database unavailable")
 	observer := loginLocationObserver(nil, nil, nil, nil, "https://issuer.test", "", func(ip netip.Addr) (*string, error) {
 		if ip.String() != "192.0.2.1" {

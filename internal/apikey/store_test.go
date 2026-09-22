@@ -12,14 +12,8 @@ import (
 )
 
 func TestCreateAuthenticateRotateAndExpiryBoundary(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "apikey-test", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err = storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	db := openTestDB(t, "apikey-test")
 	s, err := NewStore(db)
 	if err != nil {
 		t.Fatal(err)
@@ -69,6 +63,7 @@ func TestCreateAuthenticateRotateAndExpiryBoundary(t *testing.T) {
 }
 
 func TestAuthenticateAcrossStoresRejectsKeyDeletedByPeer(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := bootstrapTestDB(t, "apikey-cross-store-revocation")
 	first, err := NewStore(db)
@@ -95,21 +90,16 @@ func TestAuthenticateAcrossStoresRejectsKeyDeletedByPeer(t *testing.T) {
 }
 
 func TestRequestRejectsDuplicateGroupAndRight(t *testing.T) {
+	t.Parallel()
 	if err := validate(Request{Name: "key", Access: []Access{{Group: "Groups", AccessRights: []Right{Read, Read}}}}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("err=%v", err)
 	}
 }
 
 func TestAPIKeyMutationsAppendAuditsAndEventsRead(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "apikey-audit", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "apikey-audit")
 	s, err := NewStore(db)
 	if err != nil {
 		t.Fatal(err)
@@ -164,15 +154,9 @@ func TestAPIKeyMutationsAppendAuditsAndEventsRead(t *testing.T) {
 }
 
 func TestUpdateInterpositionDoesNotReportSuccessOrAppendAudit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "apikey-audit-interpose", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "apikey-audit-interpose")
 	s, err := NewStore(db)
 	if err != nil {
 		t.Fatal(err)
@@ -205,15 +189,9 @@ func TestUpdateInterpositionDoesNotReportSuccessOrAppendAudit(t *testing.T) {
 }
 
 func TestCreateDeleteRotateDoNotReportStaleSuccess(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "apikey-audit-stale", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "apikey-audit-stale")
 	s, err := NewStore(db)
 	if err != nil {
 		t.Fatal(err)
@@ -260,15 +238,9 @@ func TestCreateDeleteRotateDoNotReportStaleSuccess(t *testing.T) {
 }
 
 func TestListAuditEventsRechecksGrantInPageSnapshot(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "apikey-audit-read-guard", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "apikey-audit-read-guard")
 	s, err := NewStore(db)
 	if err != nil {
 		t.Fatal(err)
@@ -293,14 +265,8 @@ func TestListAuditEventsRechecksGrantInPageSnapshot(t *testing.T) {
 }
 
 func TestRejectedMutationLeavesNoGuardOrTarget(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "apikey-guard", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err = storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	db := openTestDB(t, "apikey-guard")
 	s, _ := NewStore(db)
 	s.now = func() time.Time { return time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC) }
 	s.random = func(b []byte) (int, error) {
@@ -330,14 +296,8 @@ func TestRejectedMutationLeavesNoGuardOrTarget(t *testing.T) {
 }
 
 func TestRunMutationRejectsUnguardedTargets(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "apikey-misuse", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err = storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	db := openTestDB(t, "apikey-misuse")
 	s, err := NewStore(db)
 	if err != nil {
 		t.Fatal(err)
@@ -351,14 +311,8 @@ func TestRunMutationRejectsUnguardedTargets(t *testing.T) {
 }
 
 func TestAPIKeyCannotDelegateRightsItDoesNotHold(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "apikey-delegate", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err = storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	db := openTestDB(t, "apikey-delegate")
 	s, _ := NewStore(db)
 	s.random = func(b []byte) (int, error) {
 		for i := range b {
@@ -384,14 +338,8 @@ func TestAPIKeyCannotDelegateRightsItDoesNotHold(t *testing.T) {
 }
 
 func TestAPIKeyCannotSelfEscalateOnUpdate(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "apikey-self-update", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err = storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	db := openTestDB(t, "apikey-self-update")
 	s, _ := NewStore(db)
 	s.random = func(b []byte) (int, error) {
 		for i := range b {
@@ -421,16 +369,10 @@ func TestAPIKeyCannotSelfEscalateOnUpdate(t *testing.T) {
 }
 
 func TestDeleteMissingKeyReturnsNotFound(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "apikey-delete-missing", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err = storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+	db := openTestDB(t, "apikey-delete-missing")
 	s, _ := NewStore(db)
-	if err = s.Delete(context.Background(), nil, "missing"); !errors.Is(err, ErrNotFound) {
+	if err := s.Delete(context.Background(), nil, "missing"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing delete err=%v", err)
 	}
 }
@@ -441,15 +383,9 @@ func TestDeleteMissingKeyReturnsNotFound(t *testing.T) {
 // earlier update already applied is an independent update. Replaying one exact
 // prepared mutation still deduplicates on its retained receipt.
 func TestUpdateRevertsToEarlierConfigurationAndReplaysExactRetry(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "apikey-operation-identity", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "apikey-operation-identity")
 	s, err := NewStore(db)
 	if err != nil {
 		t.Fatal(err)

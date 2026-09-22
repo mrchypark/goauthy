@@ -41,6 +41,7 @@ const outboxRetirementBarrier = `CREATE TABLE IF NOT EXISTS master_key_retiremen
 const outboxTestBody = `text body https://auth.example.test/reset`
 
 func TestEmailOutboxRetryableFailureStaysPendingUntilExhausted(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	transient := errors.New("dial tcp 127.0.0.1:25: connect: connection refused")
 	sent := 0
@@ -81,6 +82,7 @@ func TestEmailOutboxRetryableFailureStaysPendingUntilExhausted(t *testing.T) {
 }
 
 func TestEmailOutboxPermanentSMTPFailureIsTerminal(t *testing.T) {
+	t.Parallel()
 	host, port := splitSMTPAddress(t, startRejectingSMTPFixture(t))
 	sender, err := NewSMTPSender(SMTPConfig{Host: host, Port: port, From: "support@example.test", Timeout: time.Second, AllowInsecure: true})
 	if err != nil {
@@ -104,6 +106,7 @@ func TestEmailOutboxPermanentSMTPFailureIsTerminal(t *testing.T) {
 }
 
 func TestEmailOutboxCompletionIDsAreLeaseScoped(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	first := errors.New("first SMTP failure")
 	second := errors.New("second SMTP failure")
@@ -135,6 +138,7 @@ func TestEmailOutboxCompletionIDsAreLeaseScoped(t *testing.T) {
 }
 
 func TestEmailOutboxStaleOwnerCannotAcknowledgeReclaimedRow(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	var outbox *EmailOutbox
 	outbox = testEmailOutbox(t, func(ctx context.Context, _, _, _, _ string) error {
@@ -159,6 +163,7 @@ func TestEmailOutboxStaleOwnerCannotAcknowledgeReclaimedRow(t *testing.T) {
 }
 
 func TestEmailOutboxSealsPayloadsAndRefusesPlaintextWithoutKeyring(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	keyring := loginRevokeTestKeyring(t)
 	secret := "live-secret-token"
@@ -213,6 +218,7 @@ func TestEmailOutboxSealsPayloadsAndRefusesPlaintextWithoutKeyring(t *testing.T)
 }
 
 func TestEmailOutboxEnqueueRequiresKeyringForSensitivePayloads(t *testing.T) {
+	t.Parallel()
 	outbox := testEmailOutbox(t, nil)
 	err := outbox.Enqueue(t.Context(), "user@example.test", "password reset", "Reset", `<p>html</p>`, `https://auth.example.test/reset?token=live-secret`)
 	if err == nil {
@@ -227,6 +233,7 @@ func TestEmailOutboxEnqueueRequiresKeyringForSensitivePayloads(t *testing.T) {
 // insert path: an enqueue that seals under the retired key must not commit a
 // row, while an enqueue under the replacement key inserts and delivers.
 func TestEmailOutboxEnqueueRespectsMasterKeyRetirementFence(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	retired, replacement := outboxFenceKeyrings(t)
 	var delivered []string
@@ -269,6 +276,7 @@ func TestEmailOutboxEnqueueRespectsMasterKeyRetirementFence(t *testing.T) {
 // that seal, then resumes it. The fenced state and the post-readiness ready
 // state must both reject the insert.
 func TestEmailOutboxEnqueueRejectsSealThatOutlivesItsFence(t *testing.T) {
+	t.Parallel()
 	for _, state := range []string{"fenced", "ready"} {
 		t.Run(state, func(t *testing.T) {
 			retired, _ := outboxFenceKeyrings(t)
@@ -375,6 +383,7 @@ func seedOutboxRetirement(t *testing.T, outbox *EmailOutbox, state string) {
 }
 
 func TestEmailOutboxDeliversLegacyPlaintextRow(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	var delivered []string
 	outbox := testEmailOutbox(t, func(_ context.Context, _, _, textBody, htmlBody string) error {
@@ -397,6 +406,7 @@ func TestEmailOutboxDeliversLegacyPlaintextRow(t *testing.T) {
 }
 
 func TestEmailOutboxCleanupBoundsTerminalRetention(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 	outbox := testEmailOutbox(t, nil)
 	outbox.Now = func() time.Time { return now }

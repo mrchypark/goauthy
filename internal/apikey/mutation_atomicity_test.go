@@ -14,14 +14,7 @@ import (
 func mutationAtomicityFixture(t *testing.T, rights ...Right) (*Store, *Principal, context.Context) {
 	t.Helper()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "apikey-mutation-atomicity", DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, "apikey-mutation-atomicity")
 	s, err := NewStore(db)
 	if err != nil {
 		t.Fatal(err)
@@ -39,6 +32,7 @@ func mutationAtomicityFixture(t *testing.T, rights ...Right) (*Store, *Principal
 }
 
 func TestRunMutationAuthorizationRevokedBeforeSubmissionChangesNothing(t *testing.T) {
+	t.Parallel()
 	s, p, ctx := mutationAtomicityFixture(t, Create)
 	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "revoke-before-submit", SQL: `UPDATE api_keys SET secret_digest=? WHERE name=?`, Args: []any{strings.Repeat("Z", 43), p.Name}}); err != nil {
 		t.Fatal(err)
@@ -58,6 +52,7 @@ func TestRunMutationAuthorizationRevokedBeforeSubmissionChangesNothing(t *testin
 }
 
 func TestRunMutationSnapshotSurvivesSelfRevocationForRemainingStatements(t *testing.T) {
+	t.Parallel()
 	s, p, ctx := mutationAtomicityFixture(t, Delete)
 	requestID := strings.Repeat("s", 43)
 	targetDigest := strings.Repeat("T", 43)
@@ -87,6 +82,7 @@ func TestRunMutationSnapshotSurvivesSelfRevocationForRemainingStatements(t *test
 }
 
 func TestRunMutationConstraintFailureRollsBackTargetsAndGuard(t *testing.T) {
+	t.Parallel()
 	s, p, ctx := mutationAtomicityFixture(t, Create)
 	requestID := strings.Repeat("c", 43)
 	statements := []rhiza.SQLStatement{

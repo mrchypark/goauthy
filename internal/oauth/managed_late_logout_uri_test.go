@@ -14,6 +14,7 @@ import (
 )
 
 func TestManagedOIDCCodeLoginUsesUpdatedLogoutURIOnSIDRevocation(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oidcTestServer(t, db, randomSecret(t), func(context.Context) (oidc.SigningKey, error) {
 		return oidcTestKey(t), nil

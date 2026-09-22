@@ -21,6 +21,7 @@ import (
 // passkey-first enrollment has no usable session binding, so a start that
 // cannot complete must reject without reserving a passkey-only identity.
 func TestRegisterPasskeyStartFailsClosedWithoutReservingIdentity(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	config := RegistrationConfig{Enabled: true, PasskeyEnabled: true, AllowedDomains: []string{"example.test"}, RedirectValidator: ExactRedirectURIs(nil)}
 	if err := WithOpenRegistration(config, time.Hour, func(context.Context, string) (bool, error) { return true, nil })(service); err != nil {

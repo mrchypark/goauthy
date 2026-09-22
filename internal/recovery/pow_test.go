@@ -19,6 +19,7 @@ import (
 )
 
 func TestProofOfWorkIssueFormatAndConsume(t *testing.T) {
+	t.Parallel()
 	pow := testProofOfWork(t)
 	now := time.Unix(1_000, 0).UTC()
 	pow.now = func() time.Time { return now }
@@ -40,6 +41,7 @@ func TestProofOfWorkIssueFormatAndConsume(t *testing.T) {
 }
 
 func TestProofOfWorkAcceptsExpiryEqualityAndRejectsMalformed(t *testing.T) {
+	t.Parallel()
 	pow := testProofOfWork(t)
 	now := time.Unix(1_000, 0).UTC()
 	pow.now = func() time.Time { return now }
@@ -61,6 +63,7 @@ func TestProofOfWorkAcceptsExpiryEqualityAndRejectsMalformed(t *testing.T) {
 }
 
 func TestProofOfWorkConcurrentConsumeExactlyOne(t *testing.T) {
+	t.Parallel()
 	pow := testProofOfWork(t)
 	now := time.Unix(1_000, 0).UTC()
 	pow.now = func() time.Time { return now }
@@ -88,6 +91,7 @@ func TestProofOfWorkConcurrentConsumeExactlyOne(t *testing.T) {
 }
 
 func TestProofOfWorkIssueRejectsInvalidParametersAndCleansExpired(t *testing.T) {
+	t.Parallel()
 	pow := testProofOfWork(t)
 	pow.now = func() time.Time { return time.Unix(1_000, 0).UTC() }
 	pow.random = &sequenceReader{}
@@ -116,6 +120,7 @@ func TestProofOfWorkIssueRejectsInvalidParametersAndCleansExpired(t *testing.T) 
 }
 
 func TestProofOfWorkIssueAdmissionBoundaryExpiryAndNeighbor(t *testing.T) {
+	t.Parallel()
 	pow := testProofOfWork(t)
 	now := time.Unix(1_000, 0).UTC()
 	pow.now = func() time.Time { return now }
@@ -147,6 +152,7 @@ func TestProofOfWorkIssueAdmissionBoundaryExpiryAndNeighbor(t *testing.T) {
 }
 
 func TestProofOfWorkIssueCrossStoreContentionHonorsActiveBound(t *testing.T) {
+	t.Parallel()
 	pow := testProofOfWork(t)
 	now := time.Unix(1_000, 0).UTC()
 	pow.now = func() time.Time { return now }
@@ -192,6 +198,7 @@ func TestProofOfWorkIssueCrossStoreContentionHonorsActiveBound(t *testing.T) {
 }
 
 func TestProofOfWorkIssuePeerRowsStayBoundedAfterConsumption(t *testing.T) {
+	t.Parallel()
 	pow := testProofOfWork(t)
 	now := time.Unix(1_000, 0).UTC()
 	pow.now = func() time.Time { return now }

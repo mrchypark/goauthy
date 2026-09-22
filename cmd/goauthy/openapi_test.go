@@ -10,6 +10,7 @@ import (
 )
 
 func TestSwaggerConfig(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		enable, public string
 		want           swaggerConfig
@@ -43,6 +44,7 @@ func TestSwaggerConfig(t *testing.T) {
 }
 
 func TestSwaggerProductionMountAndIssuerPath(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		config     swaggerConfig

@@ -7,7 +7,8 @@ import (
 )
 
 func TestSchemaV71CreatesSaaSProvidersAndReplays(t *testing.T) {
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "provider-migration", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "provider-migration", DataDir: testDatabaseDir(t, "provider-migration")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +33,8 @@ func TestSchemaV71CreatesSaaSProvidersAndReplays(t *testing.T) {
 }
 
 func TestSchemaV72AddsOAuthIdentityColumnsAndReplays(t *testing.T) {
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "provider-migration-v72", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "provider-migration-v72", DataDir: testDatabaseDir(t, "provider-migration-v72")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +55,7 @@ func TestSchemaV72AddsOAuthIdentityColumnsAndReplays(t *testing.T) {
 }
 
 func TestSchemaV72PreservesExistingProvider(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "provider-migration-preserve", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)

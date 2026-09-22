@@ -49,6 +49,7 @@ func testClient(t *testing.T, handler http.Handler) (*Client, *httptest.Server) 
 }
 
 func TestNewEnforcesTransportPolicyWithoutMutatingCaller(t *testing.T) {
+	t.Parallel()
 	callerRedirect := func(*http.Request, []*http.Request) error { return errors.New("caller") }
 	caller := &http.Client{CheckRedirect: callerRedirect}
 	c, err := New(Config{BaseURL: "https://scim.example.test", Token: "token", HTTPClient: caller})
@@ -69,8 +70,10 @@ func TestNewEnforcesTransportPolicyWithoutMutatingCaller(t *testing.T) {
 }
 
 func TestRetryableTransportAndServerStatus(t *testing.T) {
+	t.Parallel()
 	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
+			t.Parallel()
 			client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(status)
 			}))
@@ -93,6 +96,7 @@ func TestRetryableTransportAndServerStatus(t *testing.T) {
 }
 
 func TestRetryablePartialResponseBody(t *testing.T) {
+	t.Parallel()
 	client, err := New(Config{BaseURL: "https://scim.example.test", Token: "token", HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/scim+json"}}, Body: &partialReadCloser{data: []byte(`{`), err: io.ErrUnexpectedEOF}, Request: r}, nil
 	})}})
@@ -108,10 +112,13 @@ func TestRetryablePartialResponseBody(t *testing.T) {
 }
 
 func TestNewCustomRootCAs(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
-	defer server.Close()
+	// t.Cleanup runs after the parallel subtests below finish; a defer here
+	// would close the server before they resume.
+	t.Cleanup(server.Close)
 
 	trustedRoots := x509.NewCertPool()
 	trustedRoots.AddCert(server.Certificate())
@@ -123,6 +130,7 @@ func TestNewCustomRootCAs(t *testing.T) {
 		"wrong root":   wrongRoots,
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			client, err := New(Config{BaseURL: server.URL, Token: "token", RootCAs: roots})
 			if err != nil {
 				t.Fatal(err)
@@ -172,6 +180,7 @@ func unrelatedRootPool(t *testing.T) *x509.CertPool {
 }
 
 func TestNewCustomRootCAsClonesSecureTransport(t *testing.T) {
+	t.Parallel()
 	roots := x509.NewCertPool()
 	callerTLS := &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots, ServerName: "wrong.example.test", InsecureSkipVerify: true}
 	callerTransport := &http.Transport{TLSClientConfig: callerTLS}
@@ -197,11 +206,13 @@ func TestNewCustomRootCAsClonesSecureTransport(t *testing.T) {
 }
 
 func TestNewRejectsCustomTLSDialHooks(t *testing.T) {
+	t.Parallel()
 	for name, transport := range map[string]*http.Transport{
 		"DialTLS":        {DialTLS: func(string, string) (net.Conn, error) { return nil, errors.New("unexpected") }},
 		"DialTLSContext": {DialTLSContext: func(context.Context, string, string) (net.Conn, error) { return nil, errors.New("unexpected") }},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			if _, err := New(Config{BaseURL: "https://scim.example.test", Token: "token", HTTPClient: &http.Client{Transport: transport}}); !errors.Is(err, ErrInvalidConfig) {
 				t.Fatalf("New() error = %v, want ErrInvalidConfig", err)
 			}
@@ -210,6 +221,7 @@ func TestNewRejectsCustomTLSDialHooks(t *testing.T) {
 }
 
 func TestSyncUserCreateThenUpdateAndUnchanged(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var remote = User{ID: "r-1", ExternalID: "ext-1", UserName: "alice", Active: false}
 	var methods []string
@@ -263,6 +275,7 @@ func TestSyncUserCreateThenUpdateAndUnchanged(t *testing.T) {
 }
 
 func TestSyncUserCreatesAfterEmptyExternalIDAndExactUsernameSearch(t *testing.T) {
+	t.Parallel()
 	var paths []string
 	client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.Method+" "+r.URL.RequestURI())
@@ -291,11 +304,13 @@ func TestSyncUserCreatesAfterEmptyExternalIDAndExactUsernameSearch(t *testing.T)
 }
 
 func TestSyncUserRejectsAmbiguousAndIdentifierChange(t *testing.T) {
+	t.Parallel()
 	for name, resources := range map[string][]User{
 		"duplicate": {{ID: "a", ExternalID: "ext", UserName: "alice"}, {ID: "b", ExternalID: "ext", UserName: "alice"}},
 		"changed":   {{ID: "a", ExternalID: "other", UserName: "alice"}},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					writeList(w, resources)
@@ -317,6 +332,7 @@ func TestSyncUserRejectsAmbiguousAndIdentifierChange(t *testing.T) {
 }
 
 func TestDeleteAndUnlinkAreExplicit(t *testing.T) {
+	t.Parallel()
 	var deleted, unlinked bool
 	client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
@@ -358,6 +374,7 @@ func TestDeleteAndUnlinkAreExplicit(t *testing.T) {
 }
 
 func TestMappedDeleteTargetsRemoteIDWithoutUserNameFallback(t *testing.T) {
+	t.Parallel()
 	var calls []string
 	client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, r.Method+" "+r.URL.Path)
@@ -382,6 +399,7 @@ func TestMappedDeleteTargetsRemoteIDWithoutUserNameFallback(t *testing.T) {
 }
 
 func TestMappedDeleteRejectsMismatchedExternalID(t *testing.T) {
+	t.Parallel()
 	client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("mutation after mismatched mapping: %s", r.Method)
@@ -397,6 +415,7 @@ func TestMappedDeleteRejectsMismatchedExternalID(t *testing.T) {
 }
 
 func TestMappedDeleteMissingRemoteIsNoop(t *testing.T) {
+	t.Parallel()
 	client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/scim/v2/Users/remote" {
 			t.Fatalf("request=%s %s", r.Method, r.URL.Path)
@@ -411,6 +430,7 @@ func TestMappedDeleteMissingRemoteIsNoop(t *testing.T) {
 }
 
 func TestListRejectsUnboundedAndNonJSONResponses(t *testing.T) {
+	t.Parallel()
 	for name, response := range map[string]func(http.ResponseWriter){
 		"non-json": func(w http.ResponseWriter) {
 			w.Header().Set("Content-Type", "text/plain")
@@ -422,6 +442,7 @@ func TestListRejectsUnboundedAndNonJSONResponses(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				response(w)
 			}))
@@ -439,6 +460,7 @@ func TestListRejectsUnboundedAndNonJSONResponses(t *testing.T) {
 }
 
 func TestRequestsCarryBearerAndDoNotFollowRedirect(t *testing.T) {
+	t.Parallel()
 	followed := make(chan struct{}, 1)
 	client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/scim/v2/Users" {
@@ -464,11 +486,13 @@ func TestRequestsCarryBearerAndDoNotFollowRedirect(t *testing.T) {
 }
 
 func TestCreateAllowsBodyless201AndRejectsWrongRepresentation(t *testing.T) {
+	t.Parallel()
 	for name, body := range map[string]string{
 		"bodyless": "",
 		"wrong-id": `{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"id":"new","externalId":"other","userName":"alice"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					writeList(w, nil)
@@ -498,6 +522,7 @@ func TestCreateAllowsBodyless201AndRejectsWrongRepresentation(t *testing.T) {
 }
 
 func TestUpdateRejectsChangedRepresentationIdentity(t *testing.T) {
+	t.Parallel()
 	client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			writeList(w, []User{{ID: "remote", ExternalID: "ext", UserName: "alice"}})
@@ -514,6 +539,7 @@ func TestUpdateRejectsChangedRepresentationIdentity(t *testing.T) {
 }
 
 func TestRejectsInvalidUTF8AndWrongDeleteStatus(t *testing.T) {
+	t.Parallel()
 	called := false
 	client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -538,6 +564,7 @@ func TestRejectsInvalidUTF8AndWrongDeleteStatus(t *testing.T) {
 }
 
 func TestRejectsDotRemoteIDs(t *testing.T) {
+	t.Parallel()
 	for _, id := range []string{".", ".."} {
 		client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodGet {
@@ -555,6 +582,7 @@ func TestRejectsDotRemoteIDs(t *testing.T) {
 }
 
 func TestBodylessCreateLocationMustBeExactBaseUserURL(t *testing.T) {
+	t.Parallel()
 	for name, location := range map[string]string{
 		"missing":      "",
 		"cross-origin": "https://other.example/Users/new",
@@ -563,6 +591,7 @@ func TestBodylessCreateLocationMustBeExactBaseUserURL(t *testing.T) {
 		"dot":          "/scim/v2/Users/../new",
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					writeList(w, nil)
@@ -586,8 +615,10 @@ func TestBodylessCreateLocationMustBeExactBaseUserURL(t *testing.T) {
 }
 
 func TestCreateAndUpdateRejectActiveMismatch(t *testing.T) {
+	t.Parallel()
 	for _, method := range []string{http.MethodPost, http.MethodPut} {
 		t.Run(method, func(t *testing.T) {
+			t.Parallel()
 			client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					if method == http.MethodPut {

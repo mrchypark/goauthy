@@ -14,6 +14,7 @@ import (
 )
 
 func TestMasterKeyRewrapStepIncludesSaaSProviderFamily(t *testing.T) {
+	t.Parallel()
 	var cursors []string
 	providerErr := errors.New("provider envelope unavailable")
 	w := &masterKeyRewrapWorker{
@@ -45,6 +46,7 @@ func TestMasterKeyRewrapStepIncludesSaaSProviderFamily(t *testing.T) {
 }
 
 func TestSummarizeSaaSProviderFamilyCountsNonActiveKeys(t *testing.T) {
+	t.Parallel()
 	got := summarizeOIDCFamily(oidc.MasterKeyReferenceFamily{
 		ByKeyID: map[string]int64{"master-a": 2, "master-b": 3},
 		Total:   5,
@@ -55,6 +57,7 @@ func TestSummarizeSaaSProviderFamilyCountsNonActiveKeys(t *testing.T) {
 }
 
 func TestSaaSProviderEnvelopeBlocksRetirementUntilRewrapped(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	oldKeys := retirementCmdKeyring(t, "key-a")
@@ -100,6 +103,7 @@ func TestSaaSProviderEnvelopeBlocksRetirementUntilRewrapped(t *testing.T) {
 
 
 func TestMasterKeyRewrapStepIncludesAuthProviderSecretFamily(t *testing.T) {
+	t.Parallel()
 	var cursors []string
 	secretErr := errors.New("auth-provider secret unavailable")
 	w := &masterKeyRewrapWorker{
@@ -131,6 +135,7 @@ func TestMasterKeyRewrapStepIncludesAuthProviderSecretFamily(t *testing.T) {
 }
 
 func TestAuthProviderSecretEnvelopeBlocksRetirementUntilRewrapped(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	oldKeys := retirementCmdKeyring(t, "key-a")
@@ -181,6 +186,7 @@ func TestAuthProviderSecretEnvelopeBlocksRetirementUntilRewrapped(t *testing.T) 
 }
 
 func TestAuthProviderSecretTamperBlocksStatusSafety(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	keys := retirementCmdKeyring(t, "key-b")
@@ -206,6 +212,7 @@ func TestAuthProviderSecretTamperBlocksStatusSafety(t *testing.T) {
 }
 
 func TestMasterKeyRewrapWorkerInvokesAuthProviderSecretFamily(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	keys := retirementCmdKeyring(t, "key-b")

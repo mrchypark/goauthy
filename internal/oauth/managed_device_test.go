@@ -36,6 +36,7 @@ func seedManagedDeviceClient(t *testing.T, db *rhiza.DB, id, generation string, 
 }
 
 func TestManagedDeviceHTTPPublicAndConfidentialIssueRefreshAndRejectGenerationChange(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, id, generation, secret string
 		confidential                 bool
@@ -127,6 +128,7 @@ func TestManagedDeviceHTTPPublicAndConfidentialIssueRefreshAndRejectGenerationCh
 }
 
 func TestManagedDevicePolicyChangesBetweenAuthenticationAndCreation(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	server.store.managedClients = clients.NewStore(db, nil)

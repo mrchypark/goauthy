@@ -19,6 +19,7 @@ import (
 )
 
 func TestNewMasterKeyBootIDFromIsRandomAndFailsClosed(t *testing.T) {
+	t.Parallel()
 	one, err := newMasterKeyBootIDFrom(bytes.NewReader(bytes.Repeat([]byte{1}, 32)))
 	if err != nil {
 		t.Fatal(err)
@@ -37,6 +38,7 @@ func TestNewMasterKeyBootIDFromIsRandomAndFailsClosed(t *testing.T) {
 }
 
 func TestAdmitMasterKeyRuntimeFencesOldAndAllowsReplacement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	old := retirementCmdKeyring(t, "key-a")
@@ -79,6 +81,7 @@ func TestAdmitMasterKeyRuntimeFencesOldAndAllowsReplacement(t *testing.T) {
 // GA66-RETIRE-001: runtime admission keeps rejecting a retired key once the
 // next epoch is prepared or aborted, when the barrier row no longer names it.
 func TestMasterKeyRetirementRuntimeAdmissionRejectsRetiredKeyAfterNextEpoch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	old, current := retirementCmdKeyring(t, "key-a"), retirementCmdKeyring(t, "key-b")
@@ -119,6 +122,7 @@ func TestMasterKeyRetirementRuntimeAdmissionRejectsRetiredKeyAfterNextEpoch(t *t
 }
 
 func TestMasterKeyRetirementWorkerSkipsUnsafeAndAttestsWithMonotonicSequence(t *testing.T) {
+	t.Parallel()
 	db := retirementCmdDB(t, false)
 	keyring := retirementCmdKeyring(t, "key-b")
 	barrier := storage.MasterKeyRetirement{Epoch: 7, OldKeyID: "key-a", ReplacementKeyID: "key-b", State: storage.MasterKeyRetirementFenced}
@@ -171,6 +175,7 @@ func TestMasterKeyRetirementWorkerSkipsUnsafeAndAttestsWithMonotonicSequence(t *
 }
 
 func TestInspectMasterKeyRetirementPasskeyDisabledIsExplicitZero(t *testing.T) {
+	t.Parallel()
 	db := retirementCmdDB(t, true)
 	keyring := retirementCmdKeyring(t, "key-b")
 	status, err := inspectMasterKeyRetirement(context.Background(), db, keyring, "http://localhost:8080", nil, "key-a", time.UnixMilli(1_800_000_000_000).UTC())
@@ -183,6 +188,7 @@ func TestInspectMasterKeyRetirementPasskeyDisabledIsExplicitZero(t *testing.T) {
 // or rewrapped, so retained rows must block retirement instead of reporting
 // zero passkey references.
 func TestMasterKeyRetirementRejectsRetainedPasskeyRowsWhenDisabled(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	keyring := retirementCmdKeyring(t, "key-b")
@@ -218,6 +224,7 @@ func TestMasterKeyRetirementRejectsRetainedPasskeyRowsWhenDisabled(t *testing.T)
 }
 
 func TestInspectMasterKeyRetirementIncludesLoginRevoke(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	old, active := retirementCmdKeyring(t, "key-a"), retirementCmdKeyring(t, "key-b")
@@ -247,6 +254,7 @@ func TestInspectMasterKeyRetirementIncludesLoginRevoke(t *testing.T) {
 }
 
 func TestInspectMasterKeyRetirementIncludesEmailOutbox(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	old, active := retirementCmdKeyring(t, "key-a"), retirementCmdKeyring(t, "key-b")
@@ -281,6 +289,7 @@ func TestInspectMasterKeyRetirementIncludesEmailOutbox(t *testing.T) {
 }
 
 func TestMasterKeyRetirementWorkerRunUsesInjectedTriggerAndCancellation(t *testing.T) {
+	t.Parallel()
 	db := retirementCmdDB(t, false)
 	keyring := retirementCmdKeyring(t, "key-b")
 	ticks := make(chan time.Time)
@@ -314,6 +323,7 @@ func TestMasterKeyRetirementWorkerRunUsesInjectedTriggerAndCancellation(t *testi
 }
 
 func TestMasterKeyRetirementWorkerRunReportsInjectedError(t *testing.T) {
+	t.Parallel()
 	db := retirementCmdDB(t, false)
 	keyring := retirementCmdKeyring(t, "key-b")
 	want := errors.New("barrier unavailable")
@@ -349,6 +359,7 @@ func TestMasterKeyRetirementWorkerRunReportsInjectedError(t *testing.T) {
 // is the only path, and it waits out the overlap period and requires an
 // acknowledged archival receipt (GA-STOR-002).
 func TestMasterKeyRetirementWorkerLeavesRetiredKeyToCleanupOwner(t *testing.T) {
+	t.Parallel()
 	db := retirementCmdDB(t, false)
 	keyring := retirementCmdKeyring(t, "key-b")
 	barrier := storage.MasterKeyRetirement{Epoch: 3, OldKeyID: "key-a", ReplacementKeyID: "key-b", State: storage.MasterKeyRetirementReady}
@@ -376,7 +387,7 @@ func TestMasterKeyRetirementWorkerLeavesRetiredKeyToCleanupOwner(t *testing.T) {
 
 func retirementCmdDB(t *testing.T, migrate bool) *rhiza.DB {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "cmd-retirement-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "cmd-retirement-test", DataDir: migratedDataDir(t, "cmd-retirement-test")})
 	if err != nil {
 		t.Fatal(err)
 	}

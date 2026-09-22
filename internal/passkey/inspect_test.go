@@ -14,6 +14,7 @@ import (
 )
 
 func TestInspectEnvelopeReferencesCountsLegacyAndAuthenticatedKeys(t *testing.T) {
+	t.Parallel()
 	ctx, db, old, rotated := newRewrapServices(t)
 	credentialID := testCredentialID("inspect-old")
 	insertPasskeyCredential(t, ctx, db, old, credentialID, "inspect-subject", false)
@@ -52,6 +53,7 @@ func TestInspectEnvelopeReferencesCountsLegacyAndAuthenticatedKeys(t *testing.T)
 }
 
 func TestInspectEnvelopeReferencesFailsClosedForTamperAndUnknownKey(t *testing.T) {
+	t.Parallel()
 	ctx, db, old, rotated := newRewrapServices(t)
 	id := testCredentialID("inspect-unknown")
 	insertPasskeyCredential(t, ctx, db, old, id, "inspect-unknown-subject", false)
@@ -81,6 +83,7 @@ func TestInspectEnvelopeReferencesFailsClosedForTamperAndUnknownKey(t *testing.T
 }
 
 func TestInspectEnvelopeReferencesScansDeterministicBoundedPages(t *testing.T) {
+	t.Parallel()
 	ctx, db, _, rotated := newRewrapServices(t)
 	for i := 0; i < passkeyReferenceScanLimit+1; i++ {
 		id := testCredentialID("inspect-page-" + strings.Repeat("0", 2) + string(rune('a'+i)))
@@ -97,6 +100,7 @@ func TestInspectEnvelopeReferencesScansDeterministicBoundedPages(t *testing.T) {
 }
 
 func TestIncompleteAuthenticatedCredentialFailsRewrapAndInspection(t *testing.T) {
+	t.Parallel()
 	ctx, db, old, rotated := newRewrapServices(t)
 	id := testCredentialID("inspect-incomplete")
 	idBytes, err := base64.RawURLEncoding.DecodeString(id)
