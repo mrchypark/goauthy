@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/oauth"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -322,7 +323,7 @@ func TestApprovalPolicyRejectionDoesNotConsumeInteraction(t *testing.T) {
 
 func TestDeviceReauthenticationBindsOriginalSubjectAndSession(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []string{"success", "other subject", "revoked parent"} {
+	for _, mode := range []string{"success", "other subject", "revoked parent", "upstream parent"} {
 		t.Run(mode, func(t *testing.T) {
 			h, db := testHandlerWithDB(t, false)
 			service, delivered := testOTPStepUp(t, h, db)
@@ -340,6 +341,9 @@ func TestDeviceReauthenticationBindsOriginalSubjectAndSession(t *testing.T) {
 			entry := httptest.NewRequest(http.MethodGet, "/oidc/device/verify?user_code=AB12CD34", nil)
 			peer, _ := h.resolvePeerIP(entry)
 			parent, err := h.browser.CreateSession(ctx, "user-1", "pwd", h.now().Add(time.Hour), peer)
+			if mode == "upstream parent" {
+				parent, err = h.browser.CreateUpstreamSession(ctx, "user-1", browser.UpstreamSessionBinding{Issuer: "https://upstream.example.test", ClientID: "client-1", Subject: "external-alice", SessionID: "sid-1"}, "external", h.now().Add(time.Hour), peer)
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -412,6 +416,14 @@ func TestDeviceReauthenticationBindsOriginalSubjectAndSession(t *testing.T) {
 			}
 			if _, err = h.browser.LoadSession(ctx, parent.Token); !errors.Is(err, browser.ErrRevoked) {
 				t.Fatalf("old parent remained active: %v", err)
+			}
+			if mode == "upstream parent" {
+				if err := h.oauth.RevokeUpstreamSessions(ctx, oauth.UpstreamLogout{Issuer: "https://upstream.example.test", ClientID: "client-1", Subject: "external-alice", SessionID: "sid-1", JTI: "reauth-logout", TokenDigest: strings.Repeat("A", 43), ExpiresAt: time.Now().Add(time.Minute)}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := h.browser.LoadSession(ctx, end.Result().Cookies()[0].Value); !errors.Is(err, browser.ErrRevoked) {
+					t.Fatalf("upstream logout missed replacement: %v", err)
+				}
 			}
 		})
 	}

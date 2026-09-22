@@ -2,6 +2,8 @@ package browser
 
 import (
 	"context"
+	"github.com/mrchypark/goauthy/internal/storage"
+	"github.com/mrchypark/rhiza"
 	"testing"
 	"time"
 )
@@ -71,4 +73,43 @@ func TestReauthenticationConsumeRequiresActiveSameSubjectParent(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReauthenticationReplacementRollsBackOnBindingFailure(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	parent, err := store.CreateUpstreamSession(ctx, "user-1", UpstreamSessionBinding{Issuer: "https://upstream.example.test", ClientID: "client", Subject: "external-user", SessionID: "sid"}, "external", now.Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A real constraint failure on the inherited binding must roll back the new
+	// session and leave the parent eligible; no cookie may escape this failure.
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "binding-copy-failure", SQL: "CREATE UNIQUE INDEX one_test_binding_per_issuer ON browser_upstream_session_bindings(issuer)"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateReauthenticatedSession(ctx, "user-1", "mfa", now.Add(time.Hour), "203.0.113.8", parent.ID, nil); err == nil {
+		t.Fatal("binding failure accepted")
+	}
+	if _, err := store.LoadSession(ctx, parent.Token); err != nil {
+		t.Fatalf("parent retired on rollback: %v", err)
+	}
+	assertUpstreamBindingAndSessionCount(t, store, 1, 1)
+}
+
+func TestReauthenticationReplacementRejectsParentRevokedAfterRead(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	parent, err := store.CreateSession(ctx, "user-1", "pwd", now.Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RevokeSessionID(ctx, parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.createSessionWithParent(ctx, "user-1", "mfa", now.Add(time.Hour), "203.0.113.8", nil, &parent.Session); err == nil {
+		t.Fatal("stale parent snapshot created replacement")
+	}
+	assertUpstreamBindingAndSessionCount(t, store, 0, 1)
 }

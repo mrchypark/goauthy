@@ -1144,7 +1144,7 @@ func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *ht
 // completeBrowserAuthentication performs the shared post-proof transition.
 // The caller must consume its one-use interaction first and dispatch to its
 // own destination afterward; this function never issues OAuth credentials.
-func (h *Handler) completeBrowserAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP string, onConsumed func() error, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, bool) {
+func (h *Handler) completeBrowserAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP, parentDigest string, onConsumed func() error, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, bool) {
 	if _, err := h.identity.UserBySubject(r.Context(), subject); err != nil {
 		http.Error(w, "Invalid login request", http.StatusUnauthorized)
 		return browser.IssuedSession{}, false
@@ -1169,7 +1169,7 @@ func (h *Handler) completeBrowserAuthentication(w http.ResponseWriter, r *http.R
 			return browser.IssuedSession{}, false
 		}
 	}
-	newSession, err := h.rotateBrowserSessionWithBinding(w, r, sessionToken, subject, authMethod, peerIP, binding)
+	newSession, err := h.rotateBrowserSessionWithParent(w, r, sessionToken, subject, authMethod, peerIP, parentDigest, binding)
 	if err != nil {
 		if errors.Is(err, errLoginLocation) {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -1189,19 +1189,12 @@ func (h *Handler) completeBrowserAuthentication(w http.ResponseWriter, r *http.R
 }
 
 func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, target authenticationRequest, peerIP string, onConsumed func() error, binding *browser.UpstreamSessionBinding) {
-	if target.approval != nil && target.approval.ParentSessionDigest != "" {
-		previous := onConsumed
-		onConsumed = func() error {
-			if previous != nil {
-				if err := previous(); err != nil {
-					return err
-				}
-			}
-			return h.browser.RevokeSessionID(r.Context(), target.approval.ParentSessionDigest)
-		}
+	parentDigest := ""
+	if target.approval != nil {
+		parentDigest = target.approval.ParentSessionDigest
 	}
 	// ponytail: a failed code issuance consumes this interaction; restart authorize rather than risking duplicate codes.
-	newSession, ok := h.completeBrowserAuthentication(w, r, sessionToken, subject, authMethod, peerIP, onConsumed, binding)
+	newSession, ok := h.completeBrowserAuthentication(w, r, sessionToken, subject, authMethod, peerIP, parentDigest, onConsumed, binding)
 	if !ok {
 		return
 	}
@@ -1235,6 +1228,10 @@ func (h *Handler) rotateBrowserSession(w http.ResponseWriter, r *http.Request, s
 }
 
 func (h *Handler) rotateBrowserSessionWithBinding(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP string, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, error) {
+	return h.rotateBrowserSessionWithParent(w, r, sessionToken, subject, authMethod, peerIP, "", binding)
+}
+
+func (h *Handler) rotateBrowserSessionWithParent(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP, parentDigest string, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, error) {
 	if h.onLoginLocation != nil && (authMethod == "webauthn" || authMethod == "mfa") && !security.ValidHeaderText(r.UserAgent()) {
 		return browser.IssuedSession{}, identity.ErrInvalidUserAgent
 	}
@@ -1250,7 +1247,9 @@ func (h *Handler) rotateBrowserSessionWithBinding(w http.ResponseWriter, r *http
 		newSession browser.IssuedSession
 		err        error
 	)
-	if binding != nil {
+	if parentDigest != "" {
+		newSession, err = h.browser.CreateReauthenticatedSession(r.Context(), subject, authMethod, h.now().Add(sessionLifetime), peerIP, parentDigest, binding)
+	} else if binding != nil {
 		if authMethod != "external" && authMethod != "mfa" {
 			return browser.IssuedSession{}, errors.New("upstream binding requires external or mfa authentication")
 		}

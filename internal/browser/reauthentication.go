@@ -1,6 +1,9 @@
 package browser
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // LoadReauthenticationParent reads a server-persisted session digest, never a
 // cookie bearer, without extending its lifetime. Reauthentication is restricted
@@ -36,4 +39,17 @@ func (s *Store) ConsumeReauthenticationInteractionByDigest(ctx context.Context, 
 	}
 	guard, args := s.SessionAuthorizationGuard(parent, peerIP)
 	return s.consumeAuthorizationInteractionGuarded(ctx, sessionDigest, interactionDigest, true, guard, args)
+}
+
+// CreateReauthenticatedSession atomically replaces an eligible parent and
+// preserves its upstream logout binding when the new proof is local.
+func (s *Store) CreateReauthenticatedSession(ctx context.Context, subject, authMethod string, expiresAt time.Time, peerIP, parentDigest string, binding *UpstreamSessionBinding) (IssuedSession, error) {
+	if authMethod != "mfa" || binding != nil && !validUpstreamSessionBinding(*binding) {
+		return IssuedSession{}, ErrNotFound
+	}
+	parent, err := s.LoadReauthenticationParent(ctx, parentDigest, subject, peerIP)
+	if err != nil {
+		return IssuedSession{}, err
+	}
+	return s.createSessionWithParent(ctx, subject, authMethod, expiresAt, peerIP, binding, &parent)
 }
