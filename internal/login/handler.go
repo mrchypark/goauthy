@@ -1120,47 +1120,58 @@ func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *ht
 	h.completeConsumedAuthentication(w, r, sessionToken, subject, authMethod, original, request, peerIP, onConsumed, nil)
 }
 
-func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, original *http.Request, request oauth.AuthorizationRequest, peerIP string, onConsumed func() error, binding *browser.UpstreamSessionBinding) {
+// completeBrowserAuthentication performs the shared post-proof transition.
+// The caller must consume its one-use interaction first and dispatch to its
+// own destination afterward; this function never issues OAuth credentials.
+func (h *Handler) completeBrowserAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP string, onConsumed func() error, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, bool) {
 	if _, err := h.identity.UserBySubject(r.Context(), subject); err != nil {
 		http.Error(w, "Invalid login request", http.StatusUnauthorized)
-		return
+		return browser.IssuedSession{}, false
 	}
 	if h.lockdown != nil {
 		locked, _, _, lockdownErr := h.lockdown.IsLockedDown(r.Context())
 		if lockdownErr != nil {
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-			return
+			return browser.IssuedSession{}, false
 		}
 		if locked {
 			isAdmin, adminErr := h.lockdown.IsAdmin(r.Context(), subject)
 			if adminErr != nil || !isAdmin {
 				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-				return
+				return browser.IssuedSession{}, false
 			}
 		}
 	}
 	if onConsumed != nil {
 		if err := onConsumed(); err != nil {
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-			return
+			return browser.IssuedSession{}, false
 		}
 	}
-	// ponytail: a failed code issuance consumes this interaction; restart authorize rather than risking duplicate codes.
 	newSession, err := h.rotateBrowserSessionWithBinding(w, r, sessionToken, subject, authMethod, peerIP, binding)
 	if err != nil {
 		if errors.Is(err, errLoginLocation) {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
+			return browser.IssuedSession{}, false
 		}
 		if errors.Is(err, identity.ErrInvalidUserAgent) {
 			http.Error(w, "Invalid User-Agent", http.StatusBadRequest)
-			return
+			return browser.IssuedSession{}, false
 		}
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-		return
+		return browser.IssuedSession{}, false
 	}
 	if h.metrics != nil {
 		h.metrics.AuthSuccess()
+	}
+	return newSession, true
+}
+
+func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, original *http.Request, request oauth.AuthorizationRequest, peerIP string, onConsumed func() error, binding *browser.UpstreamSessionBinding) {
+	// ponytail: a failed code issuance consumes this interaction; restart authorize rather than risking duplicate codes.
+	newSession, ok := h.completeBrowserAuthentication(w, r, sessionToken, subject, authMethod, peerIP, onConsumed, binding)
+	if !ok {
+		return
 	}
 	needs, checkErr := h.needsProfileUpdate(r, subject, request.ClientID)
 	if checkErr != nil {

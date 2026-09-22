@@ -145,12 +145,9 @@ func (h *Handler) loginPost(w http.ResponseWriter, r *http.Request, forceMFA boo
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	if err := h.recordSuccessfulAuthentication(r.Context(), peerIP, h.now().Sub(started), nil); err != nil {
-		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-		return
-	}
-	if _, err := h.rotateBrowserSession(w, r, sessionToken, auth.Subject, "pwd", peerIP); err != nil {
-		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+	if _, ok := h.completeBrowserAuthentication(w, r, sessionToken, auth.Subject, "pwd", peerIP, func() error {
+		return h.recordSuccessfulAuthentication(r.Context(), peerIP, h.now().Sub(started), nil)
+	}, nil); !ok {
 		return
 	}
 	if destination == deviceLoginDestination {
