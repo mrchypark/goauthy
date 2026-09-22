@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,7 +27,7 @@ import (
 func TestApprovalUpstreamRoundTrip(t *testing.T) {
 	t.Parallel()
 	for _, destination := range []string{"device", "handoff"} {
-		for _, proof := range []string{"valid", "wrong-nonce", "missing-mfa"} {
+		for _, proof := range []string{"valid", "wrong-nonce", "missing-mfa", "reauth-valid", "reauth-stale", "reauth-missing", "reauth-future"} {
 			t.Run(destination+"/"+proof, func(t *testing.T) {
 				h, db := testHandlerWithDB(t, false)
 				h.SetApprovalForceMFA(true)
@@ -65,7 +66,18 @@ func TestApprovalUpstreamRoundTrip(t *testing.T) {
 						if proof == "wrong-nonce" {
 							n = "wrong"
 						}
-						claims, _ := json.Marshal(map[string]any{"iss": issuer, "aud": "local-client", "sub": "external-owner", "sid": "external-session", "nonce": n, "iat": time.Now().Unix(), "exp": time.Now().Add(time.Minute).Unix(), "mfa": proof != "missing-mfa"})
+						claimValues := map[string]any{"iss": issuer, "aud": "local-client", "sub": "external-owner", "sid": "external-session", "nonce": n, "iat": time.Now().Unix(), "exp": time.Now().Add(time.Minute).Unix(), "mfa": proof != "missing-mfa"}
+						if strings.HasPrefix(proof, "reauth-") && proof != "reauth-missing" {
+							at := time.Now().Unix()
+							if proof == "reauth-stale" {
+								at -= 3600
+							}
+							if proof == "reauth-future" {
+								at += 3600
+							}
+							claimValues["auth_time"] = at
+						}
+						claims, _ := json.Marshal(claimValues)
 						token, err := signer.Sign(claims)
 						if err != nil {
 							http.Error(w, "sign", 500)
@@ -102,7 +114,7 @@ func TestApprovalUpstreamRoundTrip(t *testing.T) {
 					t.Fatal(err)
 				}
 				upstream, err := upstreamprovider.NewLocalLoginHandler(configs, store, exchanger, verifier, nil, map[string]bool{callback: true}, upstreamprovider.LocalLoginHooks{
-					Prepare: h.PrepareExternalAuthentication, Current: h.CurrentExternalInitSession,
+					Prepare: h.PrepareExternalAuthentication, RequireFreshAuthentication: h.RequireFreshExternalAuthentication, Current: h.CurrentExternalInitSession,
 					Resolve: func(ctx context.Context, s upstreamprovider.SubjectResult) (string, error) {
 						subject, found, err := h.identity.FindExternalLink(ctx, s)
 						if err != nil || !found {
@@ -116,7 +128,7 @@ func TestApprovalUpstreamRoundTrip(t *testing.T) {
 							http.Error(w, "missing provenance", 500)
 							return
 						}
-						h.CompleteUpstreamAuthentication(w, r, token, interaction, subject, &browser.UpstreamSessionBinding{Issuer: s.Issuer, ClientID: s.ClientID, Subject: s.Subject, SessionID: s.SessionID, MFAPassed: s.MFAPassed})
+						h.CompleteUpstreamAuthentication(w, r, token, interaction, subject, &browser.UpstreamSessionBinding{Issuer: s.Issuer, ClientID: s.ClientID, Subject: s.Subject, SessionID: s.SessionID, MFAPassed: s.MFAPassed, AuthenticationTime: s.AuthenticationTime})
 					},
 				})
 				if err != nil {
@@ -131,6 +143,32 @@ func TestApprovalUpstreamRoundTrip(t *testing.T) {
 					want = h.issuer + "/oidc/device/verify?user_code=" + code
 				}
 				cookie, interaction := approvalInteraction(t, h, saved)
+				var parentToken string
+				if strings.HasPrefix(proof, "reauth-") {
+					entry := httptest.NewRequest(http.MethodGet, "/account/connection-login?handoff_id="+testHandoffID, nil)
+					peer, _ := h.resolvePeerIP(entry)
+					parent, err := h.browser.CreateSession(context.Background(), "user-1", "pwd", h.now().Add(time.Hour), peer)
+					if err != nil {
+						t.Fatal(err)
+					}
+					parentToken = parent.Token
+					parentCookie, err := browser.SessionCookie(h.issuer, parent.Token, parent.ExpiresAt)
+					if err != nil {
+						t.Fatal(err)
+					}
+					entry.AddCookie(parentCookie)
+					page := httptest.NewRecorder()
+					if destination == "device" {
+						h.DeviceReviewReauthentication(page, entry, code)
+					} else {
+						h.ConnectionHandoffLoginHandler(true).ServeHTTP(page, entry)
+					}
+					if page.Code != http.StatusOK || len(page.Result().Cookies()) != 1 {
+						t.Fatalf("reauth entry=%d %s", page.Code, page.Body.String())
+					}
+					cookie = page.Result().Cookies()[0]
+					interaction = interactionToken(t, page.Body.String())
+				}
 				request := httptest.NewRequest(http.MethodGet, "/upstream/fixture/start?"+url.Values{"redirect_uri": {callback}, "interaction": {interaction}}.Encode(), nil)
 				request.AddCookie(cookie)
 				start := httptest.NewRecorder()
@@ -141,6 +179,13 @@ func TestApprovalUpstreamRoundTrip(t *testing.T) {
 				authURL, err := url.Parse(start.Header().Get("Location"))
 				if err != nil {
 					t.Fatal(err)
+				}
+				if strings.HasPrefix(proof, "reauth-") {
+					if authURL.Query().Get("prompt") != "login" || authURL.Query().Get("max_age") != "0" {
+						t.Fatal("reauthentication did not request fresh provider authentication")
+					}
+				} else if authURL.Query().Has("max_age") || authURL.Query().Has("prompt") {
+					t.Fatal("ordinary SSO unexpectedly forced reauthentication")
 				}
 				nonce.Store(authURL.Query().Get("nonce"))
 				challenge.Store(authURL.Query().Get("code_challenge"))
@@ -163,7 +208,7 @@ func TestApprovalUpstreamRoundTrip(t *testing.T) {
 					t.Fatalf("foreign browser callback=%d exchanges=%d", wrongBrowser.Code, exchanges.Load())
 				}
 				result := finish(cookie)
-				if proof == "valid" {
+				if proof == "valid" || proof == "reauth-valid" {
 					if result.Code != http.StatusSeeOther || result.Header().Get("Location") != want {
 						t.Fatalf("callback=%d location=%q body=%s", result.Code, result.Header().Get("Location"), result.Body.String())
 					}
@@ -182,6 +227,12 @@ func TestApprovalUpstreamRoundTrip(t *testing.T) {
 					}
 				} else if result.Code < 400 || result.Header().Get("Location") != "" {
 					t.Fatalf("invalid proof accepted: %d", result.Code)
+				}
+				if parentToken != "" {
+					_, err := h.browser.LoadSession(context.Background(), parentToken)
+					if (proof == "reauth-valid") != (err != nil) {
+						t.Fatalf("parent retirement proof=%s err=%v", proof, err)
+					}
 				}
 				replay := finish(cookie)
 				if replay.Code < 400 || exchanges.Load() != 1 {

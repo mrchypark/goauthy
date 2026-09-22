@@ -33,15 +33,16 @@ type CallbackResult struct {
 // rawClaims holds the full JSON payload bytes from the signature-verified
 // ID token. Unexported: accessible only within this package for claim mapping.
 type IDTokenClaims struct {
-	Issuer    string   `json:"iss"`
-	Subject   string   `json:"sub"`
-	SessionID string   `json:"sid"`
-	Audience  []string `json:"aud"`
-	Azp       string   `json:"azp"`
-	Nonce     string   `json:"nonce"`
-	ExpiresAt int64    `json:"exp"`
-	IssuedAt  int64    `json:"iat"`
-	NotBefore int64    `json:"nbf"`
+	Issuer             string   `json:"iss"`
+	Subject            string   `json:"sub"`
+	SessionID          string   `json:"sid"`
+	Audience           []string `json:"aud"`
+	Azp                string   `json:"azp"`
+	Nonce              string   `json:"nonce"`
+	ExpiresAt          int64    `json:"exp"`
+	IssuedAt           int64    `json:"iat"`
+	AuthenticationTime int64    `json:"auth_time"`
+	NotBefore          int64    `json:"nbf"`
 	// Profile claims — pointer types distinguish absent (nil) from zero value.
 	Email         *string `json:"email"`
 	EmailVerified *bool   `json:"email_verified"`

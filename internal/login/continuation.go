@@ -140,3 +140,21 @@ func (h *Handler) redirectApproval(w http.ResponseWriter, saved *approvalLoginIn
 		h.connectionHandoffRedirect(w, saved.HandoffID)
 	}
 }
+
+// RequireFreshExternalAuthentication derives the upstream prompt requirement
+// only from the current server-persisted, session-bound approval continuation.
+func (h *Handler) RequireFreshExternalAuthentication(r *http.Request, token string) (bool, error) {
+	session, _, err := h.CurrentExternalInitSession(r)
+	if err != nil {
+		return false, ErrExternalAuthentication
+	}
+	interaction, err := h.browser.LoadAuthorizationInteractionReadOnly(r.Context(), session, token)
+	if err != nil {
+		return false, ErrExternalAuthentication
+	}
+	target, err := h.resolveAuthenticationRequest(r, interaction.Payload)
+	if err != nil {
+		return false, ErrExternalAuthentication
+	}
+	return target.approval != nil && target.approval.ParentSessionDigest != "", nil
+}

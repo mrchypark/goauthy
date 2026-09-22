@@ -1037,6 +1037,13 @@ func (h *Handler) completeExternalAuthentication(w http.ResponseWriter, r *http.
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
+	// A fresh nonce binds a transaction, not the time of user authentication.
+	// OIDC NumericDate is second-granularity; compare at that same precision.
+	if target.approval != nil && target.approval.ParentSessionDigest != "" &&
+		(binding == nil || binding.AuthenticationTime <= 0 || binding.AuthenticationTime < session.CreatedAt.Unix() || binding.AuthenticationTime > h.now().Unix()) {
+		http.Error(w, "Invalid login request", http.StatusForbidden)
+		return
+	}
 	authMethod := "external"
 	if request.ForceMFA {
 		if binding == nil || !binding.MFAPassed {

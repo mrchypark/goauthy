@@ -155,13 +155,15 @@ type IssuedSession struct {
 
 // UpstreamSessionBinding identifies the upstream OIDC session that established
 // an external browser session. SessionID is the optional upstream `sid` claim.
-// All values are persisted exactly as verified by the upstream provider.
+// Identity fields are persisted exactly as verified by the upstream provider.
 type UpstreamSessionBinding struct {
 	Issuer    string
 	ClientID  string
 	Subject   string
 	SessionID string
 	MFAPassed bool
+	// AuthenticationTime is signed OIDC auth_time, used only during completion, not persisted.
+	AuthenticationTime int64
 }
 
 func (s *Store) CreateSession(ctx context.Context, subject, authMethod string, expiresAt time.Time, peerIP string) (IssuedSession, error) {

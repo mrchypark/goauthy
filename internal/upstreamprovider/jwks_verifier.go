@@ -270,19 +270,20 @@ func publicKeyForAlgorithm(key interface{}, algorithm string) bool {
 
 func decodeIDTokenClaims(payload []byte) (*IDTokenClaims, error) {
 	var raw struct {
-		Issuer        string          `json:"iss"`
-		Subject       string          `json:"sub"`
-		SessionID     string          `json:"sid"`
-		Audience      json.RawMessage `json:"aud"`
-		Azp           string          `json:"azp"`
-		Nonce         string          `json:"nonce"`
-		ExpiresAt     int64           `json:"exp"`
-		IssuedAt      int64           `json:"iat"`
-		NotBefore     int64           `json:"nbf"`
-		Email         *string         `json:"email"`
-		EmailVerified *bool           `json:"email_verified"`
-		GivenName     *string         `json:"given_name"`
-		FamilyName    *string         `json:"family_name"`
+		Issuer             string          `json:"iss"`
+		Subject            string          `json:"sub"`
+		SessionID          string          `json:"sid"`
+		Audience           json.RawMessage `json:"aud"`
+		Azp                string          `json:"azp"`
+		Nonce              string          `json:"nonce"`
+		ExpiresAt          int64           `json:"exp"`
+		IssuedAt           int64           `json:"iat"`
+		AuthenticationTime int64           `json:"auth_time"`
+		NotBefore          int64           `json:"nbf"`
+		Email              *string         `json:"email"`
+		EmailVerified      *bool           `json:"email_verified"`
+		GivenName          *string         `json:"given_name"`
+		FamilyName         *string         `json:"family_name"`
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return nil, err
@@ -303,7 +304,7 @@ func decodeIDTokenClaims(payload []byte) (*IDTokenClaims, error) {
 	return &IDTokenClaims{
 		Issuer: raw.Issuer, Subject: raw.Subject, SessionID: raw.SessionID,
 		Audience: audience, Azp: raw.Azp, Nonce: raw.Nonce,
-		ExpiresAt: raw.ExpiresAt, IssuedAt: raw.IssuedAt, NotBefore: raw.NotBefore,
+		ExpiresAt: raw.ExpiresAt, IssuedAt: raw.IssuedAt, NotBefore: raw.NotBefore, AuthenticationTime: raw.AuthenticationTime,
 		Email: raw.Email, EmailVerified: raw.EmailVerified,
 		GivenName: raw.GivenName, FamilyName: raw.FamilyName,
 		rawClaims: rawClaims,

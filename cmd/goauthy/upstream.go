@@ -102,8 +102,9 @@ func upstreamHandlerFromEnv(getenv func(string) string, db *rhiza.DB, keyring up
 		return nil, fmt.Errorf("configure upstream JWKS verifier: %w", err)
 	}
 	localHooks := upstreamprovider.LocalLoginHooks{
-		Prepare: loginHandler.PrepareExternalAuthentication,
-		Current: loginHandler.CurrentExternalInitSession,
+		Prepare:                    loginHandler.PrepareExternalAuthentication,
+		RequireFreshAuthentication: loginHandler.RequireFreshExternalAuthentication,
+		Current:                    loginHandler.CurrentExternalInitSession,
 		Resolve: func(ctx context.Context, external upstreamprovider.SubjectResult) (string, error) {
 			subject, found, err := identityStore.FindExternalLink(ctx, external)
 			if err != nil || !found {
@@ -115,7 +116,7 @@ func upstreamHandlerFromEnv(getenv func(string) string, db *rhiza.DB, keyring up
 		Complete: func(w http.ResponseWriter, r *http.Request, token, interaction, subject string, upstream *upstreamprovider.OIDCSession) {
 			var binding *browser.UpstreamSessionBinding
 			if upstream != nil {
-				binding = &browser.UpstreamSessionBinding{Issuer: upstream.Issuer, ClientID: upstream.ClientID, Subject: upstream.Subject, SessionID: upstream.SessionID, MFAPassed: upstream.MFAPassed}
+				binding = &browser.UpstreamSessionBinding{Issuer: upstream.Issuer, ClientID: upstream.ClientID, Subject: upstream.Subject, SessionID: upstream.SessionID, MFAPassed: upstream.MFAPassed, AuthenticationTime: upstream.AuthenticationTime}
 			}
 			loginHandler.CompleteUpstreamAuthentication(w, r, token, interaction, subject, binding)
 		},
