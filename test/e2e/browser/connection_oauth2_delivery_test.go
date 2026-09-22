@@ -15,7 +15,7 @@ import (
 // oauth2DeliveryProbe provisions consent for the already-ready OAuth2
 // connection. The returned callbacks let the caller check both token versions
 // and revoke consent before deleting the connection.
-func oauth2DeliveryProbe(t *testing.T, owner *http.Client, primary string, cookie *http.Cookie, headers map[string]string, collectionID, connectionID, providerID, fixtureBase string) (func(int64), func(int64), func(), func()) {
+func oauth2DeliveryProbe(t *testing.T, owner *http.Client, primary string, cookie *http.Cookie, headers map[string]string, collectionID, connectionID, providerID, fixtureBase string, initialVersion int64) (func(int64), func(int64), func(), func()) {
 	t.Helper()
 	fixtureURL, err := url.Parse(fixtureBase)
 	if err != nil || fixtureURL.Scheme != "https" || fixtureURL.Hostname() == "" {
@@ -151,13 +151,13 @@ func oauth2DeliveryProbe(t *testing.T, owner *http.Client, primary string, cooki
 		}
 	}
 	if !allowRefresh {
-		refreshDenied(consumerToken, grantDoc.ID, "1", http.StatusNotFound)
+		refreshDenied(consumerToken, grantDoc.ID, strconv.FormatInt(initialVersion, 10), http.StatusNotFound)
 	} else {
-		refreshDenied("", grantDoc.ID, "1", http.StatusUnauthorized)
-		refreshDenied(otherToken, grantDoc.ID, "1", http.StatusNotFound)
+		refreshDenied("", grantDoc.ID, strconv.FormatInt(initialVersion, 10), http.StatusUnauthorized)
+		refreshDenied(otherToken, grantDoc.ID, strconv.FormatInt(initialVersion, 10), http.StatusNotFound)
 		refreshDenied(consumerToken, grantDoc.ID, "99", http.StatusNotFound)
 	}
-	credentialStatus(consumerToken, grantDoc.ID, http.StatusOK, 1)
+	credentialStatus(consumerToken, grantDoc.ID, http.StatusOK, initialVersion)
 	credentialStatus(otherToken, grantDoc.ID, http.StatusNotFound, 0)
 	credentialStatus("", grantDoc.ID, http.StatusUnauthorized, 0)
 	missing := do(t, newBrowserClient(t), http.MethodPost, primary+"/auth/v1/connection-grants/"+url.PathEscape(grantDoc.ID)+"/credential", nil, nil)
@@ -166,7 +166,7 @@ func oauth2DeliveryProbe(t *testing.T, owner *http.Client, primary string, cooki
 	assertMetadataOnlyOAuth2Response(t, other, http.StatusNotFound)
 
 	consumer := oauthConsumerBridge(t, primary, strings.TrimRight(fixtureBase, "/")+"/v1/chat/completions", consumerToken, map[string]any{
-		"grant_id": grantDoc.ID, "provider_id": providerID, "connection_generation": grantDoc.Generation, "account_id": "fixture-subject", "resource": useGrantResource, "consumer_client_id": consumerID, "endpoint": strings.TrimRight(fixtureBase, "/") + "/v1/chat/completions", "scopes": []string{"account"}, "credential_version": int64(1),
+		"grant_id": grantDoc.ID, "provider_id": providerID, "connection_generation": grantDoc.Generation, "account_id": "fixture-subject", "resource": useGrantResource, "consumer_client_id": consumerID, "endpoint": strings.TrimRight(fixtureBase, "/") + "/v1/chat/completions", "scopes": []string{"account"}, "credential_version": initialVersion,
 	}, fixture)
 	var deliveredToken string
 	var deliveredVersion int64
