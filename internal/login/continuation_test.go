@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/mrchypark/goauthy/internal/browser"
@@ -134,6 +137,91 @@ func TestApprovalContinuationRejectsInvalidDestinations(t *testing.T) {
 	} {
 		if _, err := h.resolveAuthenticationRequest(r, []byte(payload)); err == nil {
 			t.Errorf("accepted %s", payload)
+		}
+	}
+}
+
+func TestApprovalEntryPagesCompleteOTP(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, entry, action, destination string }{
+		{"device", "/oidc/device/login?user_code=AB12-CD34", "/oidc/device/login", "/oidc/device/verify?user_code=AB12CD34"},
+		{"handoff", "/account/connection-login?handoff_id=" + testHandoffID, "/account/connection-login", "/account/connection-handoffs/" + testHandoffID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, db := testHandlerWithDB(t, false)
+			service, _ := testOTPStepUp(t, h, db)
+			ctx := context.Background()
+			if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "entry-otp-profile", SQL: "INSERT INTO identity_user_profiles(subject,email,email_verified,preferred_username) VALUES('user-1','alice@example.test',1,'alice')"}); err != nil {
+				t.Fatal(err)
+			}
+			handler := h.DeviceLoginHandler(true)
+			if tc.name == "handoff" {
+				handler = h.ConnectionHandoffLoginHandler(true)
+			}
+			page := httptest.NewRecorder()
+			handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, tc.entry, nil))
+			if page.Code != http.StatusOK {
+				t.Fatalf("entry=%d %s", page.Code, page.Body.String())
+			}
+			token := interactionToken(t, page.Body.String())
+			csrf := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(page.Body.String())
+			if len(csrf) != 2 {
+				t.Fatal("missing csrf")
+			}
+			cookie := page.Result().Cookies()[0]
+			form := url.Values{"interaction": {token}, "csrf_token": {csrf[1]}, "username": {"alice"}, "password": {"correct password"}}
+			post := httptest.NewRequest(http.MethodPost, tc.action, strings.NewReader(form.Encode()))
+			post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			post.Header.Set("Origin", h.issuer)
+			post.AddCookie(cookie)
+			step := httptest.NewRecorder()
+			handler.ServeHTTP(step, post)
+			if step.Code != http.StatusOK || !strings.Contains(step.Body.String(), `name="code"`) || len(step.Result().Cookies()) != 0 {
+				t.Fatalf("step=%d %s", step.Code, step.Body.String())
+			}
+			code, err := service.GenerateOTP(ctx, "user-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := httptest.NewRecorder()
+			h.OTPVerify(result, postOTPForm(cookie, code))
+			if result.Code != http.StatusSeeOther || result.Header().Get("Location") != h.issuer+tc.destination {
+				t.Fatalf("finish=%d %q %s", result.Code, result.Header().Get("Location"), result.Body.String())
+			}
+			session, err := h.browser.LoadSession(ctx, result.Result().Cookies()[0].Value)
+			if err != nil || session.Subject != "user-1" || session.AuthenticationMethod != "mfa" {
+				t.Fatalf("session=%+v err=%v", session, err)
+			}
+		})
+	}
+}
+
+func TestApprovalEntryOffersSharedPasskeyAndUpstreamMethods(t *testing.T) {
+	t.Parallel()
+	h := testHandler(t)
+	h.SetUpstreamProviderCatalog(func(context.Context) ([]UpstreamProvider, error) {
+		return []UpstreamProvider{{ID: "upstream", Name: "Company login", CallbackURI: "http://localhost/upstream/upstream/callback"}}, nil
+	})
+	for _, tc := range []struct {
+		entry   string
+		handler http.Handler
+	}{
+		{"/oidc/device/login?user_code=AB12CD34", h.DeviceLoginHandler(true)},
+		{"/account/connection-login?handoff_id=" + testHandoffID, h.ConnectionHandoffLoginHandler(true)},
+	} {
+		page := httptest.NewRecorder()
+		tc.handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, tc.entry, nil))
+		body := page.Body.String()
+		for _, want := range []string{`id="passkey-btn"`, `document.getElementById('login-form')`, `/auth/v1/users/webauthn_start`, `/auth/v1/users/webauthn_finish`, `/upstream/upstream/start?`} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s missing %s", tc.entry, want)
+			}
+		}
+		r := httptest.NewRequest(http.MethodGet, "/upstream/upstream/start", nil)
+		r.AddCookie(page.Result().Cookies()[0])
+		_, _, _, err := h.PrepareExternalAuthentication(r, interactionToken(t, body))
+		if err != nil {
+			t.Fatalf("%s external preparation: %v", tc.entry, err)
 		}
 	}
 }

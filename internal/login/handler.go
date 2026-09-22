@@ -45,7 +45,7 @@ const (
 	failureWriteGrace   = 5 * time.Second
 )
 
-var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p>{{.ContinueTo}} {{.ClientID}}</p><form method="post" action="{{.IssuerPath}}/auth/login"><input type="hidden" name="interaction" value="{{.Interaction}}"><label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label><button type="submit">{{.SignIn}}</button>{{if .PasskeyLogin}}<button type="button" id="passkey-btn">{{.PasskeyButton}}</button><div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div style="margin:1.5em 0;text-align:center;border-top:1px solid #ccc;padding-top:1em"><span style="background:#fff;padding:0 0.5em;color:#666;font-size:0.9em">or</span></div>{{range .Providers}}<a href="{{$.IssuerPath}}/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" style="display:block;margin:0.5em 0;padding:0.75em;border:1px solid #ccc;border-radius:4px;text-align:center;text-decoration:none;color:#333">{{.Name}}</a>{{end}}{{end}}</main>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
+var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p>{{if .Intro}}{{.Intro}}{{else}}{{.ContinueTo}} {{.ClientID}}{{end}}</p><form id="login-form" method="post" action="{{.Action}}"><input type="hidden" name="interaction" value="{{.Interaction}}">{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label><button type="submit">{{.SignIn}}</button>{{if .PasskeyLogin}}<button type="button" id="passkey-btn">{{.PasskeyButton}}</button><div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div style="margin:1.5em 0;text-align:center;border-top:1px solid #ccc;padding-top:1em"><span style="background:#fff;padding:0 0.5em;color:#666;font-size:0.9em">or</span></div>{{range .Providers}}<a href="{{$.IssuerPath}}/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" style="display:block;margin:0.5em 0;padding:0.75em;border:1px solid #ccc;border-radius:4px;text-align:center;text-decoration:none;color:#333">{{.Name}}</a>{{end}}{{end}}</main>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
 (function(){
   var btn=document.getElementById('passkey-btn');
   var err=document.getElementById('passkey-error');
@@ -85,7 +85,7 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html 
   // challenge. Continuing it here reuses the shared finish boundary, so the
   // one-time interaction and session protections stay authoritative and the
   // browser never lands on the raw challenge JSON.
-  var loginForm=document.querySelector('form[action$="auth/login"]');
+  var loginForm=document.getElementById('login-form');
   if(loginForm){loginForm.addEventListener('submit',async function(event){
     event.preventDefault();
     var submit=loginForm.querySelector('button[type="submit"]');
@@ -414,6 +414,10 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) renderLoginPage(w http.ResponseWriter, r *http.Request, request oauth.AuthorizationRequest, interactionToken, themeURL string) {
+	h.renderAuthenticationPage(w, r, request, loginPageData{ClientID: request.ClientID, Interaction: interactionToken, ThemeURL: themeURL})
+}
+
+func (h *Handler) renderAuthenticationPage(w http.ResponseWriter, r *http.Request, request oauth.AuthorizationRequest, pageData loginPageData) {
 	issuerURL, _ := url.Parse(h.issuer)
 	issuerPath := strings.TrimRight(issuerURL.Path, "/")
 	messages := i18n.MessagesFor(strings.Join(r.Header.Values("Accept-Language"), ","))
@@ -431,12 +435,15 @@ func (h *Handler) renderLoginPage(w http.ResponseWriter, r *http.Request, reques
 	if idpHint := r.URL.Query().Get("idp_hint"); idpHint != "" && len(providers) > 0 {
 		for _, p := range providers {
 			if p.ID == idpHint {
-				http.Redirect(w, r, issuerPath+"/upstream/"+p.ID+"/start?redirect_uri="+url.QueryEscape(p.CallbackURI)+"&interaction="+url.QueryEscape(interactionToken), http.StatusFound)
+				http.Redirect(w, r, issuerPath+"/upstream/"+p.ID+"/start?redirect_uri="+url.QueryEscape(p.CallbackURI)+"&interaction="+url.QueryEscape(pageData.Interaction), http.StatusFound)
 				return
 			}
 		}
 	}
-	pageData := loginPageData{IssuerPath: issuerPath, ClientID: request.ClientID, Interaction: interactionToken, ThemeURL: themeURL, Providers: providers, MFARequired: request.ForceMFA, Messages: messages}
+	pageData.IssuerPath, pageData.Providers, pageData.MFARequired, pageData.Messages = issuerPath, providers, request.ForceMFA, messages
+	if pageData.Action == "" {
+		pageData.Action = issuerPath + "/auth/login"
+	}
 	if h.passkeys != nil {
 		nonce, err := generateNonce()
 		if err != nil {
@@ -471,6 +478,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid login request", http.StatusBadRequest)
 		return
 	}
+	h.loginPassword(w, r, form)
+}
+
+func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request, form loginForm) {
 	session, sessionToken, ok := h.session(r)
 	if !ok || session.Authenticated() {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
@@ -661,6 +672,7 @@ func (h *Handler) fedCMGet(w http.ResponseWriter, r *http.Request) {
 }
 
 type loginPageData struct {
+	Action, CSRFToken, Intro                    string
 	ClientID, Interaction, ThemeURL, IssuerPath string
 	Providers                                   []UpstreamProvider
 	PasskeyLogin                                bool
