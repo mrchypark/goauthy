@@ -3,6 +3,7 @@ package login
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/storage"
@@ -313,6 +315,103 @@ func TestApprovalPolicyRejectionDoesNotConsumeInteraction(t *testing.T) {
 			finish(replay, "mfa")
 			if replay.Code != http.StatusForbidden {
 				t.Fatalf("replay=%d", replay.Code)
+			}
+		})
+	}
+}
+
+func TestDeviceReauthenticationBindsOriginalSubjectAndSession(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"success", "other subject", "revoked parent"} {
+		t.Run(mode, func(t *testing.T) {
+			h, db := testHandlerWithDB(t, false)
+			service, delivered := testOTPStepUp(t, h, db)
+			ctx := context.Background()
+			hash, err := testHash(ctx, []byte("correct password"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = h.identity.BootstrapUser(ctx, "user-2", "bob", hash); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "reauth-profiles", SQL: "INSERT INTO identity_user_profiles(subject,email,email_verified,preferred_username) VALUES('user-1','alice@example.test',1,'alice'),('user-2','bob@example.test',1,'bob')"}); err != nil {
+				t.Fatal(err)
+			}
+			entry := httptest.NewRequest(http.MethodGet, "/oidc/device/verify?user_code=AB12CD34", nil)
+			peer, _ := h.resolvePeerIP(entry)
+			parent, err := h.browser.CreateSession(ctx, "user-1", "pwd", h.now().Add(time.Hour), peer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parentCookie, err := browser.SessionCookie(h.issuer, parent.Token, parent.ExpiresAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry.AddCookie(parentCookie)
+			page := httptest.NewRecorder()
+			h.DeviceReviewReauthentication(page, entry, "AB12-CD34")
+			if page.Code != http.StatusOK || len(page.Result().Cookies()) != 1 {
+				t.Fatalf("entry=%d %s", page.Code, page.Body.String())
+			}
+			cookie := page.Result().Cookies()[0]
+			if cookie.Value == parent.Token {
+				t.Fatal("reauthentication reused authenticated session")
+			}
+			token := interactionToken(t, page.Body.String())
+			csrf := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(page.Body.String())
+			if len(csrf) != 2 {
+				t.Fatal("missing csrf")
+			}
+			username := "alice"
+			if mode == "other subject" {
+				username = "bob"
+			}
+			form := url.Values{"interaction": {token}, "csrf_token": {csrf[1]}, "username": {username}, "password": {"correct password"}}
+			post := httptest.NewRequest(http.MethodPost, "/oidc/device/login", strings.NewReader(form.Encode()))
+			post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			post.AddCookie(cookie)
+			step := httptest.NewRecorder()
+			h.DeviceLoginHandler(false).ServeHTTP(step, post)
+			if mode == "other subject" {
+				if step.Code != http.StatusForbidden || len(step.Result().Cookies()) != 0 {
+					t.Fatalf("subject swap=%d", step.Code)
+				}
+				select {
+				case <-delivered:
+					t.Fatal("sent second factor for wrong subject")
+				default:
+				}
+				return
+			}
+			if step.Code != http.StatusOK || len(step.Result().Cookies()) != 0 {
+				t.Fatalf("step=%d %s", step.Code, step.Body.String())
+			}
+			code, err := service.GenerateOTP(ctx, "user-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "revoked parent" {
+				if err = h.browser.RevokeSessionID(ctx, parent.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			end := httptest.NewRecorder()
+			h.OTPVerify(end, postOTPForm(cookie, code))
+			if mode == "revoked parent" {
+				if end.Code != http.StatusForbidden || len(end.Result().Cookies()) != 0 {
+					t.Fatalf("revoked parent completed=%d %s", end.Code, end.Body.String())
+				}
+				return
+			}
+			if end.Code != http.StatusSeeOther || end.Header().Get("Location") != h.issuer+"/oidc/device/verify?user_code=AB12CD34" {
+				t.Fatalf("end=%d %s", end.Code, end.Body.String())
+			}
+			session, err := h.browser.LoadSession(ctx, end.Result().Cookies()[0].Value)
+			if err != nil || session.Subject != "user-1" || session.AuthenticationMethod != "mfa" {
+				t.Fatalf("session=%+v err=%v", session, err)
+			}
+			if _, err = h.browser.LoadSession(ctx, parent.Token); !errors.Is(err, browser.ErrRevoked) {
+				t.Fatalf("old parent remained active: %v", err)
 			}
 		})
 	}

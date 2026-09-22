@@ -504,6 +504,10 @@ func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request, form log
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
+	if !target.acceptsSubject(auth.Subject) {
+		http.Error(w, "Invalid login request", http.StatusForbidden)
+		return
+	}
 	if request.ForceMFA {
 		if h.passkeys != nil {
 			user, err := h.identity.UserBySubject(r.Context(), auth.Subject)
@@ -1031,7 +1035,9 @@ func (h *Handler) completeExternalAuthentication(w http.ResponseWriter, r *http.
 		http.Error(w, "Invalid login request", http.StatusUnauthorized)
 		return
 	}
-	consumed, err := h.browser.ConsumeAuthorizationInteractionByDigest(r.Context(), sessionToken, interactionDigest)
+	consumed, err := h.consumeAuthenticationRequest(r, target, sessionToken, interactionDigest, subject, peerIP, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+		return h.browser.ConsumeAuthorizationInteractionByDigest(ctx, sessionToken, interactionDigest)
+	})
 	if err != nil || consumed.RequestID != interaction.RequestID || !bytes.Equal(consumed.Payload, interaction.Payload) {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
@@ -1087,7 +1093,12 @@ func (h *Handler) PrepareExternalAuthentication(r *http.Request, rawInteractionT
 // into an authenticated OAuth browser session. Both password and passkey
 // authenticators intentionally use this path.
 func (h *Handler) completeAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, interactionToken, subject, authMethod string, onConsumed func() error) {
-	h.completeAuthenticationInteraction(w, r, sessionToken, subject, authMethod, onConsumed, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+	digest, err := browser.CanonicalTokenDigest(interactionToken)
+	if err != nil {
+		http.Error(w, "Invalid login request", http.StatusForbidden)
+		return
+	}
+	h.completeAuthenticationInteraction(w, r, sessionToken, digest, subject, authMethod, onConsumed, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
 		return h.browser.LoadAuthorizationInteractionReadOnly(ctx, sessionToken, interactionToken)
 	}, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
 		return h.browser.ConsumeAuthorizationInteraction(ctx, sessionToken, interactionToken)
@@ -1098,14 +1109,14 @@ func (h *Handler) completeAuthentication(w http.ResponseWriter, r *http.Request,
 // interaction is known only by its canonical persisted digest, so the raw
 // continuation token never enters durable state or the caller (GA66-OTP-003).
 func (h *Handler) completeAuthenticationByDigest(w http.ResponseWriter, r *http.Request, sessionToken, interactionDigest, subject, authMethod string, onConsumed func() error) {
-	h.completeAuthenticationInteraction(w, r, sessionToken, subject, authMethod, onConsumed, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+	h.completeAuthenticationInteraction(w, r, sessionToken, interactionDigest, subject, authMethod, onConsumed, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
 		return h.browser.LoadAuthorizationInteractionReadOnlyByDigest(ctx, sessionToken, interactionDigest)
 	}, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
 		return h.browser.ConsumeAuthorizationInteractionByDigest(ctx, sessionToken, interactionDigest)
 	})
 }
 
-func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, onConsumed func() error, load, consume func(context.Context) (browser.AuthorizationInteraction, error)) {
+func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *http.Request, sessionToken, interactionDigest, subject, authMethod string, onConsumed func() error, load, consume func(context.Context) (browser.AuthorizationInteraction, error)) {
 	peerIP, peerOK := h.resolvePeerIP(r)
 	if !peerOK {
 		http.Error(w, "Invalid login request", http.StatusBadRequest)
@@ -1122,7 +1133,7 @@ func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *ht
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	consumed, err := consume(r.Context())
+	consumed, err := h.consumeAuthenticationRequest(r, target, sessionToken, interactionDigest, subject, peerIP, consume)
 	if err != nil || consumed.RequestID != interaction.RequestID || !bytes.Equal(consumed.Payload, interaction.Payload) {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
@@ -1178,6 +1189,17 @@ func (h *Handler) completeBrowserAuthentication(w http.ResponseWriter, r *http.R
 }
 
 func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, target authenticationRequest, peerIP string, onConsumed func() error, binding *browser.UpstreamSessionBinding) {
+	if target.approval != nil && target.approval.ParentSessionDigest != "" {
+		previous := onConsumed
+		onConsumed = func() error {
+			if previous != nil {
+				if err := previous(); err != nil {
+					return err
+				}
+			}
+			return h.browser.RevokeSessionID(r.Context(), target.approval.ParentSessionDigest)
+		}
+	}
 	// ponytail: a failed code issuance consumes this interaction; restart authorize rather than risking duplicate codes.
 	newSession, ok := h.completeBrowserAuthentication(w, r, sessionToken, subject, authMethod, peerIP, onConsumed, binding)
 	if !ok {
@@ -1393,6 +1415,10 @@ func (h *Handler) WebAuthnStart(w http.ResponseWriter, r *http.Request) {
 		username = user.Username
 	}
 
+	if !target.acceptsSubject(subject) {
+		http.Error(w, "Invalid login request", http.StatusForbidden)
+		return
+	}
 	// Fresh passkey-only accounts always require user verification (UV).
 	// Use BeginMFALogin for fresh OR when the authorization request forces
 	// MFA, avoiding a mode race that relied on BeginLogin auto-upgrade.

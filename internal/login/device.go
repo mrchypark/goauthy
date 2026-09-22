@@ -48,7 +48,7 @@ func (h *Handler) deviceLoginGet(w http.ResponseWriter, r *http.Request, forceMF
 	}
 	if current, _, ok := h.session(r); ok && current.Authenticated() {
 		if forceMFA && current.AuthenticationMethod != "mfa" {
-			http.Error(w, "Invalid login request", http.StatusForbidden)
+			h.startApprovalReauthentication(w, r, approvalLoginInteraction{Purpose: approvalLoginPayload, DeviceCode: &code, ForceMFA: true}, "/oidc/device/login")
 			return
 		}
 		h.deviceLoginRedirect(w, code)
@@ -241,7 +241,7 @@ func (h *Handler) connectionHandoffLoginGet(w http.ResponseWriter, r *http.Reque
 	}
 	if current, _, ok := h.session(r); ok && current.Authenticated() {
 		if forceMFA && current.AuthenticationMethod != "mfa" {
-			http.Error(w, "Invalid login request", http.StatusForbidden)
+			h.startApprovalReauthentication(w, r, approvalLoginInteraction{Purpose: approvalLoginPayload, HandoffID: handoffID, ForceMFA: true}, "/account/connection-login")
 			return
 		}
 		h.connectionHandoffRedirect(w, handoffID)
