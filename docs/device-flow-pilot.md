@@ -1,5 +1,19 @@
 # OAuth Device Flow pilot
 
+## 클라이언트 MFA 정책
+
+관리 클라이언트의 `force_mfa`는 Device 승인·최초 발급·refresh에 적용된다.
+승인 시 서버가 읽은 브라우저 세션의 MFA 여부를 Rhiza에 저장하고, 클라이언트
+정책이 승인 후 변경되더라도 토큰 저장 트랜잭션에서 다시 검사한다. public과
+confidential 클라이언트에 동일하게 적용된다.
+
+스키마 v110 이전 승인에는 MFA 증거가 없으므로 MFA 필수 클라이언트에서
+사용할 수 없다. 해당 사용자는 MFA로 로그인한 브라우저에서 새 Device 요청을
+승인해야 한다. 비밀번호 전용 Device 로그인 화면에 MFA step-up UI를 추가한
+것은 아니며, 이미 인증된 MFA 브라우저 세션을 사용한다. HA 배포는 모든 노드를
+수정 버전으로 교체한 뒤 검증해야 한다. 이전 바이너리는 새 정책 검사를 수행하지 않는다.
+
+
 ### 2026-09-07 DPoP 후속 검증
 
 Device token endpoint가 기존 nonce/proof 검증으로 access/refresh를 DPoP

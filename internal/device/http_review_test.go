@@ -12,7 +12,7 @@ import (
 func TestDeviceReviewedRequestBinding(t *testing.T) {
 	t.Parallel()
 	ctx, store, _ := testStore(t)
-	h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool) { return "user-1", true })
+	h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool, bool) { return "user-1", false, true })
 	first, err := store.Create(ctx, "reviewed-app", []string{"openid", "groups"}, deviceHTTPTestNow)
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestDeviceReviewedRequestBinding(t *testing.T) {
 func TestDeviceReviewPageStates(t *testing.T) {
 	t.Parallel()
 	ctx, store, _ := testStore(t)
-	h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool) { return "user-1", true })
+	h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool, bool) { return "user-1", false, true })
 	grant, err := store.Create(ctx, "app<script>", []string{"openid", "groups"}, deviceHTTPTestNow)
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestDeviceReviewPageStates(t *testing.T) {
 func TestDeviceReviewLookupRateLimit(t *testing.T) {
 	t.Parallel()
 	_, store, _ := testStore(t)
-	h, err := NewHandlerWithLimits(store, "https://id.example.test", func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool) { return "user-1", true }, Limits{VerificationLimit: 1})
+	h, err := NewHandlerWithLimits(store, "https://id.example.test", func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool, bool) { return "user-1", false, true }, Limits{VerificationLimit: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

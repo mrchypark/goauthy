@@ -53,9 +53,9 @@ type ClientAuthorizer func(*http.Request, string, []string) error
 
 var ErrClientAuthentication = errors.New("device client authentication failed")
 
-// Subject returns the browser-authenticated subject. A nil callback, or a
+// Subject returns the browser-authenticated subject and verified MFA evidence. A nil callback, or a
 // callback returning ok=false, makes approval fail closed.
-type Subject func(*http.Request) (subject string, ok bool)
+type Subject func(*http.Request) (subject string, mfa bool, ok bool)
 
 // Limits controls the distributed, fixed-window abuse boundaries. A zero
 // value uses conservative defaults; disabling these limits is not supported.
@@ -189,7 +189,7 @@ func (h *Handler) verifyPage(w http.ResponseWriter, r *http.Request) {
 		h.redirectToDeviceLogin(w, r)
 		return
 	}
-	subject, ok := h.subject(r)
+	subject, _, ok := h.subject(r)
 	if !ok || !validSubject(subject) {
 		h.redirectToDeviceLogin(w, r)
 		return
@@ -269,7 +269,7 @@ func (h *Handler) verifyDevice(w http.ResponseWriter, r *http.Request) {
 		writeHTMLStatus(w, http.StatusForbidden, "Authentication required")
 		return
 	}
-	subject, ok := h.subject(r)
+	subject, mfa, ok := h.subject(r)
 	if !ok || !validSubject(subject) {
 		writeHTMLStatus(w, http.StatusForbidden, "Authentication required")
 		return
@@ -283,7 +283,7 @@ func (h *Handler) verifyDevice(w http.ResponseWriter, r *http.Request) {
 		decisionErr = h.store.Deny(r.Context(), userCode, h.now().UTC())
 		message = "Device denied"
 	} else {
-		decisionErr = h.store.Approve(r.Context(), userCode, subject, h.now().UTC())
+		decisionErr = h.store.ApproveWithMFA(r.Context(), userCode, subject, mfa, h.now().UTC())
 	}
 	if decisionErr != nil {
 		writeHTMLStatus(w, http.StatusBadRequest, "Invalid verification request")

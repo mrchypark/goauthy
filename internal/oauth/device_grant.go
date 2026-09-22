@@ -86,6 +86,9 @@ func (h *deviceGrantHandler) HandleTokenEndpointRequest(ctx context.Context, req
 	if result.ClaimToken == "" || result.Subject == "" || len(result.Scopes) == 0 || (!h.oidcEnabled && (containsScope(result.Scopes, openidScope) || containsScope(result.Scopes, groupsScope))) {
 		return h.releaseClaimError(ctx, result.ClaimToken, fosite.ErrInvalidScope)
 	}
+	if h.store.forceMFA(request.GetClient()) && !result.MFAVerified {
+		return h.releaseClaimError(ctx, result.ClaimToken, fosite.ErrInvalidGrant)
+	}
 	if managed, ok := request.GetClient().(*clients.Client); ok && result.ManagedClientGeneration != managed.Generation {
 		return h.releaseClaimError(ctx, result.ClaimToken, fosite.ErrInvalidGrant)
 	}

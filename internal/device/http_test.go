@@ -102,7 +102,7 @@ func TestDeviceVerificationCSRFSubjectApproveAndDeny(t *testing.T) {
 		t.Fatal(err)
 	}
 	noSubject := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, nil)
-	h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool) { return "user-1", true })
+	h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool, bool) { return "user-1", false, true })
 	cookie, csrf := verificationCSRF(t, h, grant.UserCode)
 	w := httptest.NewRecorder()
 	r := formRequest(http.MethodPost, verificationPath, url.Values{"user_code": {grant.UserCode}, "csrf_token": {csrf}, "action": {"approve"}})
@@ -208,7 +208,7 @@ func TestDeviceHTTPDistributedRateLimitsUseDirectRemoteIP(t *testing.T) {
 	t.Parallel()
 	ctx, store, _ := testStore(t)
 	limits := Limits{Window: time.Minute, CreationLimit: 1, VerificationLimit: 1}
-	h, err := NewHandlerWithLimits(store, "https://id.example.test", func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool) { return "user-1", true }, limits)
+	h, err := NewHandlerWithLimits(store, "https://id.example.test", func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool, bool) { return "user-1", false, true }, limits)
 	if err != nil {
 		t.Fatal(err)
 	}

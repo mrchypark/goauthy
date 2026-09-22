@@ -543,7 +543,7 @@ func TestDeviceSessionSubjectRequiresAuthenticatedIssuerCookie(t *testing.T) {
 	issuer := "https://id.example.test"
 	subject := deviceSessionSubject(store, issuer)
 	request := httptest.NewRequest(http.MethodPost, "/oidc/device/verify", nil)
-	if got, ok := subject(request); ok || got != "" {
+	if got, _, ok := subject(request); ok || got != "" {
 		t.Fatalf("unauthenticated subject=%q ok=%t", got, ok)
 	}
 	issued, err := store.CreateSession(context.Background(), "subject-1", "pwd", time.Now().Add(time.Hour), "")
@@ -555,11 +555,11 @@ func TestDeviceSessionSubjectRequiresAuthenticatedIssuerCookie(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.AddCookie(&http.Cookie{Name: name, Value: issued.Token})
-	if got, ok := subject(request); !ok || got != "subject-1" {
+	if got, mfa, ok := subject(request); !ok || mfa || got != "subject-1" {
 		t.Fatalf("authenticated subject=%q ok=%t", got, ok)
 	}
 	forced := deviceSessionSubject(store, issuer, true)
-	if got, ok := forced(request); ok || got != "" {
+	if got, _, ok := forced(request); ok || got != "" {
 		t.Fatalf("password-only session bypassed forced MFA: subject=%q ok=%t", got, ok)
 	}
 	mfa, err := store.CreateSession(context.Background(), "subject-1", "mfa", time.Now().Add(time.Hour), "")
@@ -568,7 +568,7 @@ func TestDeviceSessionSubjectRequiresAuthenticatedIssuerCookie(t *testing.T) {
 	}
 	request.Header.Del("Cookie")
 	request.AddCookie(&http.Cookie{Name: name, Value: mfa.Token})
-	if got, ok := forced(request); !ok || got != "subject-1" {
+	if got, verified, ok := forced(request); !ok || !verified || got != "subject-1" {
 		t.Fatalf("MFA session rejected: subject=%q ok=%t", got, ok)
 	}
 }

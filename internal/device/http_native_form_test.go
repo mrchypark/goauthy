@@ -16,7 +16,7 @@ func TestDeviceVerificationNativeFormOrigin(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool) { return "user-1", true })
+			h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool, bool) { return "user-1", false, true })
 			cookie, csrf := verificationCSRF(t, h, grant.UserCode)
 			r := formRequest(http.MethodPost, verificationPath, url.Values{"user_code": {grant.UserCode}, "csrf_token": {csrf}, "action": {action}})
 			r.Header.Set("Origin", "null")
@@ -67,7 +67,7 @@ func TestDeviceVerificationNativeFormOrigin(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool) { return "user-1", true })
+			h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool, bool) { return "user-1", false, true })
 			cookie, csrf := verificationCSRF(t, h, grant.UserCode)
 			form := url.Values{"user_code": {grant.UserCode}, "csrf_token": {csrf}, "action": {"approve"}}
 			if tc.name == "missing csrf" {

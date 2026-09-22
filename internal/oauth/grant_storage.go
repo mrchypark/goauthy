@@ -253,10 +253,11 @@ func (s *Store) Commit(ctx context.Context) error {
 		// losing concurrent claim mistake another worker's consumed row for its
 		// own successful issuance.
 		guard, args := tx.deviceGuard()
+		one := int64(1)
 		tx.statements = append(tx.statements, rhiza.SQLStatement{SQL: `UPDATE oauth_device_grants
 			SET state = 'consumed', claim_until_unix_ms = 0, token_request_id = ?
 			WHERE device_code_digest = ? AND ` + guard,
-			Args: append([]any{tx.deviceRequestID, tx.deviceCodeDigest}, args...)})
+			Args: append([]any{tx.deviceRequestID, tx.deviceCodeDigest}, args...), ExpectedRowsAffected: &one})
 	}
 	cutoff := s.now().UTC()
 	if tx.kind == "exchange" && !tx.bindExchangeCutoff(cutoff.UnixMilli()) {
@@ -275,6 +276,9 @@ func (s *Store) Commit(ctx context.Context) error {
 	tx.done = true
 	_, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: tx.requestID, Statements: tx.statements})
 	if err != nil {
+		if tx.kind == "device" && strings.Contains(err.Error(), "error_code="+string(rhiza.MutationErrorCodePreconditionFailed)) {
+			return fosite.ErrSerializationFailure
+		}
 		if errors.Is(err, rhiza.ErrRequestConflict) && (tx.kind == "code" || tx.kind == "refresh") {
 			return fosite.ErrSerializationFailure
 		}
@@ -467,7 +471,7 @@ func (tx *transaction) deviceGuard() (string, []any) {
 		AND d.claim_until_unix_ms > ? AND d.expires_at_unix_ms > ? AND u.disabled=0
 		AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?)
 		AND (d.managed_client_generation IS NOT NULL OR NOT EXISTS (SELECT 1 FROM managed_oauth_clients mc0 WHERE mc0.id=d.client_id))
-		AND (d.managed_client_generation IS NULL OR EXISTS (SELECT 1 FROM managed_oauth_clients mc WHERE mc.id=d.client_id AND mc.generation=d.managed_client_generation AND mc.enabled=1 AND mc.deleted=0)))` + accountGuard,
+		AND (d.managed_client_generation IS NULL OR EXISTS (SELECT 1 FROM managed_oauth_clients mc WHERE mc.id=d.client_id AND mc.generation=d.managed_client_generation AND mc.enabled=1 AND mc.deleted=0 AND (mc.force_mfa=0 OR d.mfa_verified=1))))` + accountGuard,
 		append([]any{tx.deviceCodeDigest, tx.deviceClaimDigest, accountExpiryCutoff{}, accountExpiryCutoff{}, accountExpiryCutoff{}}, accountArgs...)
 }
 
@@ -592,14 +596,16 @@ func managedClientGuard(request fosite.Requester) (string, []any) {
 	if !ok || client.ID == "" || client.Generation == "" || client.Revision < 0 {
 		return "", nil
 	}
-	return ` AND EXISTS (SELECT 1 FROM managed_oauth_clients WHERE id=? AND generation=? AND revision=? AND enabled=1 AND deleted=0)`, []any{client.ID, client.Generation, client.Revision}
+	return ` AND EXISTS (SELECT 1 FROM managed_oauth_clients WHERE id=? AND generation=? AND revision=? AND enabled=1 AND deleted=0
+ AND (force_mfa=0 OR NOT EXISTS (SELECT 1 FROM oauth_device_grants d WHERE d.token_request_id=? AND d.client_id=managed_oauth_clients.id AND d.mfa_verified=0)))`, []any{client.ID, client.Generation, client.Revision, request.GetID()}
 }
 
 func (tx *transaction) managedGuard() (string, []any) {
 	if tx == nil || !tx.managedClientSet || tx.managedClientID == "" || tx.managedClientGeneration == "" || tx.managedClientRevision < 0 {
 		return "", nil
 	}
-	return ` AND EXISTS (SELECT 1 FROM managed_oauth_clients WHERE id=? AND generation=? AND revision=? AND enabled=1 AND deleted=0)`, []any{tx.managedClientID, tx.managedClientGeneration, tx.managedClientRevision}
+	return ` AND EXISTS (SELECT 1 FROM managed_oauth_clients WHERE id=? AND generation=? AND revision=? AND enabled=1 AND deleted=0
+ AND (force_mfa=0 OR NOT EXISTS (SELECT 1 FROM oauth_device_grants d WHERE d.token_request_id=? AND d.client_id=managed_oauth_clients.id AND d.mfa_verified=0)))`, []any{tx.managedClientID, tx.managedClientGeneration, tx.managedClientRevision, tx.deviceRequestID}
 }
 
 // exchangeInputClientGuard repeats the input-client validity check in the
@@ -618,7 +624,8 @@ func (s *Store) exchangeInputClientGuard(signature string) (string, []any) {
 			JOIN managed_oauth_clients client ON client.id=json_extract(input.request_json, '$.managed_client.id')
 			WHERE input.signature=?
 				AND client.generation=json_extract(input.request_json, '$.managed_client.generation')
-				AND client.enabled=1 AND client.deleted=0)
+				AND client.enabled=1 AND client.deleted=0
+                AND (client.force_mfa=0 OR NOT EXISTS (SELECT 1 FROM oauth_device_grants d WHERE d.token_request_id=json_extract(input.request_json, '$.id') AND d.client_id=client.id AND d.mfa_verified=0)))
 		OR EXISTS (SELECT 1 FROM oauth_token_requests input
 			WHERE input.signature=?
 				AND json_extract(input.request_json, '$.managed_client.id') IS NULL
@@ -722,6 +729,17 @@ func (s *Store) decodeRequest(ctx context.Context, encoded string, target fosite
 	}
 	if err != nil {
 		return nil, err
+	}
+	// Revalidate durable Device approval evidence for refresh and token use,
+	// including tokens issued before MFA became required. Legacy rows have no MFA.
+	if s.forceMFA(client) {
+		evidence, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT mfa_verified FROM oauth_device_grants WHERE token_request_id=? AND client_id=?`, Args: []any{record.ID, record.ClientID}, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil {
+			return nil, err
+		}
+		if len(evidence.Rows) > 0 && (len(evidence.Rows) != 1 || len(evidence.Rows[0]) != 1 || evidence.Rows[0][0] != int64(1)) {
+			return nil, fosite.ErrInvalidGrant
+		}
 	}
 	request := fosite.NewRequest()
 	request.ID, request.Client, request.RequestedAt, request.Form, request.Session = record.ID, client, time.UnixMilli(record.RequestedAt).UTC(), record.Form, session
@@ -1120,7 +1138,7 @@ func (s *Store) CreateAccessTokenSession(ctx context.Context, signature string, 
 	// rejected issuance INSERT. The exact success of each intended insert is
 	// therefore a statement precondition rather than an aggregate row count.
 	var exactIssue *int64
-	if clientCredentialsGuarded {
+	if clientCredentialsGuarded || tx != nil && tx.kind == "device" {
 		one := int64(1)
 		exactIssue = &one
 	}
@@ -1410,9 +1428,14 @@ func (s *Store) CreateRefreshTokenSession(ctx context.Context, signature, access
 		cleanupSQL += guard
 		cleanupArgs = append(cleanupArgs, guardArgs...)
 	}
+	var exactIssue *int64
+	if tx != nil && tx.kind == "device" {
+		one := int64(1)
+		exactIssue = &one
+	}
 	return s.mutate(ctx, "oauth-refresh-create/"+signature,
 		rhiza.SQLStatement{SQL: cleanupSQL, Args: cleanupArgs},
-		rhiza.SQLStatement{SQL: sql, Args: args},
+		rhiza.SQLStatement{SQL: sql, Args: args, ExpectedRowsAffected: exactIssue},
 	)
 }
 
@@ -1463,6 +1486,7 @@ func (s *Store) RotateRefreshToken(ctx context.Context, requestID, signature str
 	if err != nil {
 		return err
 	}
+	tx.deviceRequestID = requestID
 	if err := s.captureManagedSnapshot(ctx, "oauth_refresh_tokens", signature, tx); err != nil {
 		return err
 	}
