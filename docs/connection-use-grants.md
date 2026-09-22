@@ -53,10 +53,46 @@ the final snapshot recheck can also return 404; this alone does not prove perman
 revocation. Fail the current operation closed without cached-credential fallback
 or automatic refresh retry. A `ready` status with the current version
 may be explicitly refreshed only when consent has `allow_refresh=true`; otherwise
-it is delivery-only. `refreshing` means wait without exchanging again, while
+it is delivery-only. `refreshing` means bounded observation without exchanging again, while
 `uncertain` or `revoked` requires owner reconnect/recovery. Consumers must not
 guess versions, retry exchanges blindly, or substitute an owner cookie. Delivery
 never refreshes automatically and no scheduler exists.
+
+### Interrupted refresh recovery
+
+Consumers should stop the current model/API operation while `refreshing`. For
+the same grant and credential version, poll the read-only status at most once
+every five seconds for up to one minute from the first observation. This is an
+operational waiting budget, not a server lease, proof of worker death, or permission
+to retry the provider exchange. Keep that deadline across retries of the caller's
+operation; do not start another minute on every poll. If the caller loses its
+observation history, require recovery rather than extending waiting indefinitely.
+
+If status remains `refreshing` at the deadline, stop polling and report owner
+recovery required. `uncertain` can take this path immediately. A failed status
+request or 404 means authority/state could not be confirmed: fail closed and
+re-establish authorization, without interpreting that response as a stale claim.
+Record only grant/connection identifiers, credential version, first-observed and
+last-observed times, state, and request correlation identifiers in access-controlled
+operational records. Do not collect credentials, cookies, authorization headers,
+or provider response bodies. These timestamps measure observation age; the public
+status does not expose a claim start time.
+
+The owner reviews current connection status, explicitly revokes its current
+version, prepares reconnect, completes provider authorization, and grants fresh
+consumer consent. Re-read status on a version conflict instead of guessing the
+next version. Reconnect changes generation, so old consent and a late worker's
+completion cannot authorize or overwrite the new credential. Local revoke does
+not revoke provider-side tokens or cancel requests already sent; if that is needed,
+the owner also revokes access through the provider's controls.
+
+Never clear `refresh_claim`, reset a row to `ready`, expire the claim on a timer,
+or replay the old refresh token. The process may have died after the provider
+consumed it. A claim intentionally remains fail-closed until explicit recovery.
+The deterministic `TestAbandonedRefreshClaimRequiresOwnerRecovery` abandons a
+durable claim, advances a replacement worker's clock by a day, and verifies no
+second exchange, owner recovery, and fencing of late completion/uncertainty writes.
+It simulates the durable boundary; it is not a process-kill or HA qualification.
 
 ## Verification and remaining integration
 
