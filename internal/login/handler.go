@@ -45,7 +45,7 @@ const (
 	failureWriteGrace   = 5 * time.Second
 )
 
-var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p>{{.ContinueTo}} {{.ClientID}}</p><form method="post" action="../auth/login"><input type="hidden" name="interaction" value="{{.Interaction}}"><label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label><button type="submit">{{.SignIn}}</button>{{if .PasskeyLogin}}<button type="button" id="passkey-btn">{{.PasskeyButton}}</button><div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div style="margin:1.5em 0;text-align:center;border-top:1px solid #ccc;padding-top:1em"><span style="background:#fff;padding:0 0.5em;color:#666;font-size:0.9em">or</span></div>{{range .Providers}}<a href="/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" style="display:block;margin:0.5em 0;padding:0.75em;border:1px solid #ccc;border-radius:4px;text-align:center;text-decoration:none;color:#333">{{.Name}}</a>{{end}}{{end}}</main>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
+var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p>{{.ContinueTo}} {{.ClientID}}</p><form method="post" action="{{.IssuerPath}}/auth/login"><input type="hidden" name="interaction" value="{{.Interaction}}"><label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label><button type="submit">{{.SignIn}}</button>{{if .PasskeyLogin}}<button type="button" id="passkey-btn">{{.PasskeyButton}}</button><div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div style="margin:1.5em 0;text-align:center;border-top:1px solid #ccc;padding-top:1em"><span style="background:#fff;padding:0 0.5em;color:#666;font-size:0.9em">or</span></div>{{range .Providers}}<a href="{{$.IssuerPath}}/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" style="display:block;margin:0.5em 0;padding:0.75em;border:1px solid #ccc;border-radius:4px;text-align:center;text-decoration:none;color:#333">{{.Name}}</a>{{end}}{{end}}</main>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
 (function(){
   var btn=document.getElementById('passkey-btn');
   var err=document.getElementById('passkey-error');
@@ -55,7 +55,7 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html 
   function submitAssertion(code,data){
     var form=document.createElement('form');
     form.method='POST';
-    form.action='../auth/v1/users/webauthn_finish';
+    form.action='{{.IssuerPath}}/auth/v1/users/webauthn_finish';
     var codeInput=document.createElement('input');
     codeInput.type='hidden';
     codeInput.name='code';
@@ -109,7 +109,7 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html 
     btn.disabled=true;
     err.textContent='';
     try{
-      var startResp=await fetch('../auth/v1/users/webauthn_start',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({purpose:{Login:document.querySelector('input[name="interaction"]').value},username:usernameField.value})});
+      var startResp=await fetch('{{.IssuerPath}}/auth/v1/users/webauthn_start',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({purpose:{Login:document.querySelector('input[name="interaction"]').value},username:usernameField.value})});
       if(!startResp.ok){err.textContent='Passkey login failed';btn.disabled=false;return;}
       await finishPasskey(await startResp.json());
     }catch(e){err.textContent='Passkey login failed';btn.disabled=false;}
@@ -122,7 +122,7 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html 
 // OTP. The native form posts the code to the OTP verify boundary, which keeps
 // the one-time authorization interaction and the session protections of the
 // shared completion path authoritative.
-var otpStepUpPage = template.Must(template.New("otp-stepup").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p role="status" aria-live="polite">Enter the one-time code sent to your email.</p><form method="post" action="../auth/v1/users/otp/verify"><label>One-time code <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus></label><button type="submit">{{.SignIn}}</button></form></main></body></html>`))
+var otpStepUpPage = template.Must(template.New("otp-stepup").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p role="status" aria-live="polite">Enter the one-time code sent to your email.</p><form method="post" action="{{.IssuerPath}}/auth/v1/users/otp/verify"><label>One-time code <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus></label><button type="submit">{{.SignIn}}</button></form></main></body></html>`))
 
 const fedCMLandingPayload = "goauthy-fedcm-login/v1"
 
@@ -409,6 +409,12 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+	h.renderLoginPage(w, r, request, interaction.Token, themeURL)
+}
+
+func (h *Handler) renderLoginPage(w http.ResponseWriter, r *http.Request, request oauth.AuthorizationRequest, interactionToken, themeURL string) {
+	issuerURL, _ := url.Parse(h.issuer)
+	issuerPath := strings.TrimRight(issuerURL.Path, "/")
 	messages := i18n.MessagesFor(strings.Join(r.Header.Values("Accept-Language"), ","))
 	localizedHTMLHeaders(w, messages.Language)
 	// Chromium applies form-action to the callback redirect after the login
@@ -424,12 +430,12 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 	if idpHint := r.URL.Query().Get("idp_hint"); idpHint != "" && len(providers) > 0 {
 		for _, p := range providers {
 			if p.ID == idpHint {
-				http.Redirect(w, r, "/upstream/"+p.ID+"/start?redirect_uri="+url.QueryEscape(p.CallbackURI)+"&interaction="+url.QueryEscape(interaction.Token), http.StatusFound)
+				http.Redirect(w, r, issuerPath+"/upstream/"+p.ID+"/start?redirect_uri="+url.QueryEscape(p.CallbackURI)+"&interaction="+url.QueryEscape(interactionToken), http.StatusFound)
 				return
 			}
 		}
 	}
-	pageData := loginPageData{ClientID: request.ClientID, Interaction: interaction.Token, ThemeURL: themeURL, Providers: providers, MFARequired: request.ForceMFA, Messages: messages}
+	pageData := loginPageData{IssuerPath: issuerPath, ClientID: request.ClientID, Interaction: interactionToken, ThemeURL: themeURL, Providers: providers, MFARequired: request.ForceMFA, Messages: messages}
 	if h.passkeys != nil {
 		nonce, err := generateNonce()
 		if err != nil {
@@ -562,7 +568,8 @@ func (h *Handler) renderOTPStepUp(w http.ResponseWriter, r *http.Request, reques
 	// redirect that follows it. Use only this already-validated request origin.
 	w.Header().Set("Content-Security-Policy", authorizationFormCSP(request.RedirectURI))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = otpStepUpPage.Execute(w, loginPageData{ThemeURL: themeURL, Messages: messages})
+	issuerURL, _ := url.Parse(h.issuer)
+	_ = otpStepUpPage.Execute(w, loginPageData{IssuerPath: strings.TrimRight(issuerURL.Path, "/"), ThemeURL: themeURL, Messages: messages})
 }
 
 // FedCMLanding serves the same password authentication and browser-session
@@ -657,9 +664,9 @@ func (h *Handler) fedCMGet(w http.ResponseWriter, r *http.Request) {
 }
 
 type loginPageData struct {
-	ClientID, Interaction, ThemeURL string
-	Providers                       []UpstreamProvider
-	PasskeyLogin                    bool
+	ClientID, Interaction, ThemeURL, IssuerPath string
+	Providers                                   []UpstreamProvider
+	PasskeyLogin                                bool
 	// MFARequired marks a client whose successful password step is answered
 	// with a WebAuthn challenge that the page must continue instead of POSTing
 	// the form natively into the raw challenge body.

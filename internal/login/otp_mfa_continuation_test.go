@@ -186,7 +186,7 @@ func TestForcedMFAOTPStepUpCompletesAsMFA(t *testing.T) {
 				t.Fatalf("step-up status=%d content-type=%q body=%q", stepUp.Code, stepUp.Header().Get("Content-Type"), stepUp.Body.String())
 			}
 			body := stepUp.Body.String()
-			if !strings.Contains(body, "../auth/v1/users/otp/verify") || !strings.Contains(body, "name=\"code\"") || strings.Contains(body, "expires_at") {
+			if !strings.Contains(body, "/auth/v1/users/otp/verify") || !strings.Contains(body, "name=\"code\"") || strings.Contains(body, "expires_at") {
 				t.Fatalf("step-up body=%q", body)
 			}
 			if !strings.Contains(stepUp.Header().Get("Content-Security-Policy"), "form-action 'self' http://localhost") {
@@ -320,7 +320,7 @@ func TestAuthorizeRendersForcedMFAContinuationScript(t *testing.T) {
 		// only urlencoded bodies, so a multipart FormData post would be rejected.
 		"new URLSearchParams(new FormData(loginForm))",
 		"challenge.rcr",
-		"../auth/v1/users/webauthn_finish",
+		"/auth/v1/users/webauthn_finish",
 		"navigator.credentials.get",
 	} {
 		if !strings.Contains(body, want) {
@@ -347,7 +347,7 @@ func TestAuthorizeOmitsMFAContinuationForUnforcedClient(t *testing.T) {
 	if strings.Contains(body, "URLSearchParams(new FormData(loginForm))") || strings.Contains(body, "challenge.rcr") {
 		t.Fatalf("unforced client rendered the MFA continuation body=%q", body)
 	}
-	if !strings.Contains(body, "../auth/v1/users/webauthn_start") {
+	if !strings.Contains(body, "/auth/v1/users/webauthn_start") {
 		t.Fatalf("unforced client lost the passkey button script body=%q", body)
 	}
 }

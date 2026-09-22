@@ -1,6 +1,7 @@
 package login
 
 import (
+	"github.com/mrchypark/goauthy/internal/oauth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,10 +49,10 @@ func TestAuthorizePasskeyScriptCapturesStartJSON(t *testing.T) {
 	page := httptest.NewRecorder()
 	h.Authorize(page, get)
 	body := page.Body.String()
-	if !strings.Contains(body, "../auth/v1/users/webauthn_start") {
+	if !strings.Contains(body, "/auth/v1/users/webauthn_start") {
 		t.Fatalf("script missing webauthn_start endpoint")
 	}
-	if !strings.Contains(body, "../auth/v1/users/webauthn_finish") {
+	if !strings.Contains(body, "/auth/v1/users/webauthn_finish") {
 		t.Fatalf("script missing webauthn_finish endpoint")
 	}
 	if !strings.Contains(body, "startJSON.rcr") {
@@ -113,5 +114,49 @@ func TestAuthorizeCSPContainsBasePolicyWhenPasskeysEnabled(t *testing.T) {
 	basePolicy := authorizationFormCSP(authorizeValues().Get("redirect_uri"))
 	if !strings.Contains(csp, basePolicy) {
 		t.Fatalf("CSP should contain base policy: %q", csp)
+	}
+}
+
+// Shared login rendering must not resolve authentication endpoints relative to
+// the deeper Device/handoff URL; issuer prefixes must survive every method.
+func TestLoginPageEndpointsDoNotDependOnEntryPath(t *testing.T) {
+	t.Parallel()
+	h := testHandler(t)
+	h.issuer = "https://id.example.test/identity"
+	for _, entry := range []string{"/identity/oidc/device/login", "/identity/account/connection-login"} {
+		r := httptest.NewRequest(http.MethodGet, entry, nil)
+		w := httptest.NewRecorder()
+		h.renderLoginPage(w, r, oauth.AuthorizationRequest{ClientID: "review", RedirectURI: h.issuer}, "interaction", "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("render: %d", w.Code)
+		}
+		body := w.Body.String()
+		for _, endpoint := range []string{"/identity/auth/login", "/identity/auth/v1/users/webauthn_start", "/identity/auth/v1/users/webauthn_finish", "/identity/auth/v1/theme/global.css"} {
+			if !strings.Contains(body, endpoint) {
+				t.Fatalf("entry %s missing %s", entry, endpoint)
+			}
+		}
+		if strings.Contains(body, "../auth/") {
+			t.Fatalf("entry %s retained depth-dependent endpoints", entry)
+		}
+	}
+}
+
+func TestOTPStepUpEndpointsDoNotDependOnEntryPath(t *testing.T) {
+	t.Parallel()
+	h := testHandler(t)
+	h.issuer = "https://id.example.test/identity"
+	for _, entry := range []string{"/identity/auth/login", "/identity/oidc/device/login", "/identity/account/connection-login"} {
+		r := httptest.NewRequest(http.MethodPost, entry, nil)
+		w := httptest.NewRecorder()
+		h.renderOTPStepUp(w, r, oauth.AuthorizationRequest{ClientID: "review", RedirectURI: h.issuer})
+		if w.Code != http.StatusOK {
+			t.Fatalf("render: %d", w.Code)
+		}
+		for _, endpoint := range []string{`action="/identity/auth/v1/users/otp/verify"`, `href="/identity/auth/v1/theme/global.css"`} {
+			if !strings.Contains(w.Body.String(), endpoint) {
+				t.Fatalf("entry %s missing %s", entry, endpoint)
+			}
+		}
 	}
 }
