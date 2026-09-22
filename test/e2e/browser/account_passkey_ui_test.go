@@ -112,15 +112,29 @@ func TestAccountPasskeyUIAcrossPods(t *testing.T) {
 	}
 
 	if os.Getenv("GOAUTHY_E2E_DEVICE_LOGIN_FLOW") == "1" {
-		checkDeviceApprovalLoginUI(t, auth.ctx, primary, secondary, email, password, clientSecret)
-		checkDeviceApprovalLoginUI(t, auth.ctx, primary, secondary, email, "", clientSecret)
+		checkDeviceApprovalLoginUI(t, auth.ctx, primary, secondary, email, password, clientSecret, user.ID)
+		// Restore the account session promoted to MFA by UV registration only
+		// for conversion. The next login helper clears every browser cookie.
+		setPasskeyBrowserCookies(t, auth.ctx, primary, ordinary.Jar.Cookies(mustE2EURL(t, primary+"/account/")))
+		dialogReply.Store("Turn off password sign-in for this account?")
+		if err := chromedp.Run(auth.ctx, chromedp.Navigate(primary+"/account"),
+			chromedp.Poll(`document.querySelector('#passwordless-convert')?.disabled === false`, nil),
+			chromedp.Click(`#passwordless-convert`),
+			chromedp.Poll(`document.querySelector('#passwordless-status')?.textContent === 'Password sign-in disabled.'`, nil),
+		); err != nil {
+			t.Fatalf("Device passkey-only fixture conversion: %v", err)
+		}
+		assertAccountFeatures(t, ordinary, primary, user.ID, false)
+		assertPasswordLogin(t, primary, secondary, email, "device-converted-password", password, http.StatusUnauthorized)
+		dialogReply.Store("")
+		checkDeviceApprovalLoginUI(t, auth.ctx, primary, secondary, email, "", clientSecret, user.ID)
 	}
 }
 
 // Reuse the credential registered through the account UI, but remove all browser
 // sessions so each approval entry must authenticate afresh. An empty password
 // selects the real WebAuthn ceremony; otherwise use the native password form.
-func checkDeviceApprovalLoginUI(t *testing.T, ctx context.Context, primary, secondary, username, password, secret string) {
+func checkDeviceApprovalLoginUI(t *testing.T, ctx context.Context, primary, secondary, username, password, secret, expectedSubject string) {
 	t.Helper()
 	client := newBrowserClient(t)
 	grant := startDeviceAuthorizationOffline(t, client, primary, "goauthy-dev", secret)
@@ -162,6 +176,9 @@ func checkDeviceApprovalLoginUI(t *testing.T, ctx context.Context, primary, seco
 	tokens := deviceToken(t, client, secondary, secret, grant.DeviceCode)
 	if tokens.AccessToken == "" || tokens.RefreshToken == "" {
 		t.Fatal("approved Device did not issue tokens")
+	}
+	if tokenSubject(t, client, secondary, secret, tokens.AccessToken) != expectedSubject {
+		t.Fatal("Device token belongs to a different account")
 	}
 	assertDeviceTokenError(t, client, secondary, secret, grant.DeviceCode, "expired_token")
 }
