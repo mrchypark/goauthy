@@ -1198,14 +1198,6 @@ func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
-	if target.approval != nil {
-		if target.approval.DeviceCode != nil {
-			h.deviceLoginRedirect(w, *target.approval.DeviceCode)
-		} else {
-			h.connectionHandoffRedirect(w, target.approval.HandoffID)
-		}
-		return
-	}
 	original, request := target.original, target.policy
 	needs, checkErr := h.needsProfileUpdate(r, subject, request.ClientID)
 	if checkErr != nil {
@@ -1213,7 +1205,24 @@ func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.
 		return
 	}
 	if needs {
-		h.createProfileInteraction(w, r, newSession.Token, request.RequestID, newSession.Session, original.URL.RequestURI())
+		if target.approval != nil {
+			saved := *target.approval
+			saved.ExpectedSubject, saved.ParentSessionDigest = "", ""
+			saved.ProfileSubject = subject
+			payload, err := json.Marshal(saved)
+			requestID, idErr := randomDeviceLoginID()
+			if err != nil || idErr != nil {
+				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+				return
+			}
+			h.createProfileInteractionPayload(w, r, newSession.Token, requestID, payload)
+		} else {
+			h.createProfileInteraction(w, r, newSession.Token, request.RequestID, newSession.Session, original.URL.RequestURI())
+		}
+		return
+	}
+	if target.approval != nil {
+		h.redirectApproval(w, target.approval)
 		return
 	}
 	h.oauth.CompleteAuthorizationWithSession(w, original, subject, request.RequestedScopes, newSession.CreatedAt, newSession.ID, newSession.AuthenticationMethod)

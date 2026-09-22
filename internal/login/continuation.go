@@ -24,6 +24,7 @@ type approvalLoginInteraction struct {
 	ForceMFA            bool
 	ExpectedSubject     string `json:",omitempty"`
 	ParentSessionDigest string `json:",omitempty"`
+	ProfileSubject      string `json:",omitempty"`
 }
 
 type authenticationRequest struct {
@@ -51,6 +52,9 @@ func (h *Handler) resolveAuthenticationRequest(r *http.Request, payload []byte) 
 		} else if _, ok := canonicalHandoffID(saved.HandoffID); !ok {
 			return authenticationRequest{}, errors.New("invalid handoff continuation")
 		}
+		if saved.ProfileSubject != "" && (saved.ExpectedSubject != "" || saved.ParentSessionDigest != "") {
+			return authenticationRequest{}, errors.New("mixed login phase")
+		}
 		if saved.ExpectedSubject != "" || saved.ParentSessionDigest != "" {
 			peer, ok := h.resolvePeerIP(r)
 			if !ok || !saved.ForceMFA {
@@ -76,7 +80,7 @@ func (h *Handler) resolveAuthenticationRequest(r *http.Request, payload []byte) 
 }
 
 func (target authenticationRequest) acceptsSubject(subject string) bool {
-	return target.approval == nil || target.approval.ExpectedSubject == "" || target.approval.ExpectedSubject == subject
+	return target.approval == nil || target.approval.ProfileSubject == "" && (target.approval.ExpectedSubject == "" || target.approval.ExpectedSubject == subject)
 }
 
 func (h *Handler) consumeAuthenticationRequest(r *http.Request, target authenticationRequest, sessionToken, interactionDigest, subject, peerIP string, consume func(context.Context) (browser.AuthorizationInteraction, error)) (browser.AuthorizationInteraction, error) {
@@ -127,4 +131,12 @@ func (h *Handler) startApprovalReauthentication(w http.ResponseWriter, r *http.R
 	}
 	http.SetCookie(w, cookie)
 	h.renderApprovalLoginPage(w, r, payload, path, "Authenticate again with the same account to review this request. Signing in does not approve it.", interaction.Token, csrf, theme)
+}
+
+func (h *Handler) redirectApproval(w http.ResponseWriter, saved *approvalLoginInteraction) {
+	if saved.DeviceCode != nil {
+		h.deviceLoginRedirect(w, *saved.DeviceCode)
+	} else {
+		h.connectionHandoffRedirect(w, saved.HandoffID)
+	}
 }
