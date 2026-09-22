@@ -171,3 +171,35 @@ func TestOAuthConsumerEnvironmentIsolation(t *testing.T) {
 		t.Fatalf("child environment: %v: %s", err, output)
 	}
 }
+
+func TestOAuthConsumerIgnoresAmbientWorkspace(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":      "module example.test/consumer\n\ngo 1.24.0\n",
+		"consumer.go": "package consumer\n",
+		// If workspace discovery is enabled this missing module prevents build.
+		"go.work":     "go 1.24.0\n\nuse ./missing-module\n",
+		"go.work.sum": "preserve-user-workspace-checksums\n",
+	}
+	for name, data := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("GOWORK", filepath.Join(dir, "go.work"))
+	cmd := exec.CommandContext(t.Context(), "go", "test", "-mod=readonly", "-run=^$", ".")
+	cmd.Dir, cmd.Env = dir, oauthConsumerEnvironment("")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("isolated module build: %v: %s", err, output)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != len(files) {
+		t.Fatal("consumer tree entries changed")
+	}
+	for name, want := range files {
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || string(got) != want {
+			t.Fatalf("consumer file changed: %s", name)
+		}
+	}
+}
