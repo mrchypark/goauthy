@@ -12,6 +12,7 @@ import (
 )
 
 func TestTokenExchangeCustomCatalogGuardWithoutPrincipalResolver(t *testing.T) {
+	t.Parallel()
 	accessValue := json.RawMessage(`"catalog-v1"`)
 	server := customClaimsServer(t, false, &accessValue)
 	server.oidc.ResolvePrincipal = nil
@@ -31,6 +32,7 @@ func TestTokenExchangeCustomCatalogGuardWithoutPrincipalResolver(t *testing.T) {
 }
 
 func TestTokenExchangeCustomClaimsWithoutPrincipalResolverStillIssues(t *testing.T) {
+	t.Parallel()
 	accessValue := json.RawMessage(`"catalog-v1"`)
 	server := customClaimsServer(t, false, &accessValue)
 	server.oidc.ResolvePrincipal = nil
@@ -42,6 +44,7 @@ func TestTokenExchangeCustomClaimsWithoutPrincipalResolverStillIssues(t *testing
 }
 
 func TestTokenExchangePrincipalRevisionGuardWithResolver(t *testing.T) {
+	t.Parallel()
 	accessValue := json.RawMessage(`"catalog-v1"`)
 	server := customClaimsServer(t, false, &accessValue)
 	source := exchangeCatalogSource(t, server, "r")
@@ -60,6 +63,7 @@ func TestTokenExchangePrincipalRevisionGuardWithResolver(t *testing.T) {
 }
 
 func TestTokenExchangePrincipalRevisionGuardWithoutPrincipalResolver(t *testing.T) {
+	t.Parallel()
 	accessValue := json.RawMessage(`"catalog-v1"`)
 	server := customClaimsServer(t, false, &accessValue)
 	source := exchangeCatalogSource(t, server, "q")

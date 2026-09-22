@@ -20,6 +20,7 @@ import (
 )
 
 func TestDynamicDPoPPolicyOptionalBearerAndRequiredMissingProof(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	optional, err := server.store.dynamicClients.Create(context.Background(), dcr.CreateRequest{
 		ClientID: "dpop-policy-optional", GrantTypes: []string{"client_credentials"}, Scopes: []string{"goauthy.read"},
@@ -44,6 +45,7 @@ func TestDynamicDPoPPolicyOptionalBearerAndRequiredMissingProof(t *testing.T) {
 }
 
 func TestDynamicDPoPPolicyFalseToTrueClientCredentialsLeavesNoArtifact(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	client, err := server.store.dynamicClients.Create(context.Background(), dcr.CreateRequest{
 		ClientID: "dpop-policy-race", GrantTypes: []string{"client_credentials"}, Scopes: []string{"goauthy.read"},
@@ -65,6 +67,7 @@ func TestDynamicDPoPPolicyFalseToTrueClientCredentialsLeavesNoArtifact(t *testin
 }
 
 func TestDynamicDPoPPolicyRequiredDeviceMissingProofLeavesGrantUnclaimed(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	client, err := server.store.dynamicClients.Create(context.Background(), dcr.CreateRequest{
 		ClientID: "dpop-policy-device", GrantTypes: []string{DeviceGrantType}, Scopes: []string{"goauthy.read"},
@@ -89,6 +92,7 @@ func TestDynamicDPoPPolicyRequiredDeviceMissingProofLeavesGrantUnclaimed(t *test
 }
 
 func TestDynamicDPoPPolicyFalseToTrueAuthorizationCodeAndRefreshRemainUsable(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	client, err := server.store.dynamicClients.Create(context.Background(), dcr.CreateRequest{
 		ClientID: "dpop-policy-code", RedirectURIs: []string{"https://rp.example.test/callback"},
@@ -144,6 +148,7 @@ func TestDynamicDPoPPolicyFalseToTrueAuthorizationCodeAndRefreshRemainUsable(t *
 }
 
 func TestDynamicDPoPPolicyFalseToTrueDeviceGrantRemainsRetryable(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	client, err := server.store.dynamicClients.Create(context.Background(), dcr.CreateRequest{
 		ClientID: "dpop-policy-device-race", GrantTypes: []string{DeviceGrantType}, Scopes: []string{"goauthy.read"},

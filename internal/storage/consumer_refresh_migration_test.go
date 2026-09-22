@@ -7,8 +7,9 @@ import (
 )
 
 func TestMigrationV82ConsumerRefresh(t *testing.T) {
+	t.Parallel()
 	t.Run("fresh and replay default false", func(t *testing.T) {
-		db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "consumer-refresh-v82", DataDir: t.TempDir()})
+		db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "consumer-refresh-v82", DataDir: testDatabaseDir(t, "consumer-refresh-v82")})
 		if err != nil {
 			t.Fatal(err)
 		}

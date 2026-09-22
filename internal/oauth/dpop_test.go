@@ -19,6 +19,7 @@ import (
 )
 
 func TestDPoPAuthorizationCodeRefreshAndUserInfo(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	seedOAuthUser(t, db, "user-1")
 	server := userInfoTestServer(t, db, nil)
@@ -115,6 +116,7 @@ func TestDPoPAuthorizationCodeRefreshAndUserInfo(t *testing.T) {
 }
 
 func TestDPoPHeaderRejectsDuplicateAndOversizedValues(t *testing.T) {
+	t.Parallel()
 	request := httptest.NewRequest(http.MethodPost, "/oidc/token", nil)
 	request.Header.Add("DPoP", "one")
 	request.Header.Add("DPoP", "two")
@@ -129,6 +131,7 @@ func TestDPoPHeaderRejectsDuplicateAndOversizedValues(t *testing.T) {
 }
 
 func TestDPoPClientCredentials(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -161,6 +164,7 @@ func TestDPoPClientCredentials(t *testing.T) {
 }
 
 func TestDecodeRequestPreservesOnlyVerifiedDPoPCNF(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	source := fosite.NewRequest()
 	source.ID = "request-id"

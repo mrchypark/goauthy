@@ -7,6 +7,7 @@ import (
 )
 
 func TestSchemaV77APIKeyProviderRevocationAndReplay(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "api-key-provider-migration", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)

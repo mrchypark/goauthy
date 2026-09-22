@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/oidc"
-	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
 
 const bootstrapTestSecret = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz01"
 
 func TestParseBootstrapStrictAndPolicy(t *testing.T) {
+	t.Parallel()
 	valid := fmt.Sprintf(`[{"name":"runner","exp":2000000000,"secret":{"Plain":%q},"access":[{"group":"Clients","access_rights":["read"]}]}]`, bootstrapTestSecret)
 	tests := []struct {
 		name string
@@ -94,6 +94,7 @@ func TestParseBootstrapStrictAndPolicy(t *testing.T) {
 }
 
 func TestBootstrapFileNoOpAndAtomicPlainImport(t *testing.T) {
+	t.Parallel()
 	db := bootstrapTestDB(t, "bootstrap-atomic")
 	store, err := NewStore(db)
 	if err != nil {
@@ -187,6 +188,7 @@ func TestBootstrapFileNoOpAndAtomicPlainImport(t *testing.T) {
 }
 
 func TestBootstrapConcurrentSameFileIsAtomic(t *testing.T) {
+	t.Parallel()
 	db := bootstrapTestDB(t, "bootstrap-concurrent")
 	path := filepath.Join(t.TempDir(), "keys.json")
 	content := fmt.Sprintf(`[{"name":"concurrent","secret":{"Plain":%q},"access":[{"group":"Clients","access_rights":["read"]},{"group":"Roles","access_rights":["read"]}]}]`, bootstrapTestSecret)
@@ -222,20 +224,13 @@ func TestBootstrapConcurrentSameFileIsAtomic(t *testing.T) {
 }
 
 func TestBootstrapRequiresBeforeAckDurability(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	storeDir := t.TempDir()
-	db, err := rhiza.Open(ctx, rhiza.Config{
-		NodeID: "bootstrap-durability", DataDir: t.TempDir(),
+	db := openTestDBWithConfig(t, "bootstrap-durability", rhiza.Config{
 		ObjStoreProvider: rhiza.ObjectStoreProviderFilesystem, ObjStoreDir: storeDir,
 		ObjStoreDurability: rhiza.ObjectStoreDurabilityBeforeAck,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
 	store, err := NewStore(db)
 	if err != nil {
 		t.Fatal(err)
@@ -278,14 +273,7 @@ func TestBootstrapRequiresBeforeAckDurability(t *testing.T) {
 
 func bootstrapTestDB(t *testing.T, nodeID string) *rhiza.DB {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: nodeID, DataDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(context.Background(), db); err != nil {
-		t.Fatal(err)
-	}
+	db := openTestDB(t, nodeID)
 	return db
 }
 
@@ -300,6 +288,7 @@ func assertBootstrapCount(t *testing.T, db *rhiza.DB, want int64) {
 // GA-CONFIG-001: preflight validation tests for the bootstrap API-key file.
 
 func TestValidateBootstrapFileAcceptsValidPlainFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	valid := "[{\"name\":\"runner\",\"exp\":2000000000,\"secret\":{\"Plain\":\"" + bootstrapTestSecret + "\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]"
 	path := writeBootstrapTestFile(t, dir, "bootstrap.json", valid)
@@ -309,6 +298,7 @@ func TestValidateBootstrapFileAcceptsValidPlainFile(t *testing.T) {
 }
 
 func TestValidateBootstrapFileRejectsMissingFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nonexistent.json")
 	err := ValidateBootstrapFile(path, nil, false)
@@ -321,6 +311,7 @@ func TestValidateBootstrapFileRejectsMissingFile(t *testing.T) {
 }
 
 func TestValidateBootstrapFileRejectsMalformedJSON(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeBootstrapTestFile(t, dir, "bad.json", "not valid json")
 	err := ValidateBootstrapFile(path, nil, false)
@@ -333,6 +324,7 @@ func TestValidateBootstrapFileRejectsMalformedJSON(t *testing.T) {
 }
 
 func TestValidateBootstrapFileRejectsDuplicateNames(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	dup := "[{\"name\":\"dup\",\"secret\":{\"Plain\":\"" + bootstrapTestSecret + "\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]},{\"name\":\"dup\",\"secret\":{\"Plain\":\"" + bootstrapTestSecret + "\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]"
 	path := writeBootstrapTestFile(t, dir, "dup.json", dup)
@@ -346,6 +338,7 @@ func TestValidateBootstrapFileRejectsDuplicateNames(t *testing.T) {
 }
 
 func TestValidateBootstrapFileAcceptsEncryptedMode(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	enc := "[{\"name\":\"secret-key\",\"secret\":{\"Encrypted\":\"Y2lwaGVydGV4dA==\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]"
 	path := writeBootstrapTestFile(t, dir, "encrypted.json", enc)
@@ -358,6 +351,7 @@ func TestValidateBootstrapFileAcceptsEncryptedMode(t *testing.T) {
 // deferred and the parser must keep validating the rest of the document. A
 // duplicate name behind a deferred entry used to be skipped entirely.
 func TestValidateBootstrapFileValidatesEntriesAfterDeferredEncrypted(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	entry := "{\"name\":\"dup\",\"secret\":{\"Encrypted\":\"Y2lwaGVydGV4dA==\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}"
 	path := writeBootstrapTestFile(t, dir, "deferred-dup.json", "["+entry+","+entry+"]")
@@ -375,6 +369,7 @@ func TestValidateBootstrapFileValidatesEntriesAfterDeferredEncrypted(t *testing.
 // mode, so the preflight must reject it instead of letting `config check` pass
 // a file that deterministically fails startup after Rhiza is opened.
 func TestValidateBootstrapFileRejectsMalformedEncryptedSecret(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	bad := "[{\"name\":\"secret-key\",\"secret\":{\"Encrypted\":\"not-base64!!\"}}]"
 	path := writeBootstrapTestFile(t, dir, "bad-encrypted.json", bad)
@@ -388,6 +383,7 @@ func TestValidateBootstrapFileRejectsMalformedEncryptedSecret(t *testing.T) {
 }
 
 func TestValidateBootstrapFileAcceptsGenerateMode(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	gen := "[{\"name\":\"gen-key\",\"secret\":\"generate\",\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]"
 	path := writeBootstrapTestFile(t, dir, "generate.json", gen)
@@ -405,6 +401,7 @@ func TestValidateBootstrapFileAcceptsGenerateMode(t *testing.T) {
 // The store rejects an oversized batch only after Rhiza is open, by which point
 // a generated-secret artifact may already be on disk.
 func TestValidateBootstrapFileEnforcesStatementBudget(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	entry := func(name string) string {
 		return "{\"name\":\"" + name + "\",\"secret\":{\"Plain\":\"" + bootstrapTestSecret + "\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}"
@@ -430,6 +427,7 @@ func TestValidateBootstrapFileEnforcesStatementBudget(t *testing.T) {
 }
 
 func TestValidateBootstrapFileAcceptsEmptyArray(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := writeBootstrapTestFile(t, dir, "empty.json", "[]")
 	if err := ValidateBootstrapFile(path, nil, false); err != nil {
@@ -441,6 +439,7 @@ func TestValidateBootstrapFileAcceptsEmptyArray(t *testing.T) {
 // generated-secret path, which requires a Generate entry. A plain-only document
 // used to pass the preflight and then fail startup after Rhiza was opened.
 func TestValidateBootstrapFileRejectsPlainOnlyDocumentWithGeneratedExport(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	plain := "[{\"name\":\"runner\",\"secret\":{\"Plain\":\"" + bootstrapTestSecret + "\"},\"access\":[{\"group\":\"Clients\",\"access_rights\":[\"read\"]}]}]"
 	path := writeBootstrapTestFile(t, dir, "plain-only.json", plain)
@@ -464,6 +463,7 @@ func TestValidateBootstrapFileRejectsPlainOnlyDocumentWithGeneratedExport(t *tes
 // the plain path exceeds it on the shared path. The preflight has to apply the
 // budget of the path startup actually selects.
 func TestValidateBootstrapFileBudgetMatchesSelectedPath(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	// Two statements per key plus one per access right. 20 generated keys with
 	// two extra rights are 62 key statements, and the shared command adds its own

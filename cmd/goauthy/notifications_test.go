@@ -10,6 +10,7 @@ import (
 )
 
 func TestNotificationsFromEnv(t *testing.T) {
+	t.Parallel()
 	env := func(k string) string {
 		switch k {
 		case "GOAUTHY_EVENT_NOTIFICATION_TARGETS":
@@ -36,6 +37,7 @@ func TestNotificationsFromEnv(t *testing.T) {
 }
 
 func TestNotificationsEmailAndFailClosedConfiguration(t *testing.T) {
+	t.Parallel()
 	base := map[string]string{
 		"GOAUTHY_EVENT_NOTIFICATION_TARGETS": "email",
 		"GOAUTHY_EVENT_EMAIL_TO":             "events@example.test",
@@ -82,6 +84,7 @@ func TestNotificationsEmailAndFailClosedConfiguration(t *testing.T) {
 }
 
 func TestNotificationsAliasEnvVars(t *testing.T) {
+	t.Parallel()
 	env := func(k string) string {
 		switch k {
 		case "GOAUTHY_EVENT_NOTIFICATION_TARGETS":
@@ -117,6 +120,7 @@ func TestNotificationsAliasEnvVars(t *testing.T) {
 }
 
 func TestNotificationLoopCancellationDoesNotStep(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	called := false
@@ -131,6 +135,7 @@ func TestNotificationLoopCancellationDoesNotStep(t *testing.T) {
 // must fail at startup instead of persisting a generation no later
 // configuration can exceed.
 func TestNotificationGenerationFromEnv(t *testing.T) {
+	t.Parallel()
 	withGeneration := func(raw string) func(string) string {
 		return func(k string) string {
 			if k == "GOAUTHY_EVENT_NOTIFICATION_CONFIG_GENERATION" {

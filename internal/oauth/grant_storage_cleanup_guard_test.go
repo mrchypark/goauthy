@@ -11,6 +11,7 @@ import (
 )
 
 func TestClientCredentialsCleanupDoesNotMaskGuardFailure(t *testing.T) {
+	t.Parallel()
 	server, db := clientCredentialsClaimsServer(t, `{"department":"ops"}`, false)
 
 	// Seed expired access tokens and orphaned token requests so the cleanup

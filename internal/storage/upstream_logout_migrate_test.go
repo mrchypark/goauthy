@@ -7,7 +7,8 @@ import (
 )
 
 func TestMigrationV84UpstreamLogoutReceipts(t *testing.T) {
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "upstream-logout-v84", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "upstream-logout-v84", DataDir: testDatabaseDir(t, "upstream-logout-v84")})
 	if err != nil {
 		t.Fatal(err)
 	}

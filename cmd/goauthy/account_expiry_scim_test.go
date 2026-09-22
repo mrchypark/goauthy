@@ -13,8 +13,9 @@ import (
 )
 
 func TestAccountExpirySCIMProjectionDisablesExpiredRetainedUser(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-expiry-scim-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-expiry-scim-test", DataDir: migratedDataDir(t, "cmd-expiry-scim-test")})
 	if err != nil {
 		t.Fatal(err)
 	}

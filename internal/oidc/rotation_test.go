@@ -13,6 +13,7 @@ import (
 )
 
 func TestCleanupRetiredSigningKeysSkipsNoopMutation(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	cutoff := time.Unix(1_800_000_000, 0).UTC()
 	if err := CleanupRetiredSigningKeys(context.Background(), db, cutoff); err != nil {
@@ -27,6 +28,7 @@ func TestCleanupRetiredSigningKeysSkipsNoopMutation(t *testing.T) {
 }
 
 func TestActivationRequestIDBindsMutationInputs(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(1_800_000_000, 123_000_000).UTC()
 	retireAfter := now.Add(MinimumSigningKeyRetirement)
 	base := activationRequestID("active-1", "pending-1", retireAfter, now)
@@ -49,6 +51,7 @@ func TestActivationRequestIDBindsMutationInputs(t *testing.T) {
 }
 
 func TestSigningKeyPrepublicationPreventsCachedJWKSBreakage(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	keyring := testKeyring(t, "master-1")
 	issuer := "https://id.example.com"
@@ -120,6 +123,7 @@ func TestSigningKeyPrepublicationPreventsCachedJWKSBreakage(t *testing.T) {
 }
 
 func TestRetiringKeyCoversMaximumSignedAccessTokenLifetime(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	keyring := testKeyring(t, "master-1")
 	issuer := "https://id.example.com"
@@ -163,6 +167,7 @@ func TestRetiringKeyCoversMaximumSignedAccessTokenLifetime(t *testing.T) {
 }
 
 func TestSigningKeyRotationRejectsUnsafeRetentionAndConcurrentPrepareConverges(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	keyring := testKeyring(t, "master-1")
 	issuer := "https://id.example.com"
@@ -198,6 +203,7 @@ func TestSigningKeyRotationRejectsUnsafeRetentionAndConcurrentPrepareConverges(t
 }
 
 func TestConcurrentSigningKeyActivationWithSameInputsConverges(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	keyring := testKeyring(t, "master-1")
 	issuer := "https://id.example.com"
@@ -236,6 +242,7 @@ func TestConcurrentSigningKeyActivationWithSameInputsConverges(t *testing.T) {
 }
 
 func TestSigningKeyActivationRejectsTamperedPendingEnvelope(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	keyring := testKeyring(t, "master-1")
 	issuer := "https://id.example.com"

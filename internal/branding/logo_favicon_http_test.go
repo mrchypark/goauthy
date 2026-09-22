@@ -15,6 +15,7 @@ import (
 )
 
 func TestClientLogoHandlerFaviconReadsSchema94CopyAndHasNoFallback(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientLogoStore(db)
 	if err != nil {
@@ -60,6 +61,7 @@ func TestClientLogoHandlerFaviconReadsSchema94CopyAndHasNoFallback(t *testing.T)
 }
 
 func TestClientLogoHandlerFaviconProcessesPNGJPEGAndSVG(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name        string
 		contentType string
@@ -123,6 +125,7 @@ func TestClientLogoHandlerFaviconProcessesPNGJPEGAndSVG(t *testing.T) {
 }
 
 func TestClientLogoHandlerFaviconDeleteAndDeniedMutation(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewClientLogoStore(db)
 	if err != nil {

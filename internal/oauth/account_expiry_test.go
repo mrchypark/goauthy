@@ -11,6 +11,7 @@ import (
 )
 
 func TestAccountDeadlineClampDeterministic(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(100, 0).UTC()
 	for _, tc := range []struct {
 		name     string
@@ -53,6 +54,7 @@ func TestAccountDeadlineClampDeterministic(t *testing.T) {
 }
 
 func TestAccountExpiryCommitClockAndSnapshot(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"unchanged", "shorter future", "NULL to finite", "clock reaches deadline", "disabled", "deleted"} {
 		t.Run(name, func(t *testing.T) {
 			db := oauthTestDB(t)
@@ -129,6 +131,7 @@ func TestAccountExpiryCommitClockAndSnapshot(t *testing.T) {
 }
 
 func TestAccountExpiryResponseRecheck(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	now := time.Unix(1_700_000_000, 0).UTC()

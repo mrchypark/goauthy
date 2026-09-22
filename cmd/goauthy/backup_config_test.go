@@ -19,6 +19,7 @@ import (
 )
 
 func TestScheduledBackupConfigDisabledDoesNotReadFiles(t *testing.T) {
+	t.Parallel()
 	config, err := scheduledBackupFromEnv(func(name string) string {
 		if name != "GOAUTHY_BACKUP_ENABLED" {
 			t.Fatalf("disabled configuration read %s", name)
@@ -31,6 +32,7 @@ func TestScheduledBackupConfigDisabledDoesNotReadFiles(t *testing.T) {
 }
 
 func TestScheduledBackupConfigRejectsInvalidValues(t *testing.T) {
+	t.Parallel()
 	for name, value := range map[string]string{
 		"GOAUTHY_BACKUP_ENABLED":          "maybe",
 		"GOAUTHY_BACKUP_RETENTION_POLICY": "unknown",
@@ -52,6 +54,7 @@ func TestScheduledBackupConfigRejectsInvalidValues(t *testing.T) {
 }
 
 func TestScheduledBackupConfigRejectsMissingAndOverlappingLocations(t *testing.T) {
+	t.Parallel()
 	for name := range map[string]struct{}{
 		"GOAUTHY_BACKUP_CATALOG_PREFIX":   {},
 		"GOAUTHY_BACKUP_WORK_DIR":         {},
@@ -78,6 +81,7 @@ func TestScheduledBackupConfigRejectsMissingAndOverlappingLocations(t *testing.T
 }
 
 func TestScheduledBackupConfigLoadsNativeKeysAndDefaults(t *testing.T) {
+	t.Parallel()
 	env, source := scheduledTestConfigKeys(t)
 	config, err := scheduledBackupFromEnv(scheduledTestEnv(env), source)
 	if err != nil {
@@ -95,6 +99,7 @@ func TestScheduledBackupConfigLoadsNativeKeysAndDefaults(t *testing.T) {
 }
 
 func TestScheduledBackupConfigDestinationDoesNotInheritSourceCredentials(t *testing.T) {
+	t.Parallel()
 	env, source := scheduledTestConfigKeys(t)
 	env["GOAUTHY_BACKUP_OBJECT_STORE_PROVIDER"] = "s3"
 	env["GOAUTHY_BACKUP_OBJECT_STORE_BUCKET"] = "recovery"
@@ -108,6 +113,7 @@ func TestScheduledBackupConfigDestinationDoesNotInheritSourceCredentials(t *test
 }
 
 func TestScheduledBackupPrivateWorkDirectoryRejectsBeforeObjectStore(t *testing.T) {
+	t.Parallel()
 	work := t.TempDir()
 	if err := os.Chmod(work, 0755); err != nil {
 		t.Fatal(err)
@@ -158,6 +164,7 @@ func scheduledTestEnv(values map[string]string) func(string) string {
 }
 
 func TestScheduledBackupConfigScopeSurvivesCredentialAndScheduleChanges(t *testing.T) {
+	t.Parallel()
 	env, source := scheduledTestConfigKeys(t)
 	first, err := scheduledBackupFromEnv(scheduledTestEnv(env), source)
 	if err != nil {
@@ -184,6 +191,7 @@ func TestScheduledBackupConfigScopeSurvivesCredentialAndScheduleChanges(t *testi
 }
 
 func TestScheduledBackupTrustRotationConfig(t *testing.T) {
+	t.Parallel()
 	env, source := scheduledTestConfigKeys(t)
 	original, err := scheduledBackupFromEnv(scheduledTestEnv(env), source)
 	if err != nil {
@@ -233,6 +241,7 @@ func TestScheduledBackupTrustRotationConfig(t *testing.T) {
 }
 
 func TestScheduledBackupRetentionPolicy(t *testing.T) {
+	t.Parallel()
 	env, source := scheduledTestConfigKeys(t)
 	original, err := scheduledBackupFromEnv(scheduledTestEnv(env), source)
 	if err != nil || original.retentionPolicy != backup.RetainLatest {

@@ -18,7 +18,7 @@ import (
 
 func providerLogoTestDB(t *testing.T) (*rhiza.DB, *apikey.Store) {
 	t.Helper()
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "provider-logo-route-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "provider-logo-route-test", DataDir: migratedDataDir(t, "provider-logo-route-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,6 +86,7 @@ func providerLogoMultipartUpload(t *testing.T, path, contentType string, data []
 }
 
 func TestProviderLogoRouteGETMissingReturns404(t *testing.T) {
+	t.Parallel()
 	db, keys := providerLogoTestDB(t)
 	store, err := branding.NewProviderLogoStore(db)
 	if err != nil {
@@ -105,6 +106,7 @@ func TestProviderLogoRouteGETMissingReturns404(t *testing.T) {
 }
 
 func TestProviderLogoRoutePUTUnauthorizedReturns401(t *testing.T) {
+	t.Parallel()
 	db, keys := providerLogoTestDB(t)
 	store, err := branding.NewProviderLogoStore(db)
 	if err != nil {
@@ -124,6 +126,7 @@ func TestProviderLogoRoutePUTUnauthorizedReturns401(t *testing.T) {
 }
 
 func TestProviderLogoRouteDELETEReturns401WithoutAuth(t *testing.T) {
+	t.Parallel()
 	db, keys := providerLogoTestDB(t)
 	store, err := branding.NewProviderLogoStore(db)
 	if err != nil {
@@ -143,6 +146,7 @@ func TestProviderLogoRouteDELETEReturns401WithoutAuth(t *testing.T) {
 }
 
 func TestProviderLogoRouteAuthorizedUploadAndGet(t *testing.T) {
+	t.Parallel()
 	db, keys := providerLogoTestDB(t)
 	ctx := t.Context()
 	store, err := branding.NewProviderLogoStore(db)
@@ -186,6 +190,7 @@ func TestProviderLogoRouteAuthorizedUploadAndGet(t *testing.T) {
 // TestProviderLogoRouteAllMethodsAvailable verifies GET/PUT/DELETE are all
 // registered unconditionally by mountProviderLogoRoutes.
 func TestProviderLogoRouteAllMethodsAvailable(t *testing.T) {
+	t.Parallel()
 	db, keys := providerLogoTestDB(t)
 	store, err := branding.NewProviderLogoStore(db)
 	if err != nil {
@@ -211,6 +216,7 @@ func TestProviderLogoRouteAllMethodsAvailable(t *testing.T) {
 // TestProviderLogoAndLinkDeleteRoutesCoexist verifies that DELETE /img and
 // DELETE /link are distinct routes that select their intended handlers.
 func TestProviderLogoAndLinkDeleteRoutesCoexist(t *testing.T) {
+	t.Parallel()
 	db, keys := providerLogoTestDB(t)
 	store, err := branding.NewProviderLogoStore(db)
 	if err != nil {
@@ -255,6 +261,7 @@ func TestProviderLogoAndLinkDeleteRoutesCoexist(t *testing.T) {
 // runtime, all three logo methods are mounted. This is the non-nil runtime
 // counterpart; the gate was removed so the behavior is identical.
 func TestProviderLogoRouteMuxNilRuntimeMountAll(t *testing.T) {
+	t.Parallel()
 	db, keys := providerLogoTestDB(t)
 	store, err := branding.NewProviderLogoStore(db)
 	if err != nil {

@@ -30,6 +30,7 @@ const (
 // lookup cannot downgrade a force-MFA client to "MFA not required", and final
 // issuance must refuse a password-only session for a force-MFA client revision.
 func TestManagedForceMFAPolicyUsesAuthorizationSnapshot(t *testing.T) {
+	t.Parallel()
 	for _, lookup := range []struct {
 		name        string
 		unavailable func(*testing.T, *Server)

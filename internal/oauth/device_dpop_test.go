@@ -16,6 +16,7 @@ import (
 )
 
 func TestDPoPDeviceGrantBindsAccessAndRefresh(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := userInfoTestServer(t, db, nil)
 	seedDeviceUser(t, db, "device-dpop-user", nil)

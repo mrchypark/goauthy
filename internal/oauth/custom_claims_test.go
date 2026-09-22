@@ -17,6 +17,7 @@ import (
 )
 
 func TestCustomClaimsAreScopedAndSurfaceSpecific(t *testing.T) {
+	t.Parallel()
 	accessValue := json.RawMessage(`"access-v1"`)
 	server := customClaimsServer(t, false, &accessValue)
 	without := decodeOIDCToken(t, postToken(server, codeTokenForm(t, server, "a", "openid goauthy.read offline_access")))
@@ -41,6 +42,7 @@ func TestCustomClaimsAreScopedAndSurfaceSpecific(t *testing.T) {
 }
 
 func TestCustomClaimRootCollisionFailsBeforeArtifacts(t *testing.T) {
+	t.Parallel()
 	accessValue := json.RawMessage(`"access-v1"`)
 	server := customClaimsServer(t, true, &accessValue)
 	sid := oidcTestSessionID(3)
@@ -56,6 +58,7 @@ func TestCustomClaimRootCollisionFailsBeforeArtifacts(t *testing.T) {
 }
 
 func TestCustomClaimsCanMixNestedAndRootScopes(t *testing.T) {
+	t.Parallel()
 	accessValue := json.RawMessage(`"unused"`)
 	server := customClaimsServer(t, false, &accessValue)
 	server.oidc.ResolveCustomClaims = func(ctx context.Context, _ string, granted []string) (claims.Resolved, error) {
@@ -87,6 +90,7 @@ func TestCustomClaimsCanMixNestedAndRootScopes(t *testing.T) {
 }
 
 func TestCustomUserScopesAreRejectedOutsideAuthorizationCodeAndRefresh(t *testing.T) {
+	t.Parallel()
 	accessValue := json.RawMessage(`"access-v1"`)
 	server := customClaimsServer(t, false, &accessValue)
 	for name, form := range map[string]url.Values{
@@ -112,6 +116,7 @@ func TestCustomUserScopesAreRejectedOutsideAuthorizationCodeAndRefresh(t *testin
 }
 
 func TestCustomClaimCatalogAndPrincipalRacesLeaveNoArtifacts(t *testing.T) {
+	t.Parallel()
 	for name, mutation := range map[string]string{
 		"catalog":   `UPDATE claims_catalog SET revision=revision+1 WHERE id=1`,
 		"principal": `UPDATE rbac_principal_versions SET revision=revision+1 WHERE subject='user-1'`,
@@ -135,6 +140,7 @@ func TestCustomClaimCatalogAndPrincipalRacesLeaveNoArtifacts(t *testing.T) {
 }
 
 func TestCustomClaimRefreshCatalogAndPrincipalRacesLeaveNoArtifacts(t *testing.T) {
+	t.Parallel()
 	for name, mutation := range map[string]string{
 		"catalog":   `UPDATE claims_catalog SET revision=revision+1 WHERE id=1`,
 		"principal": `UPDATE rbac_principal_versions SET revision=revision+1 WHERE subject='user-1'`,

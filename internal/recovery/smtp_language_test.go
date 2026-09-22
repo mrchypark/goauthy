@@ -13,6 +13,7 @@ import (
 )
 
 func TestSMTPSenderLanguageCatalogRenderedSubjects(t *testing.T) {
+	t.Parallel()
 	s, err := NewSMTPSender(SMTPConfig{Host: "smtp.example.test", Port: 587, From: "support@example.test", Timeout: time.Second})
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +78,7 @@ func TestSMTPSenderLanguageCatalogRenderedSubjects(t *testing.T) {
 }
 
 func TestSMTPSenderLanguageFallbackOverrideAndReject(t *testing.T) {
+	t.Parallel()
 	config := SMTPConfig{Host: "smtp.example.test", Port: 587, From: "support@example.test", Timeout: time.Second, Templates: defaultEmailTemplates()}
 	copyFor := func(label string) EmailTemplate {
 		return EmailTemplate{Subject: label + " subject", Header: label + " header", Text: label + " body"}

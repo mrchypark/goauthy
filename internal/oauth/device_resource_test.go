@@ -20,6 +20,7 @@ import (
 )
 
 func TestManagedDeviceResourceAudienceHTTP(t *testing.T) {
+	t.Parallel()
 	const audience = resourceAuthorizationAudience
 	const defaultAudience = "https://default-device.example.test/api"
 	db := oauthTestDB(t)
@@ -191,6 +192,7 @@ func TestManagedDeviceResourceAudienceHTTP(t *testing.T) {
 }
 
 func TestDeviceResourceURLBoundary(t *testing.T) {
+	t.Parallel()
 	for _, value := range []string{"https://resource.example.test?", "https://resource.example.test#", "https://:443", "https://resource.example.test/a b", "https://resource.example.test/a\u00a0b"} {
 		if validResourceURL(value) {
 			t.Fatalf("invalid resource accepted: %q", value)
@@ -202,6 +204,7 @@ func TestDeviceResourceURLBoundary(t *testing.T) {
 }
 
 func TestAuthorizeDeviceClientAllowsPlatformPermissionAndRejectsUnknownCustomScope(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	server.oidc = &OIDCConfig{CustomScopeExists: claims.NewStore(db).ScopeExists}
@@ -218,6 +221,7 @@ func TestAuthorizeDeviceClientAllowsPlatformPermissionAndRejectsUnknownCustomSco
 }
 
 func TestDeviceResourceCatalogRaceLeavesNoArtifacts(t *testing.T) {
+	t.Parallel()
 	value := json.RawMessage(`"unused"`)
 	server := customClaimsServer(t, false, &value)
 	server.oidc.ResolveCustomClaims = claims.NewStore(server.store.db).Resolve

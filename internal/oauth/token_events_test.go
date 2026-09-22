@@ -14,6 +14,7 @@ import (
 )
 
 func TestTokenIssuedGrantSelection(t *testing.T) {
+	t.Parallel()
 	failure := errors.New("event sink unavailable")
 	for _, tc := range []struct {
 		flow, emitted string
@@ -49,6 +50,7 @@ func TestTokenIssuedGrantSelection(t *testing.T) {
 }
 
 func TestTokenIssuedFailureHTTP(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	s, err := NewServer(t.Context(), db, randomSecret(t), testClientID, testClientSecret, testRedirectURI)
 	if err != nil {
@@ -91,6 +93,7 @@ func TestTokenIssuedFailureHTTP(t *testing.T) {
 }
 
 func TestTokenIssuedDeviceFailureHTTP(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	seedDeviceUser(t, db, "device-event-user", nil)

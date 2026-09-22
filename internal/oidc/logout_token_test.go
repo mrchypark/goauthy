@@ -10,6 +10,7 @@ import (
 )
 
 func TestLogoutTokenSignsAndVerifies(t *testing.T) {
+	t.Parallel()
 	key := testTokenSigningKey(t)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	want := testLogoutTokenClaims(now, time.Minute)
@@ -35,6 +36,7 @@ func TestLogoutTokenSignsAndVerifies(t *testing.T) {
 }
 
 func TestLogoutTokenRoundTripsSubjectAndSessionShapes(t *testing.T) {
+	t.Parallel()
 	key := testTokenSigningKey(t)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	sid := testLogoutTokenClaims(now, time.Minute).SessionID
@@ -55,6 +57,7 @@ func TestLogoutTokenRoundTripsSubjectAndSessionShapes(t *testing.T) {
 }
 
 func TestLogoutTokenRejectsInvalidClaimsSignatureAndTime(t *testing.T) {
+	t.Parallel()
 	key := testTokenSigningKey(t)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	claims := testLogoutTokenClaims(now, time.Minute)
@@ -75,6 +78,7 @@ func TestLogoutTokenRejectsInvalidClaimsSignatureAndTime(t *testing.T) {
 		{"issued in future", claims.Issuer, claims.Audience, now.Add(-time.Second), keys},
 	} {
 		t.Run(check.name, func(t *testing.T) {
+			t.Parallel()
 			if _, err := VerifyLogoutToken(compact, check.keyset, check.issuer, check.audience, check.at); err == nil {
 				t.Fatal("invalid logout token accepted")
 			}
@@ -105,6 +109,7 @@ func TestLogoutTokenRejectsInvalidClaimsSignatureAndTime(t *testing.T) {
 }
 
 func TestLogoutTokenRejectsNonceAndMalformedEvents(t *testing.T) {
+	t.Parallel()
 	key := testTokenSigningKey(t)
 	now := time.Unix(1_800_000_000, 0).UTC()
 	claims := testLogoutTokenClaims(now, time.Minute)

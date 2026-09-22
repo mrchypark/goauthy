@@ -25,6 +25,7 @@ import (
 )
 
 func TestFedCMConfigIsBoundedAndExplicit(t *testing.T) {
+	t.Parallel()
 	path := writeFedCMConfig(t, `{"client_origins":{"rp-client":"https://rp.example.test"},"login_url":"/auth/login"}`)
 	config, err := loadFedCMConfig(path)
 	if err != nil || config.LoginURL != "/auth/login" || config.ClientOrigins["rp-client"] != "https://rp.example.test" {
@@ -47,6 +48,7 @@ func TestFedCMConfigIsBoundedAndExplicit(t *testing.T) {
 }
 
 func TestFedCMLoginURLRejectsUnsafePaths(t *testing.T) {
+	t.Parallel()
 	for _, value := range []string{"", "https://evil.example.test/login", "//evil.example.test/login", "/login?next=x", "/login#fragment", "/login/../account", "/login//account", "/login%2faccount"} {
 		if err := validateFedCMLoginURL(value); err == nil {
 			t.Errorf("validateFedCMLoginURL(%q) succeeded", value)
@@ -55,6 +57,7 @@ func TestFedCMLoginURLRejectsUnsafePaths(t *testing.T) {
 }
 
 func TestFedCMLandingPathUsesExactAllowlist(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{
 		"/oidc/token", "/oidc/logout", "/oidc/userinfo", "/oidc/device", "/oidc/device/verify",
 		"/auth/v1/roles", "/auth/v1/groups", "/auth/v1/scopes", "/auth/v1/api_keys", "/account/password",
@@ -73,6 +76,7 @@ func TestFedCMLandingPathUsesExactAllowlist(t *testing.T) {
 }
 
 func TestFedCMAwareLoginRejectsOversizedBodiesBeforeLegacy(t *testing.T) {
+	t.Parallel()
 	var legacyCalls int
 	legacy := func(w http.ResponseWriter, r *http.Request) {
 		legacyCalls++
@@ -90,6 +94,7 @@ func TestFedCMAwareLoginRejectsOversizedBodiesBeforeLegacy(t *testing.T) {
 }
 
 func TestFedCMAwareLoginPreservesBoundedLegacyBody(t *testing.T) {
+	t.Parallel()
 	want := strings.Repeat("a", fedCMLandingBodyLimit)
 	var got []byte
 	legacy := func(w http.ResponseWriter, r *http.Request) {
@@ -106,8 +111,9 @@ func TestFedCMAwareLoginPreservesBoundedLegacyBody(t *testing.T) {
 }
 
 func TestFedCMRuntimeUsesOnlyBoundSessionCookieAndActiveProfile(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "fedcm-runtime-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "fedcm-runtime-test", DataDir: migratedDataDir(t, "fedcm-runtime-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,8 +173,9 @@ func TestFedCMRuntimeUsesOnlyBoundSessionCookieAndActiveProfile(t *testing.T) {
 }
 
 func TestFedCMRuntimeRejectsLegacyEmptyPeerSession(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "fedcm-legacy-peer-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "fedcm-legacy-peer-test", DataDir: migratedDataDir(t, "fedcm-legacy-peer-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,6 +210,7 @@ func TestFedCMRuntimeRejectsLegacyEmptyPeerSession(t *testing.T) {
 }
 
 func TestFedCMRuntimeDisabledWhenConfigUnset(t *testing.T) {
+	t.Parallel()
 	runtime, err := fedcmRuntimeFromEnv(func(string) string { return "" }, nil, nil, "https://issuer.example.test", nil, nil)
 	if err != nil || runtime != nil {
 		t.Fatalf("runtime=%#v err=%v", runtime, err)
@@ -213,8 +221,9 @@ func TestFedCMRuntimeDisabledWhenConfigUnset(t *testing.T) {
 // assertion must carry the session's authentication event as auth_time while
 // the request time stays iat.
 func TestFedCMAssertionCarriesSessionAuthenticationTime(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "fedcm-auth-time-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "fedcm-auth-time-test", DataDir: migratedDataDir(t, "fedcm-auth-time-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +308,7 @@ func writeFedCMConfig(t *testing.T, content string) string {
 
 func mustFedCMHash(t *testing.T, password string) string {
 	t.Helper()
-	hash, err := credential.Hash([]byte(password))
+	hash, err := testHash(context.Background(), []byte(password))
 	if err != nil {
 		t.Fatal(err)
 	}

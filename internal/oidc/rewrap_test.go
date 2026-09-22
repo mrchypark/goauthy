@@ -15,6 +15,7 @@ import (
 )
 
 func TestRewrapSigningKeyEnvelopeBatchRewrapsAllStates(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	issuer := "https://id.example.com"
 	now := time.Unix(1_800_000_000, 0).UTC()
@@ -50,6 +51,7 @@ func TestRewrapSigningKeyEnvelopeBatchRewrapsAllStates(t *testing.T) {
 }
 
 func TestRewrapSigningKeyEnvelopeBatchCursorIsBounded(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	issuer := "https://id.example.com"
 	now := time.Unix(1_800_000_000, 0).UTC()
@@ -79,6 +81,7 @@ func TestRewrapSigningKeyEnvelopeBatchCursorIsBounded(t *testing.T) {
 }
 
 func TestRewrapSigningKeyEnvelopeBatchTamperHasNoPartialMutation(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	issuer := "https://id.example.com"
 	now := time.Unix(1_800_000_000, 0).UTC()
@@ -117,6 +120,7 @@ func TestRewrapSigningKeyEnvelopeBatchTamperHasNoPartialMutation(t *testing.T) {
 }
 
 func TestRewrapSigningKeyEnvelopeBatchConcurrentWorkersConverge(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	issuer := "https://id.example.com"
 	now := time.Unix(1_800_000_000, 0).UTC()

@@ -11,6 +11,7 @@ import (
 )
 
 func TestAuthorizeConnectionHandoffReturnsOwnerRequesterAndCurrentGuard(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	s := resourceAuthorizationServer(t, db, randomSecret(t))
 	token := issueResourceToken(t, s, "goauthy.connections.write")
@@ -29,6 +30,7 @@ func TestAuthorizeConnectionHandoffReturnsOwnerRequesterAndCurrentGuard(t *testi
 }
 
 func TestAuthorizeConnectionHandoffRejectsInvalidCredentials(t *testing.T) {
+	t.Parallel()
 	s := resourceAuthorizationServer(t, oauthTestDB(t), randomSecret(t))
 	write := issueResourceToken(t, s, "goauthy.connections.write")
 	read := issueResourceToken(t, s, "goauthy.connections.read")

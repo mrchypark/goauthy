@@ -10,6 +10,7 @@ import (
 )
 
 func TestTokenExchangeUsesSubjectScopesWithoutExchangerLoginPolicy(t *testing.T) {
+	t.Parallel()
 	server, db := crossClientExchangeServer(t)
 	seedCrossExchangeManagedClient(t, db, "scope-exchanger", "scope-exchanger-secret", true, []string{TokenExchangeGrantType}, nil, nil, 1)
 	source := decodeToken(t, postToken(server, url.Values{"grant_type": {"authorization_code"}, "code": {issueExchangeCodeFor(t, server, "user-1", "goauthy.read groups")}, "redirect_uri": {testRedirectURI}, "code_verifier": {strings.Repeat("x", 43)}}))

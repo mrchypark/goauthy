@@ -16,6 +16,7 @@ import (
 // machine-only: mapping exposes a client ID without synthesizing an end-user
 // principal.
 func TestTokenExchangeMachineSubjectMapping(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		mapSub bool
@@ -81,6 +82,7 @@ func TestTokenExchangeMachineSubjectMapping(t *testing.T) {
 }
 
 func TestMachineExchangeRetainsCollidingUserAncestorGuard(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	server.oidc.ClientCredentialsMapSub = true
 	machine := decodeToken(t, postToken(server, url.Values{"grant_type": {"client_credentials"}, "scope": {"goauthy.read"}}))
@@ -117,6 +119,7 @@ func TestMachineExchangeRetainsCollidingUserAncestorGuard(t *testing.T) {
 }
 
 func TestMachineAccountMarkersFailClosed(t *testing.T) {
+	t.Parallel()
 	for _, extra := range []map[string]any{
 		{},
 		{machineSubjectExtra: true},

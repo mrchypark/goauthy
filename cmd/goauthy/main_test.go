@@ -43,6 +43,7 @@ import (
 )
 
 func TestServerWriteTimeoutCoversInitialLoginFailureDelay(t *testing.T) {
+	t.Parallel()
 	maximumUnblockedDelay := loginpolicy.Delay(loginpolicy.Status{Failures: 6, Mean: 30 * time.Second}, 0)
 	if serverWriteTimeout <= maximumUnblockedDelay {
 		t.Fatalf("write timeout %s must exceed login delay %s", serverWriteTimeout, maximumUnblockedDelay)
@@ -50,7 +51,8 @@ func TestServerWriteTimeoutCoversInitialLoginFailureDelay(t *testing.T) {
 }
 
 func TestHealthEndpoints(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: migratedDataDir(t, "test-1")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,6 +76,7 @@ func TestHealthEndpoints(t *testing.T) {
 }
 
 func TestDCRProductionMuxMountsDelete(t *testing.T) {
+	t.Parallel()
 	called := false
 	mux := http.NewServeMux()
 	mountDCRRoutes(mux, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,6 +92,7 @@ func TestDCRProductionMuxMountsDelete(t *testing.T) {
 }
 
 func TestGeoblockConfigAcceptsHeaderOrDatabase(t *testing.T) {
+	t.Parallel()
 	t.Run("location database without admission", func(t *testing.T) {
 		config, err := geoblockConfigFromEnv(func(name string) string {
 			if name == "GOAUTHY_GEOBLOCK_MAXMIND_DB" {
@@ -161,6 +165,7 @@ func TestGeoblockConfigAcceptsHeaderOrDatabase(t *testing.T) {
 }
 
 func TestHealthBypassSkipsPeerParsing(t *testing.T) {
+	t.Parallel()
 	health := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	blocked := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) })
 	trusted := []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}
@@ -194,6 +199,7 @@ func TestHealthBypassSkipsPeerParsing(t *testing.T) {
 }
 
 func TestIssuerPathMiddlewareStripsPrefixAndKeepsRFC8414Root(t *testing.T) {
+	t.Parallel()
 	var paths []string
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path)
@@ -239,6 +245,7 @@ func TestIssuerPathMiddlewareStripsPrefixAndKeepsRFC8414Root(t *testing.T) {
 }
 
 func TestBlacklistRoutesAreConditional(t *testing.T) {
+	t.Parallel()
 	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	for _, enabled := range []bool{false, true} {
 		mux := http.NewServeMux()
@@ -258,7 +265,8 @@ func TestBlacklistRoutesAreConditional(t *testing.T) {
 }
 
 func TestAdmissionBypassRecoversBlacklistAdministration(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "admission-bypass-test", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "admission-bypass-test", DataDir: migratedDataDir(t, "admission-bypass-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +306,8 @@ func TestAdmissionBypassRecoversBlacklistAdministration(t *testing.T) {
 }
 
 func TestDeviceRoutes(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "device-route-test", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "device-route-test", DataDir: migratedDataDir(t, "device-route-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,6 +339,7 @@ func TestDeviceRoutes(t *testing.T) {
 }
 
 func TestWebIDRoutesAreDefaultOffAndConditionallyMounted(t *testing.T) {
+	t.Parallel()
 	called := false
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -367,6 +377,7 @@ func TestWebIDRoutesAreDefaultOffAndConditionallyMounted(t *testing.T) {
 }
 
 func TestWebIDEnabledFromEnv(t *testing.T) {
+	t.Parallel()
 	getenv := func(values map[string]string) func(string) string {
 		return func(name string) string { return values[name] }
 	}
@@ -392,6 +403,7 @@ func TestWebIDEnabledFromEnv(t *testing.T) {
 }
 
 func TestPasskeyAccountRoutesAreConditional(t *testing.T) {
+	t.Parallel()
 	routes := []struct {
 		name string
 		path string
@@ -440,6 +452,7 @@ func TestPasskeyAccountRoutesAreConditional(t *testing.T) {
 }
 
 func TestSelfDeleteEnabledFromEnv(t *testing.T) {
+	t.Parallel()
 	getenv := func(values map[string]string) func(string) string {
 		return func(name string) string { return values[name] }
 	}
@@ -465,6 +478,7 @@ func TestSelfDeleteEnabledFromEnv(t *testing.T) {
 }
 
 func TestAccountRoutesPrecedenceAndSelfDeleteGate(t *testing.T) {
+	t.Parallel()
 	called := make([]string, 0, 2)
 	admin := func(w http.ResponseWriter, r *http.Request) {
 		called = append(called, "admin:"+r.PathValue("subject"))
@@ -502,7 +516,8 @@ func TestAccountRoutesPrecedenceAndSelfDeleteGate(t *testing.T) {
 }
 
 func TestDeviceSessionSubjectRequiresAuthenticatedIssuerCookie(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "device-subject-test", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "device-subject-test", DataDir: migratedDataDir(t, "device-subject-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +533,7 @@ func TestDeviceSessionSubjectRequiresAuthenticatedIssuerCookie(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	phc, err := credential.Hash([]byte("test password"))
+	phc, err := testHash(context.Background(), []byte("test password"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -559,6 +574,7 @@ func TestDeviceSessionSubjectRequiresAuthenticatedIssuerCookie(t *testing.T) {
 }
 
 func TestTLSConfigFromEnvRejectsIncompleteOrInvalidConfiguration(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name string
 		env  map[string]string
@@ -581,6 +597,7 @@ func TestTLSConfigFromEnvRejectsIncompleteOrInvalidConfiguration(t *testing.T) {
 }
 
 func TestDirectTLSRequiresHTTPSIssuer(t *testing.T) {
+	t.Parallel()
 	if err := validateIssuerTLS("http://localhost:8080", true); err == nil {
 		t.Fatal("direct TLS accepted an HTTP issuer")
 	}
@@ -598,6 +615,7 @@ func TestDirectTLSRequiresHTTPSIssuer(t *testing.T) {
 }
 
 func TestSigningKeyRotationPeriod(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		raw  string
 		want time.Duration
@@ -618,6 +636,7 @@ func TestSigningKeyRotationPeriod(t *testing.T) {
 }
 
 func TestBrowserSessionIdleTimeout(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		raw  string
 		want time.Duration
@@ -638,6 +657,7 @@ func TestBrowserSessionIdleTimeout(t *testing.T) {
 }
 
 func TestClientCredentialsTokenLifetime(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		raw  string
 		want time.Duration
@@ -658,6 +678,7 @@ func TestClientCredentialsTokenLifetime(t *testing.T) {
 }
 
 func TestPasskeyConfigFromEnv(t *testing.T) {
+	t.Parallel()
 	keyPath := filepath.Join(t.TempDir(), "passkey-key")
 	if err := os.WriteFile(keyPath, bytes.Repeat([]byte{7}, 32), 0o600); err != nil {
 		t.Fatal(err)
@@ -723,6 +744,7 @@ func TestPasskeyConfigFromEnv(t *testing.T) {
 }
 
 func TestLoadPasskeyCookieKeyRequiresPrivateRegularFile(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	validPath := filepath.Join(directory, "valid")
 	if err := os.WriteFile(validPath, bytes.Repeat([]byte{7}, 32), 0o600); err != nil {
@@ -759,6 +781,7 @@ func TestLoadPasskeyCookieKeyRequiresPrivateRegularFile(t *testing.T) {
 }
 
 func TestEmailTemplateFromEnv(t *testing.T) {
+	t.Parallel()
 	getenv := func(values map[string]string) func(string) string {
 		return func(name string) string { return values[name] }
 	}
@@ -818,6 +841,7 @@ subject = "한국어 초기화"
 }
 
 func TestEmailTemplateFromEnvRejectsInvalidConfiguration(t *testing.T) {
+	t.Parallel()
 	getenv := func(values map[string]string) func(string) string {
 		return func(name string) string { return values[name] }
 	}
@@ -847,6 +871,7 @@ func TestEmailTemplateFromEnvRejectsInvalidConfiguration(t *testing.T) {
 }
 
 func TestBackchannelSettings(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name string
 		env  map[string]string
@@ -881,8 +906,9 @@ func TestBackchannelSettings(t *testing.T) {
 // no bootstrap logout URI, so delivery must start anyway and consume the queued
 // managed-client row instead of leaving attempts=0 with both timestamps null.
 func TestBackchannelDeliveryStartsWithoutBootstrapLogoutURI(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "backchannel-startup-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "backchannel-startup-test", DataDir: migratedDataDir(t, "backchannel-startup-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -930,6 +956,7 @@ func TestBackchannelDeliveryStartsWithoutBootstrapLogoutURI(t *testing.T) {
 }
 
 func TestBootstrapAllowedResources(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		raw  string
 		want int
@@ -950,6 +977,7 @@ func TestBootstrapAllowedResources(t *testing.T) {
 }
 
 func TestBootstrapDefaultAudience(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name string
 		raw  string
@@ -972,7 +1000,8 @@ func TestBootstrapDefaultAudience(t *testing.T) {
 }
 
 func TestBootstrapDefaultAudienceFailsOAuthStartup(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "default-aud-startup-test", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "default-aud-startup-test", DataDir: migratedDataDir(t, "default-aud-startup-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1001,6 +1030,7 @@ func TestBootstrapDefaultAudienceFailsOAuthStartup(t *testing.T) {
 }
 
 func TestBootstrapPostLogoutRedirectURIs(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		raw  string
 		want int
@@ -1021,6 +1051,7 @@ func TestBootstrapPostLogoutRedirectURIs(t *testing.T) {
 }
 
 func TestDCRRegistrationToken(t *testing.T) {
+	t.Parallel()
 	if token, err := dcrRegistrationToken(func(string) string { return "" }); err != nil || token != "" {
 		t.Fatalf("disabled DCR token=%q err=%v", token, err)
 	}
@@ -1047,6 +1078,7 @@ func TestDCRRegistrationToken(t *testing.T) {
 }
 
 func TestDCRAnonymousConfig(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name    string
 		env     map[string]string
@@ -1072,6 +1104,7 @@ func TestDCRAnonymousConfig(t *testing.T) {
 }
 
 func TestRFC8252LoopbackRedirects(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		raw  string
 		want bool
@@ -1087,6 +1120,7 @@ func TestRFC8252LoopbackRedirects(t *testing.T) {
 }
 
 func TestDCRScopePolicy(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name         string
 		env          map[string]string
@@ -1113,6 +1147,7 @@ func TestDCRScopePolicy(t *testing.T) {
 }
 
 func TestBrowserAdministratorRejectsUnsafeOrAnonymousRequest(t *testing.T) {
+	t.Parallel()
 	callback := browserAdministrator(nil, nil, nil, "https://id.example.test")
 	for _, request := range []*http.Request{
 		httptest.NewRequest(http.MethodGet, "https://id.example.test/auth/v1/api_keys?probe=1", nil),
@@ -1147,8 +1182,9 @@ func TestBrowserAdministratorRejectsUnsafeOrAnonymousRequest(t *testing.T) {
 }
 
 func TestBrowserAdministratorAllowsAuthenticatedBrowserWithoutAuthorization(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "browser-admin-authority", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "browser-admin-authority", DataDir: migratedDataDir(t, "browser-admin-authority")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1160,7 +1196,7 @@ func TestBrowserAdministratorAllowsAuthenticatedBrowserWithoutAuthorization(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	phc, err := credential.Hash([]byte("test password"))
+	phc, err := testHash(context.Background(), []byte("test password"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1193,6 +1229,7 @@ func TestBrowserAdministratorAllowsAuthenticatedBrowserWithoutAuthorization(t *t
 }
 
 func TestBootstrapForceMFA(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		raw  string
 		want bool
@@ -1208,6 +1245,7 @@ func TestBootstrapForceMFA(t *testing.T) {
 }
 
 func TestValidateBootstrapPasskeyConfig(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name   string
 		force  bool
@@ -1229,6 +1267,7 @@ func TestValidateBootstrapPasskeyConfig(t *testing.T) {
 }
 
 func TestForwardAuthPasskeyEnrollmentWithoutService(t *testing.T) {
+	t.Parallel()
 	enrolled, err := forwardAuthPasskeyEnrollment(nil)(context.Background(), "subject-1")
 	if err != nil || enrolled {
 		t.Fatalf("enrolled=%t err=%v", enrolled, err)
@@ -1236,6 +1275,7 @@ func TestForwardAuthPasskeyEnrollmentWithoutService(t *testing.T) {
 }
 
 func TestCIMDEnabled(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		raw  string
 		want bool
@@ -1251,6 +1291,7 @@ func TestCIMDEnabled(t *testing.T) {
 }
 
 func TestIPBlacklistEnabled(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		raw  string
 		want bool
@@ -1269,6 +1310,7 @@ func TestIPBlacklistEnabled(t *testing.T) {
 }
 
 func TestCIMDIgnoreUnknownAuthFlowsFromEnv(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		raw  string
 		want bool
@@ -1284,6 +1326,7 @@ func TestCIMDIgnoreUnknownAuthFlowsFromEnv(t *testing.T) {
 }
 
 func TestCIMDDangerAllowUnvalidatedResourceFromEnv(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		raw  string
 		want bool
@@ -1299,6 +1342,7 @@ func TestCIMDDangerAllowUnvalidatedResourceFromEnv(t *testing.T) {
 }
 
 func TestArgonPolicyFromEnv(t *testing.T) {
+	t.Parallel()
 	defaults := credential.DefaultPolicy()
 	configured := defaults
 	configured.MemoryKiB = 32768
@@ -1335,6 +1379,7 @@ func TestArgonPolicyFromEnv(t *testing.T) {
 }
 
 func TestPasswordRulesFromEnv(t *testing.T) {
+	t.Parallel()
 	defaults := credential.DefaultRules()
 	defaults.ValidDays = 0
 	if got, err := passwordRulesFromEnv(func(string) string { return "" }); err != nil || got != defaults {
@@ -1399,6 +1444,7 @@ func TestPasswordRulesFromEnv(t *testing.T) {
 }
 
 func TestPasswordRecoveryConfiguration(t *testing.T) {
+	t.Parallel()
 	if enabled, err := passwordRecoveryEnabled(func(string) string { return "" }); err != nil || enabled {
 		t.Fatalf("default enabled=%v err=%v", enabled, err)
 	}
@@ -1434,6 +1480,7 @@ func TestPasswordRecoveryConfiguration(t *testing.T) {
 }
 
 func TestOpenRegistrationConfiguration(t *testing.T) {
+	t.Parallel()
 	getenv := func(values map[string]string) func(string) string {
 		return func(name string) string { return values[name] }
 	}
@@ -1474,8 +1521,9 @@ func TestOpenRegistrationConfiguration(t *testing.T) {
 }
 
 func TestOpenRegistrationCleanupTick(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "open-registration-cleanup", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "open-registration-cleanup", DataDir: migratedDataDir(t, "open-registration-cleanup")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1520,6 +1568,7 @@ func equalStrings(got, want []string) bool {
 }
 
 func TestPasswordProofConfig(t *testing.T) {
+	t.Parallel()
 	if difficulty, ttl, err := passwordProofConfig(func(string) string { return "" }); err != nil || difficulty != 19 || ttl != 30*time.Second {
 		t.Fatalf("defaults difficulty=%d ttl=%s err=%v", difficulty, ttl, err)
 	}
@@ -1546,6 +1595,7 @@ func TestPasswordProofConfig(t *testing.T) {
 }
 
 func TestConfigureCIMD(t *testing.T) {
+	t.Parallel()
 	if resolver, err := configureCIMD(nil, false, cimd.Policy{}); err != nil || resolver != nil {
 		t.Fatalf("disabled resolver=%v err=%v", resolver, err)
 	}
@@ -1563,6 +1613,7 @@ func TestConfigureCIMD(t *testing.T) {
 }
 
 func TestForwardAuthHeadersFromEnv(t *testing.T) {
+	t.Parallel()
 	if enabled, err := forwardAuthHeadersFromEnv(func(string) string { return "" }); err != nil || enabled {
 		t.Fatalf("default enabled=%v err=%v", enabled, err)
 	}
@@ -1575,7 +1626,8 @@ func TestForwardAuthHeadersFromEnv(t *testing.T) {
 }
 
 func TestBootstrapUserIsOptionalAndNeverResets(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "bootstrap-test", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "bootstrap-test", DataDir: migratedDataDir(t, "bootstrap-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1590,7 +1642,7 @@ func TestBootstrapUserIsOptionalAndNeverResets(t *testing.T) {
 	if err := bootstrapUser(context.Background(), store, func(string) string { return "" }); err != nil {
 		t.Fatal(err)
 	}
-	first, err := credential.Hash([]byte("first password"))
+	first, err := testHash(context.Background(), []byte("first password"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1604,7 +1656,7 @@ func TestBootstrapUserIsOptionalAndNeverResets(t *testing.T) {
 	if err := bootstrapUser(context.Background(), store, getenv); err != nil {
 		t.Fatal(err)
 	}
-	second, err := credential.Hash([]byte("second password"))
+	second, err := testHash(context.Background(), []byte("second password"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1623,6 +1675,7 @@ func TestBootstrapUserIsOptionalAndNeverResets(t *testing.T) {
 }
 
 func TestBootstrapPrincipalFromEnv(t *testing.T) {
+	t.Parallel()
 	values := func(entries map[string]string) func(string) string {
 		return func(name string) string { return entries[name] }
 	}
@@ -1669,6 +1722,7 @@ func TestBootstrapPrincipalFromEnv(t *testing.T) {
 }
 
 func TestTLSConfigFromEnvServesHTTPS(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	certificateFile, keyFile := filepath.Join(directory, "certificate.pem"), filepath.Join(directory, "key.pem")
 	certificate, key := testTLSCertificate(t)
@@ -1729,6 +1783,7 @@ func testTLSCertificate(t *testing.T) ([]byte, []byte) {
 }
 
 func TestReadyEndpointRejectsUninitializedDatabase(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -1744,6 +1799,7 @@ func TestReadyEndpointRejectsUninitializedDatabase(t *testing.T) {
 }
 
 func TestCloseRhizaAfterStartupCompleteSkipsPostReadyStartupFailure(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-startup-close-guard", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -1772,7 +1828,8 @@ func TestCloseRhizaAfterStartupCompleteSkipsPostReadyStartupFailure(t *testing.T
 }
 
 func TestReadyEndpointRejectsTrustFenceMismatch(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-trust-fence", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-trust-fence", DataDir: migratedDataDir(t, "test-trust-fence")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1792,7 +1849,8 @@ func TestReadyEndpointRejectsTrustFenceMismatch(t *testing.T) {
 }
 
 func TestReadinessProbeBoundsAndReleasesContext(t *testing.T) {
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "probe-context", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "probe-context", DataDir: migratedDataDir(t, "probe-context")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1832,6 +1890,7 @@ func TestReadinessProbeBoundsAndReleasesContext(t *testing.T) {
 // --- Metrics token loading --------------------------------------------------
 
 func TestMetricsListenAddrFromEnv(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name    string
 		address string
@@ -1871,6 +1930,7 @@ func TestMetricsListenAddrFromEnv(t *testing.T) {
 }
 
 func TestLoadMetricsTokenRequiresFilePath(t *testing.T) {
+	t.Parallel()
 	_, err := loadMetricsToken(func(string) string { return "" })
 	if err == nil {
 		t.Fatal("accepted empty GOAUTHY_METRICS_TOKEN_FILE")
@@ -1878,6 +1938,7 @@ func TestLoadMetricsTokenRequiresFilePath(t *testing.T) {
 }
 
 func TestLoadMetricsTokenRejectsMissingFile(t *testing.T) {
+	t.Parallel()
 	_, err := loadMetricsToken(func(name string) string {
 		if name == "GOAUTHY_METRICS_TOKEN_FILE" {
 			return filepath.Join(t.TempDir(), "missing.token")
@@ -1890,6 +1951,7 @@ func TestLoadMetricsTokenRejectsMissingFile(t *testing.T) {
 }
 
 func TestLoadMetricsTokenRejectsOverlargeFile(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "large.token")
 	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), maxMetricsTokenFileSize+1), 0o600); err != nil {
 		t.Fatal(err)
@@ -1906,6 +1968,7 @@ func TestLoadMetricsTokenRejectsOverlargeFile(t *testing.T) {
 }
 
 func TestLoadMetricsTokenRejectsEmptyToken(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "empty.token")
 	if err := os.WriteFile(path, []byte("\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1922,6 +1985,7 @@ func TestLoadMetricsTokenRejectsEmptyToken(t *testing.T) {
 }
 
 func TestLoadMetricsTokenRejectsWhitespaceOnlyToken(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "ws.token")
 	if err := os.WriteFile(path, []byte("  \t  \n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1938,6 +2002,7 @@ func TestLoadMetricsTokenRejectsWhitespaceOnlyToken(t *testing.T) {
 }
 
 func TestLoadMetricsTokenRejectsCommaInToken(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "comma.token")
 	if err := os.WriteFile(path, []byte("tok,123"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1954,6 +2019,7 @@ func TestLoadMetricsTokenRejectsCommaInToken(t *testing.T) {
 }
 
 func TestLoadMetricsTokenRejectsSpaceInToken(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "space.token")
 	if err := os.WriteFile(path, []byte("my secret"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1970,6 +2036,7 @@ func TestLoadMetricsTokenRejectsSpaceInToken(t *testing.T) {
 }
 
 func TestLoadMetricsTokenRejectsTabInToken(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "tab.token")
 	if err := os.WriteFile(path, []byte("tok\t123"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1986,6 +2053,7 @@ func TestLoadMetricsTokenRejectsTabInToken(t *testing.T) {
 }
 
 func TestLoadMetricsTokenRejectsCRInToken(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "cr.token")
 	if err := os.WriteFile(path, []byte("tok\r123"), 0o600); err != nil {
 		t.Fatal(err)
@@ -2002,6 +2070,7 @@ func TestLoadMetricsTokenRejectsCRInToken(t *testing.T) {
 }
 
 func TestLoadMetricsTokenRejectsMidTokenLF(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "midlf.token")
 	if err := os.WriteFile(path, []byte("tok\n123"), 0o600); err != nil {
 		t.Fatal(err)
@@ -2018,6 +2087,7 @@ func TestLoadMetricsTokenRejectsMidTokenLF(t *testing.T) {
 }
 
 func TestLoadMetricsTokenTrimsSingleTrailingLF(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "lf.token")
 	if err := os.WriteFile(path, []byte("mytoken\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -2034,6 +2104,7 @@ func TestLoadMetricsTokenTrimsSingleTrailingLF(t *testing.T) {
 }
 
 func TestLoadMetricsTokenTrimsSingleTrailingCRLF(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "crlf.token")
 	if err := os.WriteFile(path, []byte("mytoken\r\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -2050,6 +2121,7 @@ func TestLoadMetricsTokenTrimsSingleTrailingCRLF(t *testing.T) {
 }
 
 func TestLoadMetricsTokenAcceptsTokenWithoutTrailingNewline(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "plain.token")
 	if err := os.WriteFile(path, []byte("mytoken"), 0o600); err != nil {
 		t.Fatal(err)
@@ -2066,6 +2138,7 @@ func TestLoadMetricsTokenAcceptsTokenWithoutTrailingNewline(t *testing.T) {
 }
 
 func TestLoadMetricsTokenTrimsOnlyOneTrailingNewline(t *testing.T) {
+	t.Parallel()
 	// Two trailing LFs: only the final one is trimmed, leaving "tok\n".
 	path := filepath.Join(t.TempDir(), "doublelf.token")
 	if err := os.WriteFile(path, []byte("tok\n\n"), 0o600); err != nil {
@@ -2083,6 +2156,7 @@ func TestLoadMetricsTokenTrimsOnlyOneTrailingNewline(t *testing.T) {
 }
 
 func TestLoadMetricsTokenTrimsOnlyOneTrailingCRLF(t *testing.T) {
+	t.Parallel()
 	// Two trailing CRLFs: only the final one is trimmed, leaving "tok\r\n".
 	path := filepath.Join(t.TempDir(), "doublecrlf.token")
 	if err := os.WriteFile(path, []byte("tok\r\n\r\n"), 0o600); err != nil {
@@ -2100,6 +2174,7 @@ func TestLoadMetricsTokenTrimsOnlyOneTrailingCRLF(t *testing.T) {
 }
 
 func TestLoadMetricsTokenRejectsFileAtMaxSizePlusOne(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "maxplus1.token")
 	exact := bytes.Repeat([]byte("a"), maxMetricsTokenFileSize) // exactly at limit
 	if err := os.WriteFile(path, exact, 0o600); err != nil {
@@ -2128,6 +2203,7 @@ func newProductionMetricsMux(token string) *http.ServeMux {
 }
 
 func TestMetricsMuxRejectsNonGETMethods(t *testing.T) {
+	t.Parallel()
 	mux := newProductionMetricsMux("test-token")
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch} {
 		req := httptest.NewRequest(method, "/metrics", nil)
@@ -2141,6 +2217,7 @@ func TestMetricsMuxRejectsNonGETMethods(t *testing.T) {
 }
 
 func TestMetricsMuxRejectsNonMetricsPaths(t *testing.T) {
+	t.Parallel()
 	mux := newProductionMetricsMux("test-token")
 	for _, path := range []string{"/", "/healthz", "/metrics/extra", "/other"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
@@ -2154,6 +2231,7 @@ func TestMetricsMuxRejectsNonMetricsPaths(t *testing.T) {
 }
 
 func TestMetricsMuxServesGETMetricsWithAuth(t *testing.T) {
+	t.Parallel()
 	mux := newProductionMetricsMux("s3cret")
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	req.Header.Set("Authorization", "Bearer s3cret")
@@ -2168,6 +2246,7 @@ func TestMetricsMuxServesGETMetricsWithAuth(t *testing.T) {
 }
 
 func TestMetricsMuxRequiresBearerAuth(t *testing.T) {
+	t.Parallel()
 	mux := newProductionMetricsMux("s3cret")
 
 	// No header → 401
@@ -2191,6 +2270,7 @@ func TestMetricsMuxRequiresBearerAuth(t *testing.T) {
 // --- Metrics server lifecycle with ephemeral listener -----------------------
 
 func TestMetricsServerLifecycle(t *testing.T) {
+	t.Parallel()
 	mux := newProductionMetricsMux("lifecycle-token")
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -2260,6 +2340,7 @@ func TestMetricsServerLifecycle(t *testing.T) {
 // shutdown reaches the actual http.Server.
 
 func TestLifecycleAppError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	appCh := make(chan error, 1)
 	appCh <- errors.New("bind: address already in use")
@@ -2270,6 +2351,7 @@ func TestLifecycleAppError(t *testing.T) {
 }
 
 func TestLifecycleAppCloseNilMetrics(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	appCh := make(chan error, 1)
 	appCh <- http.ErrServerClosed
@@ -2280,6 +2362,7 @@ func TestLifecycleAppCloseNilMetrics(t *testing.T) {
 }
 
 func TestLifecycleMetricsError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	appCh := make(chan error) // empty — only metricsCh fires
 	metricsCh := make(chan error, 1)
@@ -2295,6 +2378,7 @@ func TestLifecycleMetricsError(t *testing.T) {
 // unbuffered channels make the outer select block on both cases until
 // the goroutine delivers metrics, forcing the metrics-first branch.
 func TestLifecycleMetricsErrServerClosedWaitsForApp(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	appCh := make(chan error)     // unbuffered
 	metricsCh := make(chan error) // unbuffered
@@ -2311,6 +2395,7 @@ func TestLifecycleMetricsErrServerClosedWaitsForApp(t *testing.T) {
 // TestLifecycleMetricsCloseThenAppError uses a goroutine that sends
 // metrics first, then app only after metrics is received.
 func TestLifecycleMetricsCloseThenAppError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	appCh := make(chan error)     // unbuffered
 	metricsCh := make(chan error) // unbuffered
@@ -2381,6 +2466,7 @@ func startAppServer(t *testing.T) (*http.Server, <-chan error) {
 // fires first, lifecycle calls Shutdown on the real metrics server and the
 // metrics serve goroutine returns ErrServerClosed.
 func TestLifecycleShutsDownMetricsOnAppError(t *testing.T) {
+	t.Parallel()
 	server, metricsErrCh := startMetricsServer(t)
 	appCh := make(chan error, 1)
 	appCh <- errors.New("bind: address already in use")
@@ -2400,6 +2486,7 @@ func TestLifecycleShutsDownMetricsOnAppError(t *testing.T) {
 // fires first, lifecycle calls Shutdown on the real app server and the app
 // serve goroutine returns ErrServerClosed.
 func TestLifecycleShutsDownAppOnMetricsError(t *testing.T) {
+	t.Parallel()
 	appServer, appErrCh := startAppServer(t)
 	metricsCh := make(chan error, 1)
 	metricsCh <- errors.New("accept tcp: address already in use")
@@ -2421,6 +2508,7 @@ func TestLifecycleShutsDownAppOnMetricsError(t *testing.T) {
 // on success) without reading appErr. Both Serve goroutines then send
 // ErrServerClosed, which we can drain once to prove both closed.
 func TestLifecycleCtxDoneWithRealServers(t *testing.T) {
+	t.Parallel()
 	appServer, appErrCh := startAppServer(t)
 	metricsServer, metricsErrCh := startMetricsServer(t)
 
@@ -2445,6 +2533,7 @@ func TestLifecycleCtxDoneWithRealServers(t *testing.T) {
 // --- Instrumented handler records metrics -----------------------------------
 
 func TestMetricsInstrumentedHandlerPassesThrough(t *testing.T) {
+	t.Parallel()
 	reg := metrics.NewRegistry()
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
@@ -2464,6 +2553,7 @@ func TestMetricsInstrumentedHandlerPassesThrough(t *testing.T) {
 }
 
 func TestMetricsInstrumentedHandlerRecordsDifferentStatuses(t *testing.T) {
+	t.Parallel()
 	reg := metrics.NewRegistry()
 	scenarios := []struct {
 		code int
@@ -2487,6 +2577,7 @@ func TestMetricsInstrumentedHandlerRecordsDifferentStatuses(t *testing.T) {
 }
 
 func TestClientCredentialsMapSubFromEnv(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		raw  string
 		want bool

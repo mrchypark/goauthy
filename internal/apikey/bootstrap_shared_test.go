@@ -12,11 +12,11 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/oidc"
-	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
 
 func TestBootstrapWithSharedGeneratedSecretsConvergesAndTombstones(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	now := time.Unix(2_100_000_000, 0).UTC()
 	deadline := now.Add(time.Hour)
@@ -125,6 +125,7 @@ func TestBootstrapWithSharedGeneratedSecretsConvergesAndTombstones(t *testing.T)
 }
 
 func TestBootstrapWithSharedGeneratedSecretsRejectsExpiredPrewrittenArtifactWithoutRows(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(2_100_000_000, 0).UTC()
 	config, keyDir, artifact := generatedBootstrapFiles(t, "runner", now.Add(time.Hour))
 	if err := WriteGeneratedBootstrapSecrets(artifact, keyDir, "dev-1", []BootstrapSecretEntry{{Kind: "api-key", ID: "runner", Field: "token", Value: "runner$" + bootstrapTestSecret}}, now.Add(-time.Second)); err != nil {
@@ -151,20 +152,13 @@ func TestBootstrapWithSharedGeneratedSecretsRejectsExpiredPrewrittenArtifactWith
 }
 
 func TestSharedGeneratedBootstrapDoesNotExportBeforeAckDurability(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	storeDir := t.TempDir()
-	db, err := rhiza.Open(ctx, rhiza.Config{
-		NodeID: "shared-generated-before-ack", DataDir: t.TempDir(),
+	db := openTestDBWithConfig(t, "shared-generated-before-ack", rhiza.Config{
 		ObjStoreProvider: rhiza.ObjectStoreProviderFilesystem, ObjStoreDir: storeDir,
 		ObjStoreDurability: rhiza.ObjectStoreDurabilityBeforeAck,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := storage.Migrate(ctx, db); err != nil {
-		t.Fatal(err)
-	}
 	now := time.Unix(2_100_000_000, 0).UTC()
 	config, keyDir, winnerArtifact := generatedBootstrapFiles(t, "runner", now.Add(time.Hour))
 	keyring, err := oidc.LoadKeyring(keyDir, "dev-1")
@@ -215,6 +209,7 @@ func TestSharedGeneratedBootstrapDoesNotExportBeforeAckDurability(t *testing.T) 
 }
 
 func TestSharedBootstrapConfigDigestIsRawContent(t *testing.T) {
+	t.Parallel()
 	value := []byte(`[{"name":"runner"}]`)
 	if sharedBootstrapConfigDigest(value) == sharedBootstrapConfigDigest(append([]byte(" "), value...)) {
 		t.Fatal("raw bootstrap configuration digest ignored source bytes")

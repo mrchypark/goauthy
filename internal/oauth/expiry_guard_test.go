@@ -13,6 +13,7 @@ import (
 )
 
 func TestPrincipalGuardUsesCapturedExclusiveIdentityExpiry(t *testing.T) {
+	t.Parallel()
 	const now int64 = 1_700_000_000_000
 	db := oauthTestDB(t)
 	for i, tc := range []struct {
@@ -59,6 +60,7 @@ func TestPrincipalGuardUsesCapturedExclusiveIdentityExpiry(t *testing.T) {
 }
 
 func TestPrincipalGuardDoesNotApplyIdentityExpiryWithoutSubject(t *testing.T) {
+	t.Parallel()
 	guard, args := (&transaction{}).principalGuard()
 	if guard != "" || len(args) != 0 {
 		t.Fatalf("machine transaction unexpectedly received identity guard=%q args=%#v", guard, args)
@@ -66,6 +68,7 @@ func TestPrincipalGuardDoesNotApplyIdentityExpiryWithoutSubject(t *testing.T) {
 }
 
 func TestExpiredDevicePrincipalLeavesNoTokenArtifacts(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	deviceCode, claimToken := "expired-account-device", "expired-account-claim"

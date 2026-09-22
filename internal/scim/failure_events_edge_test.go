@@ -11,6 +11,7 @@ import (
 )
 
 func TestScimConcurrentExpiredFinalClaimEmitsOneEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	resolve := func(context.Context, string) (Reconciler, error) { return fakeReconciler(nil), nil }
 	o := newOutboxTest(t, resolve, OutboxConfig{MaxAttempts: 1})
@@ -55,6 +56,7 @@ func TestScimConcurrentExpiredFinalClaimEmitsOneEvent(t *testing.T) {
 }
 
 func TestScimFailureEventSurvivesJobCleanupAndSameClockRecreation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	o := newOutboxTest(t, func(context.Context, string) (Reconciler, error) {
 		return fakeReconciler(func(context.Context, Request) (Result, error) { return Result{}, ErrRetryable }), nil
@@ -88,6 +90,7 @@ func TestScimFailureEventSurvivesJobCleanupAndSameClockRecreation(t *testing.T) 
 }
 
 func TestScimDeadLetterEventUsesStoredCountAboveCurrentLimit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	o := newOutboxTest(t, func(context.Context, string) (Reconciler, error) { return fakeReconciler(nil), nil }, OutboxConfig{MaxAttempts: 3})
 	now := time.UnixMilli(1_800_000_000_000)

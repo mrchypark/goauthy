@@ -20,6 +20,7 @@ import (
 )
 
 func TestPasswordLoginDeletionDeliversSignedLogout(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"original", "updated", "removed"} {
 		t.Run(mode, func(t *testing.T) { testPasswordLogoutDelivery(t, mode) })
 	}

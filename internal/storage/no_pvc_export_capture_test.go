@@ -10,6 +10,7 @@ import (
 // The adapter must reject incomplete objects even when an earlier complete
 // read of that name exists. A populated baseline avoids missing-object false positives.
 func TestNoPVCExportCaptureRejectsIncompleteObjects(t *testing.T) {
+	t.Parallel()
 	const name = "capture/archive/head.bin"
 	for _, mode := range []string{"complete", "partial", "close failure", "conflicting bytes"} {
 		t.Run(mode, func(t *testing.T) {

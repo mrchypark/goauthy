@@ -8,6 +8,7 @@ import (
 )
 
 func TestSanitizedLogoSVGPreservesPinnedGraphicsAndRemovesExecutableContent(t *testing.T) {
+	t.Parallel()
 	input := []byte(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 10 10" onclick="alert(1)"><defs><path id="shape" d="M0 0h10v10z"/></defs><style>.ok{background:url(http://test.com/a.jpg)}.bad{background:url(data:text/html,xx)}@import "https://evil.example/x.css";</style><use xlink:href="#shape"/><image xlink:href="https://test.com/logo.png" onload="alert(1)"/><image href="data:image/png;base64,AAA"/><image href="data:image/svg+xml;base64,AAA"/><a href="javascript:alert(1)">safe text</a><script>alert(1)</script><foreignObject><iframe src="https://evil.example"></iframe></foreignObject></svg>`)
 
 	got, err := SanitizedLogoSVG(input)
@@ -38,6 +39,7 @@ func TestSanitizedLogoSVGPreservesPinnedGraphicsAndRemovesExecutableContent(t *t
 }
 
 func TestSanitizedLogoSVGMatchesPinnedStandardImageDataURLPolicy(t *testing.T) {
+	t.Parallel()
 	input := []byte(`<svg xmlns="http://www.w3.org/2000/svg"><image id="jpeg" href="data:image/jpeg;base64,AAA"/><image id="png" href="data:image/png;base64,AAA"/><image id="gif" href="data:image/gif;base64,AAA"/><image id="svg" href="data:image/svg+xml;base64,AAA"/><image id="text" href="data:text/plain,meh"/><image id="bad" href="data://wat"/></svg>`)
 
 	got, err := SanitizedLogoSVG(input)
@@ -74,6 +76,7 @@ func svgTagWithID(body, id string) string {
 }
 
 func TestSanitizedLogoSVGRejectsMalformedOrEmptyInput(t *testing.T) {
+	t.Parallel()
 	for _, input := range [][]byte{
 		[]byte(`<script>alert(1)</script>`),
 		[]byte(`<svg xmlns="http://www.w3.org/2000/svg"><path>`),
@@ -86,6 +89,7 @@ func TestSanitizedLogoSVGRejectsMalformedOrEmptyInput(t *testing.T) {
 }
 
 func TestSanitizedLogoSVGMatchesPinnedURLAndCSSFilters(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		input string
 		want  string
@@ -139,6 +143,7 @@ func TestSanitizedLogoSVGMatchesPinnedURLAndCSSFilters(t *testing.T) {
 }
 
 func TestSanitizedLogoSVGEscapesFilteredStyleTextBeforeSerialization(t *testing.T) {
+	t.Parallel()
 	input := []byte(`<svg xmlns="http://www.w3.org/2000/svg"><style><![CDATA[</style><script>alert(1)</script><style>]]></style></svg>`)
 	got, err := SanitizedLogoSVG(input)
 	if err != nil {

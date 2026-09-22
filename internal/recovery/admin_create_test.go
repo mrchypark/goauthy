@@ -18,6 +18,7 @@ func adminCreateInput() identity.UserCreation {
 }
 
 func TestCreateUserSendsFirstPasswordMailAfterCommit(t *testing.T) {
+	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
 	result, err := service.CreateUser(context.Background(), adminCreateInput(), "1=1", nil)
 	if err != nil || !result.Created || result.Subject == "" || result.Token == "" {
@@ -30,6 +31,7 @@ func TestCreateUserSendsFirstPasswordMailAfterCommit(t *testing.T) {
 }
 
 func TestCreateUserDeliveryFailurePreservesSuccess(t *testing.T) {
+	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
 	deliveryErr := errors.New("smtp unavailable")
 	sender.err = deliveryErr
@@ -57,6 +59,7 @@ func TestCreateUserDeliveryFailurePreservesSuccess(t *testing.T) {
 }
 
 func TestCreateUserAuthorityFailureDoesNotSendMail(t *testing.T) {
+	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
 	callbackCalls := 0
 	service.OnUserCreated = func() { callbackCalls++ }

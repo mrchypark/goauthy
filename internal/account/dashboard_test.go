@@ -12,6 +12,7 @@ import (
 )
 
 func TestDashboardCurrentAccountBoundary(t *testing.T) {
+	t.Parallel()
 	h, sessions, _, cookie, csrf := testPasswordHandler(t)
 	for _, path := range []string{"/account", "/account/data", "/account/app.js", "/account/connections.js", "/account/connection-grants.js", "/account/devices.js", "/account/account.css"} {
 		t.Run(path, func(t *testing.T) {
@@ -84,6 +85,7 @@ func TestDashboardCurrentAccountBoundary(t *testing.T) {
 }
 
 func TestDashboardIssuerPathAssets(t *testing.T) {
+	t.Parallel()
 	h, _, _, cookie, _ := testPasswordHandler(t)
 	h.issuer = "https://issuer.example.test/realm"
 	name, err := browser.CookieName(h.issuer)
@@ -101,6 +103,7 @@ func TestDashboardIssuerPathAssets(t *testing.T) {
 }
 
 func TestDashboardConversionCapability(t *testing.T) {
+	t.Parallel()
 	h, _, _, _, _, _ := testPasskeyAccountHandler(t)
 	for _, tc := range []struct {
 		method, peer string

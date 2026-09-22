@@ -20,6 +20,7 @@ import (
 )
 
 func TestDPoPTokenExchangeBindsBearerInputsAndOutput(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	source := decodeToken(t, postToken(server, url.Values{
 		"grant_type": {"authorization_code"}, "code": {issueExchangeCode(t, server)},
@@ -101,6 +102,7 @@ func TestDPoPTokenExchangeBindsBearerInputsAndOutput(t *testing.T) {
 }
 
 func TestDPoPTokenExchangeRejectsBoundInputs(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		actor bool

@@ -19,6 +19,7 @@ import (
 )
 
 func TestDeviceOIDCIssuesCurrentGroupsAndRefreshesWithoutBrowserClaims(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	seedDeviceUser(t, db, "device-oidc-user", nil)
@@ -45,6 +46,7 @@ func TestDeviceOIDCIssuesCurrentGroupsAndRefreshesWithoutBrowserClaims(t *testin
 }
 
 func TestDeviceOIDCIsOnceOnlyAndOAuthOnlyRejectsOpenID(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	seedDeviceUser(t, db, "device-oidc-user", nil)
 	store := device.NewStore(db)
@@ -80,6 +82,7 @@ func TestDeviceOIDCIsOnceOnlyAndOAuthOnlyRejectsOpenID(t *testing.T) {
 }
 
 func TestDeviceOIDCConfidentialClientSecretPost(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	server := oidcTestServer(t, db, randomSecret(t), func(context.Context) (oidc.SigningKey, error) { return key, nil })
@@ -130,6 +133,7 @@ func TestDeviceOIDCConfidentialClientSecretPost(t *testing.T) {
 }
 
 func TestDeviceOIDCPrincipalRevisionRaceLeavesNoArtifacts(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	key := oidcTestKey(t)
 	seedDeviceUser(t, db, "device-oidc-user", nil)

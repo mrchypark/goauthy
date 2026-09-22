@@ -17,6 +17,7 @@ import (
 // status unsafe, a legacy plaintext row references no key, and rewrapping every
 // remaining row restores safety.
 func TestInspectMasterKeyReferencesCountsEmailOutboxEnvelopes(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	issuer := "https://id.example.com"
@@ -51,6 +52,7 @@ func TestInspectMasterKeyReferencesCountsEmailOutboxEnvelopes(t *testing.T) {
 // TestInspectMasterKeyReferencesFailsClosedForTamperedOutboxBody covers a
 // malformed sealed body: it must never be counted as key-free.
 func TestInspectMasterKeyReferencesFailsClosedForTamperedOutboxBody(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	active := fixedKeyring("master-b")
@@ -70,6 +72,7 @@ func TestInspectMasterKeyReferencesFailsClosedForTamperedOutboxBody(t *testing.T
 // so a drift from the recovery outbox writer fails here instead of silently
 // skipping sealed rows.
 func TestEmailOutboxPayloadPurposeMatchesRecoveryWriter(t *testing.T) {
+	t.Parallel()
 	if got, want := emailOutboxPayloadPurpose("old-row", "html"), "email/outbox/Cos_FjVpWL8XLUS-b5NHCw"; got != want {
 		t.Fatalf("purpose=%q want=%q", got, want)
 	}
@@ -102,6 +105,7 @@ func insertStatusOutbox(t *testing.T, ctx context.Context, db *rhiza.DB, keyring
 // of the family: sealed bodies move to the active key, a legacy plaintext body
 // is left alone, and the reference gate returns to safe.
 func TestRewrapEmailOutboxBatchMovesSealedBodiesToActiveKey(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	active, old := fixedKeyring("master-b"), fixedKeyring("master-a")
@@ -141,6 +145,7 @@ func TestRewrapEmailOutboxBatchMovesSealedBodiesToActiveKey(t *testing.T) {
 // TestRewrapEmailOutboxBatchHonorsFencedOldWriter keeps the fail-closed fence:
 // a fenced old writer cannot commit and the queued bodies stay untouched.
 func TestRewrapEmailOutboxBatchHonorsFencedOldWriter(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	insertStatusOutbox(t, ctx, db, fixedKeyring("master-b"), "fenced-row", "recovery body")

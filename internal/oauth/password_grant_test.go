@@ -23,6 +23,7 @@ import (
 )
 
 func TestPasswordHandlerDefaultsAndAuthenticationSnapshot(t *testing.T) {
+	t.Parallel()
 	for _, enabled := range []bool{false, true} {
 		name := "access only"
 		if enabled {
@@ -100,6 +101,7 @@ func testPasswordHandlerIssuance(t *testing.T, refreshEnabled bool) {
 }
 
 func TestPasswordGrantExpiredPasswordReturnsAccessDenied(t *testing.T) {
+	t.Parallel()
 	for _, withCallback := range []bool{false, true} {
 		name := "without callback"
 		if withCallback {

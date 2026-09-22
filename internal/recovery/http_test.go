@@ -21,6 +21,7 @@ import (
 )
 
 func TestRequestResetEnumerationDeliveryAndLimiter(t *testing.T) {
+	t.Parallel()
 	service, sender := testService(t, "subject/one", "alice")
 	if err := service.BindEmail(context.Background(), "subject/one", "Alice@Example.TEST"); err != nil {
 		t.Fatal(err)
@@ -49,6 +50,7 @@ func TestRequestResetEnumerationDeliveryAndLimiter(t *testing.T) {
 }
 
 func TestRequestResetSenderFailureAndCrossSite(t *testing.T) {
+	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
 	if err := service.BindEmail(context.Background(), "subject-1", "alice@example.test"); err != nil {
 		t.Fatal(err)
@@ -67,6 +69,7 @@ func TestRequestResetSenderFailureAndCrossSite(t *testing.T) {
 }
 
 func TestProofOfWorkAndRequestResetProofBoundary(t *testing.T) {
+	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
 	if err := service.BindEmail(context.Background(), "subject-1", "alice@example.test"); err != nil {
 		t.Fatal(err)
@@ -122,6 +125,7 @@ func TestProofOfWorkAndRequestResetProofBoundary(t *testing.T) {
 }
 
 func TestProofOfWorkHTTPAdmissionUsesDirectPeer(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	if _, err := NewService(service.db, service.identity, service.sender, service.issuer, service.rules, service.policy, service.pow, service.powDifficulty, MaxProofTTL+time.Second); err == nil {
 		t.Fatal("accepted excessive PoW TTL")
@@ -163,6 +167,7 @@ func TestProofOfWorkHTTPAdmissionUsesDirectPeer(t *testing.T) {
 }
 
 func TestResetBindingCSRFReplayAndHeaders(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	ctx := context.Background()
 	token, _, err := service.identity.IssuePasswordReset(ctx, "subject-1", passwordResetLifetime)
@@ -201,6 +206,7 @@ func TestResetBindingCSRFReplayAndHeaders(t *testing.T) {
 }
 
 func TestBindEmailRejectsAmbiguousOrForeignOwnership(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	for _, email := range []string{"Alice <alice@example.test>", " alice@example.test", "앨리스@example.test"} {
 		if err := service.BindEmail(context.Background(), "subject-1", email); !errors.Is(err, ErrInvalidEmail) {
@@ -216,6 +222,7 @@ func TestBindEmailRejectsAmbiguousOrForeignOwnership(t *testing.T) {
 }
 
 func TestRegisterOpenPolicyProofDuplicateAndActivation(t *testing.T) {
+	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
 	enableOpenRegistration(t, service, ExactRedirectURIs([]string{"https://app.example.test/registered"}))
 	callbackCalls := 0
@@ -310,6 +317,7 @@ func TestRegisterOpenPolicyProofDuplicateAndActivation(t *testing.T) {
 }
 
 func TestRegisterOpenOptionsAndResponseShape(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	for _, method := range []string{http.MethodOptions, http.MethodGet} {
 		request := httptest.NewRequest(method, "/auth/v1/users/register", nil)
@@ -326,6 +334,7 @@ func TestRegisterOpenOptionsAndResponseShape(t *testing.T) {
 }
 
 func TestRegisterOpenDeliveryFailureDoesNotDisclose(t *testing.T) {
+	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
 	enableOpenRegistration(t, service, ExactRedirectURIs([]string{"https://app.example.test/registered"}))
 	sender.err = errors.New("smtp unavailable")
@@ -342,6 +351,7 @@ func TestRegisterOpenDeliveryFailureDoesNotDisclose(t *testing.T) {
 }
 
 func TestRegisterOpenConsumesProofBeforeDynamicRedirectLookup(t *testing.T) {
+	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	lookups := 0
 	option := WithOpenRegistration(RegistrationConfig{Enabled: true, AllowedDomains: []string{"example.test"}, RedirectValidator: ExactRedirectURIs([]string{"https://app.example.test/registered"})}, 72*time.Hour, func(_ context.Context, uri string) (bool, error) {
@@ -366,6 +376,7 @@ func enableOpenRegistration(t *testing.T, service *Service, validator RedirectVa
 }
 
 func TestRegisterOpenPreferredUsernameBeforeProof(t *testing.T) {
+	t.Parallel()
 	custom, err := identity.NewPreferredUsernamePolicy("required", `^Team_[0-9]{2}$`, []string{"team_12"})
 	if err != nil {
 		t.Fatal(err)
@@ -422,6 +433,7 @@ func TestRegisterOpenPreferredUsernameBeforeProof(t *testing.T) {
 }
 
 func TestRegisterOpenRequiredFieldsBeforeProof(t *testing.T) {
+	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
 	enableOpenRegistration(t, service, ExactRedirectURIs(nil))
 	challenge, err := service.pow.Issue(context.Background(), service.powDifficulty, service.powTTL)

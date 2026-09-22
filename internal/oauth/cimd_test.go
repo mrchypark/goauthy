@@ -18,6 +18,7 @@ import (
 )
 
 func TestCIMDResolvesOnlyAtAuthorizationAndPersistsSnapshot(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	seedOAuthUser(t, db, "user-1")
 	server := oauthTestServer(t, db, randomSecret(t))
@@ -75,6 +76,7 @@ func TestCIMDResolvesOnlyAtAuthorizationAndPersistsSnapshot(t *testing.T) {
 }
 
 func TestCIMDResourceAllowListAndDangerPolicy(t *testing.T) {
+	t.Parallel()
 	const clientID = "https://client.example.test/metadata"
 	const redirectURI = "https://client.example.test/callback"
 	const allowed = "https://resource.example.test/api"
@@ -126,6 +128,7 @@ func TestCIMDResourceAllowListAndDangerPolicy(t *testing.T) {
 }
 
 func TestCIMDEphemeralAudienceStrategyAllowsOnlyDangerMarker(t *testing.T) {
+	t.Parallel()
 	if err := ephemeralAudienceMatchingStrategy([]string{ephemeralAnyResourceAudience}, []string{"https://arbitrary.example.test/api"}); err != nil {
 		t.Fatalf("danger marker rejected arbitrary audience: %v", err)
 	}
@@ -135,6 +138,7 @@ func TestCIMDEphemeralAudienceStrategyAllowsOnlyDangerMarker(t *testing.T) {
 }
 
 func TestCIMDEphemeralClientIsAuthorizationCodeOnly(t *testing.T) {
+	t.Parallel()
 	client, err := newEphemeralClient(cimd.Metadata{
 		ID: "https://client.example.test/metadata", RedirectURIs: []string{"https://client.example.test/callback"}, Scopes: []string{"goauthy.read"},
 		GrantTypes: []string{"authorization_code", "client_credentials", "refresh_token"},
@@ -159,6 +163,7 @@ func TestCIMDEphemeralClientIsAuthorizationCodeOnly(t *testing.T) {
 }
 
 func TestCIMDDangerResourceAuthorizationUsesMarkerStrategy(t *testing.T) {
+	t.Parallel()
 	const clientID = "https://client.example.test/metadata"
 	const redirectURI = "https://client.example.test/callback"
 	const resource = "https://arbitrary.example.test/api"
@@ -182,6 +187,7 @@ func TestCIMDDangerResourceAuthorizationUsesMarkerStrategy(t *testing.T) {
 }
 
 func TestCIMDPrefetchFailureStages(t *testing.T) {
+	t.Parallel()
 	const clientID = "https://client.example.test/metadata"
 	metadata := cimd.Metadata{ID: clientID, RedirectURIs: []string{"https://client.example.test/callback"}, Scopes: []string{"goauthy.read"}}
 

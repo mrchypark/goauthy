@@ -11,11 +11,13 @@ import (
 )
 
 func TestOIDCEnvelopeWritersHonorFencedOldKeyAndAllowReplacement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	issuer := "https://id.example.com"
 	now := time.Unix(1_800_000_000, 0).UTC()
 
 	t.Run("bootstrap", func(t *testing.T) {
+		t.Parallel()
 		db := testDB(t)
 		fenceOIDCWriter(t, db, "master-a", "master-b", now)
 		if _, err := EnsureSigningKey(ctx, db, fixedKeyring("master-a"), issuer, now); err == nil {
@@ -28,6 +30,7 @@ func TestOIDCEnvelopeWritersHonorFencedOldKeyAndAllowReplacement(t *testing.T) {
 	})
 
 	t.Run("prepare", func(t *testing.T) {
+		t.Parallel()
 		db := testDB(t)
 		old := fixedKeyring("master-a")
 		if _, err := EnsureSigningKey(ctx, db, old, issuer, now); err != nil {
@@ -45,6 +48,7 @@ func TestOIDCEnvelopeWritersHonorFencedOldKeyAndAllowReplacement(t *testing.T) {
 	})
 
 	t.Run("rewrap", func(t *testing.T) {
+		t.Parallel()
 		db := testDB(t)
 		old := fixedKeyring("master-a")
 		if _, err := EnsureSigningKey(ctx, db, old, issuer, now); err != nil {

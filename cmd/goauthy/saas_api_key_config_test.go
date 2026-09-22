@@ -21,6 +21,7 @@ func writeSaaSAPIKeyConnectorConfig(t *testing.T, content string) string {
 }
 
 func TestLoadSaaSAPIKeyConnectors(t *testing.T) {
+	t.Parallel()
 	connectors, err := loadSaaSAPIKeyConnectors(writeSaaSAPIKeyConnectorConfig(t, validSaaSAPIKeyConnectorJSON))
 	if err != nil || len(connectors) != 1 || connectors["billing"] == nil || connectors["billing"].Digest() == "" {
 		t.Fatalf("connectors=%v err=%v", connectors, err)
@@ -32,6 +33,7 @@ func TestLoadSaaSAPIKeyConnectors(t *testing.T) {
 }
 
 func TestLoadSaaSAPIKeyConnectorsEmptyPath(t *testing.T) {
+	t.Parallel()
 	connectors, err := loadSaaSAPIKeyConnectors("")
 	if err != nil || connectors == nil || len(connectors) != 0 {
 		t.Fatalf("connectors=%v err=%v", connectors, err)
@@ -39,6 +41,7 @@ func TestLoadSaaSAPIKeyConnectorsEmptyPath(t *testing.T) {
 }
 
 func TestLoadSaaSAPIKeyConnectorsRejectsInvalidFiles(t *testing.T) {
+	t.Parallel()
 	var document map[string][]json.RawMessage
 	if err := json.Unmarshal([]byte(validSaaSAPIKeyConnectorJSON), &document); err != nil {
 		t.Fatal(err)

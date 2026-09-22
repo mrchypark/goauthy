@@ -7,7 +7,8 @@ import (
 )
 
 func TestSchemaV80DPOPMetadataMigration(t *testing.T) {
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "dpop-metadata-migration", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "dpop-metadata-migration", DataDir: testDatabaseDir(t, "dpop-metadata-migration")})
 	if err != nil {
 		t.Fatal(err)
 	}

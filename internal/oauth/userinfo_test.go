@@ -19,6 +19,7 @@ import (
 )
 
 func TestUserInfoValidGETAndPOST(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	token := issueUserInfoToken(t, server)
 	for name, request := range map[string]*http.Request{
@@ -43,6 +44,7 @@ func TestUserInfoValidGETAndPOST(t *testing.T) {
 }
 
 func TestUserInfoRejectsInvalidTokenAndTransport(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := userInfoTestServer(t, db, nil)
 	valid := issueUserInfoToken(t, server)
@@ -75,6 +77,7 @@ func TestUserInfoRejectsInvalidTokenAndTransport(t *testing.T) {
 }
 
 func TestUserInfoSubjectValidationAndMethod(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), errors.New("disabled"))
 	token := issueUserInfoToken(t, server)
 	assertUserInfoUnauthorized(t, server, userInfoRequest(http.MethodGet, token, nil))

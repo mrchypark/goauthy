@@ -18,6 +18,7 @@ import (
 )
 
 func TestOIDCAuthorizationCodeIssueIsGuardedByBrowserSession(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name   string
 		mutate func(t *testing.T, sessions *browser.Store, issued browser.IssuedSession, db *rhiza.DB)
@@ -80,6 +81,7 @@ func TestOIDCAuthorizationCodeIssueIsGuardedByBrowserSession(t *testing.T) {
 }
 
 func TestOIDCIssueGuardHonorsConfiguredBrowserIdleTimeout(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	seedDeviceUser(t, db, "user-1", nil)
 	sessions, err := browser.NewStore(db)
@@ -114,6 +116,7 @@ func TestOIDCIssueGuardHonorsConfiguredBrowserIdleTimeout(t *testing.T) {
 }
 
 func TestAtomicOIDCSessionRevocationWinsAgainstInFlightCodeIssue(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	seedDeviceUser(t, db, "user-1", nil)
 	sessions, err := browser.NewStore(db)
@@ -154,6 +157,7 @@ func TestAtomicOIDCSessionRevocationWinsAgainstInFlightCodeIssue(t *testing.T) {
 }
 
 func TestNonOIDCAuthorizationCodeIssueDoesNotRequireBrowserSession(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	seedDeviceUser(t, db, "user-1", nil)
 	store := oauthTestServer(t, db, randomSecret(t)).store
@@ -174,6 +178,7 @@ func TestNonOIDCAuthorizationCodeIssueDoesNotRequireBrowserSession(t *testing.T)
 }
 
 func TestMalformedOIDCBrowserSessionIDCannotPersistAuthorizationCode(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oidcTestServer(t, db, randomSecret(t), func(context.Context) (oidc.SigningKey, error) { return oidcTestKey(t), nil })
 	verifier := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNO0123456789"
@@ -190,6 +195,7 @@ func TestMalformedOIDCBrowserSessionIDCannotPersistAuthorizationCode(t *testing.
 }
 
 func TestOIDCBrowserSessionIDRequiresCanonicalBase64URL(t *testing.T) {
+	t.Parallel()
 	if validOIDCSessionID(strings.Repeat("A", 42) + "B") {
 		t.Fatal("noncanonical base64url browser session ID accepted")
 	}

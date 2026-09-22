@@ -12,6 +12,7 @@ import (
 )
 
 func TestJWKSHandlerReturnsOnlyPublicKeyAndSupportsETag(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	keyring := testKeyring(t, "master-1")
 	issuer := "https://id.example.com"

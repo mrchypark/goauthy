@@ -19,6 +19,7 @@ import (
 )
 
 func TestLoadSCIMProvidersStrictAndSafe(t *testing.T) {
+	t.Parallel()
 	tokenPath := filepath.Join(t.TempDir(), "token")
 	if err := os.WriteFile(tokenPath, []byte("bearer-secret\r\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -78,6 +79,7 @@ Wf86aX6PepsntZv2GYlA5UpabfT2EZICICpJ5h/iI+i341gBmLiAFQOyTDT+/wQc
 `
 
 func TestLoadSCIMRootCAsStrictAndSafe(t *testing.T) {
+	t.Parallel()
 	if pool, err := loadSCIMRootCAs(""); err != nil || pool != nil {
 		t.Fatalf("omitted CA file: pool=%v err=%v", pool, err)
 	}
@@ -125,6 +127,7 @@ func TestLoadSCIMRootCAsStrictAndSafe(t *testing.T) {
 }
 
 func TestLoadSCIMProvidersLoadsOptionalCAFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	tokenPath := filepath.Join(dir, "token")
 	caPath := filepath.Join(dir, "ca.pem")
@@ -150,6 +153,7 @@ func TestLoadSCIMProvidersLoadsOptionalCAFile(t *testing.T) {
 }
 
 func TestDecodeSCIMProviderSyncDeleteUsersIsStrict(t *testing.T) {
+	t.Parallel()
 	base := `"id":"primary","base_url":"https://scim.example.test/v2","token_file":"token"`
 	for name, raw := range map[string]string{
 		"default": `{` + base + `}`,
@@ -171,6 +175,7 @@ func TestDecodeSCIMProviderSyncDeleteUsersIsStrict(t *testing.T) {
 }
 
 func TestSCIMRuntimeFromEnvUnsetIsDisabled(t *testing.T) {
+	t.Parallel()
 	runtime, err := scimRuntimeFromEnv(func(string) string { return "" }, nil, nil, nil)
 	if err != nil || runtime != nil {
 		t.Fatalf("runtime=%v err=%v", runtime, err)
@@ -178,6 +183,7 @@ func TestSCIMRuntimeFromEnvUnsetIsDisabled(t *testing.T) {
 }
 
 func TestLoadSCIMTokenTrimsExactlyOneLineEndingAndRejectsUnsafeValues(t *testing.T) {
+	t.Parallel()
 	for name, input := range map[string][]byte{
 		"lf":        []byte("token\n"),
 		"crlf":      []byte("token\r\n"),
@@ -245,8 +251,9 @@ func TestLoadSCIMTokenTrimsExactlyOneLineEndingAndRejectsUnsafeValues(t *testing
 }
 
 func TestSCIMRuntimeStepScansEveryProviderAndDrainsBoundedJobs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-test", DataDir: migratedDataDir(t, "cmd-scim-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,8 +312,9 @@ func TestSCIMRuntimeStepScansEveryProviderAndDrainsBoundedJobs(t *testing.T) {
 }
 
 func TestSCIMRuntimeStepEnqueuesMappedGroupAfterUsers(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-group-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-group-test", DataDir: migratedDataDir(t, "cmd-scim-group-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,8 +380,9 @@ func TestSCIMRuntimeStepEnqueuesMappedGroupAfterUsers(t *testing.T) {
 }
 
 func TestSCIMRuntimeStepUsesTombstoneIntentForDeletePolicy(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-tombstone-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-tombstone-test", DataDir: migratedDataDir(t, "cmd-scim-tombstone-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -438,6 +447,7 @@ func TestSCIMRuntimeStepUsesTombstoneIntentForDeletePolicy(t *testing.T) {
 }
 
 func TestSCIMRuntimeStepCleansTombstoneOnlyAfterEveryProviderDeleteSucceeds(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name       string
 		drainLimit int
@@ -451,7 +461,7 @@ func TestSCIMRuntimeStepCleansTombstoneOnlyAfterEveryProviderDeleteSucceeds(t *t
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
-			db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-cleanup-" + strings.ReplaceAll(test.name, " ", "-"), DataDir: t.TempDir()})
+			db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-cleanup-" + strings.ReplaceAll(test.name, " ", "-"), DataDir: migratedDataDir(t, "cmd-scim-cleanup-"+strings.ReplaceAll(test.name, " ", "-"))})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -508,8 +518,9 @@ func TestSCIMRuntimeStepCleansTombstoneOnlyAfterEveryProviderDeleteSucceeds(t *t
 }
 
 func TestSCIMRuntimeStepPreservesTerminalDeletesForLiveTombstoneAndCleansOtherWork(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-outbox-cleanup", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-outbox-cleanup", DataDir: migratedDataDir(t, "cmd-scim-outbox-cleanup")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -562,8 +573,9 @@ func TestSCIMRuntimeStepPreservesTerminalDeletesForLiveTombstoneAndCleansOtherWo
 }
 
 func TestSCIMRuntimeStepUsesCapturedTombstoneProviders(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-snapshot", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-snapshot", DataDir: migratedDataDir(t, "cmd-scim-snapshot")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -616,8 +628,9 @@ func TestSCIMRuntimeStepUsesCapturedTombstoneProviders(t *testing.T) {
 }
 
 func TestSCIMRuntimeStepRejectsMalformedHardDeleteSnapshot(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-invalid-hard-delete", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-invalid-hard-delete", DataDir: migratedDataDir(t, "cmd-scim-invalid-hard-delete")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,8 +659,9 @@ func TestSCIMRuntimeStepRejectsMalformedHardDeleteSnapshot(t *testing.T) {
 }
 
 func TestSCIMRuntimeStepRejectsHardDeleteWithoutProviderSnapshot(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-empty-hard-delete", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-empty-hard-delete", DataDir: migratedDataDir(t, "cmd-scim-empty-hard-delete")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -676,8 +690,9 @@ func TestSCIMRuntimeStepRejectsHardDeleteWithoutProviderSnapshot(t *testing.T) {
 }
 
 func TestSCIMRuntimeStepRejectsStaleTombstoneGeneration(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-stale-tombstone", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-stale-tombstone", DataDir: migratedDataDir(t, "cmd-scim-stale-tombstone")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -713,8 +728,9 @@ func TestSCIMRuntimeStepRejectsStaleTombstoneGeneration(t *testing.T) {
 }
 
 func TestSCIMRuntimeStepSkipsEmptyGenerationTombstoneAndProcessesLiveWork(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-empty-generation", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-empty-generation", DataDir: migratedDataDir(t, "cmd-scim-empty-generation")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -780,8 +796,9 @@ func seedRuntimeTombstoneWithGeneration(t *testing.T, db *rhiza.DB, externalID, 
 // claims then received a lease that had already expired, so another replica
 // could take over work this process was still delivering.
 func TestSCIMRuntimeStepClaimsEachJobWithItsOwnLeaseTime(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-fresh-claim", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-fresh-claim", DataDir: migratedDataDir(t, "cmd-scim-fresh-claim")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -840,8 +857,9 @@ func TestSCIMRuntimeStepClaimsEachJobWithItsOwnLeaseTime(t *testing.T) {
 // provider's queued deletion: the failure must be recorded durably and the
 // drain must still run, before and after a restart.
 func TestSCIMRuntimeStepOversizedGroupDoesNotStallUnrelatedWork(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-oversized-group", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "cmd-scim-oversized-group", DataDir: migratedDataDir(t, "cmd-scim-oversized-group")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -920,6 +938,7 @@ func (f reconcilerFunc) Reconcile(ctx context.Context, request scim.Request) (sc
 }
 
 func TestSCIMRuntimeRunStopsDeterministicallyOnCancellation(t *testing.T) {
+	t.Parallel()
 	runtime := &scimRuntime{}
 	if err := runtime.Run(context.Background(), time.Second, time.Now, nil); err == nil {
 		t.Fatal("accepted unconfigured SCIM runtime")

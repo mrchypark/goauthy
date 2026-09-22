@@ -17,6 +17,7 @@ import (
 )
 
 func TestAlreadyIssuedUserTokenIntrospectionBecomesInactiveAfterAccountShortening(t *testing.T) {
+	t.Parallel()
 	server := oauthTestServer(t, oauthTestDB(t), randomSecret(t))
 	token := decodeToken(t, postToken(server, url.Values{
 		"grant_type": {"authorization_code"}, "code": {issueCode(t, server, strings.Repeat("e", 43))},
@@ -28,6 +29,7 @@ func TestAlreadyIssuedUserTokenIntrospectionBecomesInactiveAfterAccountShortenin
 }
 
 func TestShortenedAccountRefreshIsInactiveAndRevocationRemainsFinal(t *testing.T) {
+	t.Parallel()
 	server := oauthTestServer(t, oauthTestDB(t), randomSecret(t))
 	token := decodeToken(t, postToken(server, url.Values{
 		"grant_type": {"authorization_code"}, "code": {issueCode(t, server, strings.Repeat("r", 43))},
@@ -56,6 +58,7 @@ func TestShortenedAccountRefreshIsInactiveAndRevocationRemainsFinal(t *testing.T
 }
 
 func TestAlreadyIssuedDeviceTokenIntrospectionBecomesInactiveAfterAccountShortening(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	seedDeviceUser(t, db, "device-user", time.Now().UTC().Add(time.Hour).UnixMilli())
@@ -75,6 +78,7 @@ func TestAlreadyIssuedDeviceTokenIntrospectionBecomesInactiveAfterAccountShorten
 }
 
 func TestAlreadyIssuedExchangeTokenIntrospectionBecomesInactiveWhenActorExpires(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	seedAccountExpiry(t, server.store.db, time.Now().UTC().Add(time.Hour))
 	seedAccountExpiryForSubject(t, server.store.db, "actor-2", time.Now().UTC().Add(time.Hour))
@@ -92,6 +96,7 @@ func TestAlreadyIssuedExchangeTokenIntrospectionBecomesInactiveWhenActorExpires(
 }
 
 func TestAlreadyIssuedUserTokenConsumersRejectAfterAccountShortening(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := userInfoTestServer(t, db, nil)
 	token := issueUserInfoToken(t, server)
@@ -108,6 +113,7 @@ func TestAlreadyIssuedUserTokenConsumersRejectAfterAccountShortening(t *testing.
 }
 
 func TestForwardAuthLateProfileExpiryClearsIdentityHeaders(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := userInfoTestServer(t, db, nil)
 	token := issueUserInfoToken(t, server)
@@ -139,6 +145,7 @@ func TestForwardAuthLateProfileExpiryClearsIdentityHeaders(t *testing.T) {
 }
 
 func TestAccountExpiryConsumerPositiveNeighborsAndMachineToken(t *testing.T) {
+	t.Parallel()
 	server := userInfoTestServer(t, oauthTestDB(t), nil)
 	nullToken := issueUserInfoToken(t, server)
 	if response := forwardAuthResponse(server, forwardAuthRequest(http.MethodGet, nullToken, nil)); response.Code != http.StatusOK {
@@ -161,6 +168,7 @@ func TestAccountExpiryConsumerPositiveNeighborsAndMachineToken(t *testing.T) {
 }
 
 func TestValidateTokenAccountsBoundaryAndShapeMatrix(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		stmt string
@@ -195,6 +203,7 @@ func TestValidateTokenAccountsBoundaryAndShapeMatrix(t *testing.T) {
 }
 
 func TestValidateTokenAccountsRejectsExpiredActorAndMalformedActors(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	seedAccountExpiry(t, server.store.db, time.Now().UTC().Add(time.Hour))
 	seedAccountExpiryForSubject(t, server.store.db, "actor-2", time.Now().UTC().Add(time.Hour))
@@ -230,6 +239,7 @@ func TestValidateTokenAccountsRejectsExpiredActorAndMalformedActors(t *testing.T
 }
 
 func TestValidateTokenAccountsDistinguishesMachineAndUserClientSubject(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	machine := decodeToken(t, postToken(server, url.Values{"grant_type": {"client_credentials"}}))
 	setConsumerExpiryClock(server)

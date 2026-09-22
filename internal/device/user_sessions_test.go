@@ -9,6 +9,7 @@ import (
 )
 
 func TestRevokeUserSessionInvalidatesOnlyOneDeviceFamily(t *testing.T) {
+	t.Parallel()
 	ctx, store, db := testStore(t)
 	fixed := time.UnixMilli(1700000000000)
 	store.now = func() time.Time { return fixed }

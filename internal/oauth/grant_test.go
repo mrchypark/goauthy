@@ -5,9 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +35,7 @@ type tokenResponse struct {
 }
 
 func TestAuthorizationCodePKCEAndRefreshRotation(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	hmacSecret := randomSecret(t)
 	server := oauthTestServer(t, db, hmacSecret)
@@ -69,6 +74,7 @@ func TestAuthorizationCodePKCEAndRefreshRotation(t *testing.T) {
 }
 
 func TestAuthorizationCodeIsSingleUseUnderConcurrency(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	verifier := strings.Repeat("c", 43)
@@ -113,6 +119,7 @@ func TestAuthorizationCodeIsSingleUseUnderConcurrency(t *testing.T) {
 }
 
 func TestAuthorizationRequiresS256PKCE(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	seedAccountExpiry(t, db, nil)
 	server := oauthTestServer(t, db, randomSecret(t))
@@ -130,6 +137,7 @@ func TestAuthorizationRequiresS256PKCE(t *testing.T) {
 }
 
 func TestAuthorizationRejectsMissingLoginAndRedirectMismatch(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	verifier := strings.Repeat("d", 43)
@@ -156,6 +164,7 @@ func TestAuthorizationRejectsMissingLoginAndRedirectMismatch(t *testing.T) {
 }
 
 func TestAuthorizationIssueRemovesExpiredState(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	issueCode(t, server, strings.Repeat("e", 43))
@@ -180,6 +189,7 @@ func TestAuthorizationIssueRemovesExpiredState(t *testing.T) {
 }
 
 func TestTokenIssueRemovesExpiredState(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	for index, verifier := range []string{strings.Repeat("h", 43), strings.Repeat("i", 43)} {
@@ -210,7 +220,11 @@ func TestTokenIssueRemovesExpiredState(t *testing.T) {
 
 func oauthTestDB(t *testing.T) *rhiza.DB {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "test-1", DataDir: t.TempDir()})
+	directory := t.TempDir()
+	if err := copyDirTree(oauthMigratedTemplate(t), directory); err != nil {
+		t.Fatal(err)
+	}
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: testNodeID, DataDir: directory})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,6 +233,77 @@ func oauthTestDB(t *testing.T) *rhiza.DB {
 		t.Fatal(err)
 	}
 	return db
+}
+
+const testNodeID = "test-1"
+
+// Rhiza applies every migration statement through replicated consensus, which
+// costs ~8s for a fresh database under -race (117 statements at ~66ms each).
+// The migrated schema is therefore built once per test binary and each test
+// opens a private copy of it, which keeps per-test isolation and costs ~0.3s.
+var (
+	oauthTemplateOnce      sync.Once
+	oauthTemplateDirectory string
+	oauthTemplateErr       error
+)
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if oauthTemplateDirectory != "" {
+		_ = os.RemoveAll(oauthTemplateDirectory)
+	}
+	os.Exit(code)
+}
+
+func oauthMigratedTemplate(t *testing.T) string {
+	t.Helper()
+	oauthTemplateOnce.Do(func() {
+		directory, err := os.MkdirTemp("", "goauthy-oauth-template-")
+		if err != nil {
+			oauthTemplateErr = err
+			return
+		}
+		db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: testNodeID, DataDir: directory})
+		if err != nil {
+			oauthTemplateErr = fmt.Errorf("open oauth test template: %w", err)
+			return
+		}
+		if err := storage.Migrate(context.Background(), db); err != nil {
+			_ = db.Close()
+			oauthTemplateErr = fmt.Errorf("migrate oauth test template: %w", err)
+			return
+		}
+		if err := db.Close(); err != nil {
+			oauthTemplateErr = fmt.Errorf("close oauth test template: %w", err)
+			return
+		}
+		oauthTemplateDirectory = directory
+	})
+	if oauthTemplateErr != nil {
+		t.Fatal(oauthTemplateErr)
+	}
+	return oauthTemplateDirectory
+}
+
+func copyDirTree(source, destination string) error {
+	return filepath.WalkDir(source, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(destination, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, content, 0o644)
+	})
 }
 
 func oauthTestServer(t *testing.T, db *rhiza.DB, hmacSecret []byte) *Server {

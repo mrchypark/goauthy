@@ -10,6 +10,7 @@ import (
 )
 
 func TestTokenExchangeUserScopesAndCurrentClaims(t *testing.T) {
+	t.Parallel()
 	accessValue := json.RawMessage(`"access-v1"`)
 	server := customClaimsServer(t, false, &accessValue)
 	source := decodeOIDCToken(t, postToken(server, codeTokenForm(t, server, "s", "openid employee goauthy.read")))
@@ -28,6 +29,7 @@ func TestTokenExchangeUserScopesAndCurrentClaims(t *testing.T) {
 }
 
 func TestTokenExchangeRetainsAndDownscopesCurrentGroups(t *testing.T) {
+	t.Parallel()
 	state := PrincipalClaims{Roles: []string{"viewer"}, Groups: []string{"team/old"}, Revision: 1}
 	server := rbacClaimsServer(t, func(context.Context, string) (PrincipalClaims, error) { return state, nil })
 	source := issueRBACAccessToken(t, server, strings.Repeat("g", 43), "openid groups goauthy.read")

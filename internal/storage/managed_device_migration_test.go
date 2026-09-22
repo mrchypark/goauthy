@@ -7,7 +7,8 @@ import (
 )
 
 func TestSchemaV65ManagedDeviceGeneration(t *testing.T) {
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "managed-device-migration", DataDir: t.TempDir()})
+	t.Parallel()
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "managed-device-migration", DataDir: testDatabaseDir(t, "managed-device-migration")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,6 +30,7 @@ func TestSchemaV65ManagedDeviceGeneration(t *testing.T) {
 }
 
 func TestSchemaV65PreservesExistingDeviceGrant(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "managed-device-upgrade", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
@@ -53,6 +55,7 @@ func TestSchemaV65PreservesExistingDeviceGrant(t *testing.T) {
 }
 
 func TestSchemaV66PreservesLegacyRowsAndIndexesTokenRequests(t *testing.T) {
+	t.Parallel()
 	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "managed-device-v66", DataDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)

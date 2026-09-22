@@ -19,6 +19,7 @@ import (
 )
 
 func TestNewSMTPSenderValidatesConfig(t *testing.T) {
+	t.Parallel()
 	valid := SMTPConfig{Host: "smtp.example.test", Port: 587, From: "Support@Example.Test", Timeout: time.Second}
 	sender, err := NewSMTPSender(valid)
 	if err != nil {
@@ -45,6 +46,7 @@ func TestNewSMTPSenderValidatesConfig(t *testing.T) {
 }
 
 func TestSMTPSenderComposesCanonicalMultipartMessage(t *testing.T) {
+	t.Parallel()
 	sender := testSMTPSender(t)
 	var got *mail.Msg
 	var bounded bool
@@ -91,6 +93,7 @@ func TestSMTPSenderComposesCanonicalMultipartMessage(t *testing.T) {
 }
 
 func TestSMTPSenderComposesPasswordNewMessage(t *testing.T) {
+	t.Parallel()
 	sender := testSMTPSender(t)
 	var got *mail.Msg
 	sender.send = func(_ context.Context, msg *mail.Msg) error { got = msg; return nil }
@@ -116,6 +119,7 @@ func TestSMTPSenderComposesPasswordNewMessage(t *testing.T) {
 }
 
 func TestSMTPSenderComposesAlreadyRegisteredMessage(t *testing.T) {
+	t.Parallel()
 	sender := testSMTPSender(t)
 	var got *mail.Msg
 	sender.send = func(_ context.Context, msg *mail.Msg) error { got = msg; return nil }
@@ -177,6 +181,7 @@ func multipartBodies(t *testing.T, message *stdmail.Message) (string, string) {
 }
 
 func TestSMTPSenderRejectsUnsafeInputAndCancelledContext(t *testing.T) {
+	t.Parallel()
 	sender := testSMTPSender(t)
 	calls := 0
 	sender.send = func(_ context.Context, _ *mail.Msg) error { calls++; return nil }
@@ -208,6 +213,7 @@ func TestSMTPSenderRejectsUnsafeInputAndCancelledContext(t *testing.T) {
 }
 
 func TestSMTPSenderRequiresTLSUnlessExplicitlyAllowed(t *testing.T) {
+	t.Parallel()
 	address := startNoStartTLSFixture(t)
 	host, port := splitSMTPAddress(t, address)
 
@@ -222,6 +228,7 @@ func TestSMTPSenderRequiresTLSUnlessExplicitlyAllowed(t *testing.T) {
 }
 
 func TestSMTPSenderSendsToLocalInsecureFixture(t *testing.T) {
+	t.Parallel()
 	address, received := startSMTPFixture(t)
 	host, port := splitSMTPAddress(t, address)
 	sender, err := NewSMTPSender(SMTPConfig{Host: host, Port: port, From: "support@example.test", Timeout: time.Second, AllowInsecure: true})

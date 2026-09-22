@@ -18,7 +18,7 @@ import (
 
 func providerRegistryTestDB(t *testing.T) (*rhiza.DB, *apikey.Store) {
 	t.Helper()
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "provider-registry-route-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "provider-registry-route-test", DataDir: migratedDataDir(t, "provider-registry-route-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,6 +90,7 @@ func testRegistryActualMux(t *testing.T, h *upstreamprovider.RegistryHandler) *h
 // --- Read route tests (preserved) ---
 
 func TestRegistryRoutePostProvidersUnauthorized(t *testing.T) {
+	t.Parallel()
 	db, keys := providerRegistryTestDB(t)
 	store, err := upstreamprovider.NewRegistryStore(db, providerRegistryTestKeyring(t))
 	if err != nil {
@@ -108,6 +109,7 @@ func TestRegistryRoutePostProvidersUnauthorized(t *testing.T) {
 }
 
 func TestRegistryRouteGetMinimalPublic(t *testing.T) {
+	t.Parallel()
 	db, keys := providerRegistryTestDB(t)
 	providerRegistrySeedProvider(t, db, "rm-1", "MinimalPub", true)
 	store, err := upstreamprovider.NewRegistryStore(db, providerRegistryTestKeyring(t))
@@ -127,6 +129,7 @@ func TestRegistryRouteGetMinimalPublic(t *testing.T) {
 }
 
 func TestRegistryRouteDeleteSafeUnauthorized(t *testing.T) {
+	t.Parallel()
 	db, keys := providerRegistryTestDB(t)
 	store, err := upstreamprovider.NewRegistryStore(db, providerRegistryTestKeyring(t))
 	if err != nil {
@@ -145,6 +148,7 @@ func TestRegistryRouteDeleteSafeUnauthorized(t *testing.T) {
 }
 
 func TestRegistryRouteAllMethodsRegistered(t *testing.T) {
+	t.Parallel()
 	db, keys := providerRegistryTestDB(t)
 	store, err := upstreamprovider.NewRegistryStore(db, providerRegistryTestKeyring(t))
 	if err != nil {
@@ -190,6 +194,7 @@ func TestRegistryRouteAllMethodsRegistered(t *testing.T) {
 // --- Write route tests ---
 
 func TestRegistryRouteCreateUnauthorized(t *testing.T) {
+	t.Parallel()
 	db, keys := providerRegistryTestDB(t)
 	store, err := upstreamprovider.NewRegistryStore(db, providerRegistryTestKeyring(t))
 	if err != nil {
@@ -208,6 +213,7 @@ func TestRegistryRouteCreateUnauthorized(t *testing.T) {
 }
 
 func TestRegistryRouteUpdateUnauthorized(t *testing.T) {
+	t.Parallel()
 	db, keys := providerRegistryTestDB(t)
 	store, err := upstreamprovider.NewRegistryStore(db, providerRegistryTestKeyring(t))
 	if err != nil {
@@ -226,6 +232,7 @@ func TestRegistryRouteUpdateUnauthorized(t *testing.T) {
 }
 
 func TestRegistryRouteDeleteUnauthorized(t *testing.T) {
+	t.Parallel()
 	db, keys := providerRegistryTestDB(t)
 	store, err := upstreamprovider.NewRegistryStore(db, providerRegistryTestKeyring(t))
 	if err != nil {
@@ -244,6 +251,7 @@ func TestRegistryRouteDeleteUnauthorized(t *testing.T) {
 }
 
 func TestRegistryRouteWriteCoexistWithReadAndLogo(t *testing.T) {
+	t.Parallel()
 	db, keys := providerRegistryTestDB(t)
 	store, err := upstreamprovider.NewRegistryStore(db, providerRegistryTestKeyring(t))
 	if err != nil {

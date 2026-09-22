@@ -10,6 +10,7 @@ import (
 )
 
 func TestFaviconFromEnv(t *testing.T) {
+	t.Parallel()
 	if asset, err := faviconFromEnv(func(string) string { return "" }); err != nil || asset != nil {
 		t.Fatalf("empty path asset=%v err=%v", asset, err)
 	}

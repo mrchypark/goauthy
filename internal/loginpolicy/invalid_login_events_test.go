@@ -11,6 +11,7 @@ import (
 )
 
 func TestFailureEmitsInvalidLoginEventsWithCounterPayload(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.Unix(1_800_000_000, 0).UTC()
@@ -41,6 +42,7 @@ func TestFailureEmitsInvalidLoginEventsWithCounterPayload(t *testing.T) {
 }
 
 func TestFailureConcurrentInvalidLoginEventsHaveContiguousCounts(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	first, second := NewStore(db), NewStore(db)
 	now := time.Unix(1_800_000_000, 0).UTC()
@@ -69,6 +71,7 @@ func TestFailureConcurrentInvalidLoginEventsHaveContiguousCounts(t *testing.T) {
 }
 
 func TestFailureSuccessDoesNotEmitInvalidLoginEvents(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.Unix(1_800_000_000, 0).UTC()
@@ -85,6 +88,7 @@ func TestFailureSuccessDoesNotEmitInvalidLoginEvents(t *testing.T) {
 }
 
 func TestFailureInvalidLoginEventInsertFailureRollsBackCounter(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.Unix(1_800_000_000, 0).UTC()
@@ -122,6 +126,7 @@ func TestFailureInvalidLoginEventInsertFailureRollsBackCounter(t *testing.T) {
 }
 
 func TestFailureInvalidLoginEventCapsWireCountAtUint32(t *testing.T) {
+	t.Parallel()
 	db := testDB(t)
 	store := NewStore(db)
 	now := time.Unix(1_800_000_000, 0).UTC()

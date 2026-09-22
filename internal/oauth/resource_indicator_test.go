@@ -15,6 +15,7 @@ import (
 )
 
 func TestClientCredentialsResourceIndicator(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	resource := "https://api.example.test/v1"
 	server, err := NewServerWithResourceIndicators(context.Background(), db, randomSecret(t), testClientID, testClientSecret, testRedirectURI, []string{resource})
@@ -45,6 +46,7 @@ func TestClientCredentialsResourceIndicator(t *testing.T) {
 }
 
 func TestClientCredentialsResourceIndicatorRejected(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	resource := "https://api.example.test/v1"
 	for name, resources := range map[string][]string{
@@ -105,6 +107,7 @@ func TestClientCredentialsResourceIndicatorRejected(t *testing.T) {
 }
 
 func TestAuthorizationCodeResourceIndicatorPreservesAudience(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	resource := "https://api.example.test/v1"
 	server, err := NewServerWithResourceIndicators(context.Background(), db, randomSecret(t), testClientID, testClientSecret, testRedirectURI, []string{resource})
@@ -131,6 +134,7 @@ func TestAuthorizationCodeResourceIndicatorPreservesAudience(t *testing.T) {
 }
 
 func TestDefaultAudienceAppliesAndPersistsThroughRefresh(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	seedOAuthUser(t, db, "user-1")
 	resource := "https://api.example.test/default"
@@ -172,6 +176,7 @@ func TestDefaultAudienceAppliesAndPersistsThroughRefresh(t *testing.T) {
 }
 
 func TestDefaultAudienceValidation(t *testing.T) {
+	t.Parallel()
 	resource := "https://api.example.test/default"
 	for name, defaults := range map[string]map[string]string{
 		"not allowed":  {testClientID: "https://other.example.test/default"},
@@ -187,6 +192,7 @@ func TestDefaultAudienceValidation(t *testing.T) {
 }
 
 func TestAuthorizationResourceIndicatorRejectsUnknownTarget(t *testing.T) {
+	t.Parallel()
 	server := oauthTestServer(t, oauthTestDB(t), randomSecret(t))
 	verifier := strings.Repeat("b", 43)
 	for name, values := range map[string]url.Values{

@@ -11,6 +11,7 @@ import (
 )
 
 func TestActivatePreparedSigningKeyEmitsOneJWKSEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	keyring := testKeyring(t, "master-1")
@@ -48,11 +49,13 @@ func TestActivatePreparedSigningKeyEmitsOneJWKSEvent(t *testing.T) {
 }
 
 func TestActivatePreparedSigningKeyEventFailureRollsBackAndRetryEmitsOnce(t *testing.T) {
+	t.Parallel()
 	for _, failure := range []struct{ name, trigger string }{
 		{"event_insert", `CREATE TRIGGER rotation_event_fail BEFORE INSERT ON event_log BEGIN SELECT RAISE(ABORT,'event failure'); END`},
 		{"key_activation", `CREATE TRIGGER rotation_event_fail BEFORE UPDATE ON oidc_signing_keys WHEN NEW.state='active' BEGIN SELECT RAISE(ABORT,'activation failure'); END`},
 	} {
 		t.Run(failure.name, func(t *testing.T) {
+			t.Parallel()
 			ctx := context.Background()
 			db := testDB(t)
 			keyring := testKeyring(t, "master-1")
@@ -112,6 +115,7 @@ func rotationOrderHighwater(t *testing.T, db *rhiza.DB) int64 {
 }
 
 func TestActivatePreparedSigningKeyConcurrentTimesEmitsOneEvent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := testDB(t)
 	keyring := testKeyring(t, "master-1")

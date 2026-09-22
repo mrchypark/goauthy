@@ -7,6 +7,7 @@ import (
 )
 
 func TestIssueForSubjectDeliversToRegisteredEmail(t *testing.T) {
+	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
 	if err := service.BindEmail(context.Background(), "subject-1", "alice@example.test"); err != nil {
 		t.Fatal(err)
@@ -21,6 +22,7 @@ func TestIssueForSubjectDeliversToRegisteredEmail(t *testing.T) {
 }
 
 func TestIssueForSubjectMissingRegistrationDoesNotDeliver(t *testing.T) {
+	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
 	if err := service.IssueForSubject(context.Background(), "subject-1"); err != nil {
 		t.Fatal(err)
@@ -31,6 +33,7 @@ func TestIssueForSubjectMissingRegistrationDoesNotDeliver(t *testing.T) {
 }
 
 func TestIssueForSubjectConcurrentDifferentSubjects(t *testing.T) {
+	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
 	ctx := context.Background()
 	if err := service.BindEmail(ctx, "subject-1", "alice@example.test"); err != nil {

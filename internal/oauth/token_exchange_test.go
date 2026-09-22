@@ -20,6 +20,7 @@ import (
 const exchangeResource = "https://resource.example.test/api"
 
 func TestTokenExchangeAccessOnlyNarrowing(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	source := decodeToken(t, postToken(server, url.Values{"grant_type": {"authorization_code"}, "code": {issueExchangeCode(t, server)}, "redirect_uri": {testRedirectURI}, "code_verifier": {strings.Repeat("x", 43)}}))
 	sourceSignature := server.accessTokens.AccessTokenSignature(context.Background(), source.AccessToken)
@@ -41,6 +42,7 @@ func TestTokenExchangeAccessOnlyNarrowing(t *testing.T) {
 }
 
 func TestTokenExchangeRejectsPrivilegeWideningAndUnsupportedFields(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	source := decodeToken(t, postToken(server, url.Values{"grant_type": {"authorization_code"}, "code": {issueExchangeCode(t, server)}, "redirect_uri": {testRedirectURI}, "code_verifier": {strings.Repeat("x", 43)}}))
 	base := url.Values{"grant_type": {TokenExchangeGrantType}, "subject_token": {source.AccessToken}, "subject_token_type": {accessTokenType}}
@@ -61,6 +63,7 @@ func TestTokenExchangeRejectsPrivilegeWideningAndUnsupportedFields(t *testing.T)
 }
 
 func TestTokenExchangeGroupsFollowSubjectScope(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, sourceScopes, actorScopes, requestedScopes string
 	}{
@@ -110,6 +113,7 @@ func tokenExchangeAccessCount(t *testing.T, server *Server) int64 {
 }
 
 func TestTokenExchangeNeverOutlivesSourceAccessToken(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	source := decodeToken(t, postToken(server, url.Values{"grant_type": {"authorization_code"}, "code": {issueExchangeCode(t, server)}, "redirect_uri": {testRedirectURI}, "code_verifier": {strings.Repeat("x", 43)}}))
 	signature := server.accessTokens.AccessTokenSignature(context.Background(), source.AccessToken)
@@ -137,6 +141,7 @@ func TestTokenExchangeNeverOutlivesSourceAccessToken(t *testing.T) {
 }
 
 func TestTokenExchangeActorDelegationPersistsOnlyActSubject(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	source := decodeToken(t, postToken(server, url.Values{"grant_type": {"authorization_code"}, "code": {issueExchangeCodeFor(t, server, "user-1", "goauthy.read offline_access")}, "redirect_uri": {testRedirectURI}, "code_verifier": {strings.Repeat("x", 43)}}))
 	actor := decodeToken(t, postToken(server, url.Values{"grant_type": {"authorization_code"}, "code": {issueExchangeCodeFor(t, server, "actor-2", "goauthy.read")}, "redirect_uri": {testRedirectURI}, "code_verifier": {strings.Repeat("x", 43)}}))
@@ -174,6 +179,7 @@ func TestTokenExchangeActorDelegationPersistsOnlyActSubject(t *testing.T) {
 }
 
 func TestTokenExchangeActorCannotExpandAuthority(t *testing.T) {
+	t.Parallel()
 	server := exchangeTestServer(t)
 	source := decodeToken(t, postToken(server, url.Values{"grant_type": {"authorization_code"}, "code": {issueExchangeCodeFor(t, server, "user-1", "goauthy.read offline_access")}, "redirect_uri": {testRedirectURI}, "code_verifier": {strings.Repeat("x", 43)}}))
 	actor := decodeToken(t, postToken(server, url.Values{"grant_type": {"authorization_code"}, "code": {issueExchangeCodeFor(t, server, "actor-2", "offline_access")}, "redirect_uri": {testRedirectURI}, "code_verifier": {strings.Repeat("x", 43)}}))
@@ -188,6 +194,7 @@ func TestTokenExchangeActorCannotExpandAuthority(t *testing.T) {
 }
 
 func TestTokenExchangeRejectsRevokedOrExpiredActor(t *testing.T) {
+	t.Parallel()
 	for name, revoke := range map[string]bool{"revoked": true, "expired": false} {
 		t.Run(name, func(t *testing.T) {
 			server := exchangeTestServer(t)

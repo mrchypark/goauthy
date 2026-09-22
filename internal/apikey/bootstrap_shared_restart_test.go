@@ -13,6 +13,7 @@ import (
 )
 
 func TestSharedGeneratedBootstrapSurvivesCloseOpen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	config := rhiza.Config{
 		NodeID: "shared-generated-restart", DataDir: t.TempDir(),

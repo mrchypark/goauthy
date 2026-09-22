@@ -24,6 +24,7 @@ func writeSaaSConfig(t *testing.T, secret, config string) string {
 }
 
 func TestLoadSaaSProvidersBuildsNonSecretAdapters(t *testing.T) {
+	t.Parallel()
 	path := writeSaaSConfig(t, "saas-secret-123456", `{"providers":[
 		{"id":"acme","kind":"oauth2","client_id":"client","client_secret_file":"SECRET_FILE","callback_uri":"https://app.example.test/callback","auth_endpoint":"https://provider.example.test/authorize","token_endpoint":"https://provider.example.test/token","scopes":["read","write"],"auth_style":"params"},
 		{"id":"github","kind":"github","client_id":"github-client","client_secret_file":"SECRET_FILE","callback_uri":"https://app.example.test/github/callback"}
@@ -58,6 +59,7 @@ func TestLoadSaaSProvidersBuildsNonSecretAdapters(t *testing.T) {
 }
 
 func TestLoadSaaSProvidersDisabledWhenPathEmpty(t *testing.T) {
+	t.Parallel()
 	providers, err := loadSaaSProviders("")
 	if err != nil || providers == nil || len(providers) != 0 {
 		t.Fatalf("providers=%v err=%v", providers, err)
@@ -65,6 +67,7 @@ func TestLoadSaaSProvidersDisabledWhenPathEmpty(t *testing.T) {
 }
 
 func TestLoadSaaSProvidersStrictAndBounded(t *testing.T) {
+	t.Parallel()
 	base := `{"providers":[{"id":"acme","kind":"oauth2","client_id":"client","client_secret_file":"SECRET_FILE","callback_uri":"https://app.example.test/callback","auth_endpoint":"https://provider.example.test/authorize","token_endpoint":"https://provider.example.test/token","scopes":["read"],"auth_style":"header"}]}`
 	for name, invalid := range map[string]string{
 		"unknown field":         strings.Replace(base, `,"auth_style"`, `,"unknown":true,"auth_style"`, 1),
@@ -92,6 +95,7 @@ func TestLoadSaaSProvidersStrictAndBounded(t *testing.T) {
 }
 
 func TestLoadSaaSProvidersRequiresExplicitKindAndGenericPolicy(t *testing.T) {
+	t.Parallel()
 	base := `{"providers":[{"id":"acme","kind":"oauth2","client_id":"client","client_secret_file":"SECRET_FILE","callback_uri":"https://app.example.test/callback","auth_endpoint":"https://provider.example.test/authorize","token_endpoint":"https://provider.example.test/token","scopes":["read"],"auth_style":"params"}]}`
 	for _, replacement := range []string{
 		`"kind":"oidc"`,

@@ -42,6 +42,7 @@ func writeGroup(w http.ResponseWriter, group Group) {
 }
 
 func TestSyncGroupCreateUpdateAndCanonicalMembers(t *testing.T) {
+	t.Parallel()
 	var remote Group
 	var postPayload, putPayload Group
 	client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +107,7 @@ func TestSyncGroupCreateUpdateAndCanonicalMembers(t *testing.T) {
 }
 
 func TestEmptyGroupMembersSerializeAsArray(t *testing.T) {
+	t.Parallel()
 	client, server := testClient(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer server.Close()
 	payload, err := client.marshalGroupPayload(Group{ExternalID: "group-1", DisplayName: "Engineering"}, false)
@@ -119,6 +121,7 @@ func TestEmptyGroupMembersSerializeAsArray(t *testing.T) {
 }
 
 func TestSyncGroupUsesSafeDisplayNameFallback(t *testing.T) {
+	t.Parallel()
 	client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			if strings.Contains(r.URL.Query().Get("filter"), "externalId") {
@@ -147,6 +150,7 @@ func TestSyncGroupUsesSafeDisplayNameFallback(t *testing.T) {
 }
 
 func TestSyncGroupRejectsAmbiguousOrConflictingIdentity(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		resources []Group
@@ -158,6 +162,7 @@ func TestSyncGroupRejectsAmbiguousOrConflictingIdentity(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					if tc.name == "managed conflict" && strings.Contains(r.URL.Query().Get("filter"), "externalId") {
@@ -179,14 +184,18 @@ func TestSyncGroupRejectsAmbiguousOrConflictingIdentity(t *testing.T) {
 }
 
 func TestGroupValidationRejectsDuplicatesMalformedAndOversize(t *testing.T) {
+	t.Parallel()
 	client, server := testClient(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("invalid group reached transport") }))
-	defer server.Close()
+	// t.Cleanup runs after the parallel subtests below finish; a defer here
+	// would close the server before they resume.
+	t.Cleanup(server.Close)
 	for name, group := range map[string]Group{
 		"duplicate member": {ExternalID: "group-1", DisplayName: "Engineering", Members: []GroupMember{{Value: "user-1"}, {Value: "user-1"}}},
 		"slash member id":  {ExternalID: "group-1", DisplayName: "Engineering", Members: []GroupMember{{Value: "user/1"}}},
 		"invalid utf8":     {ExternalID: string([]byte{0xff}), DisplayName: "Engineering"},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			if _, err := client.SyncGroup(context.Background(), group); !errors.Is(err, ErrInvalidGroup) {
 				t.Fatalf("err=%v", err)
 			}
@@ -202,6 +211,7 @@ func TestGroupValidationRejectsDuplicatesMalformedAndOversize(t *testing.T) {
 }
 
 func TestGroupRejectsMalformedRemoteAndOversizeResponses(t *testing.T) {
+	t.Parallel()
 	for name, write := range map[string]func(http.ResponseWriter){
 		"wrong schema": func(w http.ResponseWriter) {
 			w.Header().Set("Content-Type", "application/scim+json")
@@ -216,6 +226,7 @@ func TestGroupRejectsMalformedRemoteAndOversizeResponses(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					write(w)
@@ -233,6 +244,7 @@ func TestGroupRejectsMalformedRemoteAndOversizeResponses(t *testing.T) {
 }
 
 func TestGroupResponseFailureClassification(t *testing.T) {
+	t.Parallel()
 	for name, status := range map[string]int{
 		"rate limited":        http.StatusTooManyRequests,
 		"service unavailable": http.StatusServiceUnavailable,
@@ -240,6 +252,7 @@ func TestGroupResponseFailureClassification(t *testing.T) {
 		"malformed response":  http.StatusOK,
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet {
 					t.Fatalf("unexpected mutation %s", r.Method)
@@ -266,6 +279,7 @@ func TestGroupResponseFailureClassification(t *testing.T) {
 }
 
 func TestGroupPartialResponseBodyIsRetryable(t *testing.T) {
+	t.Parallel()
 	client, err := New(Config{BaseURL: "https://scim.example.test", Token: "token", HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/scim+json"}}, Body: &partialReadCloser{data: []byte(`{`), err: io.ErrUnexpectedEOF}, Request: r}, nil
 	})}})
@@ -278,6 +292,7 @@ func TestGroupPartialResponseBodyIsRetryable(t *testing.T) {
 }
 
 func TestDeleteGroupOnlyDeletesManagedAndUnlinkClearsExternalID(t *testing.T) {
+	t.Parallel()
 	var deleted, unlinked bool
 	client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
@@ -316,6 +331,7 @@ func TestDeleteGroupOnlyDeletesManagedAndUnlinkClearsExternalID(t *testing.T) {
 }
 
 func TestBodylessGroupCreateLocationMustBeExact(t *testing.T) {
+	t.Parallel()
 	for name, location := range map[string]string{
 		"missing": "",
 		"query":   "/scim/v2/Groups/new?x=1",
@@ -323,6 +339,7 @@ func TestBodylessGroupCreateLocationMustBeExact(t *testing.T) {
 		"dot":     "/scim/v2/Groups/../new",
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			client, server := testClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodGet {
 					writeGroupList(w, nil)

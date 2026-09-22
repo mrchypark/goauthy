@@ -16,6 +16,7 @@ import (
 )
 
 func TestProviderLogoHandlerGetReturnsPNG(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -63,6 +64,7 @@ func TestProviderLogoHandlerGetReturnsPNG(t *testing.T) {
 }
 
 func TestProviderLogoHandlerGetReturnsSVG(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -108,6 +110,7 @@ func TestProviderLogoHandlerGetReturnsSVG(t *testing.T) {
 }
 
 func TestProviderLogoHandlerGetCacheControl(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -144,6 +147,7 @@ func TestProviderLogoHandlerGetCacheControl(t *testing.T) {
 }
 
 func TestProviderLogoHandlerPutUnauthorized(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -167,6 +171,7 @@ func TestProviderLogoHandlerPutUnauthorized(t *testing.T) {
 }
 
 func TestProviderLogoHandlerPutRevokedKey(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -197,6 +202,7 @@ func TestProviderLogoHandlerPutRevokedKey(t *testing.T) {
 }
 
 func TestProviderLogoHandlerPutWrongGroup(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -224,6 +230,7 @@ func TestProviderLogoHandlerPutWrongGroup(t *testing.T) {
 }
 
 func TestProviderLogoHandlerMalformedPreservesPrior(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -267,6 +274,7 @@ func TestProviderLogoHandlerMalformedPreservesPrior(t *testing.T) {
 }
 
 func TestProviderLogoHandlerUploadLimitRejectsPreservesPrior(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -319,6 +327,7 @@ func TestProviderLogoHandlerUploadLimitRejectsPreservesPrior(t *testing.T) {
 }
 
 func TestProviderLogoHandlerDelete(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -353,6 +362,7 @@ func TestProviderLogoHandlerDelete(t *testing.T) {
 }
 
 func TestProviderLogoHandlerNoCrossProviderFallback(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {
@@ -387,6 +397,7 @@ func TestProviderLogoHandlerNoCrossProviderFallback(t *testing.T) {
 }
 
 func TestProviderLogoHandlerNoGlobalFallback(t *testing.T) {
+	t.Parallel()
 	ctx, db := clientFaviconDB(t)
 	store, err := NewProviderLogoStore(db)
 	if err != nil {

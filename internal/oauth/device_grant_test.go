@@ -21,6 +21,7 @@ import (
 )
 
 func TestDeviceGrantIssuesStoredAccessAndRefreshTokensOnce(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	seedDeviceUser(t, db, "device-user", nil)
@@ -56,6 +57,7 @@ func TestDeviceGrantIssuesStoredAccessAndRefreshTokensOnce(t *testing.T) {
 }
 
 func TestDeviceGrantConcurrentPollMintsOnce(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	seedDeviceUser(t, db, "device-user", nil)
@@ -98,6 +100,7 @@ func TestDeviceGrantConcurrentPollMintsOnce(t *testing.T) {
 }
 
 func TestAuthorizeDeviceClientRejectsOpenIDAndUnauthorizedScopes(t *testing.T) {
+	t.Parallel()
 	server := oauthTestServer(t, oauthTestDB(t), randomSecret(t))
 	if err := server.AuthorizeDeviceClient(context.Background(), testClientID, []string{"goauthy.read"}); err != nil {
 		t.Fatalf("authorize device client: %v", err)
@@ -110,6 +113,7 @@ func TestAuthorizeDeviceClientRejectsOpenIDAndUnauthorizedScopes(t *testing.T) {
 }
 
 func TestDynamicDeviceClientAuthorizationHTTP(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
@@ -174,6 +178,7 @@ func TestDynamicDeviceClientAuthorizationHTTP(t *testing.T) {
 }
 
 func TestDeviceGrantRejectsGroupsBeforeTokenMutation(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	seedDeviceUser(t, db, "device-user", nil)
@@ -196,6 +201,7 @@ func TestDeviceGrantRejectsGroupsBeforeTokenMutation(t *testing.T) {
 }
 
 func TestDeviceGrantRFCStateErrorsAndValidationFailureLeavesNoArtifacts(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	seedDeviceUser(t, db, "device-user", nil)
@@ -246,6 +252,7 @@ func TestDeviceGrantRFCStateErrorsAndValidationFailureLeavesNoArtifacts(t *testi
 }
 
 func TestDeviceTransactionDoesNotMintAfterGrantExpiry(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	seedDeviceUser(t, db, "device-user", nil)

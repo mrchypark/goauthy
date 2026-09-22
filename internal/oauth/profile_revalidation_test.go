@@ -55,6 +55,7 @@ func profileRevalidationIdentityStore(t *testing.T, db *rhiza.DB) *identity.Stor
 }
 
 func TestSetUserValuesPolicy(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)
@@ -100,6 +101,7 @@ func TestSetUserValuesPolicy(t *testing.T) {
 }
 
 func TestProfileRevalidationDisabledAllowsIssuance(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	seedOAuthUser(t, db, "user-1")
@@ -111,6 +113,7 @@ func TestProfileRevalidationDisabledAllowsIssuance(t *testing.T) {
 }
 
 func TestProfileRevalidationValidProfileAllowsIssuance(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)
@@ -131,6 +134,7 @@ func TestProfileRevalidationValidProfileAllowsIssuance(t *testing.T) {
 }
 
 func TestProfileRevalidationMissingGivenNameDeniesIssuance(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)
@@ -159,6 +163,7 @@ func TestProfileRevalidationMissingGivenNameDeniesIssuance(t *testing.T) {
 }
 
 func TestProfileRevalidationInvalidPreferredUsernameDeniesIssuance(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)
@@ -191,6 +196,7 @@ func TestProfileRevalidationInvalidPreferredUsernameDeniesIssuance(t *testing.T)
 }
 
 func TestProfileRevalidationMissingNestedBirthdateDeniesIssuance(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)
@@ -219,6 +225,7 @@ func TestProfileRevalidationMissingNestedBirthdateDeniesIssuance(t *testing.T) {
 }
 
 func TestProfileRevalidationSessionReuseDeniesIssuance(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)
@@ -264,6 +271,7 @@ func TestProfileRevalidationSessionReuseDeniesIssuance(t *testing.T) {
 }
 
 func TestProfileRevalidationNoCodePersistedOnDenial(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)
@@ -291,6 +299,7 @@ func TestProfileRevalidationNoCodePersistedOnDenial(t *testing.T) {
 }
 
 func TestProfileRevalidationConcurrentProfileMutationDeniesCode(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)
@@ -342,6 +351,7 @@ func TestProfileRevalidationConcurrentProfileMutationDeniesCode(t *testing.T) {
 }
 
 func TestProfileRevalidationRauthyClientExempt(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)
@@ -392,6 +402,7 @@ func TestProfileRevalidationRauthyClientExempt(t *testing.T) {
 }
 
 func TestProfileRevalidationMissingProfileReturnsInteractionRequired(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)
@@ -419,6 +430,7 @@ func TestProfileRevalidationMissingProfileReturnsInteractionRequired(t *testing.
 }
 
 func TestProfileRevalidationDisabledWithCallbackAllowsCodeOnMissingProfile(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)
@@ -438,6 +450,7 @@ func TestProfileRevalidationDisabledWithCallbackAllowsCodeOnMissingProfile(t *te
 }
 
 func TestProfileRevalidationEnabledOptionalFieldsAllowsCodeOnMissingProfile(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)
@@ -457,6 +470,7 @@ func TestProfileRevalidationEnabledOptionalFieldsAllowsCodeOnMissingProfile(t *t
 }
 
 func TestProfileRevalidationInsertAbsentProfileBeforeCommitDeniesCode(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)

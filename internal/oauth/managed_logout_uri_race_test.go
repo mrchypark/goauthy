@@ -18,6 +18,7 @@ import (
 )
 
 func TestManagedLogoutURIUpdateRaceRejectsStaleTokenIssuance(t *testing.T) {
+	t.Parallel()
 	for _, grant := range []string{"authorization code", "password"} {
 		t.Run(grant, func(t *testing.T) {
 			db := oauthTestDB(t)

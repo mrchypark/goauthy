@@ -10,6 +10,7 @@ import (
 )
 
 func TestIntrospectionAndRevocation(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	issued := decodeToken(t, postToken(server, url.Values{
@@ -45,6 +46,7 @@ func TestIntrospectionAndRevocation(t *testing.T) {
 }
 
 func TestRefreshTokenRevocationRevokesGrant(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	verifier := strings.Repeat("j", 43)
@@ -63,6 +65,7 @@ func TestRefreshTokenRevocationRevokesGrant(t *testing.T) {
 }
 
 func TestIntrospectionAndRevocationRejectInvalidForms(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	for name, handler := range map[string]http.Handler{
@@ -102,6 +105,7 @@ func TestIntrospectionAndRevocationRejectInvalidForms(t *testing.T) {
 }
 
 func TestOAuthFormEndpointsRejectRepeatedHeaders(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	for name, handler := range map[string]http.Handler{

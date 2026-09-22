@@ -15,6 +15,7 @@ import (
 var deviceHTTPTestNow = time.Unix(1_700_000_000, 0).UTC()
 
 func TestDeviceAuthorizationHTTP(t *testing.T) {
+	t.Parallel()
 	_, store, _ := testStore(t)
 	h := testDeviceHandler(t, store, func(_ *http.Request, client string, scopes []string) error {
 		if client != "client-1" || strings.Join(scopes, " ") != "openid goauthy.read" {
@@ -48,6 +49,7 @@ func TestDeviceAuthorizationHTTP(t *testing.T) {
 }
 
 func TestDeviceAuthorizationRejectsUntrustedInputAndPaths(t *testing.T) {
+	t.Parallel()
 	_, store, _ := testStore(t)
 	h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, nil)
 	valid := url.Values{"client_id": {"client-1"}, "scope": {"openid"}}
@@ -93,6 +95,7 @@ func TestDeviceAuthorizationRejectsUntrustedInputAndPaths(t *testing.T) {
 }
 
 func TestDeviceVerificationCSRFSubjectApproveAndDeny(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	grant, err := store.Create(ctx, "client-1", []string{"openid"}, deviceHTTPTestNow)
 	if err != nil {
@@ -164,6 +167,7 @@ func TestDeviceVerificationCSRFSubjectApproveAndDeny(t *testing.T) {
 }
 
 func TestDeviceVerificationGETBoundary(t *testing.T) {
+	t.Parallel()
 	_, store, _ := testStore(t)
 	h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, nil)
 	for path, want := range map[string]int{
@@ -185,6 +189,7 @@ func TestDeviceVerificationGETBoundary(t *testing.T) {
 }
 
 func TestDeviceVerificationGETUnauthenticatedHandsOffToLogin(t *testing.T) {
+	t.Parallel()
 	_, store, _ := testStore(t)
 	h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, nil)
 	w := httptest.NewRecorder()
@@ -200,6 +205,7 @@ func TestDeviceVerificationGETUnauthenticatedHandsOffToLogin(t *testing.T) {
 }
 
 func TestDeviceHTTPDistributedRateLimitsUseDirectRemoteIP(t *testing.T) {
+	t.Parallel()
 	ctx, store, _ := testStore(t)
 	limits := Limits{Window: time.Minute, CreationLimit: 1, VerificationLimit: 1}
 	h, err := NewHandlerWithLimits(store, "https://id.example.test", func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool) { return "user-1", true }, limits)
@@ -256,6 +262,7 @@ func TestDeviceHTTPDistributedRateLimitsUseDirectRemoteIP(t *testing.T) {
 }
 
 func TestDeviceHTTPFailedAuthenticationIsRateLimitedBeforeAuthorizer(t *testing.T) {
+	t.Parallel()
 	_, store, _ := testStore(t)
 	calls := 0
 	h, err := NewHandlerWithLimits(store, "https://id.example.test", func(*http.Request, string, []string) error {

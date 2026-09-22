@@ -40,7 +40,7 @@ func (stubVerifier) VerifyIDToken(context.Context, string, string, string) (*ups
 
 func coexistTestDB(t *testing.T) *rhiza.DB {
 	t.Helper()
-	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "coexist-test", DataDir: t.TempDir()})
+	db, err := rhiza.Open(t.Context(), rhiza.Config{NodeID: "coexist-test", DataDir: migratedDataDir(t, "coexist-test")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +98,7 @@ func coexistTestUpstreamRuntime(t *testing.T) *upstreamRuntime {
 }
 
 func TestCoexistStaticDynamicNoPanic(t *testing.T) {
+	t.Parallel()
 	db := coexistTestDB(t)
 	accountHandler := coexistTestAccountHandler(t, db)
 	runtime := coexistTestUpstreamRuntime(t)
@@ -137,6 +138,7 @@ func TestCoexistStaticDynamicNoPanic(t *testing.T) {
 }
 
 func TestCoexistDynamicOnlyLinks(t *testing.T) {
+	t.Parallel()
 	db := coexistTestDB(t)
 	accountHandler := coexistTestAccountHandler(t, db)
 	dynamic := newDynamicUpstreamDispatcher(
@@ -177,6 +179,7 @@ func TestCoexistDynamicOnlyLinks(t *testing.T) {
 }
 
 func TestLegacyNilStaticReturnsNoRoutes(t *testing.T) {
+	t.Parallel()
 	mux := http.NewServeMux()
 	mountUpstreamRoutes(mux, nil, nil, nil)
 	rec := httptest.NewRecorder()

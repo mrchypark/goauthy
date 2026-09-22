@@ -17,6 +17,7 @@ import (
 )
 
 func TestProcessRasterLogoClientPNGDimensionsCropAndWebP(t *testing.T) {
+	t.Parallel()
 	input := logoFixture(200, 100)
 	assets, err := ProcessRasterLogo(encodePNG(t, input), logoClientSmallSize, false)
 	if err != nil {
@@ -37,6 +38,7 @@ func TestProcessRasterLogoClientPNGDimensionsCropAndWebP(t *testing.T) {
 }
 
 func TestProcessRasterLogoCustomJPEGAndFavicon(t *testing.T) {
+	t.Parallel()
 	input := logoFixture(100, 90)
 	assets, err := ProcessRasterLogo(encodeJPEG(t, input), logoProviderSmallSize, false)
 	if err != nil {
@@ -59,6 +61,7 @@ func TestProcessRasterLogoCustomJPEGAndFavicon(t *testing.T) {
 }
 
 func TestResizeToFillMatchesPinnedScaleThenCropRounding(t *testing.T) {
+	t.Parallel()
 	source := asymmetricLogoFixture(301, 101)
 	got, err := resizeToFill(source, 128, 84)
 	if err != nil {
@@ -77,12 +80,14 @@ func TestResizeToFillMatchesPinnedScaleThenCropRounding(t *testing.T) {
 }
 
 func TestResizeToFillBoundsExtremeIntermediate(t *testing.T) {
+	t.Parallel()
 	if _, err := resizeToFill(boundedImage{bounds: image.Rect(0, 0, 8192, 20)}, 128, 128); !errors.Is(err, ErrRasterLogoTooLarge) {
 		t.Fatalf("extreme intermediate error=%v", err)
 	}
 }
 
 func TestProcessRasterLogoRejectsMalformedAndBoundedResources(t *testing.T) {
+	t.Parallel()
 	if _, err := ProcessRasterLogo([]byte("not an image"), logoClientSmallSize, false); !errors.Is(err, ErrInvalidRasterLogo) {
 		t.Fatalf("malformed error=%v", err)
 	}

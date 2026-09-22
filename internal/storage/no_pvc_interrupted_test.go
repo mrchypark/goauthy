@@ -26,6 +26,7 @@ import (
 // this test distinguish the certified-block Verify read from DownloadRootFiles.
 // This is a deterministic local boundary, not an S3/MinIO qualification.
 func TestNoPVCInterruptedCheckpointDownloadRecovers(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	run := func(ctx context.Context, testRoot, phase, dataDir string) ([]byte, error) {
 		t.Helper()

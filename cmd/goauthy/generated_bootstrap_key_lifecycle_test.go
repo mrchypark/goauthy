@@ -12,6 +12,7 @@ import (
 )
 
 func TestGeneratedBootstrapEnvelopeBlocksRetirementUntilRewrapped(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	db := retirementCmdDB(t, true)
 	oldKeys := retirementCmdKeyring(t, "key-a")
@@ -49,6 +50,7 @@ func TestGeneratedBootstrapEnvelopeBlocksRetirementUntilRewrapped(t *testing.T) 
 }
 
 func TestMasterKeyRewrapStepIncludesGeneratedBootstrap(t *testing.T) {
+	t.Parallel()
 	generatedErr := errors.New("generated bootstrap envelope unavailable")
 	calls := 0
 	w := &masterKeyRewrapWorker{

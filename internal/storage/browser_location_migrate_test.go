@@ -7,6 +7,7 @@ import (
 )
 
 func TestMigrationV91PreservesLoginLocations(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "browser-location-migration", DataDir: t.TempDir()})
 	if err != nil {

@@ -8,8 +8,9 @@ import (
 )
 
 func TestSchemaV64AuthCollectionsTables(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "auth-collections-migration", DataDir: t.TempDir()})
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "auth-collections-migration", DataDir: testDatabaseDir(t, "auth-collections-migration")})
 	if err != nil {
 		t.Fatal(err)
 	}

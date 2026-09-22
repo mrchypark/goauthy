@@ -12,6 +12,7 @@ import (
 )
 
 func TestValidateAuthorizationRequestReturnsSafeViewWithoutIssuingState(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	resource := "https://api.example.test/v1"
 	server, err := NewServerWithResourceIndicators(context.Background(), db, randomSecret(t), testClientID, testClientSecret, testRedirectURI, []string{resource})
@@ -32,6 +33,7 @@ func TestValidateAuthorizationRequestReturnsSafeViewWithoutIssuingState(t *testi
 }
 
 func TestValidateAuthorizationRequestPromptAndMaxAge(t *testing.T) {
+	t.Parallel()
 	server := oauthTestServer(t, oauthTestDB(t), randomSecret(t))
 	valid := authorizationValues(strings.Repeat("f", 43), "")
 	valid.Del("resource")
@@ -60,6 +62,7 @@ func TestValidateAuthorizationRequestPromptAndMaxAge(t *testing.T) {
 }
 
 func TestValidateAuthorizationRequestRejectsMalformedInputsWithoutIssuingState(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	valid := authorizationValues(strings.Repeat("d", 43), "")
@@ -87,6 +90,7 @@ func TestValidateAuthorizationRequestRejectsMalformedInputsWithoutIssuingState(t
 }
 
 func TestCompleteAuthorizationUsesOriginalRequestAndDeniesWithoutSubject(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	seedAccountExpiry(t, db, nil)
 	server := oauthTestServer(t, db, randomSecret(t))
@@ -113,6 +117,7 @@ func TestCompleteAuthorizationUsesOriginalRequestAndDeniesWithoutSubject(t *test
 }
 
 func TestWriteLoginRequiredPreservesRedirectAndStateWithoutIssuingState(t *testing.T) {
+	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	values := authorizationValues(strings.Repeat("g", 43), "")

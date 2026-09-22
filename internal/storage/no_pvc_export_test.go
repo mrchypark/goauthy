@@ -36,6 +36,7 @@ import (
 // TestNoPVCPublicRhizaSnapshotCapture is a prototype for the public Rhiza
 // manager capture contract, integrated with the encrypted bundle and Restore.
 func TestNoPVCPublicRhizaSnapshotCapture(t *testing.T) {
+	t.Parallel()
 	timeout := 90 * time.Second
 	if os.Getenv("GOAUTHY_EXPORT_GC_TEST") == "1" {
 		timeout = 4 * time.Minute

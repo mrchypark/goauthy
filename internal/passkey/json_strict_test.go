@@ -10,6 +10,7 @@ import (
 )
 
 func TestStrictPasskeyJSONRejectsDuplicateUnknownAndTrailingValues(t *testing.T) {
+	t.Parallel()
 	good, err := json.Marshal(wa.Credential{ID: []byte("credential"), PublicKey: []byte("public-key")})
 	if err != nil {
 		t.Fatal(err)

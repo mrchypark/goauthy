@@ -15,6 +15,7 @@ import (
 )
 
 func TestTokenExchangeManagedInputGenerationGuard(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		actor   bool
@@ -76,6 +77,7 @@ func TestTokenExchangeManagedInputGenerationGuard(t *testing.T) {
 }
 
 func TestTokenExchangeManagedInputCosmeticRevisionStillIssues(t *testing.T) {
+	t.Parallel()
 	server, db := crossClientExchangeServer(t)
 	for _, input := range []struct{ id, secret string }{{"managed-input-positive-source", "managed-input-positive-source-secret"}, {"managed-input-positive-actor", "managed-input-positive-actor-secret"}} {
 		seedCrossExchangeManagedClient(t, db, input.id, input.secret, true, []string{"client_credentials"}, nil, nil, 1)
@@ -104,6 +106,7 @@ func TestTokenExchangeManagedInputCosmeticRevisionStillIssues(t *testing.T) {
 }
 
 func TestTokenExchangeDynamicInputDeletionGuard(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		actor bool
@@ -154,6 +157,7 @@ func TestTokenExchangeDynamicInputDeletionGuard(t *testing.T) {
 }
 
 func TestTokenExchangeDynamicInputUnchangedStillIssues(t *testing.T) {
+	t.Parallel()
 	server, db := crossClientExchangeServer(t)
 	_, source, sourceExpiry := dynamicExchangeInput(t, server, "dynamic-input-positive-source")
 	_, actor, actorExpiry := dynamicExchangeInput(t, server, "dynamic-input-positive-actor")
