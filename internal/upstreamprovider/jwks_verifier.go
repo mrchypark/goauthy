@@ -12,6 +12,8 @@ import (
 	"math/big"
 	"mime"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -289,16 +291,11 @@ func decodeIDTokenClaims(payload []byte) (*IDTokenClaims, error) {
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return nil, err
 	}
-	var authenticationTime int64
-	if len(raw.AuthenticationTime) != 0 && string(raw.AuthenticationTime) != "null" {
-		// NumericDate permits decimals and exponent notation. Round down before
-		// truncating to our whole-second policy so stale proof cannot round up.
-		value, _, err := big.ParseFloat(string(raw.AuthenticationTime), 10, 64, big.ToNegativeInf)
-		if err != nil || value.IsInf() {
-			return nil, ErrIDTokenVerification
-		}
-		authenticationTime, _ = value.Int64()
+	authenticationTime, err := authenticationTimeSeconds(raw.AuthenticationTime)
+	if err != nil {
+		return nil, err
 	}
+
 	var audience []string
 	if json.Unmarshal(raw.Audience, &audience) != nil {
 		var one string
@@ -320,4 +317,31 @@ func decodeIDTokenClaims(payload []byte) (*IDTokenClaims, error) {
 		GivenName: raw.GivenName, FamilyName: raw.FamilyName,
 		rawClaims: rawClaims,
 	}, nil
+}
+
+// authenticationTimeSeconds normalizes the already JSON-validated NumericDate
+// exactly. Bounds prevent compact extreme exponents from allocating large powers.
+func authenticationTimeSeconds(raw json.RawMessage) (int64, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0, nil
+	}
+	if len(raw) > 1024 {
+		return 0, ErrIDTokenVerification
+	}
+	number := string(raw)
+	if i := strings.IndexAny(number, "eE"); i >= 0 {
+		exponent, err := strconv.ParseInt(number[i+1:], 10, 32)
+		if err != nil || exponent < -1024 || exponent > 1024 {
+			return 0, ErrIDTokenVerification
+		}
+	}
+	value, ok := new(big.Rat).SetString(number)
+	if !ok {
+		return 0, ErrIDTokenVerification
+	}
+	seconds := new(big.Int).Div(value.Num(), value.Denom())
+	if !seconds.IsInt64() {
+		return 0, ErrIDTokenVerification
+	}
+	return seconds.Int64(), nil
 }

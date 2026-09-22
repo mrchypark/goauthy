@@ -28,7 +28,7 @@ import (
 func TestApprovalUpstreamRoundTrip(t *testing.T) {
 	t.Parallel()
 	for _, destination := range []string{"device", "handoff"} {
-		for _, proof := range []string{"valid", "wrong-nonce", "missing-mfa", "reauth-valid", "reauth-stale", "reauth-missing", "reauth-future", "decimal", "exponent", "reauth-decimal", "reauth-stale-decimal"} {
+		for _, proof := range []string{"valid", "wrong-nonce", "missing-mfa", "reauth-valid", "reauth-stale", "reauth-missing", "reauth-future", "decimal", "exponent", "reauth-decimal", "reauth-stale-decimal", "reauth-boundary-stale", "reauth-boundary-fresh"} {
 			t.Run(destination+"/"+proof, func(t *testing.T) {
 				h, db := testHandlerWithDB(t, false)
 				h.SetApprovalForceMFA(true)
@@ -40,6 +40,7 @@ func TestApprovalUpstreamRoundTrip(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				var threshold atomic.Int64
 				var nonce, challenge atomic.Value
 				nonce.Store("")
 				challenge.Store("")
@@ -86,6 +87,12 @@ func TestApprovalUpstreamRoundTrip(t *testing.T) {
 						}
 						if proof == "exponent" {
 							claimValues["auth_time"] = json.RawMessage("1.8e9")
+						}
+						if proof == "reauth-boundary-stale" {
+							claimValues["auth_time"] = json.RawMessage(strconv.FormatInt(threshold.Load()-1, 10) + "." + strings.Repeat("9", 56))
+						}
+						if proof == "reauth-boundary-fresh" {
+							claimValues["auth_time"] = json.RawMessage(strconv.FormatInt(threshold.Load(), 10) + "." + strings.Repeat("0", 59))
 						}
 						claims, _ := json.Marshal(claimValues)
 						token, err := signer.Sign(claims)
@@ -181,6 +188,15 @@ func TestApprovalUpstreamRoundTrip(t *testing.T) {
 				}
 				request := httptest.NewRequest(http.MethodGet, "/upstream/fixture/start?"+url.Values{"redirect_uri": {callback}, "interaction": {interaction}}.Encode(), nil)
 				request.AddCookie(cookie)
+				rawInit, _, err := h.CurrentExternalInitSession(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				init, err := h.browser.LoadSession(context.Background(), rawInit)
+				if err != nil {
+					t.Fatal(err)
+				}
+				threshold.Store(init.CreatedAt.Unix())
 				start := httptest.NewRecorder()
 				upstream.LocalStartHandler().ServeHTTP(start, request)
 				if start.Code != http.StatusFound {
@@ -218,7 +234,7 @@ func TestApprovalUpstreamRoundTrip(t *testing.T) {
 					t.Fatalf("foreign browser callback=%d exchanges=%d", wrongBrowser.Code, exchanges.Load())
 				}
 				result := finish(cookie)
-				if proof == "valid" || proof == "reauth-valid" || proof == "decimal" || proof == "exponent" || proof == "reauth-decimal" {
+				if proof == "valid" || proof == "reauth-valid" || proof == "decimal" || proof == "exponent" || proof == "reauth-decimal" || proof == "reauth-boundary-fresh" {
 					if result.Code != http.StatusSeeOther || result.Header().Get("Location") != want {
 						t.Fatalf("callback=%d location=%q body=%s", result.Code, result.Header().Get("Location"), result.Body.String())
 					}
@@ -240,7 +256,7 @@ func TestApprovalUpstreamRoundTrip(t *testing.T) {
 				}
 				if parentToken != "" {
 					_, err := h.browser.LoadSession(context.Background(), parentToken)
-					if (proof == "reauth-valid" || proof == "reauth-decimal") != (err != nil) {
+					if (proof == "reauth-valid" || proof == "reauth-decimal" || proof == "reauth-boundary-fresh") != (err != nil) {
 						t.Fatalf("parent retirement proof=%s err=%v", proof, err)
 					}
 				}
