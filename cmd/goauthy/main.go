@@ -902,6 +902,7 @@ func run() (err error) {
 		return err
 	}
 	loginHandler.SetLockdownStore(lockdownStore)
+	loginHandler.SetApprovalForceMFA(bootstrapForceMFA)
 	if err := loginHandler.SetUserValuesPolicy(userValuesPolicy); err != nil {
 		return fmt.Errorf("configure login user values policy: %w", err)
 	}

@@ -166,6 +166,7 @@ type Handler struct {
 	metrics           *metrics.Registry
 	fedcmEnabled      bool
 	fedcmForceMFA     bool
+	approvalForceMFA  bool
 	upstreamProviders func(ctx context.Context) ([]UpstreamProvider, error)
 	lockdown          *loginpolicy.LockdownStore
 	userValuesPolicy  *identity.UserValuesPolicy
@@ -486,12 +487,8 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	original, err := h.originalAuthorizeRequest(r, interaction.Payload)
-	if err != nil {
-		http.Error(w, "Invalid login request", http.StatusForbidden)
-		return
-	}
-	request, err := h.oauth.ValidateAuthorizationRequest(original)
+	target, err := h.resolveAuthenticationRequest(r, interaction.Payload)
+	request := target.policy
 	if err != nil {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
@@ -994,12 +991,8 @@ func (h *Handler) completeExternalAuthentication(w http.ResponseWriter, r *http.
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	original, err := h.originalAuthorizeRequest(r, interaction.Payload)
-	if err != nil {
-		http.Error(w, "Invalid login request", http.StatusForbidden)
-		return
-	}
-	request, err := h.oauth.ValidateAuthorizationRequest(original)
+	target, err := h.resolveAuthenticationRequest(r, interaction.Payload)
+	request := target.policy
 	if err != nil {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
@@ -1027,7 +1020,7 @@ func (h *Handler) completeExternalAuthentication(w http.ResponseWriter, r *http.
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	h.completeConsumedAuthentication(w, r, sessionToken, subject, authMethod, original, request, peerIP, nil, binding)
+	h.completeConsumedAuthentication(w, r, sessionToken, subject, authMethod, target, peerIP, nil, binding)
 }
 
 // CurrentExternalInitSession returns the cookie bearer token and its canonical
@@ -1063,11 +1056,7 @@ func (h *Handler) PrepareExternalAuthentication(r *http.Request, rawInteractionT
 	if err != nil {
 		return "", "", "", ErrExternalAuthentication
 	}
-	original, err := h.originalAuthorizeRequest(r, interaction.Payload)
-	if err != nil {
-		return "", "", "", ErrExternalAuthentication
-	}
-	_, err = h.oauth.ValidateAuthorizationRequest(original)
+	_, err = h.resolveAuthenticationRequest(r, interaction.Payload)
 	if err != nil {
 		return "", "", "", ErrExternalAuthentication
 	}
@@ -1107,17 +1096,13 @@ func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *ht
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	original, err := h.originalAuthorizeRequest(r, interaction.Payload)
-	if err != nil {
-		http.Error(w, "Invalid login request", http.StatusForbidden)
-		return
-	}
-	request, err := h.oauth.ValidateAuthorizationRequest(original)
+	target, err := h.resolveAuthenticationRequest(r, interaction.Payload)
+	request := target.policy
 	if err != nil || (request.ForceMFA && authMethod != "mfa") {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	h.completeConsumedAuthentication(w, r, sessionToken, subject, authMethod, original, request, peerIP, onConsumed, nil)
+	h.completeConsumedAuthentication(w, r, sessionToken, subject, authMethod, target, peerIP, onConsumed, nil)
 }
 
 // completeBrowserAuthentication performs the shared post-proof transition.
@@ -1167,12 +1152,21 @@ func (h *Handler) completeBrowserAuthentication(w http.ResponseWriter, r *http.R
 	return newSession, true
 }
 
-func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, original *http.Request, request oauth.AuthorizationRequest, peerIP string, onConsumed func() error, binding *browser.UpstreamSessionBinding) {
+func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, target authenticationRequest, peerIP string, onConsumed func() error, binding *browser.UpstreamSessionBinding) {
 	// ponytail: a failed code issuance consumes this interaction; restart authorize rather than risking duplicate codes.
 	newSession, ok := h.completeBrowserAuthentication(w, r, sessionToken, subject, authMethod, peerIP, onConsumed, binding)
 	if !ok {
 		return
 	}
+	if target.approval != nil {
+		if target.approval.DeviceCode != nil {
+			h.deviceLoginRedirect(w, *target.approval.DeviceCode)
+		} else {
+			h.connectionHandoffRedirect(w, target.approval.HandoffID)
+		}
+		return
+	}
+	original, request := target.original, target.policy
 	needs, checkErr := h.needsProfileUpdate(r, subject, request.ClientID)
 	if checkErr != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
@@ -1341,12 +1335,8 @@ func (h *Handler) WebAuthnStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	original, err := h.originalAuthorizeRequest(r, interaction.Payload)
-	if err != nil {
-		http.Error(w, "Invalid login request", http.StatusForbidden)
-		return
-	}
-	request, err := h.oauth.ValidateAuthorizationRequest(original)
+	target, err := h.resolveAuthenticationRequest(r, interaction.Payload)
+	request := target.policy
 	if err != nil {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
