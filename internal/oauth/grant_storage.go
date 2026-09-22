@@ -502,6 +502,9 @@ func (tx *transaction) principalGuard() (string, []any) {
 	if tx.kind == "password" {
 		guard += ` AND EXISTS (SELECT 1 FROM identity_users u JOIN identity_authentication_modes m ON m.subject=u.subject WHERE u.subject=? AND u.password_generation=? AND m.mode='password' AND m.generation=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?))`
 		args = append(args, tx.principalSubject, tx.passwordGeneration, tx.authenticationGeneration, accountExpiryCutoff{})
+		// Fence emergency lockdown at the same commit as token issuance.
+		guard += ` AND (NOT EXISTS (SELECT 1 FROM system_lockdown WHERE id=1 AND enabled<>0 AND (until_unix_ms=0 OR until_unix_ms>?)) OR EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='rauthy_admin'))`
+		args = append(args, tx.issueNowMillis(), tx.principalSubject)
 		// Admission checks the account lock before the password is verified.
 		// This predicate re-checks it inside the same Execute that writes the
 		// artifacts, so a lock committed while the transaction is queued still

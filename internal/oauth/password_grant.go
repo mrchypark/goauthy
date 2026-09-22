@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/clients"
 	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/loginpolicy"
@@ -22,11 +23,13 @@ const passwordAuthTimeExtra = "goauthy_password_auth_time"
 // server error. These sentinels keep the two policy denials distinguishable
 // through that wrapping so each keeps its own public error.
 var (
+	errPasswordAdmission     = errors.New("password admission denied")
 	errAccountLocked         = errors.New("account locked")
 	errPasswordResetRequired = errors.New("password reset required")
 )
 
 type passwordAuthenticationKey struct{}
+type passwordWriteDeadlineKey struct{}
 
 type passwordGrantHandler struct {
 	*oauth2.ResourceOwnerPasswordCredentialsGrantHandler
@@ -50,6 +53,28 @@ func (h *passwordGrantHandler) Authenticate(ctx context.Context, username, passw
 	if !ok || h.users == nil || h.locks == nil {
 		return "", fosite.ErrServerError
 	}
+	peer := browser.PeerIPFromContext(ctx)
+	if peer == "" {
+		return "", fosite.ErrServerError
+	}
+	started := time.Now()
+	if err := h.checkLockdown(ctx, username); err != nil {
+		return "", err
+	}
+	status, err := h.locks.Check(ctx, peer, started.UTC())
+	if err != nil {
+		return "", fosite.ErrServerError
+	}
+	if !status.BlockedUntil.IsZero() {
+		return "", fosite.ErrAccessDenied.WithWrap(errPasswordAdmission)
+	}
+	allowed, err := h.locks.Allow(ctx, peer, started.UTC())
+	if err != nil {
+		return "", fosite.ErrServerError
+	}
+	if !allowed {
+		return "", fosite.ErrAccessDenied.WithWrap(errPasswordAdmission)
+	}
 	// The browser path refuses an actively locked account before checking
 	// credentials; this grant must not be a way around that lock (GA-OAUTH-006).
 	locked, _, err := h.locks.CheckAccountLock(ctx, loginpolicy.AccountStuffingDigest(username), time.Now().UTC())
@@ -67,10 +92,33 @@ func (h *passwordGrantHandler) Authenticate(ctx context.Context, username, passw
 		return "", fosite.ErrAccessDenied.WithHint("Password reset required.").WithWrap(errPasswordResetRequired)
 	}
 	if errors.Is(err, identity.ErrInvalidCredentials) {
+		status, failureErr := h.locks.Failure(ctx, peer, time.Now().UTC())
+		if failureErr != nil {
+			return "", fosite.ErrServerError
+		}
+		if _, _, failureErr := h.locks.RecordAccountFailure(ctx, loginpolicy.AccountStuffingDigest(username), peer, time.Now().UTC()); failureErr != nil {
+			return "", fosite.ErrServerError
+		}
+		delay := loginpolicy.Delay(status, time.Since(started))
+		if setDeadline, ok := ctx.Value(passwordWriteDeadlineKey{}).(func(time.Time) error); ok && delay > 0 {
+			if err := setDeadline(time.Now().Add(delay + 5*time.Second)); err != nil {
+				return "", fosite.ErrServerError
+			}
+		}
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-timer.C:
+		}
 		return "", fosite.ErrNotFound
 	}
 	if err != nil {
 		return "", err
+	}
+	if err := h.locks.Success(ctx, peer, time.Since(started)); err != nil {
+		return "", fosite.ErrServerError
 	}
 	*snapshot = auth
 	return auth.Subject, nil
@@ -115,6 +163,9 @@ func (h *passwordGrantHandler) HandleTokenEndpointRequest(ctx context.Context, r
 	if err := h.ResourceOwnerPasswordCredentialsGrantHandler.HandleTokenEndpointRequest(ctx, request); err != nil {
 		// Restore the policy denials the grant handler collapsed into a server
 		// error; a storage failure keeps that server error.
+		if errors.Is(err, errPasswordAdmission) {
+			return fosite.ErrAccessDenied
+		}
 		if errors.Is(err, errAccountLocked) {
 			return fosite.ErrAccessDenied.WithHint("Account locked.")
 		}
@@ -150,6 +201,9 @@ func (h *passwordGrantHandler) PopulateTokenEndpointResponse(ctx context.Context
 	if !ok || snapshot.Subject != session.Subject {
 		return fosite.ErrInvalidGrant
 	}
+	if err := h.checkLockdown(ctx, request.GetRequestForm().Get("username")); err != nil {
+		return err
+	}
 	delete(session.Extra, passwordSnapshotExtra)
 	if err := h.users.RecordPasswordLogin(ctx, snapshot); err != nil {
 		return err
@@ -179,4 +233,22 @@ func (h *passwordGrantHandler) PopulateTokenEndpointResponse(ctx context.Context
 		response.SetExtra("refresh_token", refresh)
 	}
 	return h.Commit(ctx)
+}
+
+func (h *passwordGrantHandler) checkLockdown(ctx context.Context, username string) error {
+	lockdown := loginpolicy.NewLockdownStore(h.Store.db)
+	locked, _, _, err := lockdown.IsLockedDown(ctx)
+	if err != nil {
+		return fosite.ErrServerError
+	}
+	if locked {
+		admin, err := lockdown.IsAdminByUsername(ctx, username)
+		if err != nil {
+			return fosite.ErrServerError
+		}
+		if !admin {
+			return fosite.ErrAccessDenied.WithWrap(errPasswordAdmission)
+		}
+	}
+	return nil
 }
