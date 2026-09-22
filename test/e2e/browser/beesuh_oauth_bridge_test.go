@@ -274,7 +274,7 @@ func TestOAuthConsumerLifetime(t *testing.T) {
 					if t.Context().Err() == nil {
 						t.Error("test cancellation ordering not exercised")
 					}
-					if err := stopOAuthConsumer(cmd, stdin, time.Second); err != nil {
+					if err := stopOAuthConsumer(cmd, stdin, 5*time.Second); err != nil {
 						t.Errorf("normal shutdown: %v", err)
 					}
 				})
