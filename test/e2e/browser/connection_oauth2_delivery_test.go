@@ -165,6 +165,9 @@ func oauth2DeliveryProbe(t *testing.T, owner *http.Client, primary string, cooki
 	other := do(t, newBrowserClient(t), http.MethodPost, primary+"/auth/v1/connection-grants/"+url.PathEscape(grantDoc.ID)+"/credential", nil, map[string]string{"Authorization": "Bearer " + otherToken})
 	assertMetadataOnlyOAuth2Response(t, other, http.StatusNotFound)
 
+	consumer := oauthConsumerBridge(t, primary, strings.TrimRight(fixtureBase, "/")+"/v1/chat/completions", consumerToken, map[string]any{
+		"grant_id": grantDoc.ID, "provider_id": providerID, "connection_generation": grantDoc.Generation, "account_id": "fixture-subject", "resource": useGrantResource, "consumer_client_id": consumerID, "endpoint": strings.TrimRight(fixtureBase, "/") + "/v1/chat/completions", "scopes": []string{"account"}, "credential_version": int64(1),
+	}, fixture)
 	var deliveredToken string
 	var deliveredVersion int64
 	check := func(version int64) {
@@ -212,6 +215,7 @@ func oauth2DeliveryProbe(t *testing.T, owner *http.Client, primary string, cooki
 		if userinfo.StatusCode != http.StatusOK || err != nil || subject.Subject != "fixture-subject" {
 			t.Fatalf("delivered token userinfo status=%d subject=%q", userinfo.StatusCode, subject.Subject)
 		}
+		consumer(false)
 	}
 
 	denied := func() {
@@ -221,6 +225,7 @@ func oauth2DeliveryProbe(t *testing.T, owner *http.Client, primary string, cooki
 		if after := readOAuth2FixtureStats(t, fixture, fixtureBase); after != before {
 			t.Fatal("denied credential delivery caused an external provider request")
 		}
+		consumer(true)
 	}
 	revoked := false
 	revoke := func() {
