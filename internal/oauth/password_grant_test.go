@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/clients"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/identity"
@@ -58,7 +59,7 @@ func testPasswordHandlerIssuance(t *testing.T, refreshEnabled bool) {
 		r.Client = client
 		r.Form = url.Values{"grant_type": {"password"}, "username": {"alice"}, "password": {password}, "scope": {"offline_access"}, "resource": {"https://ignored.example.test"}}
 		r.SetRequestedScopes(fosite.Arguments{"offline_access"})
-		err := h.HandleTokenEndpointRequest(t.Context(), r)
+		err := h.HandleTokenEndpointRequest(browser.ContextWithPeerIP(t.Context(), "192.0.2.1"), r)
 		if password == "wrong password" {
 			if err == nil || r.GetSession().GetSubject() != "" {
 				t.Fatal("invalid credentials authenticated")
@@ -160,7 +161,7 @@ func testPasswordGrantExpired(t *testing.T, withCallback bool) {
 	r.Form = url.Values{"grant_type": {"password"}, "username": {"expired-user"}, "password": {"correct password"}, "scope": {"goauthy.read"}}
 	r.SetRequestedScopes(fosite.Arguments{"goauthy.read"})
 
-	err = h.HandleTokenEndpointRequest(t.Context(), r)
+	err = h.HandleTokenEndpointRequest(browser.ContextWithPeerIP(t.Context(), "192.0.2.1"), r)
 	if err == nil {
 		t.Fatal("expired password should return error")
 	}
@@ -231,7 +232,7 @@ func TestPasswordGrantRejectsForceMFAClient(t *testing.T) {
 		r.Client = client
 		r.Form = url.Values{"grant_type": {"password"}, "username": {"force-mfa-user"}, "password": {"correct password"}, "scope": {"goauthy.read"}}
 		r.SetRequestedScopes(fosite.Arguments{"goauthy.read"})
-		return h.HandleTokenEndpointRequest(t.Context(), r)
+		return h.HandleTokenEndpointRequest(browser.ContextWithPeerIP(t.Context(), "192.0.2.1"), r)
 	}
 	if err := attempt(); !errors.Is(err, fosite.ErrUnauthorizedClient) {
 		t.Fatalf("force_mfa client reached password issuance: %v", err)
@@ -281,7 +282,7 @@ func TestPasswordGrantRefusesLockedAccount(t *testing.T) {
 		r.Client = client
 		r.Form = url.Values{"grant_type": {"password"}, "username": {"locked-user"}, "password": {"correct password"}, "scope": {"goauthy.read"}}
 		r.SetRequestedScopes(fosite.Arguments{"goauthy.read"})
-		return h.HandleTokenEndpointRequest(t.Context(), r)
+		return h.HandleTokenEndpointRequest(browser.ContextWithPeerIP(t.Context(), "192.0.2.1"), r)
 	}
 	if err := attempt(); !errors.Is(err, fosite.ErrAccessDenied) {
 		t.Fatalf("locked account authenticated through the password grant: %v", err)
@@ -304,6 +305,12 @@ func TestPasswordGrantRefusesLockedAccount(t *testing.T) {
 // what admission checked and what the login path records failures against, so
 // this test keeps subject and login identifier different.
 func TestPasswordGrantRejectsLockCommittedDuringIssuance(t *testing.T) {
+	for _, global := range []bool{false, true} {
+		t.Run(fmt.Sprintf("global=%t", global), func(t *testing.T) { testPasswordGrantLockCommit(t, global) })
+	}
+}
+
+func testPasswordGrantLockCommit(t *testing.T, global bool) {
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	store := server.store
@@ -327,7 +334,7 @@ func TestPasswordGrantRejectsLockCommittedDuringIssuance(t *testing.T) {
 	request.Client = client
 	request.Form = url.Values{"grant_type": {"password"}, "username": {"barrier-user"}, "password": {"correct password"}, "scope": {"goauthy.read"}}
 	request.SetRequestedScopes(fosite.Arguments{"goauthy.read"})
-	if err := h.HandleTokenEndpointRequest(t.Context(), request); err != nil {
+	if err := h.HandleTokenEndpointRequest(browser.ContextWithPeerIP(t.Context(), "192.0.2.1"), request); err != nil {
 		t.Fatalf("admission rejected before the lock existed: %v", err)
 	}
 
@@ -350,11 +357,18 @@ func TestPasswordGrantRejectsLockCommittedDuringIssuance(t *testing.T) {
 		t.Fatalf("issuance finished without reaching the barrier: %v", err)
 	}
 
-	stuffing := loginpolicy.NewStore(db)
-	lockedAt := time.Now().UTC()
-	for _, ip := range []string{"198.51.100.11", "198.51.100.12", "198.51.100.13", "198.51.100.14", "198.51.100.15"} {
-		if _, _, err := stuffing.RecordAccountFailure(t.Context(), loginpolicy.AccountStuffingDigest("barrier-user"), ip, lockedAt); err != nil {
+	if global {
+		if err := loginpolicy.NewLockdownStore(db).SetLockdown(t.Context(), true, "test", time.Time{}); err != nil {
+			close(release)
 			t.Fatal(err)
+		}
+	} else {
+		stuffing := loginpolicy.NewStore(db)
+		lockedAt := time.Now().UTC()
+		for _, ip := range []string{"198.51.100.11", "198.51.100.12", "198.51.100.13", "198.51.100.14", "198.51.100.15"} {
+			if _, _, err := stuffing.RecordAccountFailure(t.Context(), loginpolicy.AccountStuffingDigest("barrier-user"), ip, lockedAt); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	close(release)
@@ -436,7 +450,7 @@ func TestPasswordGrantDistinguishesLockExpiryAndLockStorageFailure(t *testing.T)
 			request.Client = client
 			request.Form = url.Values{"grant_type": {"password"}, "username": {"public-error-user"}, "password": {"correct password"}, "scope": {"goauthy.read"}}
 			request.SetRequestedScopes(fosite.Arguments{"goauthy.read"})
-			err = h.HandleTokenEndpointRequest(t.Context(), request)
+			err = h.HandleTokenEndpointRequest(browser.ContextWithPeerIP(t.Context(), "192.0.2.1"), request)
 			if err == nil || request.GetSession().GetSubject() != "" {
 				t.Fatalf("rejected case authenticated: err=%v", err)
 			}

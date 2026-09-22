@@ -581,7 +581,7 @@ func run() (err error) {
 		clientID, clientSecret,
 		env("GOAUTHY_BOOTSTRAP_REDIRECT_URI", "http://localhost:5555/callback"),
 		allowedResources,
-		oauth.OIDCConfig{Issuer: issuer, PasswordUsers: identityStore, PasswordExpired: expiredRecovery, ManagedClients: managedClients, DefaultAudiences: defaultAudiences, CIMDDangerAllowUnvalidatedResource: cimdDangerAllowUnvalidatedResource, LoadSigningKey: func(ctx context.Context) (oidc.SigningKey, error) {
+		oauth.OIDCConfig{Issuer: issuer, PasswordUsers: identityStore, PasswordPolicy: loginPolicyStore, PasswordExpired: expiredRecovery, ManagedClients: managedClients, DefaultAudiences: defaultAudiences, CIMDDangerAllowUnvalidatedResource: cimdDangerAllowUnvalidatedResource, LoadSigningKey: func(ctx context.Context) (oidc.SigningKey, error) {
 			return oidc.LoadActiveSigningKey(ctx, db, keyring, issuer)
 		}, LoadVerificationKeys: func(ctx context.Context) ([]jose.JSONWebKey, error) {
 			return oidc.LoadJWKSKeys(ctx, db, time.Now().UTC())

@@ -29,6 +29,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/device"
 	"github.com/mrchypark/goauthy/internal/dpop"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/loginpolicy"
 	"github.com/mrchypark/goauthy/internal/metrics"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/redirecturi"
@@ -206,6 +207,7 @@ type OIDCConfig struct {
 	// PasswordUsers registers password authentication; clients must separately enable the flow.
 	PasswordUsers   *identity.Store
 	PasswordExpired func(context.Context, string) error
+	PasswordPolicy  *loginpolicy.Store
 	Issuer          string
 	LoadSigningKey  func(context.Context) (oidc.SigningKey, error)
 	// DefaultAudiences selects one validated default resource audience per
@@ -478,6 +480,9 @@ func newServer(ctx context.Context, db *rhiza.DB, hmacSecret []byte, clientID, c
 		if oidcConfig.PasswordUsers != nil {
 			passwordHandler := newPasswordGrantHandler(store, oidcConfig.PasswordUsers, accessTokens, config)
 			passwordHandler.onPasswordExpired = oidcConfig.PasswordExpired
+			if oidcConfig.PasswordPolicy != nil {
+				passwordHandler.locks = oidcConfig.PasswordPolicy
+			}
 			config.TokenEndpointHandlers.Append(passwordHandler)
 		}
 	}
@@ -539,6 +544,18 @@ func (s *Server) TokenHandler() http.Handler {
 		if err := formRequest(sw, r); err != nil {
 			s.writeTokenError(r.Context(), sw, fosite.NewAccessRequest(&fosite.DefaultSession{}), err)
 			return
+		}
+		if err := r.ParseForm(); err != nil {
+			s.writeTokenError(r.Context(), sw, fosite.NewAccessRequest(&fosite.DefaultSession{}), fosite.ErrInvalidRequest)
+			return
+		}
+		if r.PostForm.Get("grant_type") == "password" && browser.PeerIPFromContext(r.Context()) == "" {
+			peer, ok := loginpolicy.PeerIP(r.RemoteAddr)
+			if !ok {
+				s.writeTokenError(r.Context(), sw, fosite.NewAccessRequest(&fosite.DefaultSession{}), fosite.ErrInvalidRequest)
+				return
+			}
+			r = r.WithContext(browser.ContextWithPeerIP(r.Context(), peer))
 		}
 		request, err := s.provider.NewAccessRequest(r.Context(), r, &fosite.DefaultSession{})
 		responseStarted := false
