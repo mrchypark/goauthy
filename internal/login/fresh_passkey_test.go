@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -329,5 +330,77 @@ func TestWebAuthnStartFreshPasskeyOnlyUserRequiresUserVerification(t *testing.T)
 	}
 	if result.RCR.Response.UserVerification != protocol.VerificationRequired {
 		t.Fatalf("userVerification=%q want required", result.RCR.Response.UserVerification)
+	}
+}
+
+func TestApprovalLateMFAOffersNativeBrowserContinuation(t *testing.T) {
+	t.Parallel()
+	for _, accept := range []string{"text/html,application/xhtml+xml", "application/json"} {
+		t.Run(accept, func(t *testing.T) {
+			h, db := testHandlerWithDB(t, false)
+			h.issuer = "http://localhost/identity"
+			ctx := context.Background()
+			credentialID := []byte("late-policy-key")
+			encoded, err := json.Marshal(wa.Credential{ID: credentialID, PublicKey: []byte("public-key-bytes")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			envelope, err := testOIDCKeyring(t).SealEnvelope(credentialEnvelopePurpose("user-1"), encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "late-policy-user", SQL: "INSERT INTO identity_webauthn_users(subject,user_handle,created_at_unix_ms) VALUES('user-1',?,0)", Args: []any{base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("u", 32)))}}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "late-policy-key", SQL: "INSERT INTO identity_webauthn_credentials(credential_id,subject,name,credential_json,sign_count,user_verified,registered_at_unix_ms,last_used_at_unix_ms) VALUES(?,'user-1','key',?,0,1,0,0)", Args: []any{base64.RawURLEncoding.EncodeToString(credentialID), base64.RawURLEncoding.EncodeToString(envelope)}}); err != nil {
+				t.Fatal(err)
+			}
+			page := httptest.NewRecorder()
+			h.DeviceLoginHandler(false).ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/oidc/device/login?user_code=AB12CD34", nil))
+			if page.Code != http.StatusOK {
+				t.Fatalf("page=%d", page.Code)
+			}
+			if strings.Contains(page.Body.String(), "new URLSearchParams(new FormData(loginForm))") {
+				t.Fatal("page was already forced MFA")
+			}
+			cookie := page.Result().Cookies()[0]
+			interaction := interactionToken(t, page.Body.String())
+			csrf := fedCMCSRFPattern.FindStringSubmatch(page.Body.String())
+			if len(csrf) != 2 {
+				t.Fatal("missing csrf")
+			}
+			h.SetApprovalForceMFA(true)
+			form := url.Values{"interaction": {interaction}, "csrf_token": {csrf[1]}, "username": {"alice"}, "password": {"correct password"}}
+			r := httptest.NewRequest(http.MethodPost, "/oidc/device/login", strings.NewReader(form.Encode()))
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			r.Header.Set("Accept", accept)
+			r.AddCookie(cookie)
+			result := httptest.NewRecorder()
+			h.DeviceLoginHandler(false).ServeHTTP(result, r)
+			if result.Code != http.StatusOK || len(result.Result().Cookies()) != 0 {
+				t.Fatalf("status=%d body=%s", result.Code, result.Body.String())
+			}
+			if _, err := h.browser.LoadAuthorizationInteractionReadOnly(ctx, cookie.Value, interaction); err != nil {
+				t.Fatalf("challenge consumed login: %v", err)
+			}
+			if accept == "application/json" {
+				var response passkeyStartResponse
+				if json.Unmarshal(result.Body.Bytes(), &response) != nil || response.Code == "" || response.RCR == nil {
+					t.Fatalf("JSON contract lost: %s", result.Body.String())
+				}
+				return
+			}
+			if !strings.HasPrefix(result.Header().Get("Content-Type"), "text/html") {
+				t.Fatal("native form reached JSON")
+			}
+			for _, want := range []string{`id="passkey-challenge-btn"`, `navigator.credentials.get`, `/identity/auth/v1/users/webauthn_finish`, `"userVerification":"required"`} {
+				if !strings.Contains(result.Body.String(), want) {
+					t.Fatalf("challenge missing %s: %s", want, result.Body.String())
+				}
+			}
+			if strings.Contains(result.Body.String(), `name="password"`) || !strings.Contains(result.Header().Get("Content-Security-Policy"), "script-src 'nonce-") {
+				t.Fatal("invalid challenge page or CSP")
+			}
+		})
 	}
 }

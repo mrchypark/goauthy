@@ -45,7 +45,7 @@ const (
 	failureWriteGrace   = 5 * time.Second
 )
 
-var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p>{{if .Intro}}{{.Intro}}{{else}}{{.ContinueTo}} {{.ClientID}}{{end}}</p><form id="login-form" method="post" action="{{.Action}}"><input type="hidden" name="interaction" value="{{.Interaction}}">{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label><button type="submit">{{.SignIn}}</button>{{if .PasskeyLogin}}<button type="button" id="passkey-btn">{{.PasskeyButton}}</button><div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div style="margin:1.5em 0;text-align:center;border-top:1px solid #ccc;padding-top:1em"><span style="background:#fff;padding:0 0.5em;color:#666;font-size:0.9em">or</span></div>{{range .Providers}}<a href="{{$.IssuerPath}}/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" style="display:block;margin:0.5em 0;padding:0.75em;border:1px solid #ccc;border-radius:4px;text-align:center;text-decoration:none;color:#333">{{.Name}}</a>{{end}}{{end}}</main>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
+var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1>{{if .PasskeyChallenge}}<p>Complete the security key verification to continue.</p><button type="button" id="passkey-challenge-btn">Continue with security key</button><div id="passkey-error" role="status" aria-live="polite"></div>{{else}}<p>{{if .Intro}}{{.Intro}}{{else}}{{.ContinueTo}} {{.ClientID}}{{end}}</p><form id="login-form" method="post" action="{{.Action}}"><input type="hidden" name="interaction" value="{{.Interaction}}">{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label><button type="submit">{{.SignIn}}</button>{{if .PasskeyLogin}}<button type="button" id="passkey-btn">{{.PasskeyButton}}</button><div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div style="margin:1.5em 0;text-align:center;border-top:1px solid #ccc;padding-top:1em"><span style="background:#fff;padding:0 0.5em;color:#666;font-size:0.9em">or</span></div>{{range .Providers}}<a href="{{$.IssuerPath}}/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" style="display:block;margin:0.5em 0;padding:0.75em;border:1px solid #ccc;border-radius:4px;text-align:center;text-decoration:none;color:#333">{{.Name}}</a>{{end}}{{end}}{{end}}</main>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
 (function(){
   var btn=document.getElementById('passkey-btn');
   var err=document.getElementById('passkey-error');
@@ -80,6 +80,15 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html 
     var data=JSON.stringify({id:assertion.id,rawId:toBase64URL(assertion.rawId),type:assertion.type,response:response,clientExtensionResults:assertion.getClientExtensionResults()});
     submitAssertion(startJSON.code,data);
   }
+{{if .PasskeyChallenge}}
+  var challengeButton=document.getElementById('passkey-challenge-btn');
+  challengeButton.addEventListener('click',async function(){
+    challengeButton.disabled=true;
+    err.textContent='';
+    try{await finishPasskey({{.PasskeyChallenge}});}
+    catch(e){err.textContent='Security key verification failed. Try again.';challengeButton.disabled=false;}
+  });
+{{end}}
 {{if .MFARequired}}
   // A client that forces MFA answers a successful password step with a WebAuthn
   // challenge. Continuing it here reuses the shared finish boundary, so the
@@ -517,8 +526,18 @@ func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request, form log
 			}
 			rcr, code, exp, err := h.passkeys.BeginMFALogin(r.Context(), auth.Subject, user.Username, form.interaction, session.ID)
 			if err == nil {
+				challenge := passkeyStartResponse{Code: code, RCR: rcr, Exp: exp.UTC()}
+				if strings.Contains(r.Header.Get("Accept"), "text/html") {
+					theme, themeErr := h.resolveThemeURL(r.Context(), request.ClientID)
+					if themeErr != nil {
+						http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+						return
+					}
+					h.renderAuthenticationPage(w, r, request, loginPageData{ThemeURL: theme, PasskeyChallenge: &challenge})
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(passkeyStartResponse{Code: code, RCR: rcr, Exp: exp.UTC()})
+				_ = json.NewEncoder(w).Encode(challenge)
 				return
 			}
 			// Only confirmed absence of an eligible key permits OTP selection.
@@ -680,6 +699,7 @@ func (h *Handler) fedCMGet(w http.ResponseWriter, r *http.Request) {
 }
 
 type loginPageData struct {
+	PasskeyChallenge                            *passkeyStartResponse
 	Action, CSRFToken, Intro                    string
 	ClientID, Interaction, ThemeURL, IssuerPath string
 	Providers                                   []UpstreamProvider
