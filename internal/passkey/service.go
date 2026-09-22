@@ -219,6 +219,12 @@ func (s *Service) beginLogin(ctx context.Context, subject, username, interaction
 	if err != nil {
 		return nil, "", time.Time{}, err
 	}
+	// A persisted WebAuthn user may have removed every eligible credential.
+	// Report absence distinctly from corrupt state or backend failures so callers
+	// can offer another enrolled second factor without masking those failures.
+	if len(u.credentials) == 0 {
+		return nil, "", time.Time{}, ErrNotFound
+	}
 	challenge, err := s.randomBytes(32)
 	if err != nil {
 		return nil, "", time.Time{}, ErrInvalid

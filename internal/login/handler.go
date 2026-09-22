@@ -512,17 +512,21 @@ func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request, form log
 				return
 			}
 			rcr, code, exp, err := h.passkeys.BeginMFALogin(r.Context(), auth.Subject, user.Username, form.interaction, session.ID)
-			if err != nil {
-				if errors.Is(err, passkey.ErrNotFound) || errors.Is(err, passkey.ErrInvalid) {
-					http.Error(w, "Invalid login request", http.StatusNotAcceptable)
-					return
-				}
-				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+			if err == nil {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(passkeyStartResponse{Code: code, RCR: rcr, Exp: exp.UTC()})
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(passkeyStartResponse{Code: code, RCR: rcr, Exp: exp.UTC()})
-			return
+			// Only confirmed absence of an eligible key permits OTP selection.
+			// Corrupt credentials, invalid state and storage failures fail closed.
+			if !errors.Is(err, passkey.ErrNotFound) || h.otp == nil || !h.otp.Enabled() {
+				if errors.Is(err, passkey.ErrNotFound) || errors.Is(err, passkey.ErrInvalid) {
+					http.Error(w, "Invalid login request", http.StatusNotAcceptable)
+				} else {
+					http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+				}
+				return
+			}
 		}
 		if h.otp != nil && h.otp.Enabled() {
 			lang := ""
@@ -1084,6 +1088,8 @@ func (h *Handler) PrepareExternalAuthentication(r *http.Request, rawInteractionT
 // authenticators intentionally use this path.
 func (h *Handler) completeAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, interactionToken, subject, authMethod string, onConsumed func() error) {
 	h.completeAuthenticationInteraction(w, r, sessionToken, subject, authMethod, onConsumed, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+		return h.browser.LoadAuthorizationInteractionReadOnly(ctx, sessionToken, interactionToken)
+	}, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
 		return h.browser.ConsumeAuthorizationInteraction(ctx, sessionToken, interactionToken)
 	})
 }
@@ -1093,17 +1099,19 @@ func (h *Handler) completeAuthentication(w http.ResponseWriter, r *http.Request,
 // continuation token never enters durable state or the caller (GA66-OTP-003).
 func (h *Handler) completeAuthenticationByDigest(w http.ResponseWriter, r *http.Request, sessionToken, interactionDigest, subject, authMethod string, onConsumed func() error) {
 	h.completeAuthenticationInteraction(w, r, sessionToken, subject, authMethod, onConsumed, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+		return h.browser.LoadAuthorizationInteractionReadOnlyByDigest(ctx, sessionToken, interactionDigest)
+	}, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
 		return h.browser.ConsumeAuthorizationInteractionByDigest(ctx, sessionToken, interactionDigest)
 	})
 }
 
-func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, onConsumed func() error, consume func(context.Context) (browser.AuthorizationInteraction, error)) {
+func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, onConsumed func() error, load, consume func(context.Context) (browser.AuthorizationInteraction, error)) {
 	peerIP, peerOK := h.resolvePeerIP(r)
 	if !peerOK {
 		http.Error(w, "Invalid login request", http.StatusBadRequest)
 		return
 	}
-	interaction, err := consume(r.Context())
+	interaction, err := load(r.Context())
 	if err != nil {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
@@ -1111,6 +1119,11 @@ func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *ht
 	target, err := h.resolveAuthenticationRequest(r, interaction.Payload)
 	request := target.policy
 	if err != nil || (request.ForceMFA && authMethod != "mfa") {
+		http.Error(w, "Invalid login request", http.StatusForbidden)
+		return
+	}
+	consumed, err := consume(r.Context())
+	if err != nil || consumed.RequestID != interaction.RequestID || !bytes.Equal(consumed.Payload, interaction.Payload) {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}

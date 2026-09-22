@@ -3,6 +3,7 @@ package login
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -149,7 +150,9 @@ func TestApprovalEntryPagesCompleteOTP(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, db := testHandlerWithDB(t, false)
+			configuredPasskeys := h.passkeys
 			service, _ := testOTPStepUp(t, h, db)
+			h.passkeys = configuredPasskeys
 			ctx := context.Background()
 			if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "entry-otp-profile", SQL: "INSERT INTO identity_user_profiles(subject,email,email_verified,preferred_username) VALUES('user-1','alice@example.test',1,'alice')"}); err != nil {
 				t.Fatal(err)
@@ -223,5 +226,94 @@ func TestApprovalEntryOffersSharedPasskeyAndUpstreamMethods(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s external preparation: %v", tc.entry, err)
 		}
+	}
+}
+
+func TestApprovalOTPSelectionDoesNotMaskInvalidPasskeyState(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, handle string
+		status       int
+	}{
+		{"no eligible credential", strings.Repeat("A", 43), http.StatusOK},
+		{"corrupt user handle", strings.Repeat("!", 43), http.StatusNotAcceptable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, db := testHandlerWithDB(t, false)
+			configuredPasskeys := h.passkeys
+			_, delivered := testOTPStepUp(t, h, db)
+			h.passkeys = configuredPasskeys
+			ctx := context.Background()
+			for i, statement := range []struct {
+				SQL  string
+				Args []any
+			}{
+				{SQL: "INSERT INTO identity_user_profiles(subject,email,email_verified,preferred_username) VALUES('user-1','alice@example.test',1,'alice')"},
+				{SQL: "INSERT INTO identity_webauthn_users(subject,user_handle,created_at_unix_ms) VALUES('user-1',?,0)", Args: []any{tc.handle}},
+			} {
+				_, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: fmt.Sprintf("selection-%d", i), SQL: statement.SQL, Args: statement.Args})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			cookie, token := approvalInteraction(t, h, approvalLoginInteraction{Purpose: approvalLoginPayload, HandoffID: testHandoffID, ForceMFA: true})
+			result := httptest.NewRecorder()
+			h.Login(result, postLogin(cookie, token, "alice", "correct password"))
+			if result.Code != tc.status || len(result.Result().Cookies()) != 0 {
+				t.Fatalf("status=%d body=%s", result.Code, result.Body.String())
+			}
+			select {
+			case <-delivered:
+				if tc.status != http.StatusOK {
+					t.Fatal("invalid passkey state fell back to OTP")
+				}
+			default:
+				if tc.status == http.StatusOK {
+					t.Fatal("missing OTP delivery")
+				}
+			}
+		})
+	}
+}
+
+func TestApprovalPolicyRejectionDoesNotConsumeInteraction(t *testing.T) {
+	t.Parallel()
+	for _, byDigest := range []bool{false, true} {
+		t.Run(fmt.Sprintf("digest=%t", byDigest), func(t *testing.T) {
+			h := testHandler(t)
+			cookie, token := approvalInteraction(t, h, approvalLoginInteraction{Purpose: approvalLoginPayload, HandoffID: testHandoffID})
+			h.SetApprovalForceMFA(true)
+			r := httptest.NewRequest(http.MethodPost, "/auth/login", nil)
+			r.AddCookie(cookie)
+			finish := func(w http.ResponseWriter, method string) {
+				if byDigest {
+					digest, err := browser.CanonicalTokenDigest(token)
+					if err != nil {
+						t.Fatal(err)
+					}
+					h.completeAuthenticationByDigest(w, r, cookie.Value, digest, "user-1", method, nil)
+				} else {
+					h.completeAuthentication(w, r, cookie.Value, token, "user-1", method, nil)
+				}
+			}
+			weak := httptest.NewRecorder()
+			finish(weak, "pwd")
+			if weak.Code != http.StatusForbidden || len(weak.Result().Cookies()) != 0 {
+				t.Fatalf("weak=%d", weak.Code)
+			}
+			if _, err := h.browser.LoadAuthorizationInteractionReadOnly(r.Context(), cookie.Value, token); err != nil {
+				t.Fatalf("policy rejection consumed continuation: %v", err)
+			}
+			strong := httptest.NewRecorder()
+			finish(strong, "mfa")
+			if strong.Code != http.StatusSeeOther || strong.Header().Get("Location") != h.issuer+"/account/connection-handoffs/"+testHandoffID {
+				t.Fatalf("strong=%d %s", strong.Code, strong.Body.String())
+			}
+			replay := httptest.NewRecorder()
+			finish(replay, "mfa")
+			if replay.Code != http.StatusForbidden {
+				t.Fatalf("replay=%d", replay.Code)
+			}
+		})
 	}
 }
