@@ -20,6 +20,7 @@ import (
 	cdpwebauthn "github.com/chromedp/cdproto/webauthn"
 	"github.com/chromedp/chromedp"
 	accountbrowser "github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/device"
 )
 
 // TestAccountPasskeyUIAcrossPods exercises the ordinary user's shipped
@@ -154,7 +155,7 @@ func checkDeviceApprovalLoginUI(t *testing.T, ctx context.Context, primary, seco
 	); err != nil {
 		t.Fatalf("cold Device approval login: %v", err)
 	}
-	if reviewedCode != grant.UserCode {
+	if device.NormalizeUserCode(reviewedCode) != device.NormalizeUserCode(grant.UserCode) {
 		t.Fatal("login changed the Device approval target")
 	}
 	assertDeviceTokenError(t, client, secondary, secret, grant.DeviceCode, "authorization_pending")
@@ -163,8 +164,7 @@ func checkDeviceApprovalLoginUI(t *testing.T, ctx context.Context, primary, seco
 	defer nextPoll.Stop()
 	if err := chromedp.Run(ctx,
 		chromedp.Click(`button[name="action"][value="approve"]`),
-		chromedp.WaitVisible(`body`),
-		chromedp.Poll(`document.body.textContent.includes('Device approved')`, nil),
+		chromedp.WaitVisible(`//pre[normalize-space(.)='Device approved']`, chromedp.BySearch),
 	); err != nil {
 		t.Fatalf("explicit Device approval: %v", err)
 	}
