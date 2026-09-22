@@ -9,7 +9,7 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-const schemaVersion = 109
+const schemaVersion = 110
 
 // migrateThroughV97 applies schema versions v1 through v97. It is the
 // unchanged prefix of Migrate, extracted so tests can reach a clean v97
@@ -417,6 +417,9 @@ func Migrate(ctx context.Context, db *rhiza.DB) error {
 	}
 	if err := migrateSchemaV109(ctx, db); err != nil {
 		return fmt.Errorf("migrate schema v109: %w", err)
+	}
+	if err := migrateSchemaV110(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v110: %w", err)
 	}
 	return nil
 }
@@ -3874,6 +3877,25 @@ func migrateSchemaV105(ctx context.Context, db *rhiza.DB) error {
 		{SQL: `ALTER TABLE master_key_retirement_members_v105 RENAME TO master_key_retirement_members`},
 		{SQL: `CREATE UNIQUE INDEX master_key_retirement_attested_boot ON master_key_retirement_members(epoch, boot_id) WHERE attestation_state = 'attested'`},
 		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(105)`},
+	}})
+	return err
+}
+
+// Legacy approvals contain no evidence of MFA and deliberately default to false.
+func migrateSchemaV110(ctx context.Context, db *rhiza.DB) error {
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=110)`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 1 {
+		return errors.New("invalid schema 110 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v110", Statements: []rhiza.SQLStatement{
+		{SQL: `ALTER TABLE oauth_device_grants ADD COLUMN mfa_verified INTEGER NOT NULL DEFAULT 0 CHECK (mfa_verified IN (0,1))`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(110)`},
 	}})
 	return err
 }

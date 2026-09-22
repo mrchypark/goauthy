@@ -1517,21 +1517,21 @@ func mountAccountRoutes(mux *http.ServeMux, deleteUser, selfDelete http.HandlerF
 func deviceSessionSubject(store *browser.Store, issuer string, requireMFA ...bool) device.Subject {
 	cookieName, err := browser.CookieName(issuer)
 	if err != nil {
-		return func(*http.Request) (string, bool) { return "", false }
+		return func(*http.Request) (string, bool, bool) { return "", false, false }
 	}
-	return func(r *http.Request) (string, bool) {
+	return func(r *http.Request) (string, bool, bool) {
 		cookie, err := r.Cookie(cookieName)
 		if err != nil || cookie.Value == "" {
-			return "", false
+			return "", false, false
 		}
 		session, err := store.LoadSessionReadOnlyForPeer(r.Context(), cookie.Value, browser.PeerIPFromContext(r.Context()))
 		if err != nil || session.Subject == "" {
-			return "", false
+			return "", false, false
 		}
 		if len(requireMFA) != 0 && requireMFA[0] && session.AuthenticationMethod != "mfa" {
-			return "", false
+			return "", false, false
 		}
-		return session.Subject, true
+		return session.Subject, session.AuthenticationMethod == "mfa", true
 	}
 }
 

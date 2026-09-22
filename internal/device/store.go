@@ -38,6 +38,7 @@ type Grant struct {
 	Interval             time.Duration
 }
 type PollResult struct {
+	MFAVerified                                          bool
 	Status, ClaimToken, Subject, ManagedClientGeneration string
 	Resource                                             string
 	Scopes                                               []string
@@ -152,20 +153,26 @@ func (s *Store) recoverCreate(ctx context.Context, deviceDigest, userDigest, cli
 }
 
 func (s *Store) Approve(ctx context.Context, userCode, subject string, now time.Time) error {
-	return s.decide(ctx, userCode, subject, "approved", now)
+	return s.ApproveWithMFA(ctx, userCode, subject, false, now)
+}
+
+// ApproveWithMFA accepts evidence only from the server's authenticated browser session.
+func (s *Store) ApproveWithMFA(ctx context.Context, userCode, subject string, mfa bool, now time.Time) error {
+	return s.decide(ctx, userCode, subject, "approved", mfa, now)
 }
 func (s *Store) Deny(ctx context.Context, userCode string, now time.Time) error {
-	return s.decide(ctx, userCode, "", "denied", now)
+	return s.decide(ctx, userCode, "", "denied", false, now)
 }
-func (s *Store) decide(ctx context.Context, userCode, subject, state string, now time.Time) error {
+func (s *Store) decide(ctx context.Context, userCode, subject, state string, mfa bool, now time.Time) error {
 	if s == nil || s.db == nil || NormalizeUserCode(userCode) == "" || (state == "approved" && subject == "") {
 		return ErrInvalid
 	}
 	d := digest(NormalizeUserCode(userCode))
 	now = now.UTC().Truncate(time.Millisecond)
-	id := "device-decide/" + d[:20] + "/" + state + fmt.Sprint(now.UnixMilli())
-	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: id, SQL: `UPDATE oauth_device_grants SET state = ?, subject = ?, decision_attempt = ?, claim_token_digest = NULL, claim_until_unix_ms = NULL
-		WHERE user_code_digest = ? AND state = 'pending' AND expires_at_unix_ms > ?`, Args: []any{state, nilIfEmpty(subject), id, d, now.UnixMilli()}})
+	id := "device-decide/" + d[:20] + "/" + state + fmt.Sprint(now.UnixMilli(), "/", mfa)
+	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: id, SQL: `UPDATE oauth_device_grants SET state = ?, subject = ?, decision_attempt = ?, mfa_verified = ?, claim_token_digest = NULL, claim_until_unix_ms = NULL
+		WHERE user_code_digest = ? AND state = 'pending' AND expires_at_unix_ms > ?
+ AND (? = 'denied' OR ? = 1 OR NOT EXISTS (SELECT 1 FROM managed_oauth_clients c WHERE c.id=oauth_device_grants.client_id AND c.force_mfa=1))`, Args: []any{state, nilIfEmpty(subject), id, mfa, d, now.UnixMilli(), state, mfa}})
 	if err != nil {
 		if s.decisionApplied(ctx, d, state, subject, id, now) {
 			return nil
@@ -327,7 +334,7 @@ func (s *Store) Poll(ctx context.Context, deviceCode, clientID string, now time.
 		if !ok || fresh.claim != td {
 			return PollResult{Status: StatusSlowDown}, nil
 		}
-		return PollResult{Status: StatusClaimed, ClaimToken: token, Subject: fresh.subject, Scopes: fresh.scopes, ManagedClientGeneration: fresh.generation, Resource: fresh.resource}, nil
+		return PollResult{Status: StatusClaimed, ClaimToken: token, Subject: fresh.subject, MFAVerified: fresh.mfa, Scopes: fresh.scopes, ManagedClientGeneration: fresh.generation, Resource: fresh.resource}, nil
 	}
 	return PollResult{Status: StatusExpired}, nil
 }
@@ -348,24 +355,30 @@ func (s *Store) Complete(ctx context.Context, claimToken string, success bool, n
 }
 
 type row struct {
+	mfa                                         bool
 	state, subject, claim, generation, resource string
 	scopes                                      []string
 	expires, nextPoll, claimUntil, interval     int64
 }
 
 func (s *Store) load(ctx context.Context, d, client string) (row, bool, error) {
-	r, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT state,subject,managed_client_generation,resource,scopes_json,expires_at_unix_ms,interval_seconds,next_poll_at_unix_ms,claim_token_digest,claim_until_unix_ms FROM oauth_device_grants WHERE device_code_digest=? AND client_id=?`, Args: []any{d, client}, Consistency: rhiza.ConsistencyLinearizable})
+	r, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT state,subject,managed_client_generation,resource,scopes_json,expires_at_unix_ms,interval_seconds,next_poll_at_unix_ms,claim_token_digest,claim_until_unix_ms,mfa_verified FROM oauth_device_grants WHERE device_code_digest=? AND client_id=?`, Args: []any{d, client}, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil {
 		return row{}, false, err
 	}
 	if len(r.Rows) == 0 {
 		return row{}, false, nil
 	}
-	if len(r.Rows) != 1 || len(r.Rows[0]) != 10 {
+	if len(r.Rows) != 1 || len(r.Rows[0]) != 11 {
 		return row{}, false, ErrInvalid
 	}
 	v := r.Rows[0]
 	out := row{}
+	mfa, validMFA := v[10].(int64)
+	if !validMFA || (mfa != 0 && mfa != 1) {
+		return out, false, ErrInvalid
+	}
+	out.mfa = mfa == 1
 	var ok bool
 	if out.state, ok = v[0].(string); !ok {
 		return out, false, ErrInvalid

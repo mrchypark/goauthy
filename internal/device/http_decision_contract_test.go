@@ -14,11 +14,11 @@ import (
 // handler with more than one authenticated approver identity. headerSubject
 // takes the approver from a test header and defaults to the identity that the
 // shared verificationCSRF helper reviews with.
-func headerSubject(r *http.Request) (string, bool) {
+func headerSubject(r *http.Request) (string, bool, bool) {
 	if subject := r.Header.Get("X-Test-Subject"); subject != "" {
-		return subject, true
+		return subject, false, true
 	}
-	return "user-1", true
+	return "user-1", false, true
 }
 
 func decisionForm(grant Grant, cookie *http.Cookie, csrf, action, subject, peer string) *http.Request {
