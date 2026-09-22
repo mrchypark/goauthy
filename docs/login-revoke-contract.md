@@ -57,3 +57,24 @@ Login-location mail uses `GOAUTHY_EMAIL_SUB_PREFIX`, defaulting to the pinned
 rejected at startup. Subject composition and its real SMTP propagation have
 focused coverage. Login-warning email rendering uses validated typed variables from the persisted
 global theme, with built-in fallback; other themed page surfaces remain incomplete.
+
+## Forced logout versus delegated (exchange) credentials (GA-DESIGN-002)
+
+Decided contract; product behavior is unchanged. Enforcing code: the revoke statements in
+`internal/rbac/forced_logout.go:13-65` and the exchange write path in
+`internal/oauth/grant_storage.go` (`CreateAccessTokenSession` copies `subject` from the source
+session and keeps the actor only in the `act` session extra, which `encodeRequest` persists
+inside `request_json`).
+
+1. Forced logout revokes the token family owned by the root subject that authorized it. Every
+   statement matches on that subject: `browser_sessions`, `browser_authorization_interactions`,
+   `oauth_authorize_codes`, `oauth_pkce_requests`, `oauth_refresh_tokens`,
+   `oauth_access_tokens`/`oauth_token_requests` via `json_extract(request_json,'$.subject')`,
+   `oauth_device_grants`, `oidc_session_clients`, and `oidc_user_clients`.
+2. An exchanged (delegated) token whose session subject is the source subject survives the
+   actor's forced logout and is revoked when the source subject is forced out. The `act` claim
+   is attribution for auditing, not an independent authorization root.
+3. Revoking a delegated credential is therefore the source subject's action, or a client-side
+   revocation of that client, not the actor's.
+
+Pinned by `internal/rbac/forced_logout_delegation_test.go`.
