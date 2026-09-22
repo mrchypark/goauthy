@@ -48,7 +48,8 @@ func TestGoAuthyOAuthLiveBridge(t *testing.T) {
 	if err != nil {
 		t.Fatal("invalid OAuth client binding")
 	}
-	opts := nativeOptions(t.TempDir(), "", f.Binding.Endpoint, nil)
+	opts := nativeOptions(t.TempDir(), "", "", nil)
+	opts.Native.Provider.BaseURL = strings.TrimSuffix(f.Binding.Endpoint, "/chat/completions")
 	opts.RequireIdentity = true
 	opts.Authorize = func(context.Context, Principal) error { return nil }
 	opts.ResolveCredential = func(context.Context, Connection) (Credential, error) {
