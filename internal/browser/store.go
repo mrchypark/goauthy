@@ -559,6 +559,10 @@ func (s *Store) ConsumeAuthorizationInteractionByDigest(ctx context.Context, ses
 }
 
 func (s *Store) consumeAuthorizationInteraction(ctx context.Context, sessionDigest, digest string, requireInitSession bool) (AuthorizationInteraction, error) {
+	return s.consumeAuthorizationInteractionGuarded(ctx, sessionDigest, digest, requireInitSession, "", nil)
+}
+
+func (s *Store) consumeAuthorizationInteractionGuarded(ctx context.Context, sessionDigest, digest string, requireInitSession bool, parentGuard string, parentArgs []any) (AuthorizationInteraction, error) {
 	attempt, err := randomID(16)
 	if err != nil {
 		return AuthorizationInteraction{}, err
@@ -568,14 +572,18 @@ func (s *Store) consumeAuthorizationInteraction(ctx context.Context, sessionDige
 	if requireInitSession {
 		sessionCondition = `subject = '' AND auth_method = ''`
 	}
+	if parentGuard != "" {
+		parentGuard = " AND (" + parentGuard + ")"
+	}
+	consumeArgs := append([]any{attempt, now, digest, sessionDigest, now, sessionDigest, now, now - s.idleTimeout.Milliseconds(), now}, parentArgs...)
 	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID: mutationID("authorization-consume", digest, attempt),
 		Statements: []rhiza.SQLStatement{{SQL: `UPDATE browser_authorization_interactions
 			SET consumed_attempt = ?, consumed_at_unix_ms = ?
 			WHERE token_digest = ? AND session_digest = ? AND consumed_attempt IS NULL AND expires_at_unix_ms > ?
 			AND EXISTS (SELECT 1 FROM browser_sessions WHERE token_digest = ? AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ? AND last_seen_at_unix_ms > ?
-				AND (` + sessionCondition + `) AND ` + activeSessionSubjectSQL + `)`,
-			Args: []any{attempt, now, digest, sessionDigest, now, sessionDigest, now, now - s.idleTimeout.Milliseconds(), now}},
+				AND (` + sessionCondition + `) AND ` + activeSessionSubjectSQL + `)` + parentGuard,
+			Args: consumeArgs},
 			{SQL: `UPDATE browser_sessions SET last_seen_at_unix_ms = ?
 			WHERE token_digest = ? AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ?
 			AND last_seen_at_unix_ms > ? AND last_seen_at_unix_ms <= ?

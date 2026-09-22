@@ -15,11 +15,11 @@ func TestDeviceVerificationUsesServerMFAEvidence(t *testing.T) {
 		t.Run(map[bool]string{false: "password", true: "mfa"}[mfa], func(t *testing.T) {
 			t.Parallel()
 			ctx, store, db := testStore(t)
-			grant, err := store.Create(ctx, "mfa-client", []string{"openid"}, deviceHTTPTestNow)
+			_, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "mfa-client", SQL: `INSERT INTO managed_oauth_clients(id,generation,revision,enabled,deleted,metadata_json,force_mfa) VALUES('mfa-client','g1',1,1,0,'{}',1)`})
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "mfa-client", SQL: `INSERT INTO managed_oauth_clients(id,generation,revision,enabled,deleted,metadata_json,force_mfa) VALUES('mfa-client','g1',1,1,0,'{}',1)`})
+			grant, err := store.CreateWithBinding(ctx, "mfa-client", []string{"openid"}, ClientBinding{ID: "mfa-client", Generation: "g1", Revision: 1}, deviceHTTPTestNow)
 			if err != nil {
 				t.Fatal(err)
 			}
