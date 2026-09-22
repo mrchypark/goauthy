@@ -29,7 +29,7 @@ func TestAccountPasskeyUIAcrossPods(t *testing.T) {
 	if os.Getenv("GOAUTHY_E2E_ACCOUNT_PASSKEY_UI") != "1" {
 		t.Skip("set GOAUTHY_E2E_ACCOUNT_PASSKEY_UI=1 to run account passkey UI E2E")
 	}
-	primary, secondary, adminUser, adminPassword, _ := browserE2EConfig(t)
+	primary, secondary, adminUser, adminPassword, clientSecret := browserE2EConfig(t)
 	tertiary := requiredE2EURL(t, "GOAUTHY_E2E_TERTIARY_URL")
 	nodes := []string{primary, secondary, tertiary}
 	admin := newBrowserClient(t)
@@ -110,6 +110,54 @@ func TestAccountPasskeyUIAcrossPods(t *testing.T) {
 	if err := chromedp.Run(auth.ctx, chromedp.Navigate(secondary+"/account"), chromedp.WaitVisible(`#passkeys-list`), chromedp.Poll(`document.querySelector('#passkeys-list')?.textContent?.includes('Second UI key') && !document.querySelector('#passkeys-list')?.textContent?.includes('First UI key')`, nil)); err != nil {
 		t.Fatalf("secondary account passkey list: %v", err)
 	}
+
+	if os.Getenv("GOAUTHY_E2E_DEVICE_LOGIN_FLOW") == "1" {
+		checkPasskeyDeviceApproval(t, auth.ctx, primary, secondary, email, clientSecret)
+	}
+}
+
+// Reuse the credential registered through the account UI, but remove all browser
+// sessions so the approval entry must complete its own real WebAuthn ceremony.
+func checkPasskeyDeviceApproval(t *testing.T, ctx context.Context, primary, secondary, username, secret string) {
+	t.Helper()
+	client := newBrowserClient(t)
+	grant := startDeviceAuthorizationOffline(t, client, primary, "goauthy-dev", secret)
+	var reviewedCode string
+	if err := chromedp.Run(ctx,
+		network.ClearBrowserCookies(),
+		chromedp.Navigate(grant.VerificationURIComplete),
+		chromedp.WaitVisible(`#passkey-btn`),
+		chromedp.SetValue(`input[name="username"]`, username),
+		chromedp.Click(`#passkey-btn`),
+		chromedp.WaitVisible(`button[name="action"][value="approve"]`),
+		chromedp.Value(`input[name="user_code"]`, &reviewedCode),
+	); err != nil {
+		t.Fatalf("cold Device passkey login: %v", err)
+	}
+	if reviewedCode != grant.UserCode {
+		t.Fatal("passkey login changed the Device approval target")
+	}
+	assertDeviceTokenError(t, client, secondary, secret, grant.DeviceCode, "authorization_pending")
+	// RFC 8628 requires the returned polling interval even after user approval.
+	nextPoll := time.NewTimer(time.Duration(grant.Interval+1) * time.Second)
+	defer nextPoll.Stop()
+	if err := chromedp.Run(ctx,
+		chromedp.Click(`button[name="action"][value="approve"]`),
+		chromedp.WaitVisible(`body`),
+		chromedp.Poll(`document.body.textContent.includes('Device approved')`, nil),
+	); err != nil {
+		t.Fatalf("explicit Device approval: %v", err)
+	}
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-nextPoll.C:
+	}
+	tokens := deviceToken(t, client, secondary, secret, grant.DeviceCode)
+	if tokens.AccessToken == "" || tokens.RefreshToken == "" {
+		t.Fatal("passkey-approved Device did not issue tokens")
+	}
+	assertDeviceTokenError(t, client, secondary, secret, grant.DeviceCode, "expired_token")
 }
 
 func requiredE2EURL(t *testing.T, name string) string {
