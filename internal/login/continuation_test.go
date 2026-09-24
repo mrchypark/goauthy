@@ -347,6 +347,11 @@ func TestDeviceReauthenticationBindsOriginalSubjectAndSession(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if mode == "upstream parent" {
+				if _, err = storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "reauth-parent-rp", SQL: `INSERT INTO oidc_session_clients(sid,client_id,logout_uri,allow_private,allow_http,created_at_unix_ms) VALUES(?,?,?,0,0,?)`, Args: []any{parent.ID, "rp-client", "https://rp.example.test/logout", h.now().UnixMilli()}}); err != nil {
+					t.Fatal(err)
+				}
+			}
 			parentCookie, err := browser.SessionCookie(h.issuer, parent.Token, parent.ExpiresAt)
 			if err != nil {
 				t.Fatal(err)
@@ -418,11 +423,23 @@ func TestDeviceReauthenticationBindsOriginalSubjectAndSession(t *testing.T) {
 				t.Fatalf("old parent remained active: %v", err)
 			}
 			if mode == "upstream parent" {
-				if err := h.oauth.RevokeUpstreamSessions(ctx, oauth.UpstreamLogout{Issuer: "https://upstream.example.test", ClientID: "client-1", Subject: "external-alice", SessionID: "sid-1", JTI: "reauth-logout", TokenDigest: strings.Repeat("A", 43), ExpiresAt: time.Now().Add(time.Minute)}); err != nil {
+				logout := oauth.UpstreamLogout{Issuer: "https://upstream.example.test", ClientID: "client-1", Subject: "external-alice", SessionID: "sid-1", JTI: "reauth-logout", TokenDigest: strings.Repeat("A", 43), ExpiresAt: time.Now().Add(time.Minute)}
+				if err := h.oauth.RevokeUpstreamSessions(ctx, logout); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := h.browser.LoadSession(ctx, end.Result().Cookies()[0].Value); !errors.Is(err, browser.ErrRevoked) {
 					t.Fatalf("upstream logout missed replacement: %v", err)
+				}
+				result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT sid FROM oidc_backchannel_deliveries`, Consistency: rhiza.ConsistencyLinearizable})
+				if err != nil || len(result.Rows) != 1 || len(result.Rows[0]) != 1 || result.Rows[0][0] != parent.ID {
+					t.Fatalf("backchannel deliveries=%v err=%v want parent sid=%q", result.Rows, err, parent.ID)
+				}
+				if err := h.oauth.RevokeUpstreamSessions(ctx, logout); err != nil {
+					t.Fatal(err)
+				}
+				result, err = db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(*) FROM oidc_backchannel_deliveries`, Consistency: rhiza.ConsistencyLinearizable})
+				if err != nil || len(result.Rows) != 1 || len(result.Rows[0]) != 1 || result.Rows[0][0] != int64(1) {
+					t.Fatalf("backchannel replay=%v err=%v", result.Rows, err)
 				}
 			}
 		})
