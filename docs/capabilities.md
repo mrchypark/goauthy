@@ -14,6 +14,11 @@ Rauthy `v0.36.2`와의 세부 동등성은 [features.md](features.md)와
 - **Experimental**: opt-in 구현 또는 부분 구현으로, 제한된 검증 범위에서만 사용한다.
 - **Unsupported**: 현재 제품 계약에 포함하지 않는다.
 
+Qualified는 기록된 기능별 검증 범위를 뜻하며, 모든 변경 이후의 최종 릴리스 후보가
+재검증되었다는 뜻은 아니다. 릴리스 후보는 커밋과 이미지 digest를 고정하고 standalone과
+exact-three HA의 해당 운영·복구 경로를 다시 확인해야 한다. 남은 후보 검증은
+[운영 준비 이슈 #93](https://github.com/mrchypark/goauthy/issues/93)에서 추적한다.
+
 이 상태는 API 안정성이나 장기 호환성을 자동으로 의미하지 않는다. 외부 소비자가
 의존할 계약은 별도 v1 계약으로 고정하기 전까지 관련 문서의 현재 제한을 함께 확인한다.
 
@@ -28,8 +33,8 @@ Rauthy `v0.36.2`와의 세부 동등성은 [features.md](features.md)와
 | UserInfo, introspection, revocation | Qualified | Public route and revoked/disabled/invalid-token denial evidence. |
 | RP-initiated logout | Qualified | Browser session/OAuth sid binding and redirect validation. |
 | Back-channel logout | Preview | Outgoing/incoming subsets are implemented; broader multi-client/Kubernetes qualification remains. |
-| Dynamic Client Registration | Preview | RFC 7591/7592 subset, software statements and Device clients are implemented; complete parity/HA surface remains open. |
-| Device Authorization Grant | Preview | Bootstrap and standalone dynamic-client flows exist; dynamic-client Kind qualification remains open. |
+| Dynamic Client Registration | Preview | RFC 7591/7592 subset, software statements and Device clients are implemented; final-candidate HA qualification of the supported registration/management paths remains open. |
+| Device Authorization Grant | Preview | Bootstrap and managed dynamic-client flows, current client-policy checks and MFA proof enforcement exist; shared approval authentication and final-candidate browser/HA qualification remain tracked in #94 and #93. |
 | DPoP | Qualified | Pinned product scope has auth-code/refresh/UserInfo/client-credentials/Device and continuity evidence. |
 | Token Exchange | Preview | User/machine/cross-client subsets and DPoP output exist; complete product contract remains broader than the qualified slices. |
 | Resource Indicators | Qualified | Exact resource/audience admission and refresh persistence are wired. |
@@ -42,11 +47,11 @@ Rauthy `v0.36.2`와의 세부 동등성은 [features.md](features.md)와
 | Password login + Argon2id | Qualified | Constant-shape failure handling, configurable rules and production login path. |
 | Password recovery | Qualified | Opt-in PoW + SMTP reset flow with standalone/Kind evidence. |
 | Open registration | Preview | Opt-in password-first lifecycle is wired; broader registration methods remain open. |
-| Passkeys / WebAuthn | Preview | Registration/login/MFA and conversion slices exist; complete passwordless/recovery/admin parity remains open. |
+| Passkeys / WebAuthn | Preview | Registration/login/MFA and conversion slices exist; approval-entry browser method coverage and the supported recovery/administration workflows need explicit qualification. |
 | Roles, groups, scopes, custom attributes | Preview | Current claims and administration subsets are wired; delegated/full management remains open. |
-| Admin API keys | Preview | Scoped API keys and cross-Pod usage exist; complete management/UI parity remains open. |
+| Admin API keys | Preview | Scoped API keys and cross-Pod usage exist; the supported management/UI workflows need explicit qualification. |
 | Admin UI | Preview | Core user/client/collection management slices exist; it is not yet a complete management console. |
-| Account self-service UI | Preview | Profile/session/passkey/connection slices exist; complete self-service parity remains open. |
+| Account self-service UI | Preview | Profile/session/passkey/connection slices exist; the supported end-to-end self-service workflows need explicit qualification. |
 
 ## Federation
 
@@ -78,7 +83,8 @@ Rauthy `v0.36.2`와의 세부 동등성은 [features.md](features.md)와
 | Automatic OAuth refresh orchestration | Experimental | Refresh primitives and fencing exist, but the consumer-facing automatic coordinator is not yet the product contract. |
 | Provider-side remote revoke | Unsupported | Local use can be revoked; provider-side credential revocation workflow is not yet a supported contract. |
 | Provider revision migration | Unsupported | Unsafe referenced-provider mutation is blocked; guided migration/re-consent workflow is not yet implemented. |
-| Consumer SDK / reference adapter | Unsupported | Consumers currently integrate the HTTP contracts directly; stable Go SDK is planned. |
+| Reference consumer integration | Preview | Real Beesuh Runtime API-key bridge has standalone restart and consent-isolation evidence; actual OAuth consumer lifecycle qualification remains open in #96. This does not establish full consumer login or arbitrary SaaS interoperability. |
+| Stable consumer SDK | Unsupported | Current HTTP contracts and selected reference integrations do not constitute a versioned, supported general-purpose SDK. |
 
 For the current wire contract and remaining consumer work, see
 [external-credential-consumer-contract.md](external-credential-consumer-contract.md),

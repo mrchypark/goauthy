@@ -49,6 +49,7 @@ type refreshRecord struct{}
 type stats struct {
 	Authorize, Token, UserInfo, Healthz           int
 	AuthFailures, TokenFailures, UserInfoFailures int
+	Model, ModelFailures                          int
 }
 type handler struct {
 	cfg     config
@@ -79,6 +80,8 @@ func (h *handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		h.token(w, r)
 	case "/userinfo":
 		h.userinfo(w, r)
+	case "/v1/chat/completions":
+		h.model(w, r)
 	case "/healthz":
 		h.healthz(w, r)
 	case "/stats":
@@ -236,6 +239,29 @@ func (h *handler) userinfo(w http.ResponseWriter, r *http.Request) {
 	}
 	h.json(w, http.StatusOK, map[string]any{"sub": "fixture-subject"})
 }
+
+// model is a bounded non-streaming consumer target, not an inference service.
+func (h *handler) model(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	h.stats.Model++
+	_, valid := h.access[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
+	h.mu.Unlock()
+	if r.Method != http.MethodPost || r.URL.RawQuery != "" || r.URL.ForceQuery || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") || !valid {
+		h.fail(w, http.StatusUnauthorized, "model")
+		return
+	}
+	var request struct {
+		Messages []json.RawMessage `json:"messages"`
+		Stream   bool              `json:"stream"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
+	if decoder.Decode(&request) != nil || len(request.Messages) == 0 || request.Stream || decoder.Decode(new(any)) != io.EOF {
+		h.fail(w, http.StatusBadRequest, "model")
+		return
+	}
+	h.json(w, http.StatusOK, map[string]any{"choices": []any{map[string]any{"message": map[string]string{"role": "assistant", "content": "fixture-model-ok"}, "finish_reason": "stop"}}, "usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}})
+}
+
 func (h *handler) healthz(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	h.stats.Healthz++
@@ -290,6 +316,9 @@ func (h *handler) fail(w http.ResponseWriter, status int, kind string) {
 	}
 	if kind == "userinfo" {
 		h.stats.UserInfoFailures++
+	}
+	if kind == "model" {
+		h.stats.ModelFailures++
 	}
 	h.mu.Unlock()
 	http.Error(w, "invalid request", status)

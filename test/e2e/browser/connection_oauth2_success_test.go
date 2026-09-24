@@ -135,7 +135,7 @@ func TestConnectionOAuth2RegisteredSuccess(t *testing.T) {
 		assertRegisteredOAuth2Completion(t, completed)
 	}
 	assertRegisteredOAuth2Status(t, do(t, owner, http.MethodGet, statusURL, nil, headers), true, "ready", 1, []string{"account"}, true)
-	checkDelivery, consumerRefresh, revokeDelivery, deniedDelivery := oauth2DeliveryProbe(t, owner, primary, cookie, headers, collectionID, connectionID, providerID, providerBase)
+	checkDelivery, consumerRefresh, revokeDelivery, deniedDelivery := oauth2DeliveryProbe(t, owner, primary, cookie, headers, collectionID, connectionID, providerID, providerBase, 1)
 	checkDelivery(1)
 	restartChecks := 0
 	if os.Getenv("GOAUTHY_E2E_OAUTH2_ACTIVE_RESTART") == "1" {
@@ -199,7 +199,7 @@ func TestConnectionOAuth2RegisteredSuccess(t *testing.T) {
 		staleRevoke := do(t, owner, http.MethodDelete, statusURL, strings.NewReader(`{"version":2}`), headers)
 		assertMetadataOnlyOAuth2Response(t, staleRevoke, http.StatusConflict)
 		revokeDelivery()
-		newDelivery, _, revokeNewDelivery, _ := oauth2DeliveryProbe(t, owner, primary, cookie, headers, collectionID, connectionID, providerID, providerBase)
+		newDelivery, _, revokeNewDelivery, _ := oauth2DeliveryProbe(t, owner, primary, cookie, headers, collectionID, connectionID, providerID, providerBase, 3)
 		newDelivery(3)
 		var generations []struct {
 			Generation string `json:"generation"`

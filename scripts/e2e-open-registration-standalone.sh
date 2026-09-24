@@ -7,6 +7,12 @@ set -eu
 # earlier commands before discovering a malformed quote near the end.
 sh -n "$0"
 
+if [ -n "${GOAUTHY_E2E_BEESUH_OAUTH_PROJECT_DIR:-}" ]; then
+	case "$GOAUTHY_E2E_BEESUH_OAUTH_PROJECT_DIR" in /*) ;; *) echo 'Beesuh OAuth checkout must be an absolute path' >&2; exit 1;; esac
+	[ "${GOAUTHY_E2E_TLS:-0}" = 1 ] && [ "${GOAUTHY_E2E_REGISTERED_OAUTH2:-0}" = 1 ] && [ "${GOAUTHY_E2E_CONSUMER_REFRESH:-0}" = 1 ] || { echo 'Beesuh OAuth bridge requires TLS, REGISTERED_OAUTH2 and CONSUMER_REFRESH' >&2; exit 1; }
+	[ -f "$GOAUTHY_E2E_BEESUH_OAUTH_PROJECT_DIR/goauthy/oauth_delivery.go" ] && [ -f "$GOAUTHY_E2E_BEESUH_OAUTH_PROJECT_DIR/goauthy_delivery_integration_test.go" ] || { echo 'Beesuh OAuth adapter or runtime test helpers are missing' >&2; exit 1; }
+fi
+
 if [ "${GOAUTHY_E2E_DEVICE_DPOP:-0}" = 1 ]; then
 	[ "${GOAUTHY_E2E_TERNAL_DEVICE:-0}" != 1 ] && [ "${GOAUTHY_E2E_AUTHCODE_NATIVE_UI:-0}" != 1 ] || { echo 'Device DPoP requires a separate selected consumer fixture' >&2; exit 1; }
 fi
