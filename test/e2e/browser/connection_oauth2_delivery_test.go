@@ -76,7 +76,7 @@ func oauth2DeliveryProbe(t *testing.T, owner *http.Client, primary string, cooki
 	if os.Getenv("GOAUTHY_E2E_OAUTH2_HANDOFF_UI") == "1" {
 		grantJSON, consentExpiry = createOAuth2GrantHandoffUI(t, owner, primary, cookie, headers, collectionID, connectionID, consumerID, allowRefresh)
 	} else if os.Getenv("GOAUTHY_E2E_OAUTH2_GRANT_UI") == "1" {
-		grantJSON, consentExpiry = createOAuth2GrantUI(t, owner, primary, cookie, headers, collectionID, connectionID, consumerID)
+		grantJSON, consentExpiry = createOAuth2GrantUI(t, owner, primary, cookie, headers, collectionID, connectionID, consumerID, allowRefresh)
 	} else {
 		grantBody := `{"consumer_client_id":"` + consumerID + `","mode":"credential_delivery","purpose":"OAuth2 credential delivery","expires_at_unix_ms":` + strconv.FormatInt(consentExpiry, 10)
 		if allowRefresh {
@@ -215,7 +215,7 @@ func oauth2DeliveryProbe(t *testing.T, owner *http.Client, primary string, cooki
 		if userinfo.StatusCode != http.StatusOK || err != nil || subject.Subject != "fixture-subject" {
 			t.Fatalf("delivered token userinfo status=%d subject=%q", userinfo.StatusCode, subject.Subject)
 		}
-		consumer(false)
+		consumer(false, got.AccessToken)
 	}
 
 	denied := func() {
@@ -225,7 +225,7 @@ func oauth2DeliveryProbe(t *testing.T, owner *http.Client, primary string, cooki
 		if after := readOAuth2FixtureStats(t, fixture, fixtureBase); after != before {
 			t.Fatal("denied credential delivery caused an external provider request")
 		}
-		consumer(true)
+		consumer(true, "")
 	}
 	revoked := false
 	revoke := func() {
