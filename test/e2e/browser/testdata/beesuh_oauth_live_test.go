@@ -4,9 +4,11 @@ package beesuh
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,7 +44,8 @@ func TestGoAuthyOAuthLiveBridge(t *testing.T) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
 	t.Cleanup(tr.CloseIdleConnections)
-	transport := &http.Client{Transport: tr, Timeout: 15 * time.Second}
+	provider := &oauthBearerVerifier{transport: tr}
+	transport := &http.Client{Transport: provider, Timeout: 15 * time.Second}
 	authority := &oauthAuthorityRecorder{transport: tr, endpoint: strings.TrimRight(f.Issuer, "/") + "/auth/v1/connection-grants/" + url.PathEscape(f.Binding.GrantID) + "/credential"}
 	issuerClient := &http.Client{Transport: authority, Timeout: 15 * time.Second}
 	client, err := goauthy.NewOAuthClient(f.Issuer, f.Binding, func(_ context.Context, request goauthy.OAuthTokenRequest) (string, error) {
@@ -73,15 +76,23 @@ func TestGoAuthyOAuthLiveBridge(t *testing.T) {
 	defer ack.Close()
 	commands, replies := json.NewDecoder(os.Stdin), json.NewEncoder(ack)
 	for checkpoint := 0; ; checkpoint++ {
-		var denied bool
-		if err := commands.Decode(&denied); err == io.EOF {
+		var command struct {
+			Denied      bool
+			Fingerprint [32]byte
+		}
+		if err := commands.Decode(&command); err == io.EOF {
 			return
 		} else if err != nil {
 			t.Fatal("invalid checkpoint")
 		}
+		denied := command.Denied
+		provider.set(command.Fingerprint, denied)
 		for _, id := range []string{"first", "redelivery"} {
 			authority.take()
 			out, err := deliveryRun(runtime, "oauth", fmt.Sprintf("%d-%s", checkpoint, id))
+			if provider.mismatched() {
+				t.Fatal("consumer used an unexpected provider bearer")
+			}
 			statuses := authority.take()
 			want := http.StatusOK
 			if denied {
@@ -173,5 +184,67 @@ func TestOAuthAuthorityRecorder(t *testing.T) {
 				t.Fatal("transport failure accepted as authority response")
 			}
 		})
+	}
+}
+
+// Compare private checkpoint fingerprints without recording bearer values.
+type oauthBearerVerifier struct {
+	transport   http.RoundTripper
+	mu          sync.Mutex
+	expected    [32]byte
+	denied, bad bool
+}
+
+func (v *oauthBearerVerifier) set(expected [32]byte, denied bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.expected, v.denied, v.bad = expected, denied, false
+}
+func (v *oauthBearerVerifier) mismatched() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.bad
+}
+func (v *oauthBearerVerifier) RoundTrip(req *http.Request) (*http.Response, error) {
+	bearer := req.Header.Get("Authorization")
+	v.mu.Lock()
+	valid := !v.denied && strings.HasPrefix(bearer, "Bearer ") && sha256.Sum256([]byte(strings.TrimPrefix(bearer, "Bearer "))) == v.expected
+	v.bad = v.bad || !valid
+	v.mu.Unlock()
+	if !valid {
+		return nil, errors.New("unexpected provider bearer")
+	}
+	return v.transport.RoundTrip(req)
+}
+func TestOAuthBearerVerifier(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(200) }))
+	defer server.Close()
+	v := &oauthBearerVerifier{transport: http.DefaultTransport}
+	client := &http.Client{Transport: v}
+	send := func(token string) error {
+		req, _ := http.NewRequest(http.MethodPost, server.URL, nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		response, err := client.Do(req)
+		if response != nil {
+			response.Body.Close()
+		}
+		return err
+	}
+	v.set(sha256.Sum256([]byte("A1")), false)
+	if err := send("A1"); err != nil {
+		t.Fatal(err)
+	}
+	v.set(sha256.Sum256([]byte("A2")), false)
+	if send("A1") == nil || !v.mismatched() || calls != 1 {
+		t.Fatal("stale-token mutation accepted")
+	}
+	v.set(sha256.Sum256([]byte("A2")), false)
+	if err := send("A2"); err != nil || v.mismatched() || calls != 2 {
+		t.Fatal("current token rejected")
+	}
+	v.set(sha256.Sum256([]byte("A2")), true)
+	if send("A2") == nil || !v.mismatched() || calls != 2 {
+		t.Fatal("denied dispatch accepted")
 	}
 }

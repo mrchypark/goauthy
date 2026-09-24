@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -21,11 +22,11 @@ var beesuhOAuthLiveHarness []byte
 
 // oauthConsumerBridge uses Go's overlay to add only the harness to the selected
 // consumer checkout. Its Runtime, adapter and dependencies are not copied here.
-func oauthConsumerBridge(t *testing.T, issuer, endpoint, token string, binding map[string]any, fixture *http.Client) func(bool) {
+func oauthConsumerBridge(t *testing.T, issuer, endpoint, token string, binding map[string]any, fixture *http.Client) func(bool, string) {
 	t.Helper()
 	project := os.Getenv("GOAUTHY_E2E_BEESUH_OAUTH_PROJECT_DIR")
 	if project == "" {
-		return func(bool) {}
+		return func(bool, string) {}
 	}
 	if !filepath.IsAbs(project) {
 		t.Fatal("consumer checkout must be absolute")
@@ -102,9 +103,12 @@ func oauthConsumerBridge(t *testing.T, issuer, endpoint, token string, binding m
 		}
 	})
 	encoder, decoder := json.NewEncoder(commands), json.NewDecoder(ack)
-	return func(denied bool) {
+	return func(denied bool, accessToken string) {
 		before := modelCalls()
-		if encoder.Encode(denied) != nil {
+		if encoder.Encode(struct {
+			Denied      bool
+			Fingerprint [32]byte
+		}{denied, sha256.Sum256([]byte(accessToken))}) != nil {
 			t.Fatal("send consumer checkpoint")
 		}
 		done := make(chan bool, 1)
