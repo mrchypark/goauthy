@@ -47,12 +47,12 @@ done
 
 # Prepare fixture images before the rollout timeout starts. A file avoids
 # streaming Docker export through a second Docker process.
-minio_image=minio/minio:RELEASE.2025-04-22T22-12-26Z
-mc_image=minio/mc:RELEASE.2025-04-16T18-13-26Z
-for fixture_image in "$minio_image" "$mc_image"; do
+object_store_image=versity/versitygw:v1.8.0
+s3_client_image=curlimages/curl:8.16.0
+for fixture_image in "$object_store_image" "$s3_client_image"; do
 	docker image inspect "$fixture_image" >/dev/null 2>&1 || docker pull "$fixture_image"
 done
-docker image save --output "$temp/minio-images.tar" "$minio_image" "$mc_image"
+docker image save --output "$temp/s3-images.tar" "$object_store_image" "$s3_client_image"
 
 docker build --tag "$image" .
 docker build --target backchannel-sink --tag "$backchannel_image" .
@@ -68,10 +68,10 @@ kind load docker-image "$backchannel_image" --name "$cluster"
 platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")
 # Dory docker cp can write below Kind's mounted /tmp; stream through the node
 # mount namespace so containerd sees the archive.
-docker exec -i "$cluster-control-plane" sh -ec 'umask 077; cat > "$1"' sh /tmp/goauthy-minio-images.tar <"$temp/minio-images.tar"
+docker exec -i "$cluster-control-plane" sh -ec 'umask 077; cat > "$1"' sh /tmp/goauthy-s3-images.tar <"$temp/s3-images.tar"
 # Verify the completed stream before asking containerd to open it.
-docker exec "$cluster-control-plane" test -s /tmp/goauthy-minio-images.tar
-docker exec "$cluster-control-plane" ctr --namespace=k8s.io images import --platform "$platform" /tmp/goauthy-minio-images.tar
+docker exec "$cluster-control-plane" test -s /tmp/goauthy-s3-images.tar
+docker exec "$cluster-control-plane" ctr --namespace=k8s.io images import --platform "$platform" /tmp/goauthy-s3-images.tar
 
 
 kubectl --context "kind-$cluster" apply -f deploy/k8s/namespace.yaml

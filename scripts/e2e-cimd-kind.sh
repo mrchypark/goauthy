@@ -84,8 +84,8 @@ esac
 kind load docker-image "$GOAUTHY_IMAGE" --name "$KIND_CLUSTER"
 kind load docker-image "$GOAUTHY_CIMD_FIXTURE_IMAGE" --name "$KIND_CLUSTER"
 kind_node="$KIND_CLUSTER-control-plane"
-docker exec "$kind_node" crictl pull minio/minio:RELEASE.2025-04-22T22-12-26Z
-docker exec "$kind_node" crictl pull minio/mc:RELEASE.2025-04-16T18-13-26Z
+docker exec "$kind_node" crictl pull versity/versitygw:v1.8.0
+docker exec "$kind_node" crictl pull curlimages/curl:8.16.0
 
 kubectl --context "kind-$KIND_CLUSTER" apply -f deploy/k8s/namespace.yaml
 browser_password=correct-horse-browser-staple

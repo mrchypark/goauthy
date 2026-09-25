@@ -35,15 +35,14 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: wait-for-rhiza-bucket
-          image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+          image: curlimages/curl:8.16.0
           command: ["/bin/sh", "-ec"]
           args:
             - >-
-              until mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
-              mc stat local/rhiza >/dev/null; do sleep 2; done
+              until curl -fsSI --aws-sigv4 aws:amz:us-east-1:s3
+              --user "$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD" http://minio:9000/rhiza >/dev/null 2>&1;
+              do sleep 2; done
           env:
-            - name: MC_CONFIG_DIR
-              value: /tmp/.mc
             - name: MINIO_ROOT_USER
               valueFrom:
                 secretKeyRef:
@@ -69,9 +68,6 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
-          volumeMounts:
-            - name: mc-tmp
-              mountPath: /tmp
       containers:
         - name: goauthy
           image: goauthy:e2e
@@ -254,8 +250,6 @@ spec:
               mountPath: /run/backchannel-ca
               readOnly: true
       volumes:
-        - name: mc-tmp
-          emptyDir: {}
         - name: secrets
           secret:
             secretName: goauthy-secrets

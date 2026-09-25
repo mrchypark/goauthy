@@ -6,7 +6,7 @@ spec:
     spec:
       initContainers:
         - name: prepare-passkey-cookie-key
-          image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+          image: versity/versitygw:v1.8.0
           command: ["/bin/sh", "-ec"]
           args:
             - >-

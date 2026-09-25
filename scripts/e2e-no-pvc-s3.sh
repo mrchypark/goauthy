@@ -25,26 +25,24 @@ cleanup() {
   exit "$code"
 }
 trap cleanup EXIT HUP INT TERM
-export MINIO_ROOT_USER=goauthy-test
-MINIO_ROOT_PASSWORD=$(openssl rand -hex 32)
-export MINIO_ROOT_PASSWORD
+s3_user=goauthy-test
+s3_password=$(openssl rand -hex 32)
+export ROOT_ACCESS_KEY_ID="$s3_user" ROOT_SECRET_ACCESS_KEY="$s3_password"
 docker --context "$context" network create "$network" >/dev/null
 container=$fixture
 docker --context "$context" run -d --name "$fixture" --network "$network" \
-  -p 127.0.0.1::9000 -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD \
-  minio/minio:RELEASE.2025-04-22T22-12-26Z server /data >/dev/null
+  --tmpfs /data:mode=0777 -p 127.0.0.1::9000 -e ROOT_ACCESS_KEY_ID -e ROOT_SECRET_ACCESS_KEY -e VGW_HEALTH=/_/health \
+  versity/versitygw:v1.8.0 --port :9000 posix /data >/dev/null
 port=$(docker --context "$context" inspect --format '{{(index (index .NetworkSettings.Ports "9000/tcp") 0).HostPort}}' "$container")
 curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 1 \
-  "http://127.0.0.1:$port/minio/health/ready" >/dev/null
-# Credentials are environment-only: never argv, output, or a file.
-MC_HOST_fixture="http://$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD@$fixture:9000"
-export MC_HOST_fixture
-docker --context "$context" run --rm --network "$network" -e MC_HOST_fixture \
-  minio/mc:RELEASE.2025-04-16T18-13-26Z mb fixture/goauthy-no-pvc >/dev/null
+  "http://127.0.0.1:$port/_/health" >/dev/null
+printf 'user = "%s:%s"\n' "$s3_user" "$s3_password" |
+  curl --config - --fail --silent --show-error -X PUT --aws-sigv4 aws:amz:us-east-1:s3 \
+    "http://127.0.0.1:$port/goauthy-no-pvc" >/dev/null
 export GOAUTHY_RECOVERY_S3_ENDPOINT="127.0.0.1:$port"
 export GOAUTHY_RECOVERY_S3_BUCKET=goauthy-no-pvc
-export GOAUTHY_RECOVERY_S3_ACCESS_KEY="$MINIO_ROOT_USER"
-export GOAUTHY_RECOVERY_S3_SECRET_KEY="$MINIO_ROOT_PASSWORD"
+export GOAUTHY_RECOVERY_S3_ACCESS_KEY="$s3_user"
+export GOAUTHY_RECOVERY_S3_SECRET_KEY="$s3_password"
 cd "$root"
 go test -race "$test_package" -run "^${test_name}$" -count=1 -timeout="$test_timeout"
 printf 'Real S3 gate passed: %s\n' "$test_name"

@@ -101,8 +101,8 @@ kubectl --context "$context" get crd ciliumnetworkpolicies.cilium.io >/dev/null
 kind load docker-image "$GOAUTHY_IMAGE" --name "$KIND_CLUSTER"
 kind load docker-image "$GOAUTHY_CIMD_FIXTURE_IMAGE" --name "$KIND_CLUSTER"
 for node in $(kind get nodes --name "$KIND_CLUSTER"); do
-	docker exec "$node" crictl pull minio/minio:RELEASE.2025-04-22T22-12-26Z
-	docker exec "$node" crictl pull minio/mc:RELEASE.2025-04-16T18-13-26Z
+	docker exec "$node" crictl pull versity/versitygw:v1.8.0
+	docker exec "$node" crictl pull curlimages/curl:8.16.0
 done
 
 kubectl --context "$context" apply -f deploy/k8s/namespace.yaml

@@ -35,8 +35,10 @@ each recovery.
 This is a fixed **three-voter embedded Rhiza HA profile**. Each StatefulSet pod
 uses its own PVC and its pod name as `NodeID`; all three receive the same,
 ordered `quic://goauthy-{0,1,2}.goauthy.goauthy.svc.cluster.local:8444` member
-list. A namespace-local MinIO StatefulSet supplies the shared S3-compatible
-checkpoint store and the app chooses Rhiza `before-ack` durability. The MinIO
+list. A namespace-local VersityGW StatefulSet with a POSIX backend supplies
+the shared S3-compatible checkpoint store, and the app chooses Rhiza
+`before-ack` durability. The service keeps the `minio` name for existing E2E
+scripts. The object-store
 credentials are throwaway E2E secrets, not a production object-store pattern.
 
 This documents the HA topology; the exact-three base HA gate is verified.
