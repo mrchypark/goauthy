@@ -527,10 +527,12 @@ e2e-kind:
 			kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) port-forward --address=127.0.0.1 service/goauthy-smtp-sink $$(( $(E2E_PORT) + 4 )):8082 >"$$temp_dir/smtp-forward.log" 2>&1 & quinary_forward=$$!; \
 			wait_forward "$$quinary_forward" "$$temp_dir/smtp-forward.log"; \
 			if [ "$${GOAUTHY_E2E_MANAGED_CLIENTS:-0}" = 1 ] || [ "$${GOAUTHY_E2E_DEVICE_LOGIN_FLOW:-0}" = 1 ] || [ "$${GOAUTHY_E2E_AUTH_COLLECTIONS:-0}" = 1 ] || [ "$${GOAUTHY_E2E_AUTH_COLLECTIONS_UI:-0}" = 1 ] || [ "$${GOAUTHY_E2E_MANAGED_CLIENTS_UI:-0}" = 1 ]; then \
+				pilot_host=127.0.0.1; pilot_tests='^Test(ManagedClientsHTTPWorkflow|DeviceAuthorizationBrowserLogin|DeviceAuthorizationPublicBrowserLogin|AuthCollectionsAcrossPods|AuthCollectionsUIAcrossPods|ManagedClientsUIAcrossPods)$$'; \
+				if [ "$${GOAUTHY_E2E_ACCOUNT_PASSKEY_UI:-0}" = 1 ]; then pilot_host=localhost; pilot_tests="$$pilot_tests|^TestAccountPasskeyUIAcrossPods$$"; fi; \
 				export GOAUTHY_E2E_SMTP_SINK_URL=http://127.0.0.1:$$(( $(E2E_PORT) + 4 )); \
-				export GOAUTHY_E2E_URL=http://127.0.0.1:$(E2E_PORT) GOAUTHY_E2E_SECONDARY_URL=http://127.0.0.1:$$(( $(E2E_PORT) + 1 )) GOAUTHY_E2E_TERTIARY_URL=http://127.0.0.1:$$(( $(E2E_PORT) + 2 )) GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD="$$browser_password" GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple; \
+				export GOAUTHY_E2E_URL=http://$$pilot_host:$(E2E_PORT) GOAUTHY_E2E_SECONDARY_URL=http://$$pilot_host:$$(( $(E2E_PORT) + 1 )) GOAUTHY_E2E_TERTIARY_URL=http://$$pilot_host:$$(( $(E2E_PORT) + 2 )) GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD="$$browser_password" GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple; \
 				export GOAUTHY_E2E_DCR_REGISTRATION_TOKEN=0123456789abcdef0123456789abcdef; \
-				go test -mod=readonly -count=1 -v -timeout=5m ./test/e2e ./test/e2e/browser -run '^Test(ManagedClientsHTTPWorkflow|DeviceAuthorizationBrowserLogin|DeviceAuthorizationPublicBrowserLogin|AuthCollectionsAcrossPods|AuthCollectionsUIAcrossPods|ManagedClientsUIAcrossPods)$$'; \
+				go test -mod=readonly -count=1 -v -timeout=5m ./test/e2e ./test/e2e/browser -run "$$pilot_tests"; \
 				old_pod_uid=$$(kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) get pod goauthy-0 -o jsonpath='{.metadata.uid}'); test -n "$$old_pod_uid"; \
 				if [ "$${GOAUTHY_E2E_AUTH_COLLECTIONS:-0}" = 1 ]; then GOAUTHY_E2E_AUTH_COLLECTIONS_CHAOS=1 GOAUTHY_E2E_CHAOS_CONTEXT=kind-$(KIND_CLUSTER) GOAUTHY_E2E_CHAOS_NAMESPACE=$(K8S_NAMESPACE) GOAUTHY_E2E_CHAOS_DELETE_POD=goauthy-0 GOAUTHY_E2E_CHAOS_POD_PREFIX=goauthy- go test -mod=readonly -count=1 -v -timeout=5m ./test/e2e/browser -run '^TestAuthCollectionsAcrossPods$$'; fi; \
 				kill $$port_forward >/dev/null 2>&1 || true; wait $$port_forward 2>/dev/null || true; port_forward=; \
@@ -539,7 +541,7 @@ e2e-kind:
 				kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) wait --for=condition=ready pod/goauthy-0 pod/goauthy-1 pod/goauthy-2 --timeout=180s; \
 				new_pod_uid=$$(kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) get pod goauthy-0 -o jsonpath='{.metadata.uid}'); test -n "$$new_pod_uid" && test "$$new_pod_uid" != "$$old_pod_uid"; \
 				kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) port-forward --address=127.0.0.1 pod/goauthy-0 $(E2E_PORT):8080 >"$$temp_dir/port-forward.log" 2>&1 & port_forward=$$!; wait_forward "$$port_forward" "$$temp_dir/port-forward.log"; \
-				go test -mod=readonly -count=1 -v -timeout=5m ./test/e2e ./test/e2e/browser -run '^Test(ManagedClientsHTTPWorkflow|DeviceAuthorizationBrowserLogin|DeviceAuthorizationPublicBrowserLogin|AuthCollectionsAcrossPods|AuthCollectionsUIAcrossPods|ManagedClientsUIAcrossPods)$$'; \
+				go test -mod=readonly -count=1 -v -timeout=5m ./test/e2e ./test/e2e/browser -run "$$pilot_tests"; \
 				if [ "$${GOAUTHY_E2E_MANAGED_CLIENTS_UI:-0}" = 1 ]; then \
 					GOAUTHY_E2E_MANAGED_DEVICE_CHAOS=1 GOAUTHY_E2E_CHAOS_CONTEXT=kind-$(KIND_CLUSTER) GOAUTHY_E2E_CHAOS_NAMESPACE=$(K8S_NAMESPACE) GOAUTHY_E2E_CHAOS_DELETE_POD=goauthy-0 GOAUTHY_E2E_CHAOS_POD_PREFIX=goauthy- go test -mod=readonly -count=1 -v -timeout=5m ./test/e2e/browser -run '^TestManagedDevicePendingGrantSurvivesPodReplacement$$'; \
 					kill $$port_forward >/dev/null 2>&1 || true; wait $$port_forward 2>/dev/null || true; port_forward=; \
