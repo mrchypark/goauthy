@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: minio-init
+  name: versity-init
   namespace: goauthy
 spec:
   backoffLimit: 12
@@ -27,21 +27,21 @@ spec:
           args:
             - >-
               until curl -fsSI --aws-sigv4 aws:amz:us-east-1:s3
-              --user "$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD" http://minio:9000/rhiza >/dev/null 2>&1 ||
+              --user "$VERSITY_ROOT_USER:$VERSITY_ROOT_PASSWORD" http://versity:9000/rhiza >/dev/null 2>&1 ||
               curl -fsS -X PUT --aws-sigv4 aws:amz:us-east-1:s3
-              --user "$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD" http://minio:9000/rhiza >/dev/null 2>&1;
+              --user "$VERSITY_ROOT_USER:$VERSITY_ROOT_PASSWORD" http://versity:9000/rhiza >/dev/null 2>&1;
               do sleep 2; done
           env:
-            - name: MINIO_ROOT_USER
+            - name: VERSITY_ROOT_USER
               valueFrom:
                 secretKeyRef:
                   name: goauthy-secrets
-                  key: minio-root-user
-            - name: MINIO_ROOT_PASSWORD
+                  key: versity-root-user
+            - name: VERSITY_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: goauthy-secrets
-                  key: minio-root-password
+                  key: versity-root-password
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

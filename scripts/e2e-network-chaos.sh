@@ -100,8 +100,8 @@ kubectl --context "$context" -n "$namespace" create secret generic goauthy-secre
 	--from-literal=bootstrap-user-password-phc="$bootstrap_user_phc" \
 	--from-literal=rhiza-admin-token=goauthy-e2e-admin-token \
 	--from-literal='rhiza-members=[{"node_id":"goauthy-0","peer_url":"quic://goauthy-0.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-0-token"},{"node_id":"goauthy-1","peer_url":"quic://goauthy-1.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-1-token"},{"node_id":"goauthy-2","peer_url":"quic://goauthy-2.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-2-token"}]' \
-	--from-literal=minio-root-user=goauthy-e2e \
-	--from-literal=minio-root-password=goauthy-e2e-minio-password \
+	--from-literal=versity-root-user=goauthy-e2e \
+	--from-literal=versity-root-password=goauthy-e2e-versity-password \
 	--from-file=api-key-bootstrap="$generated_bootstrap_config" \
 	--dry-run=client -o yaml | kubectl --context "$context" apply -f -
 base_manifest=$temp_dir/base-manifest.yaml
@@ -126,8 +126,8 @@ awk '
 	END { exit !(bootstrap_file && generated_file && ttl_zero) }
 ' "$rendered_manifest" || { echo 'generated API-key bootstrap manifest invariant failed' >&2; exit 1; }
 kubectl --context "$context" apply -f "$rendered_manifest"
-kubectl --context "$context" -n "$namespace" rollout status statefulset/minio --timeout=3m
-kubectl --context "$context" -n "$namespace" wait --for=condition=complete job/minio-init --timeout=3m
+kubectl --context "$context" -n "$namespace" rollout status statefulset/versity --timeout=3m
+kubectl --context "$context" -n "$namespace" wait --for=condition=complete job/versity-init --timeout=3m
 kubectl --context "$context" -n "$namespace" rollout status statefulset/goauthy --timeout=5m
 [ "$backend" != cilium ] || kubectl --context "$context" -n "$namespace" get ciliumendpoint goauthy-2 >/dev/null
 
@@ -336,9 +336,9 @@ assert_same_identity() {
 	cmp "$before" "$after" || { echo "$label identity changed during peer partition" >&2; return 1; }
 }
 
-assert_minio_available() {
-	kubectl --context "$context" -n "$namespace" wait --for=condition=ready pod/minio-0 --timeout=60s
-	kubectl --context "$context" -n "$namespace" get endpointslice -l kubernetes.io/service-name=minio -o json |
+assert_versity_available() {
+	kubectl --context "$context" -n "$namespace" wait --for=condition=ready pod/versity-0 --timeout=60s
+	kubectl --context "$context" -n "$namespace" get endpointslice -l kubernetes.io/service-name=versity -o json |
 		jq -e 'any(.items[].endpoints[]?; .conditions.ready == true)' >/dev/null
 }
 
@@ -459,8 +459,8 @@ for ordinal in 0 1 2; do
 	baseline_kid=$(with_pod "$pod" jwks_kid)
 	printf '%s\n' "$baseline_kid" >"$temp_dir/$pod-kid-before"
 done
-snapshot_identity minio-0 minio "$temp_dir/minio-before"
-assert_minio_available
+snapshot_identity versity-0 versity "$temp_dir/versity-before"
+assert_versity_available
 with_pod goauthy-0 issue_token "$temp_dir/baseline-token"
 for ordinal in 0 1 2; do with_pod "goauthy-$ordinal" assert_active "$temp_dir/baseline-token"; done
 for ordinal in 0 1 2; do retrieve_generated_bootstrap "goauthy-$ordinal" "$temp_dir/generated-$ordinal.json"; done
@@ -528,6 +528,6 @@ EOF
 	snapshot_identity "$pod" goauthy "$temp_dir/$pod-after"
 	assert_same_identity "$temp_dir/$pod-before" "$temp_dir/$pod-after" "$pod"
 done
-snapshot_identity minio-0 minio "$temp_dir/minio-after"
-assert_same_identity "$temp_dir/minio-before" "$temp_dir/minio-after" minio-0
+snapshot_identity versity-0 versity "$temp_dir/versity-after"
+assert_same_identity "$temp_dir/versity-before" "$temp_dir/versity-after" versity-0
 echo "network peer partition OAuth/no-PVC recovery passed"

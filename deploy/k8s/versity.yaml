@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: minio
+  name: versity
   namespace: goauthy
   labels:
-    app.kubernetes.io/name: minio
+    app.kubernetes.io/name: versity
 spec:
   selector:
-    app.kubernetes.io/name: minio
+    app.kubernetes.io/name: versity
   ports:
     - name: api
       port: 9000
@@ -16,20 +16,20 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: minio
+  name: versity
   namespace: goauthy
   labels:
-    app.kubernetes.io/name: minio
+    app.kubernetes.io/name: versity
 spec:
-  serviceName: minio
+  serviceName: versity
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: minio
+      app.kubernetes.io/name: versity
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: minio
+        app.kubernetes.io/name: versity
     spec:
       serviceAccountName: goauthy
       automountServiceAccountToken: false
@@ -38,7 +38,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: minio
+        - name: versity
           image: versity/versitygw:v1.8.0
           args: ["--port", ":9000", "posix", "/data"]
           env:
@@ -46,12 +46,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: goauthy-secrets
-                  key: minio-root-user
+                  key: versity-root-user
             - name: ROOT_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: goauthy-secrets
-                  key: minio-root-password
+                  key: versity-root-password
             - name: VGW_HEALTH
               value: /_/health
           ports:

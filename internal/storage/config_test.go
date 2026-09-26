@@ -216,7 +216,7 @@ func TestRhizaConfigFromEnvRejectsUnsafeClusterConfig(t *testing.T) {
 		}},
 		{"partial credentials", func(env map[string]string) { env["GOAUTHY_RHIZA_OBJECT_STORE_ACCESS_KEY"] = "key" }},
 		{"session token without static credentials", func(env map[string]string) { env["GOAUTHY_RHIZA_OBJECT_STORE_SESSION_TOKEN"] = "session" }},
-		{"endpoint URL scheme", func(env map[string]string) { env["GOAUTHY_RHIZA_OBJECT_STORE_ENDPOINT"] = "http://minio:9000" }},
+		{"endpoint URL scheme", func(env map[string]string) { env["GOAUTHY_RHIZA_OBJECT_STORE_ENDPOINT"] = "http://versity:9000" }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			env := clusterEnv()

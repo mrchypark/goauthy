@@ -35,14 +35,14 @@ kubectl --context "$context" -n "$K8S_NAMESPACE" create secret generic goauthy-s
 	--from-literal=bootstrap-user-password-phc="$browser_phc" \
 	--from-literal=rhiza-admin-token=goauthy-e2e-admin-token \
 	--from-literal='rhiza-members=[{"node_id":"goauthy-0","peer_url":"quic://goauthy-0.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-0-token"},{"node_id":"goauthy-1","peer_url":"quic://goauthy-1.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-1-token"},{"node_id":"goauthy-2","peer_url":"quic://goauthy-2.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-2-token"}]' \
-	--from-literal=minio-root-user=goauthy-e2e --from-literal=minio-root-password=goauthy-e2e-minio-password \
+	--from-literal=versity-root-user=goauthy-e2e --from-literal=versity-root-password=goauthy-e2e-versity-password \
 	--dry-run=client -o yaml >"$temp_dir/secrets.yaml"
 kubectl --context "$context" apply -f "$temp_dir/secrets.yaml"
 kustomize build deploy/kind-admission >"$temp_dir/admission.yaml"
 sed "s#http://127.0.0.1:18080#http://127.0.0.1:$E2E_PORT#g" "$temp_dir/admission.yaml" >"$temp_dir/admission-rendered.yaml"
 kubectl --context "$context" apply -f "$temp_dir/admission-rendered.yaml"
-kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status statefulset/minio --timeout=180s
-kubectl --context "$context" -n "$K8S_NAMESPACE" wait --for=condition=complete job/minio-init --timeout=180s
+kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status statefulset/versity --timeout=180s
+kubectl --context "$context" -n "$K8S_NAMESPACE" wait --for=condition=complete job/versity-init --timeout=180s
 kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status statefulset/goauthy --timeout=180s
 kubectl --context "$context" -n "$K8S_NAMESPACE" wait --for=condition=Ready pod/goauthy-0 pod/goauthy-1 pod/goauthy-2 --timeout=180s
 kubectl --context "$context" -n "$K8S_NAMESPACE" port-forward --address=127.0.0.1 pod/goauthy-0 "$E2E_PORT:8080" >"$temp_dir/f0" 2>&1 & f0=$!

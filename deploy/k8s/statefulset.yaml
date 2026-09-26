@@ -40,19 +40,19 @@ spec:
           args:
             - >-
               until curl -fsSI --aws-sigv4 aws:amz:us-east-1:s3
-              --user "$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD" http://minio:9000/rhiza >/dev/null 2>&1;
+              --user "$VERSITY_ROOT_USER:$VERSITY_ROOT_PASSWORD" http://versity:9000/rhiza >/dev/null 2>&1;
               do sleep 2; done
           env:
-            - name: MINIO_ROOT_USER
+            - name: VERSITY_ROOT_USER
               valueFrom:
                 secretKeyRef:
                   name: goauthy-secrets
-                  key: minio-root-user
-            - name: MINIO_ROOT_PASSWORD
+                  key: versity-root-user
+            - name: VERSITY_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: goauthy-secrets
-                  key: minio-root-password
+                  key: versity-root-password
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -110,7 +110,7 @@ spec:
                   name: goauthy-secrets
                   key: rhiza-admin-token
             - name: GOAUTHY_RHIZA_OBJECT_STORE_ENDPOINT
-              value: minio.goauthy.svc.cluster.local:9000
+              value: versity.goauthy.svc.cluster.local:9000
             - name: GOAUTHY_RHIZA_OBJECT_STORE_INSECURE
               value: "true"
             - name: GOAUTHY_RHIZA_OBJECT_STORE_BUCKET
@@ -123,12 +123,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: goauthy-secrets
-                  key: minio-root-user
+                  key: versity-root-user
             - name: GOAUTHY_RHIZA_OBJECT_STORE_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: goauthy-secrets
-                  key: minio-root-password
+                  key: versity-root-password
             - name: GOAUTHY_DATA_DIR
               value: /var/lib/goauthy
             - name: GOAUTHY_MASTER_KEY_DIR

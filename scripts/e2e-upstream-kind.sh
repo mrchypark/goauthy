@@ -107,8 +107,8 @@ kubectl --context "$context" -n "$K8S_NAMESPACE" create secret generic goauthy-s
 	--from-literal=bootstrap-user-password-phc="$browser_phc" \
 	--from-literal=rhiza-admin-token=goauthy-e2e-admin-token \
 	--from-literal='rhiza-members=[{"node_id":"goauthy-0","peer_url":"quic://goauthy-0.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-0-token"},{"node_id":"goauthy-1","peer_url":"quic://goauthy-1.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-1-token"},{"node_id":"goauthy-2","peer_url":"quic://goauthy-2.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-2-token"}]' \
-	--from-literal=minio-root-user=goauthy-e2e \
-	--from-literal=minio-root-password=goauthy-e2e-minio-password \
+	--from-literal=versity-root-user=goauthy-e2e \
+	--from-literal=versity-root-password=goauthy-e2e-versity-password \
 	--from-literal=password-reset-key=0123456789abcdef0123456789abcdef \
 	--dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
 kubectl --context "$context" -n "$K8S_NAMESPACE" create secret generic goauthy-tls --from-file=tls.crt="$temp_dir/goauthy.crt" --from-file=tls.key="$temp_dir/goauthy.key" --dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
@@ -129,8 +129,8 @@ case "$fixture_cluster_ip" in
 	''|None|*[!0-9.]*) echo 'upstream-fixture service did not receive a ClusterIP' >&2; exit 1;;
 esac
 kubectl --context "$context" -n "$K8S_NAMESPACE" patch statefulset/goauthy --type=merge -p "{\"spec\":{\"template\":{\"spec\":{\"hostAliases\":[{\"ip\":\"$fixture_cluster_ip\",\"hostnames\":[\"github.com\",\"api.github.com\"]}]}}}}"
-kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status statefulset/minio --timeout=180s
-kubectl --context "$context" -n "$K8S_NAMESPACE" wait --for=condition=complete job/minio-init --timeout=180s
+kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status statefulset/versity --timeout=180s
+kubectl --context "$context" -n "$K8S_NAMESPACE" wait --for=condition=complete job/versity-init --timeout=180s
 kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status deployment/goauthy-smtp-sink --timeout=180s
 kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status deployment/upstream-fixture --timeout=180s
 if [ "${GOAUTHY_UPSTREAM_MANAGED_E2E:-}" = "1" ]; then

@@ -4,8 +4,8 @@ resources:
   - ../namespace.yaml
   - ../serviceaccount.yaml
   - ../service.yaml
-  - ../minio.yaml
-  - ../minio-init.yaml
+  - ../versity.yaml
+  - ../versity-init.yaml
   - ../statefulset.yaml
   - ../networkpolicy.yaml
 patches:

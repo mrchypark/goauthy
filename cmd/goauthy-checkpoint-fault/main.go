@@ -22,8 +22,8 @@ import (
 const (
 	defaultListen   = "127.0.0.1:9001"
 	defaultControl  = "127.0.0.1:9002"
-	defaultUpstream = "http://minio.goauthy.svc.cluster.local:9000"
-	stallBytes      = 32 * 1024 // Rhiza's io.Copy buffer must fill before MinIO's Object.Read returns.
+	defaultUpstream = "http://versity.goauthy.svc.cluster.local:9000"
+	stallBytes      = 32 * 1024 // Rhiza's io.Copy buffer must fill before VersityGW's Object.Read returns.
 )
 
 type config struct {

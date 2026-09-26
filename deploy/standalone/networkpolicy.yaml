@@ -18,7 +18,7 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: minio
+              app.kubernetes.io/name: versity
       ports:
         - protocol: TCP
           port: 9000

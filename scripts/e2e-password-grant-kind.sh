@@ -58,8 +58,8 @@ kubectl --context "kind-$cluster" -n "$namespace" create secret generic goauthy-
 	--from-literal=bootstrap-user-password-phc="$browser_phc" \
 	--from-literal=rhiza-admin-token=goauthy-e2e-admin-token \
 	--from-literal='rhiza-members=[{"node_id":"goauthy-0","peer_url":"quic://goauthy-0.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-0-token"},{"node_id":"goauthy-1","peer_url":"quic://goauthy-1.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-1-token"},{"node_id":"goauthy-2","peer_url":"quic://goauthy-2.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-2-token"}]' \
-	--from-literal=minio-root-user=goauthy-e2e \
-	--from-literal=minio-root-password=goauthy-e2e-minio-password
+	--from-literal=versity-root-user=goauthy-e2e \
+	--from-literal=versity-root-password=goauthy-e2e-versity-password
 
 backchannel_uri=http://goauthy-backchannel-sink.goauthy.svc.cluster.local:8081/backchannel
 kubectl --context "kind-$cluster" -n "$namespace" create configmap goauthy-backchannel \
@@ -75,8 +75,8 @@ kubectl --context "kind-$cluster" -n "$namespace" create configmap goauthy-backc
 kustomize build deploy/k8s | sed -e "s#image: goauthy:e2e\$#image: $image#" -e "s#image: goauthy-backchannel-sink:e2e\$#image: $backchannel_image#" -e "s#http://127.0.0.1:18080#http://127.0.0.1:$port#g" | kubectl --context "kind-$cluster" apply -f -
 sed "s#image: goauthy-backchannel-sink:e2e\$#image: $backchannel_image#" deploy/k8s/backchannel-sink.yaml | kubectl --context "kind-$cluster" -n "$namespace" apply -f -
 
-kubectl --context "kind-$cluster" -n "$namespace" rollout status statefulset/minio --timeout=180s
-kubectl --context "kind-$cluster" -n "$namespace" wait --for=condition=complete job/minio-init --timeout=180s
+kubectl --context "kind-$cluster" -n "$namespace" rollout status statefulset/versity --timeout=180s
+kubectl --context "kind-$cluster" -n "$namespace" wait --for=condition=complete job/versity-init --timeout=180s
 kubectl --context "kind-$cluster" -n "$namespace" rollout status deployment/goauthy-backchannel-sink --timeout=180s
 kubectl --context "kind-$cluster" -n "$namespace" rollout status statefulset/goauthy --timeout=180s
 kubectl --context "kind-$cluster" -n "$namespace" wait --for=condition=Ready pod/goauthy-0 pod/goauthy-1 pod/goauthy-2 --timeout=180s

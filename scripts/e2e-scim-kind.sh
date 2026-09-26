@@ -95,8 +95,8 @@ kubectl --context "$context" -n "$K8S_NAMESPACE" create secret generic goauthy-s
 	--from-literal=bootstrap-user-password-phc="$browser_phc" \
 	--from-literal=rhiza-admin-token=goauthy-e2e-admin-token \
 	--from-literal='rhiza-members=[{"node_id":"goauthy-0","peer_url":"quic://goauthy-0.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-0-token"},{"node_id":"goauthy-1","peer_url":"quic://goauthy-1.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-1-token"},{"node_id":"goauthy-2","peer_url":"quic://goauthy-2.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-2-token"}]' \
-	--from-literal=minio-root-user=goauthy-e2e \
-	--from-literal=minio-root-password=goauthy-e2e-minio-password \
+	--from-literal=versity-root-user=goauthy-e2e \
+	--from-literal=versity-root-password=goauthy-e2e-versity-password \
 	--from-literal=password-reset-key=0123456789abcdef0123456789abcdef \
 	--dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
 kubectl --context "$context" -n "$K8S_NAMESPACE" create secret generic goauthy-scim-fixture-tls --from-file=tls.crt="$temp_dir/fixture.crt" --from-file=tls.key="$temp_dir/fixture.key" --dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
@@ -109,8 +109,8 @@ kustomize build --load-restrictor LoadRestrictionsNone deploy/e2e-scim >"$temp_d
 sed -i.bak "s#goauthy:e2e#$GOAUTHY_IMAGE#g; s#goauthy-scim-fixture:e2e#$GOAUTHY_SCIM_FIXTURE_IMAGE#g; s#goauthy-smtp-sink:e2e#$GOAUTHY_SMTP_IMAGE#g; s#http://127.0.0.1:18080#http://127.0.0.1:$E2E_PORT#g" "$temp_dir/scim.yaml"
 rm -f "$temp_dir/scim.yaml.bak"
 kubectl --context "$context" apply -f "$temp_dir/scim.yaml"
-kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status statefulset/minio --timeout=180s
-kubectl --context "$context" -n "$K8S_NAMESPACE" wait --for=condition=complete job/minio-init --timeout=180s
+kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status statefulset/versity --timeout=180s
+kubectl --context "$context" -n "$K8S_NAMESPACE" wait --for=condition=complete job/versity-init --timeout=180s
 kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status deployment/goauthy-smtp-sink --timeout=180s
 kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status deployment/goauthy-scim-fixture --timeout=180s
 kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status statefulset/goauthy --timeout=180s

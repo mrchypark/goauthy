@@ -41,7 +41,7 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: minio
+              app.kubernetes.io/name: versity
       ports:
         - protocol: TCP
           port: 9000
@@ -58,12 +58,12 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: minio-ingress
+  name: versity-ingress
   namespace: goauthy
 spec:
   podSelector:
     matchLabels:
-      app.kubernetes.io/name: minio
+      app.kubernetes.io/name: versity
   policyTypes: [Ingress]
   ingress:
     - from:
@@ -88,7 +88,7 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: minio
+              app.kubernetes.io/name: versity
       ports:
         - protocol: TCP
           port: 9000
