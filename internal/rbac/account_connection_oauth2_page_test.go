@@ -43,7 +43,7 @@ func TestRenderOAuth2CompletionPageEscapesFixedAccountPath(t *testing.T) {
 	t.Parallel()
 	h := &Handler{issuer: `https://issuer.example/<script>alert("x")</script>`}
 	w := httptest.NewRecorder()
-	h.renderOAuth2CompletionPage(w)
+	h.renderOAuth2CompletionPage(w, httptest.NewRequest(http.MethodGet, "/callback", nil))
 	body := w.Body.String()
 	if w.Code != http.StatusOK || !strings.Contains(body, `id="oauth2-complete"`) || !strings.Contains(body, `id="oauth2-account-link"`) {
 		t.Fatalf("unexpected page: status=%d body=%s", w.Code, body)
@@ -59,6 +59,18 @@ func TestRenderOAuth2CompletionPageEscapesFixedAccountPath(t *testing.T) {
 	}
 	if got := w.Header().Get("Content-Security-Policy"); got != "default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" {
 		t.Fatalf("csp=%q", got)
+	}
+}
+
+func TestRenderOAuth2CompletionPageUsesSelectedLocale(t *testing.T) {
+	t.Parallel()
+	h := &Handler{issuer: "https://issuer.example"}
+	r := httptest.NewRequest(http.MethodGet, "/callback", nil)
+	r.AddCookie(&http.Cookie{Name: "goauthy_ui_locale", Value: "ko"})
+	w := httptest.NewRecorder()
+	h.renderOAuth2CompletionPage(w, r)
+	if w.Header().Get("Content-Language") != "ko" || !strings.Contains(w.Body.String(), "연결 저장됨") || !strings.Contains(w.Body.String(), "계정으로 돌아가기") {
+		t.Fatalf("language=%q body=%s", w.Header().Get("Content-Language"), w.Body.String())
 	}
 }
 

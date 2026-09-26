@@ -3,11 +3,10 @@ package admin
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
-func TestIndexRendersConfiguredRoutesWithSecurityHeaders(t *testing.T) {
+func TestIndexRedirectsToIssuerPrefixedDashboardWithSecurityHeaders(t *testing.T) {
 	called := false
 	h, err := NewIndexHandler(func(w http.ResponseWriter, r *http.Request, mutation bool) bool {
 		called = true
@@ -19,14 +18,17 @@ func TestIndexRendersConfiguredRoutesWithSecurityHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	h.SetIssuer("https://issuer.example/tenant")
+	request := httptest.NewRequest(http.MethodGet, "/tenant/auth/v1/admin", nil)
+	request.URL.Path = "/auth/v1/admin" // issuerPathMiddleware removes the issuer prefix before routing.
 	response := httptest.NewRecorder()
-	h.Index(response, httptest.NewRequest(http.MethodGet, "/auth/v1/admin", nil))
-	if response.Code != http.StatusOK || !called {
+	h.Index(response, request)
+	if response.Code != http.StatusSeeOther || !called || response.Header().Get("Location") != "/tenant/auth/v1/admin/dashboard" {
 		t.Fatalf("status=%d called=%v body=%q", response.Code, called, response.Body.String())
 	}
 	for name, want := range map[string]string{
 		"cache":   "no-store",
-		"csp":     "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+		"csp":     "default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
 		"frame":   "DENY",
 		"nosniff": "nosniff",
 		"type":    "text/html; charset=utf-8",
@@ -47,23 +49,6 @@ func TestIndexRendersConfiguredRoutesWithSecurityHeaders(t *testing.T) {
 		if got != want {
 			t.Fatalf("%s header=%q want %q", name, got, want)
 		}
-	}
-	body := response.Body.String()
-	if !strings.Contains(body, `href="/auth/v1/roles"`) || !strings.Contains(body, `href="/auth/v1/groups"`) {
-		t.Fatalf("configured links missing from body: %q", body)
-	}
-}
-
-func TestIndexEscapesRouteLabels(t *testing.T) {
-	h, err := NewIndexHandler(func(http.ResponseWriter, *http.Request, bool) bool { return true }, Route{Label: `<script>alert(1)</script>`, Path: "/auth/v1/roles"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := httptest.NewRecorder()
-	h.Index(response, httptest.NewRequest(http.MethodGet, "/auth/v1/admin", nil))
-	body := response.Body.String()
-	if strings.Contains(body, `<script>alert(1)</script>`) || !strings.Contains(body, `&lt;script&gt;alert(1)&lt;/script&gt;`) {
-		t.Fatalf("route label was not escaped: %q", body)
 	}
 }
 

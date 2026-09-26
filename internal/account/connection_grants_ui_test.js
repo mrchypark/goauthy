@@ -26,7 +26,7 @@ function setup(options = {}) {
     if (url.endsWith('/connector')) { requested(); if (env.failConnector) throw new Error('private error'); return env.pendingConnector || response(info); }
     if (url.endsWith('/oauth2')) return typeof env.oauth === 'function' ? env.oauth() : response(env.oauth);
     if (options.method === 'POST') {
-      if (env.failPost) throw new Error('Request failed (409). private error');
+      if (env.failPost) { const error = new Error('Request failed (409). private error'); error.status = 409; throw error; }
       env.grants = [{ ...JSON.parse(options.body), id: 'g1', revision: 1, resource: 'https://resource.test', revoked: false }]; return response(env.grants[0], 201);
     }
     if (options.method === 'DELETE') { env.grants[0].revoked = true; return response(null, 204); }

@@ -89,6 +89,15 @@ func Resolve(header string) string {
 	return resolve(header, []string{"en", "ko"})
 }
 
+// UILanguageFromRequest selects the browser UI only; it does not change the
+// account/email language. Only the two shipped UI catalogs are selectable.
+func UILanguageFromRequest(r *http.Request) string {
+	if cookie, err := r.Cookie("goauthy_ui_locale"); err == nil && (cookie.Value == "en" || cookie.Value == "ko") {
+		return cookie.Value
+	}
+	return Resolve(strings.Join(r.Header.Values("Accept-Language"), ","))
+}
+
 // UserLanguageFromRequest uses the non-sensitive locale preference cookie
 // before Accept-Language. It selects account/mail language, not UI catalog support.
 func UserLanguageFromRequest(r *http.Request) string {

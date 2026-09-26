@@ -3,7 +3,7 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const source = fs.readFileSync(__dirname + '/sessions.js', 'utf8');
 const nodes = new Map(), calls = [];
-const node = id => nodes.get(id) || (nodes.set(id, {id, innerHTML: '', value: '', checked: false, textContent: '', dataset: {}, className: ''}), nodes.get(id));
+const node = id => nodes.get(id) || (nodes.set(id, {id, innerHTML: '', value: '', checked: false, textContent: '', dataset: {}, className: '', focus() {}}), nodes.get(id));
 const document = {getElementById: node};
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const api = async (path, opts = {}) => { calls.push({path, opts}); return ctx.reply; };
@@ -15,11 +15,18 @@ vm.runInNewContext(source, ctx);
 (async () => {
   await ctx.sessions();
   assert.equal(calls[0].path, '/auth/v1/sessions?session_state=Auth&page_size=20');
+  assert.match(source, /min="1" max="65535"/);
+  assert.match(node('app').innerHTML, /Requested page size; the server applies its paging threshold and returns smaller result sets in full/);
   assert.match(node('session-table').innerHTML, /&lt;subject&gt;/);
   assert.match(node('session-table').innerHTML, /data-revoke-session="sid\/1"/);
   assert.match(node('session-paging').innerHTML, /Next page/);
 
-  node('session-state').value = 'Unknown'; node('session-page-size').value = '7';
+  node('session-state').value = 'Unknown'; node('session-page-size').value = '0';
+  const beforeInvalidSize = calls.length;
+  await node('session-filter').onsubmit({preventDefault() {}});
+  assert.equal(calls.length, beforeInvalidSize);
+  assert.match(node('session-status').textContent, /1–65535/);
+  node('session-page-size').value = '7';
   await node('session-filter').onsubmit({preventDefault() {}});
   assert.match(calls.at(-1).path, /session_state=Unknown&page_size=7/);
 

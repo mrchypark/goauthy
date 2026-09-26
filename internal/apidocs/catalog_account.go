@@ -70,10 +70,13 @@ func addAccountOperations(doc *openapi3.T, features Features) error {
 	secure := map[string][]string{"browserSession": {}}
 	csrf := map[string][]string{"csrfToken": {}}
 	api := map[string][]string{"apiKey": {}}
+	add("/account/login", "get", "accountLoginPage", "Sign in to the current account; fixed account continuation", 200)
+	add("/account/login", "post", "accountLoginSubmit", "Authenticate with the session-bound account interaction and CSRF token", 303, secure)
 	add("/account/password", "get", "getPassword", "Get password policy and CSRF token", 200, secure)
 	for _, page := range []struct{ path, id, media string }{
 		{"/account", "accountDashboard", "text/html"},
 		{"/account/app.js", "accountDashboardScript", "text/javascript"},
+		{"/account/locale.js", "accountLocaleScript", "text/javascript"},
 		{"/account/connections.js", "accountConnectionsScript", "text/javascript"},
 		{"/account/connection-grants.js", "accountConnectionGrantsScript", "text/javascript"},
 		{"/account/devices.js", "accountDevicesScript", "text/javascript"},
@@ -137,8 +140,17 @@ func addAccountOperations(doc *openapi3.T, features Features) error {
 	revoke.Responses.Status(200).Value.Content = openapi3.Content{"text/html": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}}
 	if features.Recovery {
 		addRecoveryOperations(doc, add, pathParam)
+		for _, page := range []struct{ path, id, media string }{
+			{"/auth/v1/users/password_reset", "passwordResetPage", "text/html"},
+			{"/auth/v1/users/recovery.js", "recoveryPageScript", "text/javascript"},
+		} {
+			add(page.path, "get", page.id, "Recovery browser interface", 200)
+			doc.Paths.Value(page.path).Get.Responses.Status(200).Value.Content = openapi3.Content{page.media: {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}}
+		}
 	}
 	if features.Recovery && features.OpenRegistration {
+		add("/auth/v1/users/register", "get", "registrationPage", "Registration browser interface", 200)
+		doc.Paths.Value("/auth/v1/users/register").Get.Responses.Status(200).Value.Content = openapi3.Content{"text/html": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}}
 		add("/auth/v1/users/register", "post", "registerUser", "Register a user", 204)
 		add("/auth/v1/users/register", "options", "registerUserOptions", "Describe registration CORS policy", 204)
 	}
@@ -246,6 +258,7 @@ func addAccountOperations(doc *openapi3.T, features Features) error {
 		reset.AddParameter(openapi3.NewHeaderParameter("X-Pwd-CSRF-Token").WithRequired(true).WithSchema(str))
 		reset.Description = "Requires the reset cookie and X-Pwd-CSRF-Token issued by GET for this magic link; an ordinary session or OAuth bearer does not replace this proof."
 		doc.Paths.Value("/auth/v1/users/{subject}/reset/{token}").Get.Responses.Status(200).Value.WithJSONSchema(doc.Paths.Value("/account/password").Get.Responses.Status(200).Value.Content["application/json"].Schema.Value)
+		doc.Paths.Value("/auth/v1/users/{subject}/reset/{token}").Get.Responses.Status(200).Value.Content["text/html"] = &openapi3.MediaType{Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}
 		doc.Paths.Value("/auth/v1/pow").Post.Responses.Status(200).Value.Content = openapi3.Content{"text/plain": {Schema: &openapi3.SchemaRef{Value: str}}}
 	}
 	if features.Recovery {

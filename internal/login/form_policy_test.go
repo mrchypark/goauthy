@@ -20,7 +20,7 @@ func TestAuthorizationFormCSP(t *testing.T) {
 		{"https://*.example.test/callback", "'self'"},
 		{"https://invalid host/callback", "'self'"},
 	} {
-		want := "default-src 'none'; style-src 'self'; form-action " + tc.action + "; frame-ancestors 'none'"
+		want := "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; form-action " + tc.action + "; frame-ancestors 'none'"
 		if got := authorizationFormCSP(tc.redirect); got != want || strings.Contains(got, "tenant=") {
 			t.Fatalf("policy=%q want=%q", got, want)
 		}

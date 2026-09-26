@@ -84,7 +84,7 @@ func TestAuthorizePasskeyScriptCapturesStartJSON(t *testing.T) {
 	}
 }
 
-func TestAuthorizePasskeyNonceNotSetWhenPasskeysDisabled(t *testing.T) {
+func TestAuthorizeLocaleNonceWithoutPasskeys(t *testing.T) {
 	t.Parallel()
 	h := testHandler(t)
 	h.passkeys = nil
@@ -99,8 +99,8 @@ func TestAuthorizePasskeyNonceNotSetWhenPasskeysDisabled(t *testing.T) {
 		t.Fatalf("passkey script rendered when passkeys disabled")
 	}
 	csp := page.Header().Get("Content-Security-Policy")
-	if strings.Contains(csp, "script-src") {
-		t.Fatalf("CSP should not contain script-src when passkeys disabled: %q", csp)
+	if !strings.Contains(csp, "script-src 'nonce-") || strings.Contains(csp, "unsafe-inline") || !strings.Contains(body, `/auth/v1/branding/locale.js" nonce="`) {
+		t.Fatalf("locale script requires nonce-scoped CSP even without passkeys: %q", csp)
 	}
 }
 

@@ -45,7 +45,7 @@ const (
 	failureWriteGrace   = 5 * time.Second
 )
 
-var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1>{{if .PasskeyChallenge}}<p>Complete the security key verification to continue.</p><button type="button" id="passkey-challenge-btn">Continue with security key</button><div id="passkey-error" role="status" aria-live="polite"></div>{{else}}<p>{{if .Intro}}{{.Intro}}{{else}}{{.ContinueTo}} {{.ClientID}}{{end}}</p><form id="login-form" method="post" action="{{.Action}}"><input type="hidden" name="interaction" value="{{.Interaction}}">{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label><button type="submit">{{.SignIn}}</button>{{if .PasskeyLogin}}<button type="button" id="passkey-btn">{{.PasskeyButton}}</button><div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div style="margin:1.5em 0;text-align:center;border-top:1px solid #ccc;padding-top:1em"><span style="background:#fff;padding:0 0.5em;color:#666;font-size:0.9em">or</span></div>{{range .Providers}}<a href="{{$.IssuerPath}}/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" style="display:block;margin:0.5em 0;padding:0.75em;border:1px solid #ccc;border-radius:4px;text-align:center;text-decoration:none;color:#333">{{.Name}}</a>{{end}}{{end}}{{end}}</main>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
+var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title data-i18n="Sign in" data-brand-en="{{.Brand.English.Title}}" data-brand-ko="{{.Brand.Korean.Title}}">{{if .BrandTitle}}{{.BrandTitle}}{{else}}{{.SignIn}}{{end}}</title></head><body class="auth-page" data-locale-mode="in-place"><header class="auth-topbar"><a class="auth-brand" href="{{.IssuerPath}}/">{{if .Brand.LogoURL}}<img class="client-login-logo" src="{{.Brand.LogoURL}}" alt="{{.ClientID}}">{{else}}<span class="brand-symbol" aria-hidden="true"></span><span>GoAuthy</span>{{end}}</a><select class="language-select" data-language-select aria-label="Language"><option value="en">English</option><option value="ko">한국어</option></select></header><main class="auth-panel"><p class="auth-eyebrow" data-i18n="YOUR SECURE CONNECTION">{{if eq .Language "ko"}}나만의 안전한 연결{{else}}YOUR SECURE CONNECTION{{end}}</p><h1 data-i18n="Sign in" data-brand-en="{{.Brand.English.Title}}" data-brand-ko="{{.Brand.Korean.Title}}">{{if .BrandTitle}}{{.BrandTitle}}{{else}}{{.SignIn}}{{end}}</h1>{{if .PasskeyChallenge}}<p class="auth-intro" data-i18n="Complete the security key verification to continue.">{{if eq .Language "ko"}}계속하려면 등록된 보안 키로 본인을 확인하세요.{{else}}Complete the security key verification to continue.{{end}}</p><button type="button" id="passkey-challenge-btn" data-i18n="Continue with security key">{{if eq .Language "ko"}}보안 키로 계속{{else}}Continue with security key{{end}}</button><div id="passkey-error" role="status" aria-live="polite"></div>{{else}}<p class="auth-intro">{{if .BrandDescription}}<span data-i18n="Continue to" data-brand-en="{{.Brand.English.Description}}" data-brand-ko="{{.Brand.Korean.Description}}">{{.BrandDescription}}</span>{{else if .Intro}}<span data-i18n="{{.IntroKey}}">{{.Intro}}</span>{{else}}<span data-i18n="Continue to">{{.ContinueTo}}</span> {{.ClientID}}{{end}}</p><form id="login-form" method="post" action="{{.Action}}"><input type="hidden" name="interaction" value="{{.Interaction}}">{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<label><span data-i18n="Username">{{.Username}}</span> <input name="username" autocomplete="username" required></label><label><span data-i18n="Password">{{.Password}}</span> <input type="password" name="password" autocomplete="current-password" required></label><button type="submit" data-i18n="Sign in" data-brand-en="{{.Brand.English.Button}}" data-brand-ko="{{.Brand.Korean.Button}}">{{if .BrandButton}}{{.BrandButton}}{{else}}{{.SignIn}}{{end}}</button>{{if .PasskeyLogin}}<button class="secondary passkey-button" type="button" id="passkey-btn" data-i18n="Sign in with a passkey">{{.PasskeyButton}}</button><div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div class="auth-divider"><span data-i18n="or continue with">{{if eq .Language "ko"}}또는{{else}}or continue with{{end}}</span></div>{{range .Providers}}<a href="{{$.IssuerPath}}/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" class="provider-button">{{.Name}}</a>{{end}}{{end}}{{end}}{{if not .PasskeyChallenge}}<nav class="auth-links" aria-label="Account help"><a href="{{.IssuerPath}}/oidc/device/verify" data-i18n="Enter a device code">{{if eq .Language "ko"}}기기 코드 입력{{else}}Enter a device code{{end}}</a>{{if .RecoveryPage}}<a href="{{.IssuerPath}}/auth/v1/users/password_reset" target="_blank" rel="noopener noreferrer" data-i18n="Forgot password?">{{if eq .Language "ko"}}비밀번호를 잊으셨나요?{{else}}Forgot password?{{end}}</a>{{end}}{{if .RegistrationPage}}<a href="{{.IssuerPath}}/auth/v1/users/register" target="_blank" rel="noopener noreferrer" data-i18n="Create an account">{{if eq .Language "ko"}}계정 만들기{{else}}Create an account{{end}}</a>{{end}}</nav>{{end}}</main><footer class="auth-footer"><span>GoAuthy</span><span data-i18n="Your access. In your hands.">{{if eq .Language "ko"}}접근 권한은 언제나 내 손안에.{{else}}Your access. In your hands.{{end}}</span></footer><script src="{{.IssuerPath}}/auth/v1/branding/locale.js" nonce="{{.PasskeyNonce}}" defer></script>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
 (function(){
   var btn=document.getElementById('passkey-btn');
   var err=document.getElementById('passkey-error');
@@ -131,13 +131,13 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html 
 // OTP. The native form posts the code to the OTP verify boundary, which keeps
 // the one-time authorization interaction and the session protections of the
 // shared completion path authoritative.
-var otpStepUpPage = template.Must(template.New("otp-stepup").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p role="status" aria-live="polite">Enter the one-time code sent to your email.</p><form method="post" action="{{.IssuerPath}}/auth/v1/users/otp/verify"><label>One-time code <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus></label><button type="submit">{{.SignIn}}</button></form></main></body></html>`))
+var otpStepUpPage = template.Must(template.New("otp-stepup").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body class="auth-page"><header class="auth-brand"><span class="brand-symbol" aria-hidden="true"></span><span>GoAuthy</span></header><main class="auth-panel"><p class="auth-eyebrow">{{if eq .Language "ko"}}나만의 안전한 연결{{else}}YOUR SECURE CONNECTION{{end}}</p><h1>{{.SignIn}}</h1><p role="status" aria-live="polite">{{if eq .Language "ko"}}이메일로 전송된 일회용 코드를 입력하세요.{{else}}Enter the one-time code sent to your email.{{end}}</p><form method="post" action="{{.IssuerPath}}/auth/v1/users/otp/verify"><label>{{if eq .Language "ko"}}인증 코드{{else}}One-time code{{end}} <input name="code" class="otp-input" pattern="[0-9]{6}" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus></label><button type="submit">{{.SignIn}}</button></form></main></body></html>`))
 
 const fedCMLandingPayload = "goauthy-fedcm-login/v1"
 
-var fedCMLandingPage = template.Must(template.New("fedcm-login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><form method="post" action=""><input type="hidden" name="fedcm" value="1"><input type="hidden" name="interaction" value="{{.Interaction}}"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label><button type="submit">{{.SignIn}}</button></form></main></body></html>`))
+var fedCMLandingPage = template.Must(template.New("fedcm-login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body class="auth-page"><header class="auth-brand"><span class="brand-symbol" aria-hidden="true"></span><span>GoAuthy</span></header><main class="auth-panel"><p class="auth-eyebrow">{{if eq .Language "ko"}}나만의 안전한 연결{{else}}YOUR SECURE CONNECTION{{end}}</p><h1>{{.SignIn}}</h1><form method="post" action=""><input type="hidden" name="fedcm" value="1"><input type="hidden" name="interaction" value="{{.Interaction}}"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label><button type="submit">{{.SignIn}}</button></form></main></body></html>`))
 
-var fedCMSuccessPage = template.Must(template.New("fedcm-success").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignedIn}}</title></head><body><main><p>{{.SignedIn}}</p></main></body></html>`))
+var fedCMSuccessPage = template.Must(template.New("fedcm-success").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignedIn}}</title></head><body class="auth-page"><header class="auth-brand"><span class="brand-symbol" aria-hidden="true"></span><span>GoAuthy</span></header><main class="auth-panel"><p>{{.SignedIn}}</p></main></body></html>`))
 
 // ErrExternalAuthentication deliberately does not reveal which upstream
 // binding check failed.
@@ -157,28 +157,35 @@ type UpstreamProvider struct {
 
 // Handler wires the concrete state stores to two browser endpoints.
 type Handler struct {
-	issuer            string
-	browser           *browser.Store
-	identity          *identity.Store
-	oauth             *oauth.Server
-	policy            *loginpolicy.Store
-	passkeys          *passkey.Service
-	otp               *recovery.OTPHandler
-	now               func() time.Time
-	wait              func(context.Context, time.Duration) error
-	deadline          func(http.ResponseWriter, time.Time) error
-	onPasswordExpired func(context.Context, string) error
-	onLoginLocation   func(*http.Request, string, string, string, string) error
-	themeURLResolver  func(context.Context, string) (string, error)
-	browserIDPolicy   *browser.BrowserIDPolicy
-	trustedProxies    []netip.Prefix
-	metrics           *metrics.Registry
-	fedcmEnabled      bool
-	fedcmForceMFA     bool
-	approvalForceMFA  bool
-	upstreamProviders func(ctx context.Context) ([]UpstreamProvider, error)
-	lockdown          *loginpolicy.LockdownStore
-	userValuesPolicy  *identity.UserValuesPolicy
+	recoveryPages, registrationPage bool
+	issuer                          string
+	browser                         *browser.Store
+	identity                        *identity.Store
+	oauth                           *oauth.Server
+	policy                          *loginpolicy.Store
+	passkeys                        *passkey.Service
+	otp                             *recovery.OTPHandler
+	now                             func() time.Time
+	wait                            func(context.Context, time.Duration) error
+	deadline                        func(http.ResponseWriter, time.Time) error
+	onPasswordExpired               func(context.Context, string) error
+	onLoginLocation                 func(*http.Request, string, string, string, string) error
+	themeURLResolver                func(context.Context, string) (string, error)
+	loginBrandingResolver           func(context.Context, string) (LoginBranding, error)
+	browserIDPolicy                 *browser.BrowserIDPolicy
+	trustedProxies                  []netip.Prefix
+	metrics                         *metrics.Registry
+	fedcmEnabled                    bool
+	fedcmForceMFA                   bool
+	approvalForceMFA                bool
+	upstreamProviders               func(ctx context.Context) ([]UpstreamProvider, error)
+	lockdown                        *loginpolicy.LockdownStore
+	userValuesPolicy                *identity.UserValuesPolicy
+}
+
+// SetRecoveryPages exposes only routes enabled by the runtime.
+func (h *Handler) SetRecoveryPages(recovery, registration bool) {
+	h.recoveryPages, h.registrationPage = recovery, registration
 }
 
 // SetMetrics attaches a metrics registry for authentication counters.
@@ -429,7 +436,7 @@ func (h *Handler) renderLoginPage(w http.ResponseWriter, r *http.Request, reques
 func (h *Handler) renderAuthenticationPage(w http.ResponseWriter, r *http.Request, request oauth.AuthorizationRequest, pageData loginPageData) {
 	issuerURL, _ := url.Parse(h.issuer)
 	issuerPath := strings.TrimRight(issuerURL.Path, "/")
-	messages := i18n.MessagesFor(strings.Join(r.Header.Values("Accept-Language"), ","))
+	messages := i18n.MessagesFor(i18n.UILanguageFromRequest(r))
 	localizedHTMLHeaders(w, messages.Language)
 	// Chromium applies form-action to the callback redirect after the login
 	// POST too. Use only this already-validated request's callback origin.
@@ -449,20 +456,55 @@ func (h *Handler) renderAuthenticationPage(w http.ResponseWriter, r *http.Reques
 			}
 		}
 	}
+	pageData.IntroKey = pageData.Intro
+	if messages.Language == "ko" {
+		switch pageData.Intro {
+		case "Sign in to manage your account.":
+			pageData.Intro = "내 계정을 관리하려면 로그인하세요."
+		case "Sign in to review the code from your device. Signing in does not approve it.":
+			pageData.Intro = "기기에 표시된 코드를 확인하려면 로그인하세요. 로그인만으로 접근이 승인되지는 않습니다."
+		case "Sign in to review this connection handoff. Signing in does not approve it.":
+			pageData.Intro = "연결 요청을 검토하려면 로그인하세요. 접근 권한은 검토 후 직접 승인합니다."
+		}
+	}
+	pageData.RecoveryPage, pageData.RegistrationPage = h.recoveryPages, h.registrationPage
 	pageData.IssuerPath, pageData.Providers, pageData.MFARequired, pageData.Messages = issuerPath, providers, request.ForceMFA, messages
 	if pageData.Action == "" {
 		pageData.Action = issuerPath + "/auth/login"
 	}
-	if h.passkeys != nil {
-		nonce, err := generateNonce()
+	nonce, err := generateNonce()
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	// Custom copy applies only to the OAuth password page, never security-step instructions.
+	if pageData.Action == issuerPath+"/auth/login" && h.loginBrandingResolver != nil {
+		brand, err := h.loginBrandingResolver(r.Context(), request.ClientID)
 		if err != nil {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 			return
 		}
-		pageData.PasskeyLogin = true
-		pageData.PasskeyNonce = nonce
-		w.Header().Set("Content-Security-Policy", authorizationFormCSPWithNonce(request.RedirectURI, nonce))
+		if pageData.PasskeyChallenge != nil {
+			brand = LoginBranding{LogoURL: brand.LogoURL}
+		}
+		if brand.English.Description != "" || brand.Korean.Description != "" {
+			if brand.English.Description == "" {
+				brand.English.Description = "Continue to " + request.ClientID
+			}
+			if brand.Korean.Description == "" {
+				brand.Korean.Description = "계속할 서비스: " + request.ClientID
+			}
+		}
+		pageData.Brand = brand
+		copy := brand.English
+		if messages.Language == "ko" {
+			copy = brand.Korean
+		}
+		pageData.BrandTitle, pageData.BrandDescription, pageData.BrandButton = copy.Title, copy.Description, copy.Button
 	}
+	pageData.PasskeyLogin = h.passkeys != nil
+	pageData.PasskeyNonce = nonce
+	w.Header().Set("Content-Security-Policy", authorizationFormCSPWithNonce(request.RedirectURI, nonce))
 	if err := loginPage.Execute(w, pageData); err != nil {
 		return
 	}
@@ -597,7 +639,7 @@ func (h *Handler) renderOTPStepUp(w http.ResponseWriter, r *http.Request, reques
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	messages := i18n.MessagesFor(strings.Join(r.Header.Values("Accept-Language"), ","))
+	messages := i18n.MessagesFor(i18n.UILanguageFromRequest(r))
 	localizedHTMLHeaders(w, messages.Language)
 	// Chromium applies form-action to the code submission and to the callback
 	// redirect that follows it. Use only this already-validated request origin.
@@ -690,7 +732,7 @@ func (h *Handler) fedCMGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	messages := i18n.MessagesFor(strings.Join(r.Header.Values("Accept-Language"), ","))
+	messages := i18n.MessagesFor(i18n.UILanguageFromRequest(r))
 	localizedHTMLHeaders(w, messages.Language)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := fedCMLandingPage.Execute(w, fedCMLandingPageData{Interaction: interaction.Token, CSRFToken: csrf, ThemeURL: themeURL, Messages: messages}); err != nil {
@@ -699,8 +741,11 @@ func (h *Handler) fedCMGet(w http.ResponseWriter, r *http.Request) {
 }
 
 type loginPageData struct {
+	RecoveryPage, RegistrationPage              bool
+	Brand                                       LoginBranding
+	BrandTitle, BrandDescription, BrandButton   string
 	PasskeyChallenge                            *passkeyStartResponse
-	Action, CSRFToken, Intro                    string
+	Action, CSRFToken, Intro, IntroKey          string
 	ClientID, Interaction, ThemeURL, IssuerPath string
 	Providers                                   []UpstreamProvider
 	PasskeyLogin                                bool
@@ -783,7 +828,7 @@ func (h *Handler) writeFedCMSuccess(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	messages := i18n.MessagesFor(strings.Join(r.Header.Values("Accept-Language"), ","))
+	messages := i18n.MessagesFor(i18n.UILanguageFromRequest(r))
 	localizedHTMLHeaders(w, messages.Language)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = fedCMSuccessPage.Execute(w, fedCMSuccessPageData{ThemeURL: themeURL, Messages: messages})
@@ -1925,13 +1970,14 @@ func securityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'")
 	w.Header().Set("X-Frame-Options", "DENY")
 }
 
 func localizedHTMLHeaders(w http.ResponseWriter, language string) {
 	w.Header().Set("Content-Language", language)
 	w.Header().Add("Vary", "Accept-Language")
+	w.Header().Add("Vary", "Cookie")
 }
 
 func methodNotAllowed(w http.ResponseWriter, allowed string) {

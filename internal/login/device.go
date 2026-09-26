@@ -88,6 +88,7 @@ type loginPostDestination uint8
 const (
 	deviceLoginDestination loginPostDestination = iota
 	connectionHandoffDestination
+	accountLoginDestination
 )
 
 func (h *Handler) loginPost(w http.ResponseWriter, r *http.Request, forceMFA bool, destination loginPostDestination) {
@@ -111,7 +112,9 @@ func (h *Handler) loginPost(w http.ResponseWriter, r *http.Request, forceMFA boo
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	if (destination == deviceLoginDestination && target.approval.DeviceCode == nil) || (destination == connectionHandoffDestination && target.approval.HandoffID == "") {
+	if (destination == deviceLoginDestination && target.approval.DeviceCode == nil) ||
+		(destination == connectionHandoffDestination && target.approval.HandoffID == "") ||
+		(destination == accountLoginDestination && !target.approval.Account) {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}

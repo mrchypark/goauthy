@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/saas"
 )
 
@@ -19,9 +20,17 @@ var connectionHandoffHTML string
 var connectionHandoffPage = template.Must(template.New("connection-handoff").Parse(connectionHandoffHTML))
 
 type connectionHandoffPageData struct {
-	Review                                                           saas.UseHandoffReview
-	Action, CSS, CSRF, GrantExpiry, TicketExpiry, ReturnURI, Message string
-	Complete, Approved                                               bool
+	Review                                                                    saas.UseHandoffReview
+	Action, CSS, CSRF, GrantExpiry, TicketExpiry, ReturnURI, Account, Message string
+	Language                                                                  string
+	Complete, Approved                                                        bool
+}
+
+func (d connectionHandoffPageData) Text(english, korean string) string {
+	if d.Language == "ko" {
+		return korean
+	}
+	return english
 }
 
 // ConnectionHandoffPage is a navigation endpoint, not a Bearer API. Visiting it
@@ -32,7 +41,22 @@ func (h *Handler) ConnectionHandoffPage(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 	render := func(status int, data connectionHandoffPageData) {
 		data.CSS = h.issuer + "/account/account.css"
+		data.Account = h.issuer + "/account"
+		data.Language = i18n.UILanguageFromRequest(r)
+		if data.Language == "ko" {
+			switch data.Message {
+			case "This request is invalid. Return to the requesting app and start again.":
+				data.Message = "이 요청은 올바르지 않습니다. 요청한 앱으로 돌아가 다시 시작하세요."
+			case "This request could not be completed. It may have expired, changed or already been used. Return to the requesting app and check its status before starting again.":
+				data.Message = "이 요청을 완료할 수 없습니다. 만료되었거나 변경되었거나 이미 사용되었을 수 있습니다. 요청한 앱으로 돌아가 상태를 확인한 후 다시 시작하세요."
+			case "This request is unavailable for this account. It may have expired, changed or already been used. Return to the requesting app and start again.":
+				data.Message = "이 요청은 이 계정에서 사용할 수 없습니다. 만료되었거나 변경되었거나 이미 사용되었을 수 있습니다. 요청한 앱으로 돌아가 다시 시작하세요."
+			}
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Language", data.Language)
+		w.Header().Add("Vary", "Accept-Language")
+		w.Header().Add("Vary", "Cookie")
 		w.WriteHeader(status)
 		_ = connectionHandoffPage.Execute(w, data)
 	}

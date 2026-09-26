@@ -117,6 +117,12 @@ func (s *Service) GetReset(w http.ResponseWriter, r *http.Request) {
 		forbidden(w)
 		return
 	}
+	// HTML navigation is presentation only; explicit continuation bootstraps JSON.
+	if strings.Contains(r.Header.Get("Accept"), "text/html") {
+		s.renderPage(w, r, "reset")
+		return
+	}
+	w.Header().Add("Vary", "Accept")
 	subject, token := r.PathValue("subject"), r.PathValue("token")
 	challenge, err := s.identity.BeginPasswordReset(r.Context(), subject, token)
 	if err != nil {

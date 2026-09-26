@@ -93,3 +93,69 @@ func TestThemeCSSValidationMatchesRustWhitespace(t *testing.T) {
 		t.Fatal("non-White_Space rune accepted")
 	}
 }
+
+func TestLoginAppearanceValidationCSSAndCopyFallback(t *testing.T) {
+	theme := DefaultTheme("client-1")
+	data, err := json.Marshal(theme)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"login"`) {
+		t.Fatalf("nil login appearance was not omitted: %s", data)
+	}
+	theme.Login = &LoginAppearance{
+		Copy: map[string]LoginCopy{
+			"en": {Title: "Welcome", Description: "<b>Sign in</b>", Button: "Continue"},
+			"ko": {Title: "환영합니다", Button: "계속"},
+		},
+		LogoAlignment: "center",
+		CardWidth:     640,
+	}
+	if err := theme.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	gotCopy := theme.Login.CopyFor("ko")
+	if gotCopy.Title != "환영합니다" || gotCopy.Description != "<b>Sign in</b>" || gotCopy.Button != "계속" {
+		t.Fatalf("CopyFor(ko)=%+v", gotCopy)
+	}
+	css := theme.CSS()
+	for _, rule := range []string{
+		"body.auth-page .auth-panel{width:min(100%,640px);max-width:640px}",
+		"body.auth-page .auth-topbar .auth-brand{margin-inline:auto}",
+	} {
+		if !strings.Contains(css, rule) {
+			t.Errorf("CSS missing %q: %s", rule, css)
+		}
+	}
+	data, err = json.Marshal(theme)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roundTrip Theme
+	if err := json.Unmarshal(data, &roundTrip); err != nil || roundTrip.Login == nil || roundTrip.Login.Copy["ko"].Title != "환영합니다" {
+		t.Fatalf("JSON round trip: theme=%+v err=%v", roundTrip, err)
+	}
+}
+
+func TestLoginAppearanceRejectsInvalidValues(t *testing.T) {
+	for name, login := range map[string]*LoginAppearance{
+		"unsupported language": {Copy: map[string]LoginCopy{"fr": {Title: "Bonjour"}}},
+		"title too long":       {Copy: map[string]LoginCopy{"en": {Title: strings.Repeat("한", 121)}}},
+		"description too long": {Copy: map[string]LoginCopy{"ko": {Description: strings.Repeat("x", 501)}}},
+		"button too long":      {Copy: map[string]LoginCopy{"en": {Button: strings.Repeat("x", 61)}}},
+		"invalid alignment":    {LogoAlignment: "end"},
+		"card too narrow":      {CardWidth: 319},
+		"card too wide":        {CardWidth: 641},
+	} {
+		t.Run(name, func(t *testing.T) {
+			theme := DefaultTheme("client-1")
+			theme.Login = login
+			if err := theme.Validate(); err == nil {
+				t.Fatal("invalid login appearance accepted")
+			}
+			if theme.CSS() != "" {
+				t.Fatal("invalid login appearance produced CSS")
+			}
+		})
+	}
+}

@@ -47,6 +47,7 @@ func TestApprovalAuthenticationReturnsToReview(t *testing.T) {
 	}{
 		{"device", approvalLoginInteraction{Purpose: approvalLoginPayload, DeviceCode: &code}, "/oidc/device/verify?user_code=AB12CD34"},
 		{"handoff", approvalLoginInteraction{Purpose: approvalLoginPayload, HandoffID: testHandoffID}, "/account/connection-handoffs/" + testHandoffID},
+		{"account", approvalLoginInteraction{Purpose: approvalLoginPayload, Account: true}, "/"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := testHandler(t)
@@ -133,6 +134,8 @@ func TestApprovalContinuationRejectsInvalidDestinations(t *testing.T) {
 	for _, payload := range []string{
 		`{"Purpose":"goauthy-approval-login/v1"}`,
 		`{"Purpose":"goauthy-approval-login/v1","DeviceCode":"AB12","HandoffID":"AAAAAAAAAAAAAAAAAAAAAAAA"}`,
+		`{"Purpose":"goauthy-approval-login/v1","DeviceCode":"AB12","Account":true}`,
+		`{"Purpose":"goauthy-approval-login/v1","HandoffID":"AAAAAAAAAAAAAAAAAAAAAAAA","Account":true}`,
 		`{"Purpose":"goauthy-approval-login/v1","DeviceCode":"https://evil.test"}`,
 		`{"Purpose":"goauthy-approval-login/v1","HandoffID":"AAAA"}`,
 		`{"Purpose":"goauthy-approval-login/v1","DeviceCode":"AB12","return_url":"https://evil.test"}`,
@@ -150,6 +153,7 @@ func TestApprovalEntryPagesCompleteOTP(t *testing.T) {
 	for _, tc := range []struct{ name, entry, action, destination string }{
 		{"device", "/oidc/device/login?user_code=AB12-CD34", "/oidc/device/login", "/oidc/device/verify?user_code=AB12CD34"},
 		{"handoff", "/account/connection-login?handoff_id=" + testHandoffID, "/account/connection-login", "/account/connection-handoffs/" + testHandoffID},
+		{"account", "/account/login", "/account/login", "/"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, db := testHandlerWithDB(t, false)
@@ -163,6 +167,8 @@ func TestApprovalEntryPagesCompleteOTP(t *testing.T) {
 			handler := h.DeviceLoginHandler(true)
 			if tc.name == "handoff" {
 				handler = h.ConnectionHandoffLoginHandler(true)
+			} else if tc.name == "account" {
+				handler = h.AccountLoginHandler(true)
 			}
 			page := httptest.NewRecorder()
 			handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, tc.entry, nil))
@@ -214,6 +220,7 @@ func TestApprovalEntryOffersSharedPasskeyAndUpstreamMethods(t *testing.T) {
 	}{
 		{"/oidc/device/login?user_code=AB12CD34", h.DeviceLoginHandler(true)},
 		{"/account/connection-login?handoff_id=" + testHandoffID, h.ConnectionHandoffLoginHandler(true)},
+		{"/account/login", h.AccountLoginHandler(true)},
 	} {
 		page := httptest.NewRecorder()
 		tc.handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, tc.entry, nil))

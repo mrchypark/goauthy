@@ -13,7 +13,7 @@ import (
 //go:embed global.css
 var globalCSS []byte
 
-const globalCSSCacheControl = "public, max-age=300, must-revalidate"
+const globalCSSCacheControl = "public, no-cache"
 
 // GlobalCSSHandler serves the embedded global stylesheet at its mounted route.
 func GlobalCSSHandler() http.Handler {

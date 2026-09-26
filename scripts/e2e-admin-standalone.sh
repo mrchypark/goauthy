@@ -157,20 +157,16 @@ cp "$cookie_jar" "$auth_cookie_jar"
 admin_headers=$temp_dir/admin.headers
 admin_body=$temp_dir/admin.html
 admin_status=$(curl --max-time 5 --fail --silent --show-error --output "$admin_body" --dump-header "$admin_headers" --write-out '%{http_code}' --cookie "$cookie_jar" "$base/auth/v1/admin")
-[ "$admin_status" = 200 ] || { echo "admin status=$admin_status want 200" >&2; exit 1; }
-expected_links=$(printf '%s\n' \
-	/auth/v1/roles \
-	/auth/v1/groups \
-	/auth/v1/scopes \
-	/auth/v1/users/attr \
-	/auth/v1/api_keys)
-actual_links=$(tr '<' '\n' <"$admin_body" | sed -n 's/^[^>]*href="\([^"]*\)".*/\1/p')
-[ "$actual_links" = "$expected_links" ] || {
-	echo "admin links changed: $(printf '%s' "$actual_links" | tr '\n' ' ')" >&2
-	exit 1
-}
+[ "$admin_status" = 303 ] || { echo "admin status=$admin_status want 303" >&2; exit 1; }
+[ "$(header_value Location "$admin_headers")" = /auth/v1/admin/dashboard ] || exit 1
+# Follow the verified local destination and check the authenticated UI shell.
+dashboard_status=$(curl --max-time 5 --fail --silent --show-error --output "$admin_body" --write-out '%{http_code}' --cookie "$cookie_jar" "$base/auth/v1/admin/dashboard")
+[ "$dashboard_status" = 200 ] || { echo "dashboard status=$dashboard_status want 200" >&2; exit 1; }
+for page in dashboard users clients roles groups api-keys scopes attributes collections providers sessions events blacklist templates; do
+	grep -q "href=\"/auth/v1/admin/$page\"" "$admin_body" || { echo "dashboard missing $page navigation" >&2; exit 1; }
+done
 [ "$(header_value Cache-Control "$admin_headers")" = no-store ] || exit 1
-[ "$(header_value Content-Security-Policy "$admin_headers")" = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" ] || exit 1
+[ "$(header_value Content-Security-Policy "$admin_headers")" = "default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" ] || exit 1
 [ "$(header_value X-Frame-Options "$admin_headers")" = DENY ] || exit 1
 [ "$(header_value X-Content-Type-Options "$admin_headers")" = nosniff ] || exit 1
 [ "$(header_value Content-Type "$admin_headers")" = 'text/html; charset=utf-8' ] || exit 1

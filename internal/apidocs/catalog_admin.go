@@ -322,6 +322,11 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 		"client_id": openapi3.NewStringSchema().WithMinLength(2).WithMaxLength(256),
 		"light":     themeCSS, "dark": themeCSS, "border_radius": cssValue,
 	}, "client_id", "light", "dark", "border_radius")
+	brandAsset := add("GET", "/auth/v1/branding/{name}", "Read bundled brand assets", nil, nil, nil)
+	brandAsset.Responses.Status(200).Value.Content = openapi3.Content{}
+	for _, contentType := range []string{"text/css", "font/ttf", "font/woff2", "image/svg+xml"} {
+		brandAsset.Responses.Status(200).Value.Content[contentType] = &openapi3.MediaType{Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}
+	}
 	globalCSS := add("GET", "/auth/v1/theme/global.css", "Read shared theme styles", nil, nil, nil)
 	globalCSS.Responses.Status(200).Value.Content = openapi3.Content{"text/css": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}}
 	themePublic := add("GET", "/auth/v1/theme/{client_id}/{timestamp}", "Read public theme CSS", nil, nil, nil)

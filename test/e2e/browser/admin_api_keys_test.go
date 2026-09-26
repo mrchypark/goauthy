@@ -51,14 +51,16 @@ func TestAdminAPIKeysAcrossPods(t *testing.T) {
 	apiKeyStatus(t, keyClient, http.MethodGet, primary+"/auth/v1/groups", nil, keyHeader, http.StatusForbidden, "groups denied")
 	apiKeyStatus(t, keyClient, http.MethodGet, primary+"/auth/v1/scopes", nil, keyHeader, http.StatusForbidden, "claims denied after access reduction")
 
-	rotated := rotateAdminAPIKey(t, keyClient, tertiary, secret)
+	apiKeyStatus(t, keyClient, http.MethodPut, tertiary+"/auth/v1/api_keys/"+adminAPIKeyName+"/secret", nil, keyHeader, http.StatusForbidden, "API key cannot rotate credentials")
+	rotated := rotateAdminAPIKey(t, admin, tertiary, csrf, secret)
 	apiKeyStatus(t, keyClient, http.MethodGet, primary+"/auth/v1/roles", nil, keyHeader, http.StatusUnauthorized, "old key revoked after rotate")
 	rotatedHeader := map[string]string{"Authorization": "API-Key " + rotated}
 	apiKeyStatus(t, keyClient, http.MethodGet, secondary+"/auth/v1/roles", nil, rotatedHeader, http.StatusOK, "rotated key works")
 	apiKeyStatus(t, keyClient, http.MethodGet, primary+"/auth/v1/api_keys/"+adminAPIKeyName+"/test", nil, rotatedHeader, http.StatusOK, "key self test")
 	apiKeyStatus(t, keyClient, http.MethodGet, primary+"/auth/v1/api_keys/"+adminAPIKeyOtherName+"/test", nil, rotatedHeader, http.StatusForbidden, "key other test")
 
-	apiKeyStatus(t, keyClient, http.MethodDelete, tertiary+"/auth/v1/api_keys/"+adminAPIKeyName, nil, rotatedHeader, http.StatusOK, "key delete")
+	apiKeyStatus(t, keyClient, http.MethodDelete, tertiary+"/auth/v1/api_keys/"+adminAPIKeyName, nil, rotatedHeader, http.StatusForbidden, "API key cannot delete credentials")
+	apiKeyStatus(t, admin, http.MethodDelete, tertiary+"/auth/v1/api_keys/"+adminAPIKeyName, nil, rbacMutationHeaders(csrf), http.StatusOK, "browser key delete")
 	apiKeyStatus(t, keyClient, http.MethodGet, secondary+"/auth/v1/roles", nil, rotatedHeader, http.StatusUnauthorized, "deleted key rejected across pod")
 }
 
@@ -110,14 +112,14 @@ func updateAdminAPIKeyAccess(t *testing.T, client *http.Client, base, csrf strin
 	apiKeyStatus(t, client, http.MethodPut, base+"/auth/v1/api_keys/"+adminAPIKeyName, apiKeyJSON(t, map[string]any{"name": adminAPIKeyName, "access": access}), rbacMutationHeaders(csrf), http.StatusOK, "browser key access update")
 }
 
-func rotateAdminAPIKey(t *testing.T, client *http.Client, base, secret string) string {
+func rotateAdminAPIKey(t *testing.T, client *http.Client, base, csrf, secret string) string {
 	t.Helper()
-	response := do(t, client, http.MethodPut, base+"/auth/v1/api_keys/"+adminAPIKeyName+"/secret", nil, map[string]string{"Authorization": "API-Key " + secret})
+	response := do(t, client, http.MethodPut, base+"/auth/v1/api_keys/"+adminAPIKeyName+"/secret", nil, rbacMutationHeaders(csrf))
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1024))
 	response.Body.Close()
 	rotated := string(body)
 	if response.StatusCode != http.StatusOK || err != nil || !strings.HasPrefix(rotated, adminAPIKeyName+"$") || rotated == secret {
-		t.Fatalf("rotate API key status=%d changed=%t decode=%v", response.StatusCode, rotated != secret, err)
+		t.Fatalf("rotate API key status=%d changed=%t decode=%v", response.StatusCode, response.StatusCode == http.StatusOK && rotated != secret, err)
 	}
 	return rotated
 }

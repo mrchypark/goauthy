@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mrchypark/goauthy/internal/i18n"
 	"html/template"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
-//go:embed admin.html admin.css admin.js dashboard.js catalog.js sessions.js collections.js clients.js providers.js blacklist.js events.js templates.js
+//go:embed admin.html admin.css locale.js module_locale.js admin.js dashboard.js catalog.js sessions.js collections.js clients.js themes.js providers.js blacklist.js events.js templates.js
 var uiFS embed.FS
 
 type CSRFTokenProvider func(http.ResponseWriter, *http.Request) bool
@@ -34,6 +36,7 @@ type EmailTemplateProvider interface {
 
 type UI struct {
 	browserAdmin BrowserAdministrator
+	basePath     string
 	csrf         CSRFTokenProvider
 	templates    EmailTemplateProvider
 }
@@ -45,6 +48,28 @@ func NewUI(browserAdmin BrowserAdministrator) (*UI, error) {
 	return &UI{browserAdmin: browserAdmin}, nil
 }
 
+// SetIssuer configures links from the same validated issuer used by the router.
+func (u *UI) SetIssuer(issuer string) {
+	parsed, err := url.Parse(issuer)
+	if err == nil {
+		u.basePath = strings.TrimRight(parsed.EscapedPath(), "/")
+	}
+}
+
+func (u *UI) localPaths(data []byte) []byte {
+	if u.basePath == "" {
+		return data
+	}
+	text := string(data)
+	for _, quote := range []string{`"`, "'", "`"} {
+		for _, path := range []string{"/auth/v1/", "/account", "/oidc/"} {
+			text = strings.ReplaceAll(text, quote+path, quote+u.basePath+path)
+		}
+	}
+	text = strings.ReplaceAll(text, `href="/"`, `href="`+u.basePath+`/"`)
+	return []byte(text)
+}
+
 func (u *UI) SetCSRFTokenProvider(provider CSRFTokenProvider) { u.csrf = provider }
 func (u *UI) SetTemplateProvider(p EmailTemplateProvider)     { u.templates = p }
 
@@ -52,7 +77,7 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; frame-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	if r == nil || r.URL == nil || r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -62,7 +87,18 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
-	if !u.browserAdmin(w, r, false) {
+	// UI query strings select previews and filters, not authentication authority.
+	authRequest := r.Clone(r.Context())
+	authRequest.URL.RawQuery = ""
+	authRequest.URL.ForceQuery = false
+	htmlPage := wantsHTML(r) && !strings.HasSuffix(r.URL.Path, ".js") && !strings.HasSuffix(r.URL.Path, ".css") && r.URL.Path != "/auth/v1/admin/csrf" && !strings.HasPrefix(r.URL.Path, "/auth/v1/admin/email-templates")
+	if htmlPage {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	}
+	if !u.browserAdmin(w, authRequest, false) {
+		if htmlPage {
+			renderAccessPage(w, r, u.basePath)
+		}
 		return
 	}
 	if r.URL.Path == "/auth/v1/admin/csrf" {
@@ -83,9 +119,9 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/auth/v1/admin/app.js" {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		for _, name := range []string{"dashboard.js", "catalog.js", "sessions.js", "collections.js", "clients.js", "providers.js", "blacklist.js", "events.js", "templates.js", "admin.js"} {
+		for _, name := range []string{"locale.js", "module_locale.js", "dashboard.js", "catalog.js", "sessions.js", "collections.js", "clients.js", "themes.js", "providers.js", "blacklist.js", "events.js", "templates.js", "admin.js"} {
 			data, _ := uiFS.ReadFile(name)
-			_, _ = w.Write(data)
+			_, _ = w.Write(u.localPaths(data))
 			_, _ = w.Write([]byte("\n;\n"))
 		}
 		return
@@ -98,7 +134,11 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data, _ := uiFS.ReadFile("admin.html")
-	_, _ = w.Write(data)
+	language := i18n.UILanguageFromRequest(r)
+	w.Header().Set("Content-Language", language)
+	w.Header().Add("Vary", "Accept-Language")
+	w.Header().Add("Vary", "Cookie")
+	_, _ = w.Write(u.localPaths([]byte(strings.Replace(string(data), `<html lang="en">`, `<html lang="`+language+`" data-base-path="`+template.HTMLEscapeString(u.basePath)+`">`, 1))))
 }
 
 func (u *UI) handleEmailTemplateList(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +158,9 @@ func (u *UI) handleEmailTemplateList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (u *UI) handleEmailTemplatePreview(w http.ResponseWriter, r *http.Request) {
+	// Only the authenticated preview may be framed by this same-origin console.
+	w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'self'; form-action 'none'")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	typ := r.URL.Query().Get("type")
 	lang := r.URL.Query().Get("lang")
@@ -149,8 +192,8 @@ func (u *UI) handleEmailTemplatePreview(w http.ResponseWriter, r *http.Request) 
 	}
 	_, _ = fmt.Fprintf(w, `<!doctype html>
 <html><head><meta charset="utf-8"><title>Email Preview</title>
-<style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;margin:2em;background:#fff;color:#222}h1{font-size:1.4em}p{margin:.5em 0}footer{margin-top:2em;border-top:1px solid #ddd;padding-top:.5em;font-size:.9em;color:#666}</style>
-</head><body>
+<link rel="stylesheet" href="../admin.css"><link rel="stylesheet" href="../../branding/brand.css">
+</head><body class="email-preview">
 <h1>%s</h1>
 <p>%s</p>
 %s
@@ -163,7 +206,7 @@ func (u *UI) handleEmailTemplatePreview(w http.ResponseWriter, r *http.Request) 
 		template.HTMLEscapeString(info.Text),
 		func() string {
 			if info.ClickLink != "" {
-				return fmt.Sprintf("<p><a href=\"%s\" style=\"display:inline-block;padding:.5em 1em;background:#0066cc;color:#fff;text-decoration:none;border-radius:4px\">%s</a></p>", sampleURL, template.HTMLEscapeString(info.Button))
+				return fmt.Sprintf("<p><a href=\"%s\" class=\"button\">%s</a></p>", sampleURL, template.HTMLEscapeString(info.Button))
 			}
 			return ""
 		}(),
@@ -172,7 +215,7 @@ func (u *UI) handleEmailTemplatePreview(w http.ResponseWriter, r *http.Request) 
 		"2024-01-01T00:00:00Z",
 		func() string {
 			if typ == "otp" {
-				return fmt.Sprintf("<p style=\"font-size:2em;font-weight:bold;letter-spacing:0.1em;margin:1em 0\">%s</p>", template.HTMLEscapeString(sampleOTP))
+				return fmt.Sprintf("<p class=\"email-code\">%s</p>", template.HTMLEscapeString(sampleOTP))
 			}
 			return ""
 		}(),

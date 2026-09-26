@@ -1,6 +1,7 @@
 package account
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,7 +15,7 @@ import (
 func TestDashboardCurrentAccountBoundary(t *testing.T) {
 	t.Parallel()
 	h, sessions, _, cookie, csrf := testPasswordHandler(t)
-	for _, path := range []string{"/account", "/account/data", "/account/app.js", "/account/connections.js", "/account/connection-grants.js", "/account/devices.js", "/account/account.css"} {
+	for _, path := range []string{"/account", "/account/data", "/account/app.js", "/account/locale.js", "/account/connections.js", "/account/connection-grants.js", "/account/devices.js", "/account/account.css"} {
 		t.Run(path, func(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, path, nil)
 			r.AddCookie(cookie)
@@ -148,5 +149,35 @@ func TestDashboardConversionCapability(t *testing.T) {
 			read(false)
 			h.passkeys = service
 		})
+	}
+}
+
+func TestDashboardNavigationAndLanguage(t *testing.T) {
+	h, _, _, cookie, _ := testPasswordHandler(t)
+	h.issuer = "http://localhost/tenant"
+	cookie.Name, _ = browser.CookieName(h.issuer)
+	h.isAdmin = func(context.Context, string) (bool, error) { return true, nil }
+	r := httptest.NewRequest("GET", "/account", nil)
+	r.AddCookie(cookie)
+	r.AddCookie(&http.Cookie{Name: "goauthy_ui_locale", Value: "ko"})
+	w := httptest.NewRecorder()
+	h.Dashboard(w, r)
+	for _, value := range []string{`lang="ko"`, `href="/tenant/auth/v1/admin/dashboard"`, `data-language-select`} {
+		if !strings.Contains(w.Body.String(), value) {
+			t.Fatalf("status %d missing %s", w.Code, value)
+		}
+	}
+	h.isAdmin = func(context.Context, string) (bool, error) { return false, nil }
+	w = httptest.NewRecorder()
+	h.Dashboard(w, r)
+	if strings.Contains(w.Body.String(), `href="/tenant/auth/v1/admin/dashboard"`) {
+		t.Fatal("non-admin sees administrator link")
+	}
+	r = httptest.NewRequest("GET", "/account", nil)
+	r.Header.Set("Accept", "text/html")
+	w = httptest.NewRecorder()
+	h.Dashboard(w, r)
+	if w.Code != 303 || w.Header().Get("Location") != "/tenant/account/login" {
+		t.Fatal("anonymous browser has no sign-in path", w.Code, w.Header())
 	}
 }

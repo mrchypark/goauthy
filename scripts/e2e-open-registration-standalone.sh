@@ -209,6 +209,11 @@ stop_goauthy() {
 	pid=
 }
 start_goauthy
+if [ "${GOAUTHY_UI_PREVIEW:-0}" = 1 ]; then
+	printf 'GoAuthy UI preview: %s/\nStop with Ctrl-C; disposable data is removed on exit.\n' "$base_url"
+	wait "$pid"
+	exit 0
+fi
 if [ "${GOAUTHY_E2E_PROFILE_REVALIDATION:-}" = 1 ]; then
 	export GOAUTHY_E2E_URL="$base_url"
 	export GOAUTHY_E2E_SECONDARY_URL="$base_url"

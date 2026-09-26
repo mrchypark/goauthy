@@ -22,16 +22,16 @@ func TestUIServesSameOriginAssetsAndCSRFProvider(t *testing.T) {
 		_, _ = w.Write([]byte(`{"token":"test-token"}`))
 		return true
 	})
-	for _, path := range []string{"/auth/v1/admin/users", "/auth/v1/admin/clients", "/auth/v1/admin/collections", "/auth/v1/admin/app.js", "/auth/v1/admin/admin.css", "/auth/v1/admin/csrf"} {
+	for _, path := range []string{"/auth/v1/admin/users", "/auth/v1/admin/clients", "/auth/v1/admin/clients/test/theme", "/auth/v1/admin/collections", "/auth/v1/admin/app.js", "/auth/v1/admin/admin.css", "/auth/v1/admin/csrf"} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
-		if w.Code != http.StatusOK || strings.Contains(w.Header().Get("Content-Security-Policy"), "unsafe-") {
+		if w.Code != http.StatusOK || !strings.Contains(w.Header().Get("Content-Security-Policy"), "img-src 'self'") || strings.Contains(w.Header().Get("Content-Security-Policy"), "unsafe-") {
 			t.Fatalf("path=%s status=%d csp=%q", path, w.Code, w.Header().Get("Content-Security-Policy"))
 		}
 	}
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/auth/v1/admin/app.js", nil))
-	for _, function := range []string{"function catalog(", "function sessions(", "function collections(", "function clients(", "function route("} {
+	for _, function := range []string{"function catalog(", "function sessions(", "function collections(", "function clients(", "function clientTheme(", "function route("} {
 		if !strings.Contains(w.Body.String(), function) {
 			t.Fatalf("served bundle missing %s", function)
 		}
@@ -49,5 +49,69 @@ func TestUIRejectsAuthorizationHeader(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d", w.Code)
+	}
+}
+
+func TestEmailPreviewAllowsOnlySameOriginFraming(t *testing.T) {
+	h, _ := NewUI(func(http.ResponseWriter, *http.Request, bool) bool { return true })
+	for _, path := range []string{"/auth/v1/admin/email-templates/preview?type=password_reset&lang=en", "/auth/v1/admin/templates"} {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		frame, ancestor := "DENY", "frame-ancestors 'none'"
+		if strings.Contains(path, "/preview?") {
+			frame, ancestor = "SAMEORIGIN", "frame-ancestors 'self'"
+		}
+		if w.Header().Get("X-Frame-Options") != frame || !strings.Contains(w.Header().Get("Content-Security-Policy"), ancestor) || strings.Contains(w.Header().Get("Content-Security-Policy"), "unsafe-") {
+			t.Fatalf("path=%s headers=%v", path, w.Header())
+		}
+	}
+}
+
+func TestUIPresentationQueryDoesNotChangeAuthorization(t *testing.T) {
+	h, _ := NewUI(func(_ http.ResponseWriter, r *http.Request, mutation bool) bool {
+		if mutation || r.URL.RawQuery != "" || r.URL.ForceQuery {
+			t.Fatal("unexpected authorization context")
+		}
+		return true
+	})
+	r := httptest.NewRequest(http.MethodGet, "/auth/v1/admin/email-templates/preview?type=password_reset&lang=en", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusServiceUnavailable || r.URL.Query().Get("type") != "password_reset" {
+		t.Fatalf("preview parameters lost: status=%d query=%s", w.Code, r.URL.RawQuery)
+	}
+}
+
+func TestUILanguageAndIssuerNavigation(t *testing.T) {
+	h, _ := NewUI(func(http.ResponseWriter, *http.Request, bool) bool { return true })
+	h.SetIssuer("https://auth.test/tenant")
+	r := httptest.NewRequest("GET", "/auth/v1/admin/dashboard", nil)
+	r.AddCookie(&http.Cookie{Name: "goauthy_ui_locale", Value: "ko"})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	for _, value := range []string{`lang="ko"`, `data-base-path="/tenant"`, `href="/tenant/account"`, `href="/tenant/"`, `src="/tenant/auth/v1/branding/locale.js"`} {
+		if !strings.Contains(w.Body.String(), value) {
+			t.Fatalf("missing %s", value)
+		}
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest("GET", "/auth/v1/admin/app.js", nil))
+	if !strings.Contains(w.Body.String(), "/tenant/auth/v1/admin/csrf") {
+		t.Fatal("API request lost issuer path")
+	}
+}
+
+func TestUnauthorizedBrowserKeepsNavigationAndDenial(t *testing.T) {
+	h, _ := NewUI(func(w http.ResponseWriter, _ *http.Request, _ bool) bool { w.WriteHeader(401); return false })
+	h.SetIssuer("https://auth.test/tenant")
+	r := httptest.NewRequest("GET", "/auth/v1/admin/users", nil)
+	r.Header.Set("Accept", "text/html")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 401 || !strings.Contains(w.Body.String(), `href="/tenant/account/login"`) {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), `id="app"`) {
+		t.Fatal("denied user received admin UI")
 	}
 }

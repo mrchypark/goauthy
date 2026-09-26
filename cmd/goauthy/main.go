@@ -728,10 +728,12 @@ func run() (err error) {
 	if err != nil {
 		return fmt.Errorf("configure admin index: %w", err)
 	}
+	adminHandler.SetIssuer(issuer)
 	adminUI, err := admin.NewUI(browserAdmin)
 	if err != nil {
 		return fmt.Errorf("configure admin UI: %w", err)
 	}
+	adminUI.SetIssuer(issuer)
 	adminUI.SetCSRFTokenProvider(adminCSRFTokenProvider(issuer))
 	if emailTemplates, tplErr := recovery.LoadEmailTemplates(os.Getenv("GOAUTHY_EMAIL_TEMPLATES_FILE")); tplErr == nil {
 		adminUI.SetTemplateProvider(&emailTemplateAdapter{templates: emailTemplates})
@@ -903,6 +905,7 @@ func run() (err error) {
 	}
 	loginHandler.SetLockdownStore(lockdownStore)
 	loginHandler.SetApprovalForceMFA(bootstrapForceMFA)
+	loginHandler.SetRecoveryPages(recoveryService != nil, recoveryService != nil && openRegistration.Enabled)
 	deviceHandler.SetReauthentication(loginHandler.DeviceReviewReauthentication)
 	if err := loginHandler.SetUserValuesPolicy(userValuesPolicy); err != nil {
 		return fmt.Errorf("configure login user values policy: %w", err)
@@ -935,6 +938,25 @@ func run() (err error) {
 		return err
 	}
 	loginHandler.SetThemeURLResolver(themeStore.StylesheetURL)
+	loginHandler.SetLoginBrandingResolver(func(ctx context.Context, id string) (login.LoginBranding, error) {
+		theme, err := themeStore.GetFallback(ctx, id)
+		if err != nil {
+			return login.LoginBranding{}, err
+		}
+		var result login.LoginBranding
+		if theme.Login != nil {
+			result.English, result.Korean = theme.Login.CopyFor("en"), theme.Login.CopyFor("ko")
+		}
+		asset, err := clientLogoStore.GetFallback(ctx, id)
+		if err != nil && !errors.Is(err, branding.ErrLogoNotFound) {
+			return result, err
+		}
+		if err == nil {
+			issuerURL, _ := url.Parse(issuer)
+			result.LogoURL = strings.TrimRight(issuerURL.Path, "/") + "/auth/v1/clients/" + url.PathEscape(id) + "/logo?updated=" + strconv.FormatInt(asset.Updated, 10)
+		}
+		return result, nil
+	})
 	loginHandler.SetBrowserIDPolicy(browserIDPolicy)
 	loginHandler.SetLoginLocationObserver(notifyLoginLocation)
 	loginHandler.SetCaptchaSiteKey(captchaVerifier.SiteKey())
@@ -1064,13 +1086,12 @@ func run() (err error) {
 	}, func(ctx context.Context) error {
 		return storage.CheckDCRSoftwareStatementTrust(ctx, db, softwareStatementDigest, retirementMembers)
 	})
-	handler.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		_, _ = fmt.Fprintln(w, "GoAuthy")
-	})
-	handler.Handle("GET /favicon.ico", branding.Handler(favicon))
+	handler.Handle("GET /{$}", http.HandlerFunc(accountHandler.Home))
+	if favicon == nil {
+		handler.Handle("GET /favicon.ico", branding.DefaultFaviconHandler())
+	} else {
+		handler.Handle("GET /favicon.ico", branding.Handler(favicon))
+	}
 	mountWebIDRoutes(handler, webIDEnabled, webIDHandler)
 	discoveryOptions := oidc.DiscoveryOptions{PasswordGrantEnabled: identityStore != nil, RegistrationEnabled: registrationHandler != nil, ClientIDMetadataDocumentSupported: cimdResolver != nil}
 	handler.Handle("GET /.well-known/oauth-authorization-server", oidc.DiscoveryHandlerWithOptions(issuer, discoveryOptions))
@@ -1091,6 +1112,9 @@ func run() (err error) {
 		mountDCRRoutes(handler, registrationHandler)
 	}
 	mountDeviceRoutes(handler, deviceHandler)
+	accountLogin := loginHandler.AccountLoginHandler(bootstrapForceMFA)
+	handler.Handle("GET /account/login", accountLogin)
+	handler.Handle("POST /account/login", accountLogin)
 	deviceLogin := loginHandler.DeviceLoginHandler(bootstrapForceMFA)
 	handler.Handle("GET /oidc/device/login", deviceLogin)
 	handler.Handle("POST /oidc/device/login", deviceLogin)
@@ -1143,11 +1167,14 @@ func run() (err error) {
 	}
 	handler.Handle("GET /auth/v1/users/{subject}/revoke/{code}", recovery.NewLoginRevokeHandler(identityStore, keyring, locationLookup))
 	if recoveryService != nil {
+		handler.HandleFunc("GET /auth/v1/users/password_reset", recoveryService.Page)
+		handler.HandleFunc("GET /auth/v1/users/recovery.js", recoveryService.PageScript)
 		handler.HandleFunc("POST /auth/v1/users/request_reset", recoveryService.RequestReset)
 		handler.HandleFunc("GET /auth/v1/users/{subject}/reset/{token}", recoveryService.GetReset)
 		handler.HandleFunc("PUT /auth/v1/users/{subject}/reset", recoveryService.PutReset)
 		handler.HandleFunc("POST /auth/v1/pow", recoveryService.ProofOfWork)
 		if openRegistration.Enabled {
+			handler.HandleFunc("GET /auth/v1/users/register", recoveryService.Page)
 			handler.HandleFunc("POST /auth/v1/users/register", recoveryService.RegisterOpen)
 			handler.HandleFunc("OPTIONS /auth/v1/users/register", recoveryService.RegisterOpen)
 		}
@@ -1270,6 +1297,7 @@ func run() (err error) {
 	handler.HandleFunc("GET /auth/v1/clients/{id}/login-restriction", rbacHandler.LoginRestriction)
 	handler.HandleFunc("PUT /auth/v1/clients/{id}/login-restriction", rbacHandler.LoginRestriction)
 	handler.Handle("GET /auth/v1/theme/global.css", branding.GlobalCSSHandler())
+	handler.Handle("GET /auth/v1/branding/{name}", branding.BrandAssetHandler())
 	handler.HandleFunc("GET /auth/v1/theme/{client_id}/{timestamp}", themeHandler.Theme)
 	handler.HandleFunc("POST /auth/v1/theme/{client_id}", themeHandler.Theme)
 	handler.HandleFunc("PUT /auth/v1/theme/{client_id}", themeHandler.Theme)
@@ -1286,6 +1314,7 @@ func run() (err error) {
 	handler.HandleFunc("GET /account", accountHandler.Dashboard)
 	handler.HandleFunc("GET /account/data", accountHandler.Dashboard)
 	handler.HandleFunc("GET /account/app.js", accountHandler.Dashboard)
+	handler.HandleFunc("GET /account/locale.js", accountHandler.Dashboard)
 	handler.HandleFunc("GET /account/connections.js", accountHandler.Dashboard)
 	handler.HandleFunc("GET /account/connection-grants.js", accountHandler.Dashboard)
 	handler.HandleFunc("GET /account/devices.js", accountHandler.Dashboard)
@@ -1306,7 +1335,7 @@ func run() (err error) {
 
 	// --- Metrics server (opt-in, disabled by default) -----------------------
 	var metricsServer *http.Server
-	var appHandler http.Handler = handler
+	var appHandler http.Handler = branding.BrowserPageErrors(issuer, handler)
 	if geoConfig.Enabled {
 		appHandler = geoblock.Middleware(geoConfig.Policy, geoConfig.Header, trustedProxies, geoReader, appHandler)
 	}

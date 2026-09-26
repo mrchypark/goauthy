@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GoAuthy administration</title>
-</head>
+  <title>GoAuthy administration</title><link rel="stylesheet" href="/auth/v1/admin/admin.css">
+<link rel="stylesheet" href="/auth/v1/branding/brand.css"></head>
 <body>
   <main>
-    <h1>GoAuthy administration</h1>
-    <nav aria-label="Administration">
+    <p class="brand-lockup"><i class="brand-symbol" aria-hidden="true"></i>GoAuthy</p><h1>Administration</h1><p class="lede">Manage identities, applications and access.</p>
+    <nav class="index-nav" aria-label="Administration">
       <ul>
         {{range .Routes}}<li><a href="{{.Path}}">{{.Label}}</a></li>{{end}}
       </ul>

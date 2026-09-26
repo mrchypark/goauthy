@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 var (
@@ -32,10 +33,37 @@ type ThemeCSS struct {
 }
 
 type Theme struct {
-	ClientID     string   `json:"client_id"`
-	Light        ThemeCSS `json:"light"`
-	Dark         ThemeCSS `json:"dark"`
-	BorderRadius string   `json:"border_radius"`
+	ClientID     string           `json:"client_id"`
+	Light        ThemeCSS         `json:"light"`
+	Dark         ThemeCSS         `json:"dark"`
+	BorderRadius string           `json:"border_radius"`
+	Login        *LoginAppearance `json:"login,omitempty"`
+}
+
+type LoginAppearance struct {
+	Copy          map[string]LoginCopy `json:"copy,omitempty"`
+	LogoAlignment string               `json:"logo_alignment,omitempty"`
+	CardWidth     int                  `json:"card_width,omitempty"`
+}
+
+type LoginCopy struct {
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	Button      string `json:"button,omitempty"`
+}
+
+func (a LoginAppearance) CopyFor(language string) LoginCopy {
+	copy, fallback := a.Copy[language], a.Copy["en"]
+	if copy.Title == "" {
+		copy.Title = fallback.Title
+	}
+	if copy.Description == "" {
+		copy.Description = fallback.Description
+	}
+	if copy.Button == "" {
+		copy.Button = fallback.Button
+	}
+	return copy
 }
 
 func DefaultTheme(clientID string) Theme {
@@ -81,6 +109,16 @@ func (t Theme) Validate() error {
 	}
 	if !validCSSValue(t.BorderRadius) {
 		return ErrInvalidTheme
+	}
+	if t.Login != nil {
+		if (t.Login.LogoAlignment != "" && t.Login.LogoAlignment != "start" && t.Login.LogoAlignment != "center") || (t.Login.CardWidth != 0 && (t.Login.CardWidth < 320 || t.Login.CardWidth > 640)) {
+			return ErrInvalidTheme
+		}
+		for language, copy := range t.Login.Copy {
+			if (language != "en" && language != "ko") || utf8.RuneCountInString(copy.Title) > 120 || utf8.RuneCountInString(copy.Description) > 500 || utf8.RuneCountInString(copy.Button) > 60 {
+				return ErrInvalidTheme
+			}
+		}
 	}
 	return nil
 }
@@ -141,6 +179,17 @@ func (t Theme) CSS() string {
 	appendThemeCSS(&css, t.Light)
 	css.WriteString("}")
 	css.WriteString("}")
+	if t.Login != nil {
+		if t.Login.CardWidth != 0 {
+			width := strconv.Itoa(t.Login.CardWidth)
+			css.WriteString("body.auth-page .auth-panel{width:min(100%,640px);max-width:")
+			css.WriteString(width)
+			css.WriteString("px}")
+		}
+		if t.Login.LogoAlignment == "center" {
+			css.WriteString("body.auth-page .auth-topbar .auth-brand{margin-inline:auto}")
+		}
+	}
 	return css.String()
 }
 
