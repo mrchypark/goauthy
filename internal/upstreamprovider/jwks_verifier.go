@@ -9,8 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math/big"
 	"mime"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -270,23 +273,29 @@ func publicKeyForAlgorithm(key interface{}, algorithm string) bool {
 
 func decodeIDTokenClaims(payload []byte) (*IDTokenClaims, error) {
 	var raw struct {
-		Issuer        string          `json:"iss"`
-		Subject       string          `json:"sub"`
-		SessionID     string          `json:"sid"`
-		Audience      json.RawMessage `json:"aud"`
-		Azp           string          `json:"azp"`
-		Nonce         string          `json:"nonce"`
-		ExpiresAt     int64           `json:"exp"`
-		IssuedAt      int64           `json:"iat"`
-		NotBefore     int64           `json:"nbf"`
-		Email         *string         `json:"email"`
-		EmailVerified *bool           `json:"email_verified"`
-		GivenName     *string         `json:"given_name"`
-		FamilyName    *string         `json:"family_name"`
+		Issuer             string          `json:"iss"`
+		Subject            string          `json:"sub"`
+		SessionID          string          `json:"sid"`
+		Audience           json.RawMessage `json:"aud"`
+		Azp                string          `json:"azp"`
+		Nonce              string          `json:"nonce"`
+		ExpiresAt          int64           `json:"exp"`
+		IssuedAt           int64           `json:"iat"`
+		AuthenticationTime json.RawMessage `json:"auth_time"`
+		NotBefore          int64           `json:"nbf"`
+		Email              *string         `json:"email"`
+		EmailVerified      *bool           `json:"email_verified"`
+		GivenName          *string         `json:"given_name"`
+		FamilyName         *string         `json:"family_name"`
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return nil, err
 	}
+	authenticationTime, err := authenticationTimeSeconds(raw.AuthenticationTime)
+	if err != nil {
+		return nil, err
+	}
+
 	var audience []string
 	if json.Unmarshal(raw.Audience, &audience) != nil {
 		var one string
@@ -303,9 +312,36 @@ func decodeIDTokenClaims(payload []byte) (*IDTokenClaims, error) {
 	return &IDTokenClaims{
 		Issuer: raw.Issuer, Subject: raw.Subject, SessionID: raw.SessionID,
 		Audience: audience, Azp: raw.Azp, Nonce: raw.Nonce,
-		ExpiresAt: raw.ExpiresAt, IssuedAt: raw.IssuedAt, NotBefore: raw.NotBefore,
+		ExpiresAt: raw.ExpiresAt, IssuedAt: raw.IssuedAt, NotBefore: raw.NotBefore, AuthenticationTime: authenticationTime,
 		Email: raw.Email, EmailVerified: raw.EmailVerified,
 		GivenName: raw.GivenName, FamilyName: raw.FamilyName,
 		rawClaims: rawClaims,
 	}, nil
+}
+
+// authenticationTimeSeconds normalizes the already JSON-validated NumericDate
+// exactly. Bounds prevent compact extreme exponents from allocating large powers.
+func authenticationTimeSeconds(raw json.RawMessage) (int64, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0, nil
+	}
+	if len(raw) > 1024 {
+		return 0, ErrIDTokenVerification
+	}
+	number := string(raw)
+	if i := strings.IndexAny(number, "eE"); i >= 0 {
+		exponent, err := strconv.ParseInt(number[i+1:], 10, 32)
+		if err != nil || exponent < -1024 || exponent > 1024 {
+			return 0, ErrIDTokenVerification
+		}
+	}
+	value, ok := new(big.Rat).SetString(number)
+	if !ok {
+		return 0, ErrIDTokenVerification
+	}
+	seconds := new(big.Int).Div(value.Num(), value.Denom())
+	if !seconds.IsInt64() {
+		return 0, ErrIDTokenVerification
+	}
+	return seconds.Int64(), nil
 }

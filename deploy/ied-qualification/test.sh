@@ -169,7 +169,7 @@ if ! yq -e 'select(.kind == "NetworkPolicy" and .metadata.name == "goauthy-qual-
 fi
 
 # --- Forbidden content ---
-if grep -E -n 'volumeClaimTemplates|kind: Job|kind: PersistentVolumeClaim|name: minio|CHANGEME|TODO' "$render"; then
+if grep -E -n 'volumeClaimTemplates|kind: Job|kind: PersistentVolumeClaim|name: versity|CHANGEME|TODO' "$render"; then
 	echo "qualification render contains a forbidden resource or placeholder" >&2; exit 1
 fi
 

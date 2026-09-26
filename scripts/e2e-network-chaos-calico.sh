@@ -74,12 +74,12 @@ kubectl --context "$context" -n "$namespace" create secret generic goauthy-secre
 	--from-literal=bootstrap-user-password-phc="$bootstrap_user_phc" \
 	--from-literal=rhiza-admin-token=goauthy-e2e-admin-token \
 	--from-literal='rhiza-members=[{"node_id":"goauthy-0","peer_url":"quic://goauthy-0.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-0-token"},{"node_id":"goauthy-1","peer_url":"quic://goauthy-1.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-1-token"},{"node_id":"goauthy-2","peer_url":"quic://goauthy-2.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-2-token"}]' \
-	--from-literal=minio-root-user=goauthy-e2e \
-	--from-literal=minio-root-password=goauthy-e2e-minio-password \
+	--from-literal=versity-root-user=goauthy-e2e \
+	--from-literal=versity-root-password=goauthy-e2e-versity-password \
 	--dry-run=client -o yaml | kubectl --context "$context" apply -f -
 kubectl --context "$context" apply -k deploy/k8s
-kubectl --context "$context" -n "$namespace" rollout status statefulset/minio --timeout=3m
-kubectl --context "$context" -n "$namespace" wait --for=condition=complete job/minio-init --timeout=3m
+kubectl --context "$context" -n "$namespace" rollout status statefulset/versity --timeout=3m
+kubectl --context "$context" -n "$namespace" wait --for=condition=complete job/versity-init --timeout=3m
 kubectl --context "$context" -n "$namespace" rollout status statefulset/goauthy --timeout=5m
 
 forward_status() {

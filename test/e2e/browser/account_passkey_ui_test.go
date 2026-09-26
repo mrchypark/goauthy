@@ -20,6 +20,7 @@ import (
 	cdpwebauthn "github.com/chromedp/cdproto/webauthn"
 	"github.com/chromedp/chromedp"
 	accountbrowser "github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/device"
 )
 
 // TestAccountPasskeyUIAcrossPods exercises the ordinary user's shipped
@@ -29,7 +30,7 @@ func TestAccountPasskeyUIAcrossPods(t *testing.T) {
 	if os.Getenv("GOAUTHY_E2E_ACCOUNT_PASSKEY_UI") != "1" {
 		t.Skip("set GOAUTHY_E2E_ACCOUNT_PASSKEY_UI=1 to run account passkey UI E2E")
 	}
-	primary, secondary, adminUser, adminPassword, _ := browserE2EConfig(t)
+	primary, secondary, adminUser, adminPassword, clientSecret := browserE2EConfig(t)
 	tertiary := requiredE2EURL(t, "GOAUTHY_E2E_TERTIARY_URL")
 	nodes := []string{primary, secondary, tertiary}
 	admin := newBrowserClient(t)
@@ -110,6 +111,76 @@ func TestAccountPasskeyUIAcrossPods(t *testing.T) {
 	if err := chromedp.Run(auth.ctx, chromedp.Navigate(secondary+"/account"), chromedp.WaitVisible(`#passkeys-list`), chromedp.Poll(`document.querySelector('#passkeys-list')?.textContent?.includes('Second UI key') && !document.querySelector('#passkeys-list')?.textContent?.includes('First UI key')`, nil)); err != nil {
 		t.Fatalf("secondary account passkey list: %v", err)
 	}
+
+	if os.Getenv("GOAUTHY_E2E_DEVICE_LOGIN_FLOW") == "1" {
+		checkDeviceApprovalLoginUI(t, auth.ctx, primary, secondary, email, password, clientSecret, user.ID)
+		// Restore the account session promoted to MFA by UV registration only
+		// for conversion. The next login helper clears every browser cookie.
+		setPasskeyBrowserCookies(t, auth.ctx, primary, ordinary.Jar.Cookies(mustE2EURL(t, primary+"/account/")))
+		dialogReply.Store("Turn off password sign-in for this account?")
+		if err := chromedp.Run(auth.ctx, chromedp.Navigate(primary+"/account"),
+			chromedp.Poll(`document.querySelector('#passwordless-convert')?.disabled === false`, nil),
+			chromedp.Click(`#passwordless-convert`),
+			chromedp.Poll(`document.querySelector('#passwordless-status')?.textContent === 'Password sign-in disabled.'`, nil),
+		); err != nil {
+			t.Fatalf("Device passkey-only fixture conversion: %v", err)
+		}
+		assertAccountFeatures(t, ordinary, primary, user.ID, false)
+		assertPasswordLogin(t, primary, secondary, email, "device-converted-password", password, http.StatusUnauthorized)
+		dialogReply.Store("")
+		checkDeviceApprovalLoginUI(t, auth.ctx, primary, secondary, email, "", clientSecret, user.ID)
+	}
+}
+
+// Reuse the credential registered through the account UI, but remove all browser
+// sessions so each approval entry must authenticate afresh. An empty password
+// selects the real WebAuthn ceremony; otherwise use the native password form.
+func checkDeviceApprovalLoginUI(t *testing.T, ctx context.Context, primary, secondary, username, password, secret, expectedSubject string) {
+	t.Helper()
+	client := newBrowserClient(t)
+	grant := startDeviceAuthorizationOffline(t, client, primary, "goauthy-dev", secret)
+	login := chromedp.Tasks{chromedp.Click(`#passkey-btn`)}
+	if password != "" {
+		login = chromedp.Tasks{chromedp.SetValue(`input[name="password"]`, password), chromedp.Click(`#login-form button[type="submit"]`)}
+	}
+	var reviewedCode string
+	if err := chromedp.Run(ctx,
+		network.ClearBrowserCookies(),
+		chromedp.Navigate(grant.VerificationURIComplete),
+		chromedp.WaitVisible(`#passkey-btn`),
+		chromedp.SetValue(`input[name="username"]`, username),
+		login,
+		chromedp.WaitVisible(`button[name="action"][value="approve"]`),
+		chromedp.Value(`input[name="user_code"]`, &reviewedCode),
+	); err != nil {
+		t.Fatalf("cold Device approval login: %v", err)
+	}
+	if device.NormalizeUserCode(reviewedCode) != device.NormalizeUserCode(grant.UserCode) {
+		t.Fatal("login changed the Device approval target")
+	}
+	assertDeviceTokenError(t, client, secondary, secret, grant.DeviceCode, "authorization_pending")
+	// RFC 8628 requires the returned polling interval even after user approval.
+	nextPoll := time.NewTimer(time.Duration(grant.Interval+1) * time.Second)
+	defer nextPoll.Stop()
+	if err := chromedp.Run(ctx,
+		chromedp.Click(`button[name="action"][value="approve"]`),
+		chromedp.WaitVisible(`//pre[normalize-space(.)='Device approved']`, chromedp.BySearch),
+	); err != nil {
+		t.Fatalf("explicit Device approval: %v", err)
+	}
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-nextPoll.C:
+	}
+	tokens := deviceToken(t, client, secondary, secret, grant.DeviceCode)
+	if tokens.AccessToken == "" || tokens.RefreshToken == "" {
+		t.Fatal("approved Device did not issue tokens")
+	}
+	if tokenSubject(t, client, secondary, secret, tokens.AccessToken) != expectedSubject {
+		t.Fatal("Device token belongs to a different account")
+	}
+	assertDeviceTokenError(t, client, secondary, secret, grant.DeviceCode, "expired_token")
 }
 
 func requiredE2EURL(t *testing.T, name string) string {

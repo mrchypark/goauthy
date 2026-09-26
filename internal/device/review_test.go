@@ -2,6 +2,8 @@ package device
 
 import (
 	"errors"
+	"github.com/mrchypark/goauthy/internal/storage"
+	"github.com/mrchypark/rhiza"
 	"testing"
 	"time"
 )
@@ -64,5 +66,45 @@ func TestReviewRejectsUnavailableCodes(t *testing.T) {
 		if _, err := store.Review(ctx, code, now); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("code=%q error=%v", code, err)
 		}
+	}
+}
+
+func TestReviewUsesCurrentMFAAndOriginalClientGeneration(t *testing.T) {
+	t.Parallel()
+	ctx, store, db := testStore(t)
+	now := time.UnixMilli(1_700_000_000_000).UTC()
+	seedManagedBinding(t, ctx, store, "review-client", "gen-a", 1, 1)
+	grant, err := store.CreateWithBinding(ctx, "review-client", nil, ClientBinding{ID: "review-client", Generation: "gen-a", Revision: 1}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := store.Review(ctx, grant.UserCode, now)
+	if err != nil || initial.ForceMFA {
+		t.Fatalf("initial=%+v err=%v", initial, err)
+	}
+	for _, tc := range []struct {
+		name, update   string
+		available, mfa bool
+	}{
+		{"tighten", "force_mfa=1,revision=2", true, true},
+		{"relax", "force_mfa=0,revision=3", true, false},
+		{"disable", "enabled=0", false, false},
+		{"enable", "enabled=1", true, false},
+		{"delete", "deleted=1", false, false},
+		{"replace", "deleted=0,generation='gen-b'", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "review-policy-" + tc.name, SQL: "UPDATE managed_oauth_clients SET " + tc.update + " WHERE id='review-client'"}); err != nil {
+				t.Fatal(err)
+			}
+			review, err := store.Review(ctx, grant.UserCode, now)
+			if tc.available {
+				if err != nil || review.ForceMFA != tc.mfa {
+					t.Fatalf("review=%+v err=%v", review, err)
+				}
+			} else if !errors.Is(err, ErrInvalid) {
+				t.Fatalf("unavailable review err=%v", err)
+			}
+		})
 	}
 }

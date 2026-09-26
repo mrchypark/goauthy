@@ -587,7 +587,11 @@ func primaryOrigin(t *testing.T, baseURL string) string {
 	if issuer == "" {
 		issuer = baseURL
 	}
-	return issuer
+	parsed, err := url.Parse(issuer)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		t.Fatalf("invalid E2E issuer %q", issuer)
+	}
+	return parsed.Scheme + "://" + parsed.Host
 }
 
 func deviceWait(t *testing.T, seconds int) {
@@ -2506,5 +2510,16 @@ func TestHiddenInputValue(t *testing.T) {
 	value, ok := hiddenInputValue(`<input value="token-value" type="hidden" name="interaction">`, "interaction")
 	if !ok || value != "token-value" {
 		t.Fatalf("value=%q ok=%t", value, ok)
+	}
+}
+
+func TestPrimaryOriginOmitsIssuerPath(t *testing.T) {
+	t.Setenv("GOAUTHY_E2E_URL", "http://localhost:18194/identity")
+	if got := primaryOrigin(t, "http://unused.test"); got != "http://localhost:18194" {
+		t.Fatalf("origin=%q", got)
+	}
+	t.Setenv("GOAUTHY_E2E_URL", "")
+	if got := primaryOrigin(t, "https://example.test/tenant"); got != "https://example.test" {
+		t.Fatalf("fallback origin=%q", got)
 	}
 }

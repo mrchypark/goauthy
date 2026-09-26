@@ -12,7 +12,7 @@ command -v kustomize >/dev/null || {
 
 kustomize build "$root/deploy/k8s" >"$render"
 
-# Return only the named YAML document.  Kustomize renders MinIO alongside
+# Return only the named YAML document.  Kustomize renders VersityGW alongside
 # GoAuthy, so assertions must not accidentally match another StatefulSet or
 # policy.
 resource_block() {

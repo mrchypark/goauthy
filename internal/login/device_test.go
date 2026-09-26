@@ -97,8 +97,8 @@ func TestDeviceLoginRejectsCSRFAndForcedPasswordDowngrade(t *testing.T) {
 	forcePost.AddCookie(forceCookie)
 	response = httptest.NewRecorder()
 	force.DeviceLoginHandler(true).ServeHTTP(response, forcePost)
-	if response.Code != http.StatusForbidden {
-		t.Fatalf("forced password POST status=%d", response.Code)
+	if response.Code != http.StatusNotAcceptable || len(response.Result().Cookies()) != 0 {
+		t.Fatalf("unenrolled forced-MFA password POST status=%d", response.Code)
 	}
 }
 
@@ -123,7 +123,7 @@ func TestDeviceLoginFormActionDropsGETQueryAndBlankCodeRedirectsWithoutApproval(
 	get.RemoteAddr = "203.0.113.8:1234"
 	w := httptest.NewRecorder()
 	h.DeviceLoginHandler(false).ServeHTTP(w, get)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `action="login"`) || strings.Contains(w.Body.String(), "user_code=") {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `action="/oidc/device/login"`) || strings.Contains(w.Body.String(), "user_code=") {
 		t.Fatalf("blank-code form status=%d body=%s", w.Code, w.Body.String())
 	}
 	cookie := w.Result().Cookies()[0]

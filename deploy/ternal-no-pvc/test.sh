@@ -40,7 +40,7 @@ for key in master-key-ternal-1 oauth-hmac bootstrap-client bootstrap-user-passwo
 	test "$(yq -r "$statefulset | .spec.template.spec.volumes[] | select(.name == \"secrets\") | .secret.items[] | select(.key == \"$key\") | .key" "$render")" = "$key"
 done
 
-if grep -E -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: minio|image: .*:latest|<[^>]+>|CHANGEME|TODO' "$render"; then
+if grep -E -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: versity|image: .*:latest|<[^>]+>|CHANGEME|TODO' "$render"; then
 	echo "Ternal no-PVC render contains a forbidden resource or placeholder" >&2
 	exit 1
 fi
@@ -65,7 +65,7 @@ if grep -E -n 'GOAUTHY_RHIZA_(PEER|MEMBERS|ADMIN)|name: peer|targetPort: peer|co
 	echo "Ternal standalone render retains a cluster-only peer setting" >&2
 	exit 1
 fi
-if grep -E -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: minio|image: .*:latest|<[^>]+>|CHANGEME|TODO' "$standalone_render"; then
+if grep -E -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: versity|image: .*:latest|<[^>]+>|CHANGEME|TODO' "$standalone_render"; then
 	echo "Ternal standalone render contains a forbidden resource or placeholder" >&2
 	exit 1
 fi
@@ -83,7 +83,7 @@ if yq -e "$gcs_statefulset | .spec.template.spec.containers[0].env[] | select(.n
 	echo "Ternal GCS standalone render retains S3 configuration" >&2
 	exit 1
 fi
-if grep -E -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: minio|s3-access-key|s3-secret-key|service-account\.json|GOOGLE_APPLICATION_CREDENTIALS' "$gcs_standalone_render"; then
+if grep -E -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: versity|s3-access-key|s3-secret-key|service-account\.json|GOOGLE_APPLICATION_CREDENTIALS' "$gcs_standalone_render"; then
 	echo "Ternal GCS standalone render contains a forbidden storage fallback" >&2
 	exit 1
 fi
@@ -102,7 +102,7 @@ if yq -e "$gcs_ha_statefulset | .spec.template.spec.containers[0].env[] | select
 	echo "Ternal GCS HA render retains S3 configuration" >&2
 	exit 1
 fi
-if grep -E -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: minio|s3-access-key|s3-secret-key|service-account\.json|GOOGLE_APPLICATION_CREDENTIALS' "$gcs_ha_render"; then
+if grep -E -n 'volumeClaimTemplates|kind: (Job|PersistentVolumeClaim)|name: versity|s3-access-key|s3-secret-key|service-account\.json|GOOGLE_APPLICATION_CREDENTIALS' "$gcs_ha_render"; then
 	echo "Ternal GCS HA render contains a forbidden storage fallback" >&2
 	exit 1
 fi

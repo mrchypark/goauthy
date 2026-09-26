@@ -35,8 +35,9 @@ each recovery.
 This is a fixed **three-voter embedded Rhiza HA profile**. Each StatefulSet pod
 uses its own PVC and its pod name as `NodeID`; all three receive the same,
 ordered `quic://goauthy-{0,1,2}.goauthy.goauthy.svc.cluster.local:8444` member
-list. A namespace-local MinIO StatefulSet supplies the shared S3-compatible
-checkpoint store and the app chooses Rhiza `before-ack` durability. The MinIO
+list. A namespace-local VersityGW StatefulSet with a POSIX backend supplies
+the shared S3-compatible checkpoint store, and the app chooses Rhiza
+`before-ack` durability. The service is named `versity`. The object-store
 credentials are throwaway E2E secrets, not a production object-store pattern.
 
 This documents the HA topology; the exact-three base HA gate is verified.
@@ -49,7 +50,7 @@ e2e-kind-backup-restore`. It first writes a sentinel token, gracefully stops
 one orphaned pod while two voters remain so Rhiza can publish a certified
 checkpoint, then stops the other pods and exports the complete
 `goauthy-e2e/goauthy-e2e` object-store prefix. The restore uses a new Kind
-cluster with fresh MinIO and GoAuthy storage, restores the prefix before
+cluster with fresh VersityGW and GoAuthy storage, restores the prefix before
 starting GoAuthy, and re-creates the identical member/cluster secrets. It
 checks `archive/head.bin`, `checkpoint/CURRENT`, the immutable root and all
 referenced checkpoint blocks, then verifies the sentinel token, JWKS `kid`, and

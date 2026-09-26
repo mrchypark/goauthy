@@ -117,6 +117,10 @@ OAuth 상태 응답은 `connected`, `state`, `version`, `provider_id`, `account_
 `scopes`다. credential이 없으면 `draft`, version 0이다. 그 외 `ready`, `refreshing`,
 `uncertain`, `revoked`, `reconnecting`을 반환한다. `connected`는 저장 상태가 ready라는 뜻이며
 access token의 현재 유효성이나 외부 서비스 가용성을 보증하지 않는다.
+`refreshing`을 무한 대기하지 않는다. 동일 grant/version을 처음 관찰한 시점부터
+최대 1분 동안 5초보다 자주 조회하지 않고, 계속 같은 상태면 owner 해제·재연결로
+안내한다. 이 시간은 claim 만료나 자동 재시도 허가가 아니다. 비밀을 제외한 관찰
+기록과 충돌 처리 절차는 [중단된 갱신 복구](connection-use-grants.md#interrupted-refresh-recovery)를 따른다.
 비활성 컬렉션/provider도 owner가 확인·해제할 수 있다. 사용자 자체가 비활성화되거나
 현재 session이 무효하면 접근할 수 없다. scopes는 비어 있어도 배열이며 비밀은 없다.
 

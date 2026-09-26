@@ -35,25 +35,24 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: wait-for-rhiza-bucket
-          image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+          image: curlimages/curl:8.16.0
           command: ["/bin/sh", "-ec"]
           args:
             - >-
-              until mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" &&
-              mc stat local/rhiza >/dev/null; do sleep 2; done
+              until curl -fsSI --aws-sigv4 aws:amz:us-east-1:s3
+              --user "$VERSITY_ROOT_USER:$VERSITY_ROOT_PASSWORD" http://versity:9000/rhiza >/dev/null 2>&1;
+              do sleep 2; done
           env:
-            - name: MC_CONFIG_DIR
-              value: /tmp/.mc
-            - name: MINIO_ROOT_USER
+            - name: VERSITY_ROOT_USER
               valueFrom:
                 secretKeyRef:
                   name: goauthy-secrets
-                  key: minio-root-user
-            - name: MINIO_ROOT_PASSWORD
+                  key: versity-root-user
+            - name: VERSITY_ROOT_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: goauthy-secrets
-                  key: minio-root-password
+                  key: versity-root-password
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -69,9 +68,6 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
-          volumeMounts:
-            - name: mc-tmp
-              mountPath: /tmp
       containers:
         - name: goauthy
           image: goauthy:e2e
@@ -114,7 +110,7 @@ spec:
                   name: goauthy-secrets
                   key: rhiza-admin-token
             - name: GOAUTHY_RHIZA_OBJECT_STORE_ENDPOINT
-              value: minio.goauthy.svc.cluster.local:9000
+              value: versity.goauthy.svc.cluster.local:9000
             - name: GOAUTHY_RHIZA_OBJECT_STORE_INSECURE
               value: "true"
             - name: GOAUTHY_RHIZA_OBJECT_STORE_BUCKET
@@ -127,12 +123,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: goauthy-secrets
-                  key: minio-root-user
+                  key: versity-root-user
             - name: GOAUTHY_RHIZA_OBJECT_STORE_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: goauthy-secrets
-                  key: minio-root-password
+                  key: versity-root-password
             - name: GOAUTHY_DATA_DIR
               value: /var/lib/goauthy
             - name: GOAUTHY_MASTER_KEY_DIR
@@ -254,8 +250,6 @@ spec:
               mountPath: /run/backchannel-ca
               readOnly: true
       volumes:
-        - name: mc-tmp
-          emptyDir: {}
         - name: secrets
           secret:
             secretName: goauthy-secrets

@@ -754,3 +754,84 @@ func TestProfileMaxAgeZeroDeterministicDelayPreservesSession(t *testing.T) {
 		t.Fatalf("session ID changed: before=%s after=%s", sessionBefore.ID, sessionAfter.ID)
 	}
 }
+
+func TestApprovalProfileContinuationReturnsToReviewWithoutOAuth(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, entry, action, destination string }{
+		{"device", "/oidc/device/login?user_code=AB12-CD34", "/oidc/device/login", "/oidc/device/verify?user_code=AB12CD34"},
+		{"handoff", "/account/connection-login?handoff_id=" + testHandoffID, "/account/connection-login", "/account/connection-handoffs/" + testHandoffID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, db := testHandlerWithDB(t, false)
+			ctx := context.Background()
+			if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "approval-profile-email", SQL: "INSERT INTO identity_recovery_emails(subject,email) VALUES('user-1','alice@example.test')"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.SetUserValuesPolicy(identity.UserValuesPolicy{RevalidateDuringLogin: true, GivenName: "required"}); err != nil {
+				t.Fatal(err)
+			}
+			handler := h.DeviceLoginHandler(false)
+			if tc.name == "handoff" {
+				handler = h.ConnectionHandoffLoginHandler(false)
+			}
+			page := httptest.NewRecorder()
+			handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, tc.entry, nil))
+			if page.Code != http.StatusOK {
+				t.Fatalf("entry=%d", page.Code)
+			}
+			cookie := page.Result().Cookies()[0]
+			token := interactionToken(t, page.Body.String())
+			csrf := fedCMCSRFPattern.FindStringSubmatch(page.Body.String())
+			if len(csrf) != 2 {
+				t.Fatal("missing csrf")
+			}
+			values := url.Values{"interaction": {token}, "csrf_token": {csrf[1]}, "username": {"alice"}, "password": {"correct password"}}
+			post := httptest.NewRequest(http.MethodPost, tc.action, strings.NewReader(values.Encode()))
+			post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			post.AddCookie(cookie)
+			authenticated := httptest.NewRecorder()
+			handler.ServeHTTP(authenticated, post)
+			location := authenticated.Header().Get("Location")
+			if authenticated.Code != http.StatusFound || !strings.HasPrefix(location, "/auth/profile?interaction=") {
+				t.Fatalf("login=%d %q %s", authenticated.Code, location, authenticated.Body.String())
+			}
+			profileCookie := authenticated.Result().Cookies()[0]
+			before, err := h.browser.LoadSession(ctx, profileCookie.Value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			get := httptest.NewRequest(http.MethodGet, location, nil)
+			get.AddCookie(profileCookie)
+			profile := httptest.NewRecorder()
+			h.Profile(profile, get)
+			if profile.Code != http.StatusOK {
+				t.Fatalf("profile=%d %s", profile.Code, profile.Body.String())
+			}
+			csrf = fedCMCSRFPattern.FindStringSubmatch(profile.Body.String())
+			if len(csrf) != 2 {
+				t.Fatal("missing profile csrf")
+			}
+			profileToken := interactionToken(t, profile.Body.String())
+			values = url.Values{"interaction": {profileToken}, "csrf_token": {csrf[1]}, "given_name": {"Alice"}}
+			submit := func() *httptest.ResponseRecorder {
+				r := httptest.NewRequest(http.MethodPost, location, strings.NewReader(values.Encode()))
+				r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				r.AddCookie(profileCookie)
+				w := httptest.NewRecorder()
+				h.Profile(w, r)
+				return w
+			}
+			result := submit()
+			if result.Code != http.StatusSeeOther || result.Header().Get("Location") != h.issuer+tc.destination {
+				t.Fatalf("profile completion=%d %q %s", result.Code, result.Header().Get("Location"), result.Body.String())
+			}
+			after, err := h.browser.LoadSession(ctx, profileCookie.Value)
+			if err != nil || before.ID != after.ID || before.AuthenticationMethod != after.AuthenticationMethod || !before.CreatedAt.Equal(after.CreatedAt) {
+				t.Fatalf("profile changed authentication: before=%+v after=%+v err=%v", before, after, err)
+			}
+			if replay := submit(); replay.Code != http.StatusForbidden {
+				t.Fatalf("profile replay=%d", replay.Code)
+			}
+		})
+	}
+}

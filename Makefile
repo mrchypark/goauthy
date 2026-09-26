@@ -346,8 +346,8 @@ e2e-kind:
 		--from-literal=bootstrap-user-password-phc="$$browser_phc" \
 		--from-literal=rhiza-admin-token=goauthy-e2e-admin-token \
 		--from-literal='rhiza-members=[{"node_id":"goauthy-0","peer_url":"quic://goauthy-0.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-0-token"},{"node_id":"goauthy-1","peer_url":"quic://goauthy-1.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-1-token"},{"node_id":"goauthy-2","peer_url":"quic://goauthy-2.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-2-token"}]' \
-		--from-literal=minio-root-user=goauthy-e2e \
-		--from-literal=minio-root-password=goauthy-e2e-minio-password \
+		--from-literal=versity-root-user=goauthy-e2e \
+		--from-literal=versity-root-password=goauthy-e2e-versity-password \
 		--dry-run=client -o yaml | kubectl --context kind-$(KIND_CLUSTER) apply -f -; \
 	if [ "$(E2E_PROFILE)" = backchannel-https ]; then \
 		kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) create secret generic goauthy-backchannel-ca --from-file=ca.crt="$$temp_dir/backchannel-ca.crt" --dry-run=client -o yaml | kubectl --context kind-$(KIND_CLUSTER) apply -f -; \
@@ -382,8 +382,8 @@ e2e-kind:
 	[ "$$(kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) get statefulset/goauthy -o jsonpath='{.spec.template.spec.containers[?(@.name=="goauthy")].image}')" = "$$GOAUTHY_IMAGE" ]; \
 	[ "$$(kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) get deployment/goauthy-backchannel-sink -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$$GOAUTHY_BACKCHANNEL_SINK_IMAGE" ]; \
 	if [ "$(E2E_PROFILE)" = password-reset ] || [ "$(E2E_PROFILE)" = open-registration ] || [ "$(E2E_PROFILE)" = user-delete ] || [ "$(E2E_PROFILE)" = self-attributes ] || [ "$${GOAUTHY_E2E_TOKEN_EXCHANGE_ACTOR:-0}" = 1 ]; then [ "$$(kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) get deployment/goauthy-smtp-sink -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$$GOAUTHY_SMTP_SINK_IMAGE" ]; fi; \
-	kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) rollout status statefulset/minio --timeout=180s; \
-	kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) wait --for=condition=complete job/minio-init --timeout=180s; \
+	kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) rollout status statefulset/versity --timeout=180s; \
+	kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) wait --for=condition=complete job/versity-init --timeout=180s; \
 	kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) rollout status deployment/goauthy-backchannel-sink --timeout=180s; \
 	if [ "$(E2E_PROFILE)" = password-reset ] || [ "$(E2E_PROFILE)" = open-registration ] || [ "$(E2E_PROFILE)" = user-delete ] || [ "$(E2E_PROFILE)" = self-attributes ] || [ "$${GOAUTHY_E2E_TOKEN_EXCHANGE_ACTOR:-0}" = 1 ]; then kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) rollout status deployment/goauthy-smtp-sink --timeout=180s; fi; \
 	kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) rollout status statefulset/goauthy --timeout=180s; \
@@ -527,10 +527,12 @@ e2e-kind:
 			kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) port-forward --address=127.0.0.1 service/goauthy-smtp-sink $$(( $(E2E_PORT) + 4 )):8082 >"$$temp_dir/smtp-forward.log" 2>&1 & quinary_forward=$$!; \
 			wait_forward "$$quinary_forward" "$$temp_dir/smtp-forward.log"; \
 			if [ "$${GOAUTHY_E2E_MANAGED_CLIENTS:-0}" = 1 ] || [ "$${GOAUTHY_E2E_DEVICE_LOGIN_FLOW:-0}" = 1 ] || [ "$${GOAUTHY_E2E_AUTH_COLLECTIONS:-0}" = 1 ] || [ "$${GOAUTHY_E2E_AUTH_COLLECTIONS_UI:-0}" = 1 ] || [ "$${GOAUTHY_E2E_MANAGED_CLIENTS_UI:-0}" = 1 ]; then \
+				pilot_host=127.0.0.1; pilot_tests='^Test(ManagedClientsHTTPWorkflow|DeviceAuthorizationBrowserLogin|DeviceAuthorizationPublicBrowserLogin|AuthCollectionsAcrossPods|AuthCollectionsUIAcrossPods|ManagedClientsUIAcrossPods)$$'; \
+				if [ "$${GOAUTHY_E2E_ACCOUNT_PASSKEY_UI:-0}" = 1 ]; then pilot_host=localhost; pilot_tests="$$pilot_tests|^TestAccountPasskeyUIAcrossPods$$"; fi; \
 				export GOAUTHY_E2E_SMTP_SINK_URL=http://127.0.0.1:$$(( $(E2E_PORT) + 4 )); \
-				export GOAUTHY_E2E_URL=http://127.0.0.1:$(E2E_PORT) GOAUTHY_E2E_SECONDARY_URL=http://127.0.0.1:$$(( $(E2E_PORT) + 1 )) GOAUTHY_E2E_TERTIARY_URL=http://127.0.0.1:$$(( $(E2E_PORT) + 2 )) GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD="$$browser_password" GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple; \
+				export GOAUTHY_E2E_URL=http://$$pilot_host:$(E2E_PORT) GOAUTHY_E2E_SECONDARY_URL=http://$$pilot_host:$$(( $(E2E_PORT) + 1 )) GOAUTHY_E2E_TERTIARY_URL=http://$$pilot_host:$$(( $(E2E_PORT) + 2 )) GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD="$$browser_password" GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple; \
 				export GOAUTHY_E2E_DCR_REGISTRATION_TOKEN=0123456789abcdef0123456789abcdef; \
-				go test -mod=readonly -count=1 -v -timeout=5m ./test/e2e ./test/e2e/browser -run '^Test(ManagedClientsHTTPWorkflow|DeviceAuthorizationBrowserLogin|DeviceAuthorizationPublicBrowserLogin|AuthCollectionsAcrossPods|AuthCollectionsUIAcrossPods|ManagedClientsUIAcrossPods)$$'; \
+				go test -mod=readonly -count=1 -v -timeout=5m ./test/e2e ./test/e2e/browser -run "$$pilot_tests"; \
 				old_pod_uid=$$(kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) get pod goauthy-0 -o jsonpath='{.metadata.uid}'); test -n "$$old_pod_uid"; \
 				if [ "$${GOAUTHY_E2E_AUTH_COLLECTIONS:-0}" = 1 ]; then GOAUTHY_E2E_AUTH_COLLECTIONS_CHAOS=1 GOAUTHY_E2E_CHAOS_CONTEXT=kind-$(KIND_CLUSTER) GOAUTHY_E2E_CHAOS_NAMESPACE=$(K8S_NAMESPACE) GOAUTHY_E2E_CHAOS_DELETE_POD=goauthy-0 GOAUTHY_E2E_CHAOS_POD_PREFIX=goauthy- go test -mod=readonly -count=1 -v -timeout=5m ./test/e2e/browser -run '^TestAuthCollectionsAcrossPods$$'; fi; \
 				kill $$port_forward >/dev/null 2>&1 || true; wait $$port_forward 2>/dev/null || true; port_forward=; \
@@ -539,7 +541,7 @@ e2e-kind:
 				kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) wait --for=condition=ready pod/goauthy-0 pod/goauthy-1 pod/goauthy-2 --timeout=180s; \
 				new_pod_uid=$$(kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) get pod goauthy-0 -o jsonpath='{.metadata.uid}'); test -n "$$new_pod_uid" && test "$$new_pod_uid" != "$$old_pod_uid"; \
 				kubectl --context kind-$(KIND_CLUSTER) -n $(K8S_NAMESPACE) port-forward --address=127.0.0.1 pod/goauthy-0 $(E2E_PORT):8080 >"$$temp_dir/port-forward.log" 2>&1 & port_forward=$$!; wait_forward "$$port_forward" "$$temp_dir/port-forward.log"; \
-				go test -mod=readonly -count=1 -v -timeout=5m ./test/e2e ./test/e2e/browser -run '^Test(ManagedClientsHTTPWorkflow|DeviceAuthorizationBrowserLogin|DeviceAuthorizationPublicBrowserLogin|AuthCollectionsAcrossPods|AuthCollectionsUIAcrossPods|ManagedClientsUIAcrossPods)$$'; \
+				go test -mod=readonly -count=1 -v -timeout=5m ./test/e2e ./test/e2e/browser -run "$$pilot_tests"; \
 				if [ "$${GOAUTHY_E2E_MANAGED_CLIENTS_UI:-0}" = 1 ]; then \
 					GOAUTHY_E2E_MANAGED_DEVICE_CHAOS=1 GOAUTHY_E2E_CHAOS_CONTEXT=kind-$(KIND_CLUSTER) GOAUTHY_E2E_CHAOS_NAMESPACE=$(K8S_NAMESPACE) GOAUTHY_E2E_CHAOS_DELETE_POD=goauthy-0 GOAUTHY_E2E_CHAOS_POD_PREFIX=goauthy- go test -mod=readonly -count=1 -v -timeout=5m ./test/e2e/browser -run '^TestManagedDevicePendingGrantSurvivesPodReplacement$$'; \
 					kill $$port_forward >/dev/null 2>&1 || true; wait $$port_forward 2>/dev/null || true; port_forward=; \

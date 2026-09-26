@@ -67,12 +67,18 @@ type Limits struct {
 
 // Handler serves the device authorization and verification endpoints.
 type Handler struct {
-	store     *Store
-	issuer    *url.URL
-	authorize ClientAuthorizer
-	subject   Subject
-	limits    Limits
-	now       func() time.Time
+	store          *Store
+	issuer         *url.URL
+	authorize      ClientAuthorizer
+	subject        Subject
+	reauthenticate func(http.ResponseWriter, *http.Request, string)
+	limits         Limits
+	now            func() time.Time
+}
+
+// SetReauthentication configures the same-subject MFA login continuation.
+func (h *Handler) SetReauthentication(fn func(http.ResponseWriter, *http.Request, string)) {
+	h.reauthenticate = fn
 }
 
 // NewHandler constructs the narrowly scoped device HTTP boundary. subject may
@@ -189,7 +195,7 @@ func (h *Handler) verifyPage(w http.ResponseWriter, r *http.Request) {
 		h.redirectToDeviceLogin(w, r)
 		return
 	}
-	subject, _, ok := h.subject(r)
+	subject, mfa, ok := h.subject(r)
 	if !ok || !validSubject(subject) {
 		h.redirectToDeviceLogin(w, r)
 		return
@@ -217,6 +223,10 @@ func (h *Handler) verifyPage(w http.ResponseWriter, r *http.Request) {
 		}
 		data.Message = "This code is unavailable. Check the code or start a new request on your device."
 		render(http.StatusBadRequest)
+		return
+	}
+	if review.ForceMFA && !mfa && h.reauthenticate != nil {
+		h.reauthenticate(w, r, code)
 		return
 	}
 	token, err := csrfToken()
@@ -286,6 +296,12 @@ func (h *Handler) verifyDevice(w http.ResponseWriter, r *http.Request) {
 		decisionErr = h.store.ApproveWithMFA(r.Context(), userCode, subject, mfa, h.now().UTC())
 	}
 	if decisionErr != nil {
+		if action == "approve" && !mfa && h.reauthenticate != nil && errors.Is(decisionErr, ErrInvalid) {
+			if review, err := h.store.Review(r.Context(), userCode, h.now().UTC()); err == nil && review.ForceMFA {
+				h.reauthenticate(w, r, userCode)
+				return
+			}
+		}
 		writeHTMLStatus(w, http.StatusBadRequest, "Invalid verification request")
 		return
 	}

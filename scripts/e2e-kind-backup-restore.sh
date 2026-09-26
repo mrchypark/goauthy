@@ -12,6 +12,7 @@ restore_cluster=$cluster-restore
 restore_node_name=$restore_cluster-control-plane
 [ "${#restore_node_name}" -le 63 ] || { echo 'KIND_CLUSTER is too long for the restore node hostname (maximum 41 characters)' >&2; exit 1; }
 image=${GOAUTHY_IMAGE:-goauthy:e2e}
+s3_client_image=goauthy-s3-client:e2e
 namespace=goauthy
 port=${E2E_PORT:-18085}
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -80,15 +81,15 @@ temp_dir=$(mktemp -d)
 source_created=false
 restore_created=false
 forward_pid=
-minio_forward_pid=
-minio_forward_log=
+versity_forward_pid=
+versity_forward_log=
 catalog_container=
 catalog_network=
 catalog_port=
 catalog_prefix=
 catalog_kind_ip=
 catalog_paused=false
-helper_pod=backup-mc
+helper_pod=backup-s3-fixture
 kind_node=
 kubelet_stopped=false
 scheduled_source_stopped=false
@@ -157,9 +158,9 @@ cleanup() {
 		kill "$forward_pid" >/dev/null 2>&1 || true
 		wait "$forward_pid" 2>/dev/null || true
 	fi
-	if [ -n "$minio_forward_pid" ]; then
-		kill "$minio_forward_pid" >/dev/null 2>&1 || true
-		wait "$minio_forward_pid" 2>/dev/null || true
+	if [ -n "$versity_forward_pid" ]; then
+		kill "$versity_forward_pid" >/dev/null 2>&1 || true
+		wait "$versity_forward_pid" 2>/dev/null || true
 	fi
 	if [ "$catalog_paused" = true ] && [ -n "$catalog_container" ]; then
 		docker unpause "$catalog_container" >/dev/null 2>&1 || true
@@ -211,6 +212,7 @@ printf '%s\n' '[{"name":"generated-reader","secret":"generate","access":[{"group
 [ "$checkpoint_interruption_profile" = 0 ] || docker build --target checkpoint-fault --tag "$checkpoint_fault_image" .
 [ "$journal_interruption_profile" = 0 ] || docker build --target journal-fault --tag "$journal_fault_image" .
 docker build --tag "$image" .
+docker build -f deploy/e2e-s3-client/Dockerfile --tag "$s3_client_image" .
 go build -trimpath -o "$temp_dir/goauthy-backup" ./cmd/goauthy-backup
 cat >"$temp_dir/generate-age-key.go" <<'EOF'
 package main
@@ -350,8 +352,8 @@ create_secret() {
 		--from-literal=bootstrap-user-password-phc="$bootstrap_user_phc" \
 		--from-literal=rhiza-admin-token=goauthy-e2e-admin-token \
 		--from-literal='rhiza-members=[{"node_id":"goauthy-0","peer_url":"quic://goauthy-0.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-0-token"},{"node_id":"goauthy-1","peer_url":"quic://goauthy-1.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-1-token"},{"node_id":"goauthy-2","peer_url":"quic://goauthy-2.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-2-token"}]' \
-		--from-literal=minio-root-user=goauthy-e2e \
-		--from-literal=minio-root-password=goauthy-e2e-minio-password \
+		--from-literal=versity-root-user=goauthy-e2e \
+		--from-literal=versity-root-password=goauthy-e2e-versity-password \
 		--from-file=api-key-bootstrap="$generated_bootstrap_config" \
 		--dry-run=client -o yaml | kubectl --context "$context" apply -f -
 }
@@ -471,9 +473,9 @@ apply_object_store() {
 	kubectl --context "$context" apply -f deploy/k8s/namespace.yaml
 	kubectl --context "$context" apply -f deploy/k8s/serviceaccount.yaml
 	create_secret "$context"
-	kubectl --context "$context" -n "$namespace" apply -f deploy/k8s/service.yaml -f deploy/k8s/minio.yaml -f deploy/k8s/minio-init.yaml
-	kubectl --context "$context" -n "$namespace" rollout status statefulset/minio --timeout=180s
-	kubectl --context "$context" -n "$namespace" wait --for=condition=complete job/minio-init --timeout=180s
+	kubectl --context "$context" -n "$namespace" apply -f deploy/k8s/service.yaml -f deploy/k8s/versity.yaml -f deploy/k8s/versity-init.yaml
+	kubectl --context "$context" -n "$namespace" rollout status statefulset/versity --timeout=180s
+	kubectl --context "$context" -n "$namespace" wait --for=condition=complete job/versity-init --timeout=180s
 }
 
 apply_app() {
@@ -566,7 +568,7 @@ apply_app() {
 				print "        - name: DATA_DIR"
 				print "          value: /var/lib/goauthy"
 				print "        - name: UPSTREAM"
-				print "          value: http://minio.goauthy.svc.cluster.local:9000"
+				print "          value: http://versity.goauthy.svc.cluster.local:9000"
 				print "        securityContext:"
 				print "          allowPrivilegeEscalation: false"
 				print "          capabilities:"
@@ -601,7 +603,7 @@ apply_app() {
 				endpoint_replacements++
 				print
 				getline
-				if ($0 != "          value: minio.goauthy.svc.cluster.local:9000") exit 1
+				if ($0 != "          value: versity.goauthy.svc.cluster.local:9000") exit 1
 				print "          value: 127.0.0.1:9001"
 				next
 			}
@@ -821,7 +823,7 @@ wait_checkpoint() {
 	context=$1
 	for _ in $(seq 1 60); do
 		if kubectl --context "$context" -n "$namespace" exec "$helper_pod" -- \
-			mc stat local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/CURRENT >/dev/null 2>&1; then
+			s3-fixture stat local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/CURRENT >/dev/null 2>&1; then
 			return 0
 		fi
 		sleep 1
@@ -835,17 +837,14 @@ assert_archive_without_checkpoint() {
 	label=$2
 	listing=$temp_dir/$label-archive-listing.jsonl
 	errors=$temp_dir/$label-archive-listing.err
-	if ! kubectl --context "$context" -n "$namespace" exec -c backup-mc "$helper_pod" -- \
-		mc ls --recursive --json local/rhiza/goauthy-e2e/goauthy-e2e >"$listing" 2>"$errors"; then
+	if ! kubectl --context "$context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- \
+		s3-fixture ls --recursive --json local/rhiza/goauthy-e2e/goauthy-e2e >"$listing" 2>"$errors"; then
 		echo 'unable to obtain a successful object-store archive listing' >&2
 		return 1
 	fi
-	jq -eRs '
-		split("\n") | map(select(length > 0)) as $lines |
-		if ($lines | length) == 0 then error("empty listing") else . end |
-		[$lines[] | (fromjson |
-			if .status == "success" and (.key | type) == "string" then .key
-			else error("unexpected mc listing record") end)] as $keys |
+	jq -e '
+		if length == 0 then error("empty listing") else . end |
+		[.[] | select(.IsDir == false) | .Path] as $keys |
 		any($keys[]; test("(^|/)archive/head[.]bin$")) and
 		all($keys[]; (test("(^|/)checkpoint/CURRENT$") | not))
 	' "$listing" >/dev/null || {
@@ -857,9 +856,9 @@ assert_archive_without_checkpoint() {
 assert_archive_blocks() {
 	expected_blocks=$3
 	assert_archive_without_checkpoint "$1" "$2"
-	jq -es --argjson present "$expected_blocks" '
-		if $present then any(.[]; .key | test("(^|/)archive/blocks/[^/]+[.]bin$"))
-		else all(.[]; (.key | test("(^|/)archive/blocks/") | not)) end
+	jq -e --argjson present "$expected_blocks" '
+		if $present then any(.[]; .Path | test("(^|/)archive/blocks/[^/]+[.]bin$"))
+		else all(.[]; (.Path | test("(^|/)archive/blocks/") | not)) end
 	' "$listing" >/dev/null || {
 		echo 'archive block listing did not match the required fault state' >&2
 		return 1
@@ -871,17 +870,14 @@ assert_checkpoint_with_archive_head() {
 	label=$2
 	listing=$temp_dir/$label-checkpoint-listing.jsonl
 	errors=$temp_dir/$label-checkpoint-listing.err
-	if ! kubectl --context "$context" -n "$namespace" exec -c backup-mc "$helper_pod" -- \
-		mc ls --recursive --json local/rhiza/goauthy-e2e/goauthy-e2e >"$listing" 2>"$errors"; then
+	if ! kubectl --context "$context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- \
+		s3-fixture ls --recursive --json local/rhiza/goauthy-e2e/goauthy-e2e >"$listing" 2>"$errors"; then
 		echo 'unable to obtain a successful object-store checkpoint listing' >&2
 		return 1
 	fi
-	jq -eRs '
-		split("\n") | map(select(length > 0)) as $lines |
-		if ($lines | length) == 0 then error("empty listing") else . end |
-		[$lines[] | (fromjson |
-			if .status == "success" and (.key | type) == "string" then .key
-			else error("unexpected mc listing record") end)] as $keys |
+	jq -e '
+		if length == 0 then error("empty listing") else . end |
+		[.[] | select(.IsDir == false) | .Path] as $keys |
 		any($keys[]; test("(^|/)archive/head[.]bin$")) and
 		any($keys[]; test("(^|/)checkpoint/CURRENT$"))
 	' "$listing" >/dev/null || {
@@ -1000,8 +996,8 @@ run_all_voters_crash_recovery() {
 		capture_pod_uid "$source_context" "goauthy-$ordinal" "$temp_dir/crash-before-uid-$ordinal"
 		capture_container_id "$source_context" "goauthy-$ordinal" goauthy "$temp_dir/crash-container-$ordinal"
 	done
-	capture_pod_uid "$source_context" minio-0 "$temp_dir/minio-before-uid"
-	capture_container_id "$source_context" minio-0 minio "$temp_dir/minio-before-container"
+	capture_pod_uid "$source_context" versity-0 "$temp_dir/versity-before-uid"
+	capture_container_id "$source_context" versity-0 versity "$temp_dir/versity-before-container"
 
 	stop_goauthy_voters_sigkill "$source_context" crash
 	# kubelet is running again for exec, but no GoAuthy pod exists and the
@@ -1022,13 +1018,13 @@ run_all_voters_crash_recovery() {
 		with_pod "$source_context" "goauthy-$ordinal" assert_generated_key "$temp_dir/generated-auth.conf" "$temp_dir/crash-generated-auth-$ordinal.json"
 		assert_generated_log_redaction "$source_context" "goauthy-$ordinal" "$temp_dir/generated-token-patterns" "$temp_dir/crash-generated-log-$ordinal"
 	done
-	[ "$(cat "$temp_dir/minio-before-uid")" = "$(kubectl --context "$source_context" -n "$namespace" get pod/minio-0 -o jsonpath='{.metadata.uid}')" ] || {
-		echo 'MinIO pod identity changed during all-voters crash recovery' >&2
+	[ "$(cat "$temp_dir/versity-before-uid")" = "$(kubectl --context "$source_context" -n "$namespace" get pod/versity-0 -o jsonpath='{.metadata.uid}')" ] || {
+		echo 'VersityGW pod identity changed during all-voters crash recovery' >&2
 		return 1
 	}
-	capture_container_id "$source_context" minio-0 minio "$temp_dir/minio-after-container"
-	[ "$(cat "$temp_dir/minio-before-container")" = "$(cat "$temp_dir/minio-after-container")" ] || {
-		echo 'MinIO container identity changed during all-voters crash recovery' >&2
+	capture_container_id "$source_context" versity-0 versity "$temp_dir/versity-after-container"
+	[ "$(cat "$temp_dir/versity-before-container")" = "$(cat "$temp_dir/versity-after-container")" ] || {
+		echo 'VersityGW container identity changed during all-voters crash recovery' >&2
 		return 1
 	}
 	# A new OAuth access-token session is a persisted Rhiza write; introspection
@@ -1147,7 +1143,7 @@ copy_checkpoint_object() {
 	remote=$2
 	local=$3
 	helper_name=$4
-	kubectl --context "$context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp "$remote" "/tmp/backup/$helper_name"
+	kubectl --context "$context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp "$remote" "/tmp/backup/$helper_name"
 	kubectl --context "$context" -n "$namespace" cp -c archive "$helper_pod:/tmp/backup/$helper_name" "$local"
 	test -s "$local"
 }
@@ -1157,8 +1153,8 @@ run_checkpoint_download_interruption() {
 	assert_checkpoint_with_archive_head "$source_context" source-before-checkpoint-interruption
 	assert_single_kind_node
 	for ordinal in 0 1 2; do capture_pod_uid "$source_context" "goauthy-$ordinal" "$temp_dir/checkpoint-interruption-source-uid-$ordinal"; done
-	capture_pod_uid "$source_context" minio-0 "$temp_dir/checkpoint-interruption-minio-uid"
-	capture_container_id "$source_context" minio-0 minio "$temp_dir/checkpoint-interruption-minio-container"
+	capture_pod_uid "$source_context" versity-0 "$temp_dir/checkpoint-interruption-versity-uid"
+	capture_container_id "$source_context" versity-0 versity "$temp_dir/checkpoint-interruption-versity-container"
 
 	# Stop every writer before pinning immutable checkpoint metadata. The helper
 	# and fixture object store remain live; no GoAuthy data directory is retained.
@@ -1287,9 +1283,9 @@ EOF
 		with_pod "$source_context" "goauthy-$issuer" issue_token "$checkpoint_interruption_token"
 		for verifier in 0 1 2; do with_pod "$source_context" "goauthy-$verifier" assert_active "$checkpoint_interruption_token"; done
 	done
-	[ "$(cat "$temp_dir/checkpoint-interruption-minio-uid")" = "$(kubectl --context "$source_context" -n "$namespace" get pod/minio-0 -o jsonpath='{.metadata.uid}')" ] || { echo 'checkpoint interruption changed MinIO pod identity' >&2; return 1; }
-	capture_container_id "$source_context" minio-0 minio "$temp_dir/checkpoint-interruption-minio-after-container"
-	cmp "$temp_dir/checkpoint-interruption-minio-container" "$temp_dir/checkpoint-interruption-minio-after-container"
+	[ "$(cat "$temp_dir/checkpoint-interruption-versity-uid")" = "$(kubectl --context "$source_context" -n "$namespace" get pod/versity-0 -o jsonpath='{.metadata.uid}')" ] || { echo 'checkpoint interruption changed VersityGW pod identity' >&2; return 1; }
+	capture_container_id "$source_context" versity-0 versity "$temp_dir/checkpoint-interruption-versity-after-container"
+	cmp "$temp_dir/checkpoint-interruption-versity-container" "$temp_dir/checkpoint-interruption-versity-after-container"
 	if [ "$checkpoint_interruption_replace" = 1 ]; then
 		echo 'Kind exact-three Rhiza interrupted checkpoint download fresh-pod E2E passed'
 	else
@@ -1301,8 +1297,8 @@ run_journal_interruption() {
 	wait_checkpoint "$source_context"
 	assert_checkpoint_with_archive_head "$source_context" source-before-journal-interruption
 	assert_single_kind_node
-	capture_pod_uid "$source_context" minio-0 "$temp_dir/journal-interruption-minio-uid"
-	capture_container_id "$source_context" minio-0 minio "$temp_dir/journal-interruption-minio-container"
+	capture_pod_uid "$source_context" versity-0 "$temp_dir/journal-interruption-versity-uid"
+	capture_container_id "$source_context" versity-0 versity "$temp_dir/journal-interruption-versity-container"
 	for ordinal in 0 1 2; do capture_pod_uid "$source_context" "goauthy-$ordinal" "$temp_dir/journal-interruption-source-uid-$ordinal"; done
 	stop_goauthy_voters_sigkill "$source_context" journal-interruption-source
 	assert_checkpoint_with_archive_head "$source_context" source-stopped-journal-interruption
@@ -1379,9 +1375,9 @@ EOF
 		with_pod "$source_context" "goauthy-$issuer" issue_token "$journal_token"
 		for verifier in 0 1 2; do with_pod "$source_context" "goauthy-$verifier" assert_active "$journal_token"; done
 	done
-	[ "$(cat "$temp_dir/journal-interruption-minio-uid")" = "$(kubectl --context "$source_context" -n "$namespace" get pod/minio-0 -o jsonpath='{.metadata.uid}')" ] || { echo 'journal interruption changed MinIO pod identity' >&2; return 1; }
-	capture_container_id "$source_context" minio-0 minio "$temp_dir/journal-interruption-minio-after-container"
-	cmp "$temp_dir/journal-interruption-minio-container" "$temp_dir/journal-interruption-minio-after-container"
+	[ "$(cat "$temp_dir/journal-interruption-versity-uid")" = "$(kubectl --context "$source_context" -n "$namespace" get pod/versity-0 -o jsonpath='{.metadata.uid}')" ] || { echo 'journal interruption changed VersityGW pod identity' >&2; return 1; }
+	capture_container_id "$source_context" versity-0 versity "$temp_dir/journal-interruption-versity-after-container"
+	cmp "$temp_dir/journal-interruption-versity-container" "$temp_dir/journal-interruption-versity-after-container"
 	echo "Kind exact-three Rhiza journal interruption phase $journal_interruption_phase E2E passed"
 }
 
@@ -1434,9 +1430,9 @@ run_archive_corruption() {
 		assert_archive_without_checkpoint "$source_context" source-before-corruption
 	fi
 	for ordinal in 0 1 2; do capture_pod_uid "$source_context" "goauthy-$ordinal" "$temp_dir/corrupt-source-uid-$ordinal"; done
-	capture_pod_uid "$source_context" minio-0 "$temp_dir/corrupt-minio-uid"
+	capture_pod_uid "$source_context" versity-0 "$temp_dir/corrupt-versity-uid"
 	assert_single_kind_node
-	capture_container_id "$source_context" minio-0 minio "$temp_dir/corrupt-minio-container"
+	capture_container_id "$source_context" versity-0 versity "$temp_dir/corrupt-versity-container"
 	stop_goauthy_voters_sigkill "$source_context" corrupt
 	if [ "$checkpoint_fault" = 1 ]; then
 		assert_checkpoint_with_archive_head "$source_context" source-stopped-checkpoint-corruption
@@ -1444,12 +1440,12 @@ run_archive_corruption() {
 		assert_archive_without_checkpoint "$source_context" source-stopped-corruption
 	fi
 	head_original=$temp_dir/archive-head-original.bin
-	kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp local/rhiza/goauthy-e2e/goauthy-e2e/archive/head.bin /tmp/backup/archive-head-original.bin
+	kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp local/rhiza/goauthy-e2e/goauthy-e2e/archive/head.bin /tmp/backup/archive-head-original.bin
 	kubectl --context "$source_context" -n "$namespace" cp -c archive "$helper_pod:/tmp/backup/archive-head-original.bin" "$head_original"
 	test -s "$head_original"
 	if [ "$checkpoint_fault" = 1 ]; then
 		checkpoint_original=$temp_dir/checkpoint-current-original.json
-		kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/CURRENT /tmp/backup/checkpoint-current-original.json
+		kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/CURRENT /tmp/backup/checkpoint-current-original.json
 		kubectl --context "$source_context" -n "$namespace" cp -c archive "$helper_pod:/tmp/backup/checkpoint-current-original.json" "$checkpoint_original"
 		test -s "$checkpoint_original"
 		jq -e '(.index | type) == "number" and .index > 0 and (.root_hash | type) == "string" and (.root_hash | test("^[a-f0-9]{64}$"))' "$checkpoint_original" >/dev/null || {
@@ -1463,14 +1459,14 @@ run_archive_corruption() {
 			checkpoint_root_name=$(printf '%020d_%s.json' "$checkpoint_index" "$checkpoint_hash")
 			checkpoint_root_path=local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/roots/$checkpoint_root_name
 			checkpoint_root_original=$temp_dir/checkpoint-root-original.json
-			kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp "$checkpoint_root_path" /tmp/backup/checkpoint-root-original.json
+			kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp "$checkpoint_root_path" /tmp/backup/checkpoint-root-original.json
 			kubectl --context "$source_context" -n "$namespace" cp -c archive "$helper_pod:/tmp/backup/checkpoint-root-original.json" "$checkpoint_root_original"
 			test -s "$checkpoint_root_original"
 			if [ "$corrupt_checkpoint_root" = 1 ]; then
 				corrupt_checkpoint_root_file=$temp_dir/checkpoint-root-corrupt.json
 				printf '%s' '{"corrupt":true}' >"$corrupt_checkpoint_root_file"
 				kubectl --context "$source_context" -n "$namespace" cp -c archive "$corrupt_checkpoint_root_file" "$helper_pod:/tmp/backup/checkpoint-root-corrupt.json"
-				kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp /tmp/backup/checkpoint-root-corrupt.json "$checkpoint_root_path"
+				kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp /tmp/backup/checkpoint-root-corrupt.json "$checkpoint_root_path"
 			else
 				jq -er '
 					select(.key | test("(^|/)checkpoint/blocks/")) |
@@ -1481,7 +1477,7 @@ run_archive_corruption() {
 					end
 				' "$listing" >"$temp_dir/corrupt-checkpoint-block-keys"
 				test -s "$temp_dir/corrupt-checkpoint-block-keys"
-				kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc mirror local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/blocks/ /tmp/backup/checkpoint-blocks/
+				kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture mirror local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/blocks/ /tmp/backup/checkpoint-blocks/
 				while IFS= read -r checkpoint_block_key; do
 					# shellcheck disable=SC2016 # evaluated in the helper's shell
 					kubectl --context "$source_context" -n "$namespace" exec -c archive "$helper_pod" -- sh -ec '
@@ -1499,23 +1495,23 @@ run_archive_corruption() {
 						[ "$original_size" -eq "$(wc -c <"$corrupt")" ]
 						if cmp -s "$original" "$corrupt"; then exit 1; else [ "$?" -eq 1 ]; fi
 					' sh "$checkpoint_block_key"
-					kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp "/tmp/backup/checkpoint-blocks-corrupt/$checkpoint_block_key" "local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/blocks/$checkpoint_block_key"
+					kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp "/tmp/backup/checkpoint-blocks-corrupt/$checkpoint_block_key" "local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/blocks/$checkpoint_block_key"
 				done <"$temp_dir/corrupt-checkpoint-block-keys"
 			fi
 		else
 			corrupt_checkpoint_current=$temp_dir/checkpoint-current-corrupt.json
 			printf '%s' '{"index":1,"root_hash":"broken"}' >"$corrupt_checkpoint_current"
 			kubectl --context "$source_context" -n "$namespace" cp -c archive "$corrupt_checkpoint_current" "$helper_pod:/tmp/backup/checkpoint-current-corrupt.json"
-			kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp /tmp/backup/checkpoint-current-corrupt.json local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/CURRENT
+			kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp /tmp/backup/checkpoint-current-corrupt.json local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/CURRENT
 		fi
 	elif [ "$missing_blocks" = 1 ]; then
 		assert_archive_blocks "$source_context" blocks-before-removal true
-		kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc mirror local/rhiza/goauthy-e2e/goauthy-e2e/archive/blocks/ /tmp/backup/blocks/
-		kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc rm --recursive --force local/rhiza/goauthy-e2e/goauthy-e2e/archive/blocks/
+		kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture mirror local/rhiza/goauthy-e2e/goauthy-e2e/archive/blocks/ /tmp/backup/blocks/
+		kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture rm --recursive --force local/rhiza/goauthy-e2e/goauthy-e2e/archive/blocks/
 		assert_archive_blocks "$source_context" blocks-after-removal false
 	elif [ "$corrupt_blocks" = 1 ]; then
 		assert_archive_blocks "$source_context" blocks-before-corruption true
-		kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc mirror local/rhiza/goauthy-e2e/goauthy-e2e/archive/blocks/ /tmp/backup/blocks/
+		kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture mirror local/rhiza/goauthy-e2e/goauthy-e2e/archive/blocks/ /tmp/backup/blocks/
 		jq -er '
 			select(.key | test("(^|/)archive/blocks/")) |
 			.key as $key |
@@ -1529,14 +1525,14 @@ run_archive_corruption() {
 		printf '%s\n' goauthy-e2e-archive-extent-corruption >"$corrupt_block"
 		kubectl --context "$source_context" -n "$namespace" cp -c archive "$corrupt_block" "$helper_pod:/tmp/backup/archive-block-corrupt.bin"
 		while IFS= read -r block_key; do
-			kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp /tmp/backup/archive-block-corrupt.bin "local/rhiza/goauthy-e2e/goauthy-e2e/archive/blocks/$block_key"
+			kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp /tmp/backup/archive-block-corrupt.bin "local/rhiza/goauthy-e2e/goauthy-e2e/archive/blocks/$block_key"
 		done <"$temp_dir/corrupt-block-keys"
 		assert_archive_blocks "$source_context" blocks-after-corruption true
 	else
 		corrupt_head=$temp_dir/archive-head-corrupt.bin
 		printf '%s' corrupt-head >"$corrupt_head"
 		kubectl --context "$source_context" -n "$namespace" cp -c archive "$corrupt_head" "$helper_pod:/tmp/backup/archive-head-corrupt.bin"
-		kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp /tmp/backup/archive-head-corrupt.bin local/rhiza/goauthy-e2e/goauthy-e2e/archive/head.bin
+		kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp /tmp/backup/archive-head-corrupt.bin local/rhiza/goauthy-e2e/goauthy-e2e/archive/head.bin
 	fi
 	apply_app "$source_context" false
 	wait_archive_decode_failure "$source_context"
@@ -1550,26 +1546,26 @@ run_archive_corruption() {
 	kubectl --context "$source_context" -n "$namespace" delete statefulset/goauthy --cascade=orphan --wait=true
 	for ordinal in 0 1 2; do capture_pod_uid "$source_context" "goauthy-$ordinal" "$temp_dir/corrupt-failed-uid-$ordinal"; kubectl --context "$source_context" -n "$namespace" delete "pod/goauthy-$ordinal" --wait=true; done
 	for ordinal in 0 1 2; do wait_pod_deleted "$source_context" "goauthy-$ordinal"; done
-	kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp local/rhiza/goauthy-e2e/goauthy-e2e/archive/head.bin /tmp/backup/archive-head-observed-corrupt.bin
+	kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp local/rhiza/goauthy-e2e/goauthy-e2e/archive/head.bin /tmp/backup/archive-head-observed-corrupt.bin
 	kubectl --context "$source_context" -n "$namespace" cp -c archive "$helper_pod:/tmp/backup/archive-head-observed-corrupt.bin" "$temp_dir/archive-head-observed-corrupt.bin"
 	if [ "$checkpoint_fault" = 1 ]; then
 		cmp "$head_original" "$temp_dir/archive-head-observed-corrupt.bin"
-		kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/CURRENT /tmp/backup/checkpoint-current-observed-corrupt.json
+		kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/CURRENT /tmp/backup/checkpoint-current-observed-corrupt.json
 		kubectl --context "$source_context" -n "$namespace" cp -c archive "$helper_pod:/tmp/backup/checkpoint-current-observed-corrupt.json" "$temp_dir/checkpoint-current-observed-corrupt.json"
 		if [ "$corrupt_checkpoint_root" = 1 ]; then
 			cmp "$checkpoint_original" "$temp_dir/checkpoint-current-observed-corrupt.json"
-			kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp "$checkpoint_root_path" /tmp/backup/checkpoint-root-observed-corrupt.json
+			kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp "$checkpoint_root_path" /tmp/backup/checkpoint-root-observed-corrupt.json
 			kubectl --context "$source_context" -n "$namespace" cp -c archive "$helper_pod:/tmp/backup/checkpoint-root-observed-corrupt.json" "$temp_dir/checkpoint-root-observed-corrupt.json"
 			cmp "$corrupt_checkpoint_root_file" "$temp_dir/checkpoint-root-observed-corrupt.json"
 			kubectl --context "$source_context" -n "$namespace" cp -c archive "$checkpoint_root_original" "$helper_pod:/tmp/restore/checkpoint-root-original.json"
-			kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp /tmp/restore/checkpoint-root-original.json "$checkpoint_root_path"
+			kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp /tmp/restore/checkpoint-root-original.json "$checkpoint_root_path"
 		elif [ "$corrupt_checkpoint_blocks" = 1 ]; then
 			cmp "$checkpoint_original" "$temp_dir/checkpoint-current-observed-corrupt.json"
-			kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp "$checkpoint_root_path" /tmp/backup/checkpoint-root-observed-corrupt.json
+			kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp "$checkpoint_root_path" /tmp/backup/checkpoint-root-observed-corrupt.json
 			kubectl --context "$source_context" -n "$namespace" cp -c archive "$helper_pod:/tmp/backup/checkpoint-root-observed-corrupt.json" "$temp_dir/checkpoint-root-observed-corrupt.json"
 			cmp "$checkpoint_root_original" "$temp_dir/checkpoint-root-observed-corrupt.json"
 			while IFS= read -r checkpoint_block_key; do
-				kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp "local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/blocks/$checkpoint_block_key" "/tmp/backup/checkpoint-block-observed-$checkpoint_block_key"
+				kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp "local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/blocks/$checkpoint_block_key" "/tmp/backup/checkpoint-block-observed-$checkpoint_block_key"
 				kubectl --context "$source_context" -n "$namespace" cp -c archive "$helper_pod:/tmp/backup/checkpoint-block-observed-$checkpoint_block_key" "$temp_dir/checkpoint-block-observed-$checkpoint_block_key"
 				kubectl --context "$source_context" -n "$namespace" cp -c archive "$helper_pod:/tmp/backup/checkpoint-blocks-corrupt/$checkpoint_block_key" "$temp_dir/checkpoint-block-corrupt-$checkpoint_block_key"
 				cmp "$temp_dir/checkpoint-block-corrupt-$checkpoint_block_key" "$temp_dir/checkpoint-block-observed-$checkpoint_block_key"
@@ -1577,35 +1573,35 @@ run_archive_corruption() {
 			# mirror --overwrite can skip same-size content changes. Copy each saved
 			# block explicitly and verify the remote bytes before starting any voter.
 			while IFS= read -r checkpoint_block_key; do
-				kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp "/tmp/backup/checkpoint-blocks/$checkpoint_block_key" "local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/blocks/$checkpoint_block_key"
-				kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp "local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/blocks/$checkpoint_block_key" "/tmp/backup/checkpoint-block-restored-$checkpoint_block_key"
+				kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp "/tmp/backup/checkpoint-blocks/$checkpoint_block_key" "local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/blocks/$checkpoint_block_key"
+				kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp "local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/blocks/$checkpoint_block_key" "/tmp/backup/checkpoint-block-restored-$checkpoint_block_key"
 				kubectl --context "$source_context" -n "$namespace" exec -c archive "$helper_pod" -- cmp "/tmp/backup/checkpoint-blocks/$checkpoint_block_key" "/tmp/backup/checkpoint-block-restored-$checkpoint_block_key"
 			done <"$temp_dir/corrupt-checkpoint-block-keys"
 		else
 			cmp "$corrupt_checkpoint_current" "$temp_dir/checkpoint-current-observed-corrupt.json"
 			kubectl --context "$source_context" -n "$namespace" cp -c archive "$checkpoint_original" "$helper_pod:/tmp/restore/checkpoint-current-original.json"
-			kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp /tmp/restore/checkpoint-current-original.json local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/CURRENT
+			kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp /tmp/restore/checkpoint-current-original.json local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/CURRENT
 		fi
 		assert_checkpoint_with_archive_head "$source_context" checkpoint-after-restoration
 	elif [ "$missing_blocks" = 1 ]; then
 		cmp "$head_original" "$temp_dir/archive-head-observed-corrupt.bin"
 		assert_archive_blocks "$source_context" blocks-after-failure false
-		kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc mirror /tmp/backup/blocks/ local/rhiza/goauthy-e2e/goauthy-e2e/archive/blocks/
+		kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture mirror /tmp/backup/blocks/ local/rhiza/goauthy-e2e/goauthy-e2e/archive/blocks/
 		assert_archive_blocks "$source_context" blocks-after-restoration true
 	elif [ "$corrupt_blocks" = 1 ]; then
 		cmp "$head_original" "$temp_dir/archive-head-observed-corrupt.bin"
 		assert_archive_blocks "$source_context" blocks-after-failure true
 		while IFS= read -r block_key; do
-			kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp "local/rhiza/goauthy-e2e/goauthy-e2e/archive/blocks/$block_key" "/tmp/backup/archive-block-observed-$block_key"
+			kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp "local/rhiza/goauthy-e2e/goauthy-e2e/archive/blocks/$block_key" "/tmp/backup/archive-block-observed-$block_key"
 			kubectl --context "$source_context" -n "$namespace" cp -c archive "$helper_pod:/tmp/backup/archive-block-observed-$block_key" "$temp_dir/archive-block-observed-$block_key"
 			cmp "$corrupt_block" "$temp_dir/archive-block-observed-$block_key"
 		done <"$temp_dir/corrupt-block-keys"
-		kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc mirror --overwrite /tmp/backup/blocks/ local/rhiza/goauthy-e2e/goauthy-e2e/archive/blocks/
+		kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture mirror --overwrite /tmp/backup/blocks/ local/rhiza/goauthy-e2e/goauthy-e2e/archive/blocks/
 		assert_archive_blocks "$source_context" blocks-after-restoration true
 	else
 		cmp "$corrupt_head" "$temp_dir/archive-head-observed-corrupt.bin"
 		kubectl --context "$source_context" -n "$namespace" cp -c archive "$head_original" "$helper_pod:/tmp/restore/archive-head-original.bin"
-		kubectl --context "$source_context" -n "$namespace" exec -c backup-mc "$helper_pod" -- mc cp /tmp/restore/archive-head-original.bin local/rhiza/goauthy-e2e/goauthy-e2e/archive/head.bin
+		kubectl --context "$source_context" -n "$namespace" exec -c backup-s3-fixture "$helper_pod" -- s3-fixture cp /tmp/restore/archive-head-original.bin local/rhiza/goauthy-e2e/goauthy-e2e/archive/head.bin
 	fi
 	apply_app "$source_context"
 	assert_no_pvc_application "$source_context"
@@ -1620,9 +1616,9 @@ run_archive_corruption() {
 	done
 	corrupt_kid=$(with_pod "$source_context" goauthy-0 jwks_kid); [ "$corrupt_kid" = "$source_kid" ] || return 1
 	for issuer in 0 1 2; do corrupt_token=$temp_dir/corrupt-oauth-token-$issuer; with_pod "$source_context" "goauthy-$issuer" issue_token "$corrupt_token"; for ordinal in 0 1 2; do with_pod "$source_context" "goauthy-$ordinal" assert_active "$corrupt_token"; done; done
-	[ "$(cat "$temp_dir/corrupt-minio-uid")" = "$(kubectl --context "$source_context" -n "$namespace" get pod/minio-0 -o jsonpath='{.metadata.uid}')" ] || return 1
-	capture_container_id "$source_context" minio-0 minio "$temp_dir/corrupt-minio-after-container"
-	cmp "$temp_dir/corrupt-minio-container" "$temp_dir/corrupt-minio-after-container"
+	[ "$(cat "$temp_dir/corrupt-versity-uid")" = "$(kubectl --context "$source_context" -n "$namespace" get pod/versity-0 -o jsonpath='{.metadata.uid}')" ] || return 1
+	capture_container_id "$source_context" versity-0 versity "$temp_dir/corrupt-versity-after-container"
+	cmp "$temp_dir/corrupt-versity-container" "$temp_dir/corrupt-versity-after-container"
 	if [ "$corrupt_checkpoint_root" = 1 ]; then
 		echo 'Kind exact-three Rhiza checkpoint root corruption E2E passed'
 	elif [ "$corrupt_checkpoint_blocks" = 1 ]; then
@@ -1638,30 +1634,30 @@ run_archive_corruption() {
 	fi
 }
 
-minio_unavailable_once() {
+versity_unavailable_once() {
 	context=$1
-	pods=$temp_dir/minio-outage-pods.json
-	endpoints=$temp_dir/minio-outage-endpoints.json
-	kubectl --context "$context" -n "$namespace" get pods -l app.kubernetes.io/name=minio -o json >"$pods" || return 2
+	pods=$temp_dir/versity-outage-pods.json
+	endpoints=$temp_dir/versity-outage-endpoints.json
+	kubectl --context "$context" -n "$namespace" get pods -l app.kubernetes.io/name=versity -o json >"$pods" || return 2
 	jq -e '(.items | type) == "array"' "$pods" >/dev/null || return 2
 	jq -e '(.items | length) == 0' "$pods" >/dev/null || return 1
-	kubectl --context "$context" -n "$namespace" get endpoints/minio -o json >"$endpoints" || return 2
+	kubectl --context "$context" -n "$namespace" get endpoints/versity -o json >"$endpoints" || return 2
 	jq -e 'if has("subsets") and .subsets != null then (.subsets | type) == "array" else true end' "$endpoints" >/dev/null || return 2
 	jq -e '(.subsets // [] | length) == 0' "$endpoints" >/dev/null || return 1
 }
 
-wait_minio_unavailable() {
+wait_versity_unavailable() {
 	context=$1
 	for _ in $(seq 1 90); do
-		if minio_unavailable_once "$context"; then
+		if versity_unavailable_once "$context"; then
 			return 0
 		else
 			result=$?
 		fi
-		[ "$result" -eq 1 ] || { echo 'cannot verify MinIO pods and service endpoints during outage' >&2; return 1; }
+		[ "$result" -eq 1 ] || { echo 'cannot verify VersityGW pods and service endpoints during outage' >&2; return 1; }
 		sleep 1
 	done
-	echo 'MinIO pods or service endpoints remained available during outage' >&2
+	echo 'VersityGW pods or service endpoints remained available during outage' >&2
 	return 1
 }
 
@@ -1691,16 +1687,16 @@ assert_outage_oauth_write_failure() {
 
 run_object_store_outage() {
 	for ordinal in 0 1 2; do capture_pod_uid "$source_context" "goauthy-$ordinal" "$temp_dir/outage-before-uid-$ordinal"; done
-	kubectl --context "$source_context" -n "$namespace" scale statefulset/minio --replicas=0
-	wait_minio_unavailable "$source_context"
+	kubectl --context "$source_context" -n "$namespace" scale statefulset/versity --replicas=0
+	wait_versity_unavailable "$source_context"
 	for ordinal in 0 1 2; do
 		with_pod "$source_context" "goauthy-$ordinal" assert_outage_oauth_write_failure \
 			"$temp_dir/outage-write-$ordinal.json" "$temp_dir/outage-write-$ordinal.err"
 	done
 
-	kubectl --context "$source_context" -n "$namespace" scale statefulset/minio --replicas=1
-	kubectl --context "$source_context" -n "$namespace" rollout status statefulset/minio --timeout=180s
-	kubectl --context "$source_context" -n "$namespace" wait --for=condition=ready pod/minio-0 --timeout=180s
+	kubectl --context "$source_context" -n "$namespace" scale statefulset/versity --replicas=1
+	kubectl --context "$source_context" -n "$namespace" rollout status statefulset/versity --timeout=180s
+	kubectl --context "$source_context" -n "$namespace" wait --for=condition=ready pod/versity-0 --timeout=180s
 	assert_no_pvc_application "$source_context"
 	for ordinal in 0 1 2; do
 		capture_pod_uid "$source_context" "goauthy-$ordinal" "$temp_dir/outage-after-uid-$ordinal"
@@ -1728,13 +1724,11 @@ run_object_store_outage() {
 start_helper() {
 	context=$1
 	kubectl --context "$context" -n "$namespace" run "$helper_pod" \
-		--image=minio/mc:RELEASE.2025-04-16T18-13-26Z --image-pull-policy=IfNotPresent \
+		--image=goauthy-s3-client:e2e --image-pull-policy=Never \
 		--restart=Never --labels=app.kubernetes.io/component=object-store-client \
-		--overrides='{"spec":{"securityContext":{"fsGroup":1000,"seccompProfile":{"type":"RuntimeDefault"}},"volumes":[{"name":"transfer","emptyDir":{}}],"containers":[{"name":"backup-mc","image":"minio/mc:RELEASE.2025-04-16T18-13-26Z","imagePullPolicy":"IfNotPresent","command":["tail","-f","/dev/null"],"env":[{"name":"MC_CONFIG_DIR","value":"/tmp/.mc"}],"volumeMounts":[{"name":"transfer","mountPath":"/tmp/backup"},{"name":"transfer","mountPath":"/tmp/restore"}],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"runAsNonRoot":true,"runAsUser":1000,"runAsGroup":1000}},{"name":"archive","image":"busybox:1.36.1","imagePullPolicy":"IfNotPresent","command":["tail","-f","/dev/null"],"volumeMounts":[{"name":"transfer","mountPath":"/tmp/backup"},{"name":"transfer","mountPath":"/tmp/restore"}],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"runAsNonRoot":true,"runAsUser":1000,"runAsGroup":1000}}]}}' \
-		--env=MC_CONFIG_DIR=/tmp/.mc --command -- tail -f /dev/null
+		--overrides='{"spec":{"securityContext":{"fsGroup":1000,"seccompProfile":{"type":"RuntimeDefault"}},"volumes":[{"name":"transfer","emptyDir":{}}],"containers":[{"name":"backup-s3-fixture","image":"goauthy-s3-client:e2e","imagePullPolicy":"Never","command":["tail","-f","/dev/null"],"env":[{"name":"RCLONE_CONFIG_LOCAL_TYPE","value":"s3"},{"name":"RCLONE_CONFIG_LOCAL_PROVIDER","value":"Other"},{"name":"RCLONE_CONFIG_LOCAL_ENDPOINT","value":"http://versity:9000"},{"name":"RCLONE_CONFIG_LOCAL_REGION","value":"us-east-1"},{"name":"RCLONE_CONFIG_LOCAL_ACCESS_KEY_ID","valueFrom":{"secretKeyRef":{"name":"goauthy-secrets","key":"versity-root-user"}}},{"name":"RCLONE_CONFIG_LOCAL_SECRET_ACCESS_KEY","valueFrom":{"secretKeyRef":{"name":"goauthy-secrets","key":"versity-root-password"}}}],"volumeMounts":[{"name":"transfer","mountPath":"/tmp/backup"},{"name":"transfer","mountPath":"/tmp/restore"}],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"runAsNonRoot":true,"runAsUser":1000,"runAsGroup":1000}},{"name":"archive","image":"busybox:1.36.1","imagePullPolicy":"IfNotPresent","command":["tail","-f","/dev/null"],"volumeMounts":[{"name":"transfer","mountPath":"/tmp/backup"},{"name":"transfer","mountPath":"/tmp/restore"}],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"runAsNonRoot":true,"runAsUser":1000,"runAsGroup":1000}}]}}' \
+		--command -- tail -f /dev/null
 	kubectl --context "$context" -n "$namespace" wait --for=condition=ready "pod/$helper_pod" --timeout=180s
-	kubectl --context "$context" -n "$namespace" exec "$helper_pod" -- \
-		mc alias set local http://minio:9000 goauthy-e2e goauthy-e2e-minio-password >/dev/null
 }
 
 wait_forward() {
@@ -1748,27 +1742,27 @@ wait_forward() {
 	return 1
 }
 
-stop_minio_forward() {
-	[ -n "$minio_forward_pid" ] || return 0
-	kill "$minio_forward_pid" >/dev/null 2>&1 || true
-	wait "$minio_forward_pid" 2>/dev/null || true
-	minio_forward_pid=
+stop_versity_forward() {
+	[ -n "$versity_forward_pid" ] || return 0
+	kill "$versity_forward_pid" >/dev/null 2>&1 || true
+	wait "$versity_forward_pid" 2>/dev/null || true
+	versity_forward_pid=
 }
 
-with_minio_operator() {
+with_versity_operator() {
 	context=$1
 	prefix=$2
 	shift 2
-	minio_forward_log=$temp_dir/$context-minio-forward.log
-	kubectl --context "$context" -n "$namespace" port-forward --address=127.0.0.1 service/minio 0:9000 >"$minio_forward_log" 2>&1 &
-	minio_forward_pid=$!
+	versity_forward_log=$temp_dir/$context-versity-forward.log
+	kubectl --context "$context" -n "$namespace" port-forward --address=127.0.0.1 service/versity 0:9000 >"$versity_forward_log" 2>&1 &
+	versity_forward_pid=$!
 	for _ in $(seq 1 50); do
-		minio_port=$(sed -n 's/^Forwarding from 127[.]0[.]0[.]1:\([0-9][0-9]*\) -> 9000$/\1/p' "$minio_forward_log")
-		[ -n "$minio_port" ] && break
-		kill -0 "$minio_forward_pid" 2>/dev/null || { cat "$minio_forward_log" >&2; stop_minio_forward; return 1; }
+		versity_port=$(sed -n 's/^Forwarding from 127[.]0[.]0[.]1:\([0-9][0-9]*\) -> 9000$/\1/p' "$versity_forward_log")
+		[ -n "$versity_port" ] && break
+		kill -0 "$versity_forward_pid" 2>/dev/null || { cat "$versity_forward_log" >&2; stop_versity_forward; return 1; }
 		sleep 0.1
 	done
-	[ -n "${minio_port:-}" ] || { cat "$minio_forward_log" >&2; stop_minio_forward; return 1; }
+	[ -n "${versity_port:-}" ] || { cat "$versity_forward_log" >&2; stop_versity_forward; return 1; }
 	set +e
 	GOAUTHY_RHIZA_PROFILE=standalone \
 		GOAUTHY_CLUSTER_ID=goauthy-e2e \
@@ -1781,46 +1775,55 @@ with_minio_operator() {
 		GOAUTHY_RHIZA_PEER_TOKEN= \
 		GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER=s3 \
 		GOAUTHY_RHIZA_OBJECT_STORE_SESSION_TOKEN= \
-		GOAUTHY_RHIZA_OBJECT_STORE_ENDPOINT="127.0.0.1:$minio_port" \
+		GOAUTHY_RHIZA_OBJECT_STORE_ENDPOINT="127.0.0.1:$versity_port" \
 		GOAUTHY_RHIZA_OBJECT_STORE_INSECURE=true \
 		GOAUTHY_RHIZA_OBJECT_STORE_BUCKET=rhiza \
 		GOAUTHY_RHIZA_OBJECT_STORE_PREFIX="$prefix" \
 		GOAUTHY_RHIZA_OBJECT_STORE_REGION=us-east-1 \
 		GOAUTHY_RHIZA_OBJECT_STORE_ACCESS_KEY=goauthy-e2e \
-		GOAUTHY_RHIZA_OBJECT_STORE_SECRET_KEY=goauthy-e2e-minio-password \
+		GOAUTHY_RHIZA_OBJECT_STORE_SECRET_KEY=goauthy-e2e-versity-password \
 		"$temp_dir/goauthy-backup" "$@"
 	status=$?
 	set -e
-	stop_minio_forward
+	stop_versity_forward
 	return "$status"
+}
+
+catalog_client() {
+	docker run --rm -i --network "$catalog_network" \
+		-e RCLONE_CONFIG_FIXTURE_TYPE -e RCLONE_CONFIG_FIXTURE_PROVIDER \
+		-e RCLONE_CONFIG_FIXTURE_ENDPOINT -e RCLONE_CONFIG_FIXTURE_REGION \
+		-e RCLONE_CONFIG_FIXTURE_ACCESS_KEY_ID -e RCLONE_CONFIG_FIXTURE_SECRET_ACCESS_KEY \
+		goauthy-s3-client:e2e "$@"
 }
 
 start_catalog_fixture() {
 	fixture=goauthy-backup-catalog-$(openssl rand -hex 6)
 	catalog_container=$fixture
 	catalog_network=$fixture
-	export MINIO_ROOT_USER=goauthy-catalog
-	MINIO_ROOT_PASSWORD=$(openssl rand -hex 32)
-	export MINIO_ROOT_PASSWORD
+	export ROOT_ACCESS_KEY_ID=goauthy-catalog
+	ROOT_SECRET_ACCESS_KEY=$(openssl rand -hex 32)
+	export ROOT_SECRET_ACCESS_KEY
 	docker network create "$catalog_network" >/dev/null
 	docker run -d --name "$catalog_container" --network "$catalog_network" \
-		-p 127.0.0.1::9000 -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD \
-		minio/minio:RELEASE.2025-04-22T22-12-26Z server /data >/dev/null
+		--tmpfs /data:mode=0777 -p 127.0.0.1::9000 \
+		-e ROOT_ACCESS_KEY_ID -e ROOT_SECRET_ACCESS_KEY -e VGW_HEALTH=/_/health \
+		versity/versitygw:v1.8.0 --port :9000 posix /data >/dev/null
 	catalog_port=$(docker inspect --format '{{(index (index .NetworkSettings.Ports "9000/tcp") 0).HostPort}}' "$catalog_container")
 	curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 1 \
-		"http://127.0.0.1:$catalog_port/minio/health/ready" >/dev/null
-	# The fixture credentials never appear in argv or output.
-	MC_HOST_fixture="http://$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD@$catalog_container:9000"
-	export MC_HOST_fixture
-	docker run --rm --network "$catalog_network" -e MC_HOST_fixture \
-		minio/mc:RELEASE.2025-04-16T18-13-26Z mb fixture/goauthy-backups >/dev/null
+		"http://127.0.0.1:$catalog_port/_/health" >/dev/null
+	# The fixture credentials stay in environment variables, never argv or output.
+	export RCLONE_CONFIG_FIXTURE_TYPE=s3 RCLONE_CONFIG_FIXTURE_PROVIDER=Other
+	export RCLONE_CONFIG_FIXTURE_ENDPOINT="http://$catalog_container:9000" RCLONE_CONFIG_FIXTURE_REGION=us-east-1
+	export RCLONE_CONFIG_FIXTURE_ACCESS_KEY_ID="$ROOT_ACCESS_KEY_ID" RCLONE_CONFIG_FIXTURE_SECRET_ACCESS_KEY="$ROOT_SECRET_ACCESS_KEY"
+	catalog_client mb fixture/goauthy-backups >/dev/null
 	if [ "$scheduled_backup_profile" = 1 ]; then
 		docker network connect kind "$catalog_container"
 		# The Docker host may reassign an ephemeral published port when attaching
 		# another network. Operator clients must use the final mapping.
 		catalog_port=$(docker inspect --format '{{(index (index .NetworkSettings.Ports "9000/tcp") 0).HostPort}}' "$catalog_container")
 		curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 1 \
-			"http://127.0.0.1:$catalog_port/minio/health/ready" >/dev/null
+			"http://127.0.0.1:$catalog_port/_/health" >/dev/null
 		catalog_kind_ip=$(docker inspect --format '{{with index .NetworkSettings.Networks "kind"}}{{.IPAddress}}{{end}}' "$catalog_container")
 		case "$catalog_kind_ip" in
 			[0-9]*.[0-9]*.[0-9]*.[0-9]*) ;;
@@ -1828,8 +1831,8 @@ start_catalog_fixture() {
 		esac
 		catalog_access_key_file=$temp_dir/catalog-access-key
 		catalog_secret_key_file=$temp_dir/catalog-secret-key
-		printf '%s' "$MINIO_ROOT_USER" >"$catalog_access_key_file"
-		printf '%s' "$MINIO_ROOT_PASSWORD" >"$catalog_secret_key_file"
+		printf '%s' "$ROOT_ACCESS_KEY_ID" >"$catalog_access_key_file"
+		printf '%s' "$ROOT_SECRET_ACCESS_KEY" >"$catalog_secret_key_file"
 	fi
 }
 
@@ -1851,8 +1854,8 @@ with_catalog_operator() {
 		GOAUTHY_RHIZA_OBJECT_STORE_BUCKET=goauthy-backups \
 		GOAUTHY_RHIZA_OBJECT_STORE_PREFIX=goauthy-e2e \
 		GOAUTHY_RHIZA_OBJECT_STORE_REGION=us-east-1 \
-		GOAUTHY_RHIZA_OBJECT_STORE_ACCESS_KEY="$MINIO_ROOT_USER" \
-		GOAUTHY_RHIZA_OBJECT_STORE_SECRET_KEY="$MINIO_ROOT_PASSWORD" \
+		GOAUTHY_RHIZA_OBJECT_STORE_ACCESS_KEY="$ROOT_ACCESS_KEY_ID" \
+		GOAUTHY_RHIZA_OBJECT_STORE_SECRET_KEY="$ROOT_SECRET_ACCESS_KEY" \
 		"$temp_dir/goauthy-backup" "$@"
 	status=$?
 	set -e
@@ -1862,8 +1865,7 @@ with_catalog_operator() {
 catalog_fixture_list() {
 	listing=$1
 	errors=$2
-	if ! docker run --rm --network "$catalog_network" -e MC_HOST_fixture \
-		minio/mc:RELEASE.2025-04-16T18-13-26Z ls --recursive --json "fixture/goauthy-backups/" >"$listing" 2>"$errors"; then
+	if ! catalog_client ls --recursive --json "fixture/goauthy-backups/" >"$listing" 2>"$errors"; then
 		echo 'unable to obtain a successful catalog fixture listing' >&2
 		return 1
 	fi
@@ -1872,10 +1874,8 @@ catalog_fixture_list() {
 catalog_fixture_has() {
 	listing=$1
 	name=$2
-	jq -eRs --arg name "$name" '
-		split("\n") | map(select(length > 0)) |
-		[.[] | (fromjson | if .status == "success" and (.key | type) == "string" then .key else error("unexpected mc listing record") end)] |
-		any(.[]; . == $name)
+	jq -e --arg name "$name" '
+		any(.[]; .IsDir == false and .Path == $name)
 	' "$listing" >/dev/null
 }
 
@@ -2108,24 +2108,24 @@ copy_scheduled_backup_observer_file() {
 }
 
 prepare_scheduled_backup_watermark_observer() {
-	source_minio_ip=$(kubectl --context "$source_context" -n "$namespace" get pod/minio-0 -o jsonpath='{.status.podIP}')
-	case "$source_minio_ip" in [0-9]*.[0-9]*.[0-9]*.[0-9]*) ;; *) echo 'scheduled watermark observer found no source MinIO pod IPv4 address' >&2; return 1;; esac
+	source_versity_ip=$(kubectl --context "$source_context" -n "$namespace" get pod/versity-0 -o jsonpath='{.status.podIP}')
+	case "$source_versity_ip" in [0-9]*.[0-9]*.[0-9]*.[0-9]*) ;; *) echo 'scheduled watermark observer found no source VersityGW pod IPv4 address' >&2; return 1;; esac
 	node_arch=$(docker exec "$kind_node" uname -m)
 	case "$node_arch" in x86_64) observer_arch=amd64;; aarch64|arm64) observer_arch=arm64;; *) echo 'unsupported Kind node architecture for scheduled watermark observer' >&2; return 1;; esac
 	observer_local=$temp_dir/backup-watermark
 	CGO_ENABLED=0 GOOS=linux GOARCH=$observer_arch go build -trimpath -o "$observer_local" ./scripts/testdata/backup-watermark
 	observer_identity_local=$temp_dir/backup-watermark-identity.json
-	jq -nc --arg source_endpoint minio.goauthy.svc.cluster.local:9000 --arg destination_endpoint "$catalog_kind_ip:9000" --arg catalog "$catalog_prefix" \
+	jq -nc --arg source_endpoint versity.goauthy.svc.cluster.local:9000 --arg destination_endpoint "$catalog_kind_ip:9000" --arg catalog "$catalog_prefix" \
 		'["goauthy-e2e", "s3", $source_endpoint, "rhiza", "goauthy-e2e", "s3", $destination_endpoint, "goauthy-backups", $catalog]' >"$observer_identity_local"
 	observer_env_local=$temp_dir/backup-watermark.env
 	(umask 077; cat >"$observer_env_local" <<EOF
 GOAUTHY_CLUSTER_ID=goauthy-e2e
-GOAUTHY_RHIZA_OBJECT_STORE_ENDPOINT=$source_minio_ip:9000
+GOAUTHY_RHIZA_OBJECT_STORE_ENDPOINT=$source_versity_ip:9000
 GOAUTHY_RHIZA_OBJECT_STORE_BUCKET=rhiza
 GOAUTHY_RHIZA_OBJECT_STORE_PREFIX=goauthy-e2e
 GOAUTHY_RHIZA_OBJECT_STORE_REGION=us-east-1
 GOAUTHY_RHIZA_OBJECT_STORE_ACCESS_KEY=goauthy-e2e
-GOAUTHY_RHIZA_OBJECT_STORE_SECRET_KEY=goauthy-e2e-minio-password
+GOAUTHY_RHIZA_OBJECT_STORE_SECRET_KEY=goauthy-e2e-versity-password
 EOF
 )
 	observer_token=$(openssl rand -hex 8)
@@ -2187,14 +2187,14 @@ assert_scheduled_pause_cluster_health() {
 			echo 'scheduled paused-holder made the Kind node NotReady' >&2
 			return 1
 		}
-	kubectl --context "$source_context" -n "$namespace" get endpoints/minio -o json |
+	kubectl --context "$source_context" -n "$namespace" get endpoints/versity -o json |
 		jq -e 'any(.subsets[]?.addresses[]?; (.ip | type) == "string" and length > 0)' >/dev/null || {
-			echo 'scheduled paused-holder made the source MinIO Service have no ready endpoint' >&2
+			echo 'scheduled paused-holder made the source VersityGW Service have no ready endpoint' >&2
 			return 1
 		}
 	kubectl --context "$source_context" -n "$namespace" exec "$helper_pod" -- \
-		mc stat local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/CURRENT >/dev/null || {
-			echo 'scheduled paused-holder could not reach source MinIO through its Service' >&2
+		s3-fixture stat local/rhiza/goauthy-e2e/goauthy-e2e/checkpoint/CURRENT >/dev/null || {
+			echo 'scheduled paused-holder could not reach source VersityGW through its Service' >&2
 			return 1
 		}
 }
@@ -2409,6 +2409,7 @@ source_created=true
 ./scripts/e2e-preflight.sh kind-inotify --cluster "$cluster"
 normalize_context "$source_context"
 kind load docker-image "$image" --name "$cluster"
+kind load docker-image "$s3_client_image" --name "$cluster"
 [ "$checkpoint_interruption_profile" = 0 ] || {
 	docker image inspect "$checkpoint_fault_image" >/dev/null
 	kind load docker-image "$checkpoint_fault_image" --name "$cluster"
@@ -2508,12 +2509,12 @@ if [ "$scheduled_backup_profile" = 1 ]; then
 	scheduled_now=$(scheduled_backup_now) || exit 1
 	[ "$scheduled_now" -lt "$scheduled_backup_due_epoch" ] || { echo 'scheduled backup slot elapsed before all voters were ready' >&2; exit 1; }
 	if [ "$scheduled_backup_outage_profile" = 1 ]; then
-		kubectl --context "$source_context" -n "$namespace" scale statefulset/minio --replicas=0
-		wait_minio_unavailable "$source_context"
+		kubectl --context "$source_context" -n "$namespace" scale statefulset/versity --replicas=0
+		wait_versity_unavailable "$source_context"
 		wait_scheduled_backup_failure
-		kubectl --context "$source_context" -n "$namespace" scale statefulset/minio --replicas=1
-		kubectl --context "$source_context" -n "$namespace" rollout status statefulset/minio --timeout=180s
-		kubectl --context "$source_context" -n "$namespace" wait --for=condition=ready pod/minio-0 --timeout=180s
+		kubectl --context "$source_context" -n "$namespace" scale statefulset/versity --replicas=1
+		kubectl --context "$source_context" -n "$namespace" rollout status statefulset/versity --timeout=180s
+		kubectl --context "$source_context" -n "$namespace" wait --for=condition=ready pod/versity-0 --timeout=180s
 		for ordinal in 0 1 2; do
 			kubectl --context "$source_context" -n "$namespace" wait --for=condition=ready "pod/goauthy-$ordinal" --timeout=30s
 		done
@@ -2570,9 +2571,9 @@ else
 		export GOAUTHY_BACKUP_OBJECT_STORE_INSECURE=true
 		export GOAUTHY_BACKUP_OBJECT_STORE_BUCKET=goauthy-backups
 		export GOAUTHY_BACKUP_OBJECT_STORE_REGION=us-east-1
-		export GOAUTHY_BACKUP_OBJECT_STORE_ACCESS_KEY="$MINIO_ROOT_USER"
-		export GOAUTHY_BACKUP_OBJECT_STORE_SECRET_KEY="$MINIO_ROOT_PASSWORD"
-		with_minio_operator "$source_context" goauthy-e2e create \
+		export GOAUTHY_BACKUP_OBJECT_STORE_ACCESS_KEY="$ROOT_ACCESS_KEY_ID"
+		export GOAUTHY_BACKUP_OBJECT_STORE_SECRET_KEY="$ROOT_SECRET_ACCESS_KEY"
+		with_versity_operator "$source_context" goauthy-e2e create \
 			-recipient-file "$age_recipient_file" -signing-key-file "$catalog_private_key" \
 			-catalog-prefix "$catalog_prefix" -work-dir "$temp_dir"
 	) >"$catalog_entry"
@@ -2611,8 +2612,7 @@ go run "$temp_dir/generate-age-key.go" fixture-reseed "$catalog_private_key" "$c
 jq -e --arg id "$catalog_old_id" --arg prefix "$catalog_prefix" --arg source "$catalog_old_source" '
 	.entry | .id == $id and .catalog_prefix == $prefix and .source_prefix == $source and .created_at < (now - 30 * 24 * 60 * 60)
 ' "$catalog_old_receipt" >/dev/null || { echo 'catalog retention fixture receipt was not reseeded' >&2; exit 1; }
-docker run --rm -i --network "$catalog_network" -e MC_HOST_fixture \
-	minio/mc:RELEASE.2025-04-16T18-13-26Z pipe "fixture/goauthy-backups/$catalog_prefix/completed/$catalog_old_id.json" <"$catalog_old_receipt"
+catalog_client pipe "fixture/goauthy-backups/$catalog_prefix/completed/$catalog_old_id.json" <"$catalog_old_receipt"
 catalog_old_artifact=$catalog_prefix/artifacts/$catalog_old_id.age
 catalog_old_completion=$catalog_prefix/completed/$catalog_old_id.json
 catalog_fixture_listing=$temp_dir/catalog-retention-before.jsonl
@@ -2700,7 +2700,7 @@ rm -f "$backup_bundle"
 }
 
 # The restore cluster receives an unrelated object-store prefix and exact
-# member/secret identity. MinIO is an object-store test fixture; GoAuthy starts
+# member/secret identity. VersityGW is an object-store test fixture; GoAuthy starts
 # with emptyDir.
 kind delete cluster --name "$cluster"
 source_created=false
@@ -2710,6 +2710,7 @@ restore_created=true
 ./scripts/e2e-preflight.sh kind-inotify --cluster "$restore_cluster"
 normalize_context "$restore_context"
 kind load docker-image "$image" --name "$restore_cluster"
+kind load docker-image "$s3_client_image" --name "$restore_cluster"
 apply_object_store "$restore_context"
 start_helper "$restore_context"
 backup_bundle=$temp_dir/goauthy-e2e-catalog.age
@@ -2719,12 +2720,12 @@ with_catalog_operator fetch -file "$backup_bundle" -key-file "$catalog_public_ke
 jq -e --arg id "$catalog_id" --arg digest "$backup_digest" '
 	.id == $id and .sha256 == $digest
 ' "$catalog_fetch" >/dev/null || { echo 'fetched catalog digest differs from exported artifact' >&2; exit 1; }
-with_minio_operator "$restore_context" goauthy-dr restore \
+with_versity_operator "$restore_context" goauthy-dr restore \
 	-file "$backup_bundle" -key-file "$age_identity_file" -work-dir "$temp_dir" -sha256 "$backup_digest"
 kubectl --context "$restore_context" -n "$namespace" exec "$helper_pod" -- \
-	mc stat local/rhiza/goauthy-dr/goauthy-e2e/checkpoint/CURRENT >/dev/null
+	s3-fixture stat local/rhiza/goauthy-dr/goauthy-e2e/checkpoint/CURRENT >/dev/null
 kubectl --context "$restore_context" -n "$namespace" exec "$helper_pod" -- \
-	mc stat local/rhiza/goauthy-dr/goauthy-e2e/goauthy-restore.json >/dev/null
+	s3-fixture stat local/rhiza/goauthy-dr/goauthy-e2e/goauthy-restore.json >/dev/null
 kubectl --context "$restore_context" -n "$namespace" delete pod "$helper_pod" --wait=true
 pvc_names=$(kubectl --context "$restore_context" -n "$namespace" get pvc -o name) || { echo 'cannot inspect restore PVCs before application deployment' >&2; exit 1; }
 if printf '%s\n' "$pvc_names" | grep -q '^persistentvolumeclaim/data-goauthy-'; then

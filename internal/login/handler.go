@@ -45,7 +45,7 @@ const (
 	failureWriteGrace   = 5 * time.Second
 )
 
-var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p>{{.ContinueTo}} {{.ClientID}}</p><form method="post" action="../auth/login"><input type="hidden" name="interaction" value="{{.Interaction}}"><label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label><button type="submit">{{.SignIn}}</button>{{if .PasskeyLogin}}<button type="button" id="passkey-btn">{{.PasskeyButton}}</button><div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div style="margin:1.5em 0;text-align:center;border-top:1px solid #ccc;padding-top:1em"><span style="background:#fff;padding:0 0.5em;color:#666;font-size:0.9em">or</span></div>{{range .Providers}}<a href="/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" style="display:block;margin:0.5em 0;padding:0.75em;border:1px solid #ccc;border-radius:4px;text-align:center;text-decoration:none;color:#333">{{.Name}}</a>{{end}}{{end}}</main>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
+var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1>{{if .PasskeyChallenge}}<p>Complete the security key verification to continue.</p><button type="button" id="passkey-challenge-btn">Continue with security key</button><div id="passkey-error" role="status" aria-live="polite"></div>{{else}}<p>{{if .Intro}}{{.Intro}}{{else}}{{.ContinueTo}} {{.ClientID}}{{end}}</p><form id="login-form" method="post" action="{{.Action}}"><input type="hidden" name="interaction" value="{{.Interaction}}">{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<label>{{.Username}} <input name="username" autocomplete="username" required></label><label>{{.Password}} <input type="password" name="password" autocomplete="current-password" required></label><button type="submit">{{.SignIn}}</button>{{if .PasskeyLogin}}<button type="button" id="passkey-btn">{{.PasskeyButton}}</button><div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div style="margin:1.5em 0;text-align:center;border-top:1px solid #ccc;padding-top:1em"><span style="background:#fff;padding:0 0.5em;color:#666;font-size:0.9em">or</span></div>{{range .Providers}}<a href="{{$.IssuerPath}}/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" style="display:block;margin:0.5em 0;padding:0.75em;border:1px solid #ccc;border-radius:4px;text-align:center;text-decoration:none;color:#333">{{.Name}}</a>{{end}}{{end}}{{end}}</main>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
 (function(){
   var btn=document.getElementById('passkey-btn');
   var err=document.getElementById('passkey-error');
@@ -55,7 +55,7 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html 
   function submitAssertion(code,data){
     var form=document.createElement('form');
     form.method='POST';
-    form.action='../auth/v1/users/webauthn_finish';
+    form.action='{{.IssuerPath}}/auth/v1/users/webauthn_finish';
     var codeInput=document.createElement('input');
     codeInput.type='hidden';
     codeInput.name='code';
@@ -80,12 +80,21 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html 
     var data=JSON.stringify({id:assertion.id,rawId:toBase64URL(assertion.rawId),type:assertion.type,response:response,clientExtensionResults:assertion.getClientExtensionResults()});
     submitAssertion(startJSON.code,data);
   }
+{{if .PasskeyChallenge}}
+  var challengeButton=document.getElementById('passkey-challenge-btn');
+  challengeButton.addEventListener('click',async function(){
+    challengeButton.disabled=true;
+    err.textContent='';
+    try{await finishPasskey({{.PasskeyChallenge}});}
+    catch(e){err.textContent='Security key verification failed. Try again.';challengeButton.disabled=false;}
+  });
+{{end}}
 {{if .MFARequired}}
   // A client that forces MFA answers a successful password step with a WebAuthn
   // challenge. Continuing it here reuses the shared finish boundary, so the
   // one-time interaction and session protections stay authoritative and the
   // browser never lands on the raw challenge JSON.
-  var loginForm=document.querySelector('form[action$="auth/login"]');
+  var loginForm=document.getElementById('login-form');
   if(loginForm){loginForm.addEventListener('submit',async function(event){
     event.preventDefault();
     var submit=loginForm.querySelector('button[type="submit"]');
@@ -109,7 +118,7 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html 
     btn.disabled=true;
     err.textContent='';
     try{
-      var startResp=await fetch('../auth/v1/users/webauthn_start',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({purpose:{Login:document.querySelector('input[name="interaction"]').value},username:usernameField.value})});
+      var startResp=await fetch('{{.IssuerPath}}/auth/v1/users/webauthn_start',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({purpose:{Login:document.querySelector('input[name="interaction"]').value},username:usernameField.value})});
       if(!startResp.ok){err.textContent='Passkey login failed';btn.disabled=false;return;}
       await finishPasskey(await startResp.json());
     }catch(e){err.textContent='Passkey login failed';btn.disabled=false;}
@@ -122,7 +131,7 @@ var loginPage = template.Must(template.New("login").Parse(`<!doctype html><html 
 // OTP. The native form posts the code to the OTP verify boundary, which keeps
 // the one-time authorization interaction and the session protections of the
 // shared completion path authoritative.
-var otpStepUpPage = template.Must(template.New("otp-stepup").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p role="status" aria-live="polite">Enter the one-time code sent to your email.</p><form method="post" action="../auth/v1/users/otp/verify"><label>One-time code <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus></label><button type="submit">{{.SignIn}}</button></form></main></body></html>`))
+var otpStepUpPage = template.Must(template.New("otp-stepup").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body><main><h1>{{.SignIn}}</h1><p role="status" aria-live="polite">Enter the one-time code sent to your email.</p><form method="post" action="{{.IssuerPath}}/auth/v1/users/otp/verify"><label>One-time code <input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required autofocus></label><button type="submit">{{.SignIn}}</button></form></main></body></html>`))
 
 const fedCMLandingPayload = "goauthy-fedcm-login/v1"
 
@@ -166,6 +175,7 @@ type Handler struct {
 	metrics           *metrics.Registry
 	fedcmEnabled      bool
 	fedcmForceMFA     bool
+	approvalForceMFA  bool
 	upstreamProviders func(ctx context.Context) ([]UpstreamProvider, error)
 	lockdown          *loginpolicy.LockdownStore
 	userValuesPolicy  *identity.UserValuesPolicy
@@ -409,6 +419,16 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+	h.renderLoginPage(w, r, request, interaction.Token, themeURL)
+}
+
+func (h *Handler) renderLoginPage(w http.ResponseWriter, r *http.Request, request oauth.AuthorizationRequest, interactionToken, themeURL string) {
+	h.renderAuthenticationPage(w, r, request, loginPageData{ClientID: request.ClientID, Interaction: interactionToken, ThemeURL: themeURL})
+}
+
+func (h *Handler) renderAuthenticationPage(w http.ResponseWriter, r *http.Request, request oauth.AuthorizationRequest, pageData loginPageData) {
+	issuerURL, _ := url.Parse(h.issuer)
+	issuerPath := strings.TrimRight(issuerURL.Path, "/")
 	messages := i18n.MessagesFor(strings.Join(r.Header.Values("Accept-Language"), ","))
 	localizedHTMLHeaders(w, messages.Language)
 	// Chromium applies form-action to the callback redirect after the login
@@ -424,12 +444,15 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 	if idpHint := r.URL.Query().Get("idp_hint"); idpHint != "" && len(providers) > 0 {
 		for _, p := range providers {
 			if p.ID == idpHint {
-				http.Redirect(w, r, "/upstream/"+p.ID+"/start?redirect_uri="+url.QueryEscape(p.CallbackURI)+"&interaction="+url.QueryEscape(interaction.Token), http.StatusFound)
+				http.Redirect(w, r, issuerPath+"/upstream/"+p.ID+"/start?redirect_uri="+url.QueryEscape(p.CallbackURI)+"&interaction="+url.QueryEscape(pageData.Interaction), http.StatusFound)
 				return
 			}
 		}
 	}
-	pageData := loginPageData{ClientID: request.ClientID, Interaction: interaction.Token, ThemeURL: themeURL, Providers: providers, MFARequired: request.ForceMFA, Messages: messages}
+	pageData.IssuerPath, pageData.Providers, pageData.MFARequired, pageData.Messages = issuerPath, providers, request.ForceMFA, messages
+	if pageData.Action == "" {
+		pageData.Action = issuerPath + "/auth/login"
+	}
 	if h.passkeys != nil {
 		nonce, err := generateNonce()
 		if err != nil {
@@ -464,6 +487,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid login request", http.StatusBadRequest)
 		return
 	}
+	h.loginPassword(w, r, form)
+}
+
+func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request, form loginForm) {
 	session, sessionToken, ok := h.session(r)
 	if !ok || session.Authenticated() {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
@@ -480,13 +507,13 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	original, err := h.originalAuthorizeRequest(r, interaction.Payload)
+	target, err := h.resolveAuthenticationRequest(r, interaction.Payload)
+	request := target.policy
 	if err != nil {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	request, err := h.oauth.ValidateAuthorizationRequest(original)
-	if err != nil {
+	if !target.acceptsSubject(auth.Subject) {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
@@ -498,17 +525,31 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			rcr, code, exp, err := h.passkeys.BeginMFALogin(r.Context(), auth.Subject, user.Username, form.interaction, session.ID)
-			if err != nil {
-				if errors.Is(err, passkey.ErrNotFound) || errors.Is(err, passkey.ErrInvalid) {
-					http.Error(w, "Invalid login request", http.StatusNotAcceptable)
+			if err == nil {
+				challenge := passkeyStartResponse{Code: code, RCR: rcr, Exp: exp.UTC()}
+				if strings.Contains(r.Header.Get("Accept"), "text/html") {
+					theme, themeErr := h.resolveThemeURL(r.Context(), request.ClientID)
+					if themeErr != nil {
+						http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+						return
+					}
+					h.renderAuthenticationPage(w, r, request, loginPageData{ThemeURL: theme, PasskeyChallenge: &challenge})
 					return
 				}
-				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(challenge)
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(passkeyStartResponse{Code: code, RCR: rcr, Exp: exp.UTC()})
-			return
+			// Only confirmed absence of an eligible key permits OTP selection.
+			// Corrupt credentials, invalid state and storage failures fail closed.
+			if !errors.Is(err, passkey.ErrNotFound) || h.otp == nil || !h.otp.Enabled() {
+				if errors.Is(err, passkey.ErrNotFound) || errors.Is(err, passkey.ErrInvalid) {
+					http.Error(w, "Invalid login request", http.StatusNotAcceptable)
+				} else {
+					http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+				}
+				return
+			}
 		}
 		if h.otp != nil && h.otp.Enabled() {
 			lang := ""
@@ -562,7 +603,8 @@ func (h *Handler) renderOTPStepUp(w http.ResponseWriter, r *http.Request, reques
 	// redirect that follows it. Use only this already-validated request origin.
 	w.Header().Set("Content-Security-Policy", authorizationFormCSP(request.RedirectURI))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = otpStepUpPage.Execute(w, loginPageData{ThemeURL: themeURL, Messages: messages})
+	issuerURL, _ := url.Parse(h.issuer)
+	_ = otpStepUpPage.Execute(w, loginPageData{IssuerPath: strings.TrimRight(issuerURL.Path, "/"), ThemeURL: themeURL, Messages: messages})
 }
 
 // FedCMLanding serves the same password authentication and browser-session
@@ -657,9 +699,11 @@ func (h *Handler) fedCMGet(w http.ResponseWriter, r *http.Request) {
 }
 
 type loginPageData struct {
-	ClientID, Interaction, ThemeURL string
-	Providers                       []UpstreamProvider
-	PasskeyLogin                    bool
+	PasskeyChallenge                            *passkeyStartResponse
+	Action, CSRFToken, Intro                    string
+	ClientID, Interaction, ThemeURL, IssuerPath string
+	Providers                                   []UpstreamProvider
+	PasskeyLogin                                bool
 	// MFARequired marks a client whose successful password step is answered
 	// with a WebAuthn challenge that the page must continue instead of POSTing
 	// the form natively into the raw challenge body.
@@ -987,13 +1031,16 @@ func (h *Handler) completeExternalAuthentication(w http.ResponseWriter, r *http.
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	original, err := h.originalAuthorizeRequest(r, interaction.Payload)
+	target, err := h.resolveAuthenticationRequest(r, interaction.Payload)
+	request := target.policy
 	if err != nil {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	request, err := h.oauth.ValidateAuthorizationRequest(original)
-	if err != nil {
+	// A fresh nonce binds a transaction, not the time of user authentication.
+	// OIDC NumericDate is second-granularity; compare at that same precision.
+	if target.approval != nil && target.approval.ParentSessionDigest != "" &&
+		(binding == nil || binding.AuthenticationTime <= 0 || binding.AuthenticationTime < session.CreatedAt.Unix() || binding.AuthenticationTime > h.now().Unix()) {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
@@ -1015,12 +1062,14 @@ func (h *Handler) completeExternalAuthentication(w http.ResponseWriter, r *http.
 		http.Error(w, "Invalid login request", http.StatusUnauthorized)
 		return
 	}
-	consumed, err := h.browser.ConsumeAuthorizationInteractionByDigest(r.Context(), sessionToken, interactionDigest)
+	consumed, err := h.consumeAuthenticationRequest(r, target, sessionToken, interactionDigest, subject, peerIP, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+		return h.browser.ConsumeAuthorizationInteractionByDigest(ctx, sessionToken, interactionDigest)
+	})
 	if err != nil || consumed.RequestID != interaction.RequestID || !bytes.Equal(consumed.Payload, interaction.Payload) {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	h.completeConsumedAuthentication(w, r, sessionToken, subject, authMethod, original, request, peerIP, nil, binding)
+	h.completeConsumedAuthentication(w, r, sessionToken, subject, authMethod, target, peerIP, nil, binding)
 }
 
 // CurrentExternalInitSession returns the cookie bearer token and its canonical
@@ -1056,11 +1105,7 @@ func (h *Handler) PrepareExternalAuthentication(r *http.Request, rawInteractionT
 	if err != nil {
 		return "", "", "", ErrExternalAuthentication
 	}
-	original, err := h.originalAuthorizeRequest(r, interaction.Payload)
-	if err != nil {
-		return "", "", "", ErrExternalAuthentication
-	}
-	_, err = h.oauth.ValidateAuthorizationRequest(original)
+	_, err = h.resolveAuthenticationRequest(r, interaction.Payload)
 	if err != nil {
 		return "", "", "", ErrExternalAuthentication
 	}
@@ -1075,7 +1120,14 @@ func (h *Handler) PrepareExternalAuthentication(r *http.Request, rawInteractionT
 // into an authenticated OAuth browser session. Both password and passkey
 // authenticators intentionally use this path.
 func (h *Handler) completeAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, interactionToken, subject, authMethod string, onConsumed func() error) {
-	h.completeAuthenticationInteraction(w, r, sessionToken, subject, authMethod, onConsumed, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+	digest, err := browser.CanonicalTokenDigest(interactionToken)
+	if err != nil {
+		http.Error(w, "Invalid login request", http.StatusForbidden)
+		return
+	}
+	h.completeAuthenticationInteraction(w, r, sessionToken, digest, subject, authMethod, onConsumed, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+		return h.browser.LoadAuthorizationInteractionReadOnly(ctx, sessionToken, interactionToken)
+	}, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
 		return h.browser.ConsumeAuthorizationInteraction(ctx, sessionToken, interactionToken)
 	})
 }
@@ -1084,84 +1136,120 @@ func (h *Handler) completeAuthentication(w http.ResponseWriter, r *http.Request,
 // interaction is known only by its canonical persisted digest, so the raw
 // continuation token never enters durable state or the caller (GA66-OTP-003).
 func (h *Handler) completeAuthenticationByDigest(w http.ResponseWriter, r *http.Request, sessionToken, interactionDigest, subject, authMethod string, onConsumed func() error) {
-	h.completeAuthenticationInteraction(w, r, sessionToken, subject, authMethod, onConsumed, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+	h.completeAuthenticationInteraction(w, r, sessionToken, interactionDigest, subject, authMethod, onConsumed, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+		return h.browser.LoadAuthorizationInteractionReadOnlyByDigest(ctx, sessionToken, interactionDigest)
+	}, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
 		return h.browser.ConsumeAuthorizationInteractionByDigest(ctx, sessionToken, interactionDigest)
 	})
 }
 
-func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, onConsumed func() error, consume func(context.Context) (browser.AuthorizationInteraction, error)) {
+func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *http.Request, sessionToken, interactionDigest, subject, authMethod string, onConsumed func() error, load, consume func(context.Context) (browser.AuthorizationInteraction, error)) {
 	peerIP, peerOK := h.resolvePeerIP(r)
 	if !peerOK {
 		http.Error(w, "Invalid login request", http.StatusBadRequest)
 		return
 	}
-	interaction, err := consume(r.Context())
+	interaction, err := load(r.Context())
 	if err != nil {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	original, err := h.originalAuthorizeRequest(r, interaction.Payload)
-	if err != nil {
-		http.Error(w, "Invalid login request", http.StatusForbidden)
-		return
-	}
-	request, err := h.oauth.ValidateAuthorizationRequest(original)
+	target, err := h.resolveAuthenticationRequest(r, interaction.Payload)
+	request := target.policy
 	if err != nil || (request.ForceMFA && authMethod != "mfa") {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	h.completeConsumedAuthentication(w, r, sessionToken, subject, authMethod, original, request, peerIP, onConsumed, nil)
+	consumed, err := h.consumeAuthenticationRequest(r, target, sessionToken, interactionDigest, subject, peerIP, consume)
+	if err != nil || consumed.RequestID != interaction.RequestID || !bytes.Equal(consumed.Payload, interaction.Payload) {
+		http.Error(w, "Invalid login request", http.StatusForbidden)
+		return
+	}
+	h.completeConsumedAuthentication(w, r, sessionToken, subject, authMethod, target, peerIP, onConsumed, nil)
 }
 
-func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, original *http.Request, request oauth.AuthorizationRequest, peerIP string, onConsumed func() error, binding *browser.UpstreamSessionBinding) {
+// completeBrowserAuthentication performs the shared post-proof transition.
+// The caller must consume its one-use interaction first and dispatch to its
+// own destination afterward; this function never issues OAuth credentials.
+func (h *Handler) completeBrowserAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP, parentDigest string, onConsumed func() error, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, bool) {
 	if _, err := h.identity.UserBySubject(r.Context(), subject); err != nil {
 		http.Error(w, "Invalid login request", http.StatusUnauthorized)
-		return
+		return browser.IssuedSession{}, false
 	}
 	if h.lockdown != nil {
 		locked, _, _, lockdownErr := h.lockdown.IsLockedDown(r.Context())
 		if lockdownErr != nil {
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-			return
+			return browser.IssuedSession{}, false
 		}
 		if locked {
 			isAdmin, adminErr := h.lockdown.IsAdmin(r.Context(), subject)
 			if adminErr != nil || !isAdmin {
 				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-				return
+				return browser.IssuedSession{}, false
 			}
 		}
 	}
 	if onConsumed != nil {
 		if err := onConsumed(); err != nil {
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-			return
+			return browser.IssuedSession{}, false
 		}
 	}
-	// ponytail: a failed code issuance consumes this interaction; restart authorize rather than risking duplicate codes.
-	newSession, err := h.rotateBrowserSessionWithBinding(w, r, sessionToken, subject, authMethod, peerIP, binding)
+	newSession, err := h.rotateBrowserSessionWithParent(w, r, sessionToken, subject, authMethod, peerIP, parentDigest, binding)
 	if err != nil {
 		if errors.Is(err, errLoginLocation) {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
+			return browser.IssuedSession{}, false
 		}
 		if errors.Is(err, identity.ErrInvalidUserAgent) {
 			http.Error(w, "Invalid User-Agent", http.StatusBadRequest)
-			return
+			return browser.IssuedSession{}, false
 		}
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-		return
+		return browser.IssuedSession{}, false
 	}
 	if h.metrics != nil {
 		h.metrics.AuthSuccess()
 	}
+	return newSession, true
+}
+
+func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, target authenticationRequest, peerIP string, onConsumed func() error, binding *browser.UpstreamSessionBinding) {
+	parentDigest := ""
+	if target.approval != nil {
+		parentDigest = target.approval.ParentSessionDigest
+	}
+	// ponytail: a failed code issuance consumes this interaction; restart authorize rather than risking duplicate codes.
+	newSession, ok := h.completeBrowserAuthentication(w, r, sessionToken, subject, authMethod, peerIP, parentDigest, onConsumed, binding)
+	if !ok {
+		return
+	}
+	original, request := target.original, target.policy
 	needs, checkErr := h.needsProfileUpdate(r, subject, request.ClientID)
 	if checkErr != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
 	if needs {
-		h.createProfileInteraction(w, r, newSession.Token, request.RequestID, newSession.Session, original.URL.RequestURI())
+		if target.approval != nil {
+			saved := *target.approval
+			saved.ExpectedSubject, saved.ParentSessionDigest = "", ""
+			saved.ProfileSubject = subject
+			payload, err := json.Marshal(saved)
+			requestID, idErr := randomDeviceLoginID()
+			if err != nil || idErr != nil {
+				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+				return
+			}
+			h.createProfileInteractionPayload(w, r, newSession.Token, requestID, payload)
+		} else {
+			h.createProfileInteraction(w, r, newSession.Token, request.RequestID, newSession.Session, original.URL.RequestURI())
+		}
+		return
+	}
+	if target.approval != nil {
+		h.redirectApproval(w, target.approval)
 		return
 	}
 	h.oauth.CompleteAuthorizationWithSession(w, original, subject, request.RequestedScopes, newSession.CreatedAt, newSession.ID, newSession.AuthenticationMethod)
@@ -1176,6 +1264,10 @@ func (h *Handler) rotateBrowserSession(w http.ResponseWriter, r *http.Request, s
 }
 
 func (h *Handler) rotateBrowserSessionWithBinding(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP string, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, error) {
+	return h.rotateBrowserSessionWithParent(w, r, sessionToken, subject, authMethod, peerIP, "", binding)
+}
+
+func (h *Handler) rotateBrowserSessionWithParent(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP, parentDigest string, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, error) {
 	if h.onLoginLocation != nil && (authMethod == "webauthn" || authMethod == "mfa") && !security.ValidHeaderText(r.UserAgent()) {
 		return browser.IssuedSession{}, identity.ErrInvalidUserAgent
 	}
@@ -1191,7 +1283,9 @@ func (h *Handler) rotateBrowserSessionWithBinding(w http.ResponseWriter, r *http
 		newSession browser.IssuedSession
 		err        error
 	)
-	if binding != nil {
+	if parentDigest != "" {
+		newSession, err = h.browser.CreateReauthenticatedSession(r.Context(), subject, authMethod, h.now().Add(sessionLifetime), peerIP, parentDigest, binding)
+	} else if binding != nil {
 		if authMethod != "external" && authMethod != "mfa" {
 			return browser.IssuedSession{}, errors.New("upstream binding requires external or mfa authentication")
 		}
@@ -1323,12 +1417,8 @@ func (h *Handler) WebAuthnStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	original, err := h.originalAuthorizeRequest(r, interaction.Payload)
-	if err != nil {
-		http.Error(w, "Invalid login request", http.StatusForbidden)
-		return
-	}
-	request, err := h.oauth.ValidateAuthorizationRequest(original)
+	target, err := h.resolveAuthenticationRequest(r, interaction.Payload)
+	request := target.policy
 	if err != nil {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
@@ -1360,6 +1450,10 @@ func (h *Handler) WebAuthnStart(w http.ResponseWriter, r *http.Request) {
 		username = user.Username
 	}
 
+	if !target.acceptsSubject(subject) {
+		http.Error(w, "Invalid login request", http.StatusForbidden)
+		return
+	}
 	// Fresh passkey-only accounts always require user verification (UV).
 	// Use BeginMFALogin for fresh OR when the authorization request forces
 	// MFA, avoiding a mode race that relied on BeginLogin auto-upgrade.

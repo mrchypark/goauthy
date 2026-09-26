@@ -46,24 +46,26 @@ type Handler struct {
 // LocalLoginHooks connects an upstream callback to an existing local OAuth
 // login without exposing the local login implementation to this package.
 type LocalLoginHooks struct {
-	Prepare  func(r *http.Request, rawInteraction string) (rawSessionToken, sessionDigest, interactionDigest string, err error)
-	Current  func(r *http.Request) (rawSessionToken, sessionDigest string, err error)
-	Resolve  func(ctx context.Context, upstream SubjectResult) (localSubject string, err error)
+	Prepare                    func(r *http.Request, rawInteraction string) (rawSessionToken, sessionDigest, interactionDigest string, err error)
+	RequireFreshAuthentication func(r *http.Request, rawInteraction string) (bool, error)
+	Current                    func(r *http.Request) (rawSessionToken, sessionDigest string, err error)
+	Resolve                    func(ctx context.Context, upstream SubjectResult) (localSubject string, err error)
 	// ResolveVerified, when non-nil, is preferred over Resolve at LocalCallback.
 	// It receives the full VerifiedIdentity with deep-cloned config, verified
 	// claims, and raw payload — enabling federated onboarding/profile policy.
 	ResolveVerified func(ctx context.Context, identity VerifiedIdentity) (localSubject string, err error)
-	Complete func(w http.ResponseWriter, r *http.Request, rawSessionToken, interactionDigest, localSubject string, upstream *OIDCSession)
+	Complete        func(w http.ResponseWriter, r *http.Request, rawSessionToken, interactionDigest, localSubject string, upstream *OIDCSession)
 }
 
 // OIDCSession contains only claims verified against the consumed login transaction.
 // Its SID is upstream-scoped, never a local browser session identifier.
 type OIDCSession struct {
-	Issuer    string
-	ClientID  string
-	Subject   string
-	SessionID string
-	MFAPassed bool
+	Issuer             string
+	ClientID           string
+	Subject            string
+	SessionID          string
+	MFAPassed          bool
+	AuthenticationTime int64
 }
 
 // VerifiedIdentity carries the full verified upstream identity through the
@@ -74,8 +76,8 @@ type OIDCSession struct {
 // carry signed ID tokens.
 type VerifiedIdentity struct {
 	Subject       SubjectResult
-	Config        Config          // deep-cloned snapshot of the handler config
-	IDTokenClaims *IDTokenClaims  // nil for GitHub/OAuthUserInfo
+	Config        Config         // deep-cloned snapshot of the handler config
+	IDTokenClaims *IDTokenClaims // nil for GitHub/OAuthUserInfo
 }
 
 // cloneIDTokenClaims returns a deep copy of claims. Pointer fields and
@@ -404,6 +406,14 @@ func (h *Handler) LocalStartHandler() http.Handler {
 			http.Error(w, "Failed to start upstream flow", http.StatusBadRequest)
 			return
 		}
+		fresh := false
+		if h.localLogin.RequireFreshAuthentication != nil {
+			fresh, err = h.localLogin.RequireFreshAuthentication(r, interactions[0])
+			if err != nil {
+				http.Error(w, "Invalid login request", http.StatusBadRequest)
+				return
+			}
+		}
 		result, err := GenerateAuthorizationURL(r.Context(), h.provider, cfg, h.store, AuthorizationParams{
 			CallbackURI: callbackURI, Scopes: cfg.Scopes,
 			SessionDigest: sessionDigest, InteractionDigest: interactionDigest,
@@ -417,6 +427,13 @@ func (h *Handler) LocalStartHandler() http.Handler {
 		if err != nil || authURL.Query().Get("state") == "" {
 			http.Error(w, "Failed to start upstream flow", http.StatusInternalServerError)
 			return
+		}
+		if fresh {
+			query := authURL.Query()
+			query.Set("prompt", "login")
+			query.Set("max_age", "0")
+			authURL.RawQuery = query.Encode()
+			result.URL = authURL.String()
 		}
 		setCookie(w, stateCookieName, authURL.Query().Get("state"), 600)
 		w.Header().Set("Location", result.URL)
@@ -873,7 +890,7 @@ func (h *Handler) resolveSubject(ctx context.Context, providerID string, result 
 			return SubjectResult{}, nil, VerifiedIdentity{}, err
 		}
 		vi := VerifiedIdentity{Subject: sr, Config: clonedCfg, IDTokenClaims: cloneIDTokenClaims(claims)}
-		return sr, &OIDCSession{Issuer: claims.Issuer, ClientID: tx.ClientID, Subject: claims.Subject, SessionID: claims.SessionID}, vi, nil
+		return sr, &OIDCSession{Issuer: claims.Issuer, ClientID: tx.ClientID, Subject: claims.Subject, SessionID: claims.SessionID, AuthenticationTime: claims.AuthenticationTime}, vi, nil
 	case ProviderKindGitHub:
 		if result.IDToken != "" || result.Subject == nil || result.Subject.ProviderID != providerID {
 			return SubjectResult{}, nil, VerifiedIdentity{}, ErrNoSubject

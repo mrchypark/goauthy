@@ -8,7 +8,7 @@ unless the shared object store is configured.
 
 The overlay removes only the three-voter peer address, member list, and admin
 token. It deliberately retains the object-store configuration, bucket-wait
-init container, MinIO service/statefulset/init job, and their policies. MinIO's
+init container, VersityGW service/statefulset/init job, and their policies. VersityGW's
 PVC is an external-object-store test fixture for this manifest; it is not
 GoAuthy's product data PVC.
 

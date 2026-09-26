@@ -103,14 +103,15 @@ func upstreamLogoutStatements(logout UpstreamLogout, operationID string, now tim
 			(issuer,client_id,jti,token_digest,upstream_subject,upstream_sid,expires_at_unix_ms,operation_id,created_at_unix_ms)
 			VALUES (?,?,?,?,?,?,?,?,?)`, Args: append(receiptArgs, createdAt)},
 		// This is the same durable downstream logout outbox used by local OIDC
-		// logout. It precedes revocation so its active-session predicate is stable.
+		// logout. A reauthentication replacement can revoke the bound parent before
+		// its upstream logout arrives, but its RP logout obligation remains.
 		{SQL: `INSERT OR IGNORE INTO oidc_backchannel_deliveries
 			(event_id,client_id,sid,subject,logout_uri,allow_private,allow_http,attempts,next_attempt_at_unix_ms,created_at_unix_ms)
 			SELECT ? || '/' || ub.session_digest, sc.client_id, ub.session_digest, '', sc.logout_uri, sc.allow_private, sc.allow_http, 0, ?, ?
 			FROM browser_upstream_session_bindings ub
 			JOIN oidc_session_clients sc ON sc.sid=ub.session_digest
 			JOIN browser_sessions bs ON bs.token_digest=ub.session_digest
-			WHERE ` + selected + ` AND sc.logout_uri <> '' AND bs.revoked_at_unix_ms IS NULL AND ` + receipt,
+			WHERE ` + selected + ` AND sc.logout_uri <> '' AND ` + receipt,
 			Args: append(append([]any{eventPrefix, createdAt, createdAt}, selectionArgs...), receiptArgs...)},
 		{SQL: `UPDATE browser_sessions SET revoked_at_unix_ms=COALESCE(revoked_at_unix_ms, ?)
 			WHERE token_digest IN (` + sessionSelection + `)`, Args: append([]any{createdAt}, selectionAndReceipt...)},

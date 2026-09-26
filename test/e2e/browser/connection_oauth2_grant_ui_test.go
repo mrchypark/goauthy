@@ -13,7 +13,7 @@ import (
 
 // createOAuth2GrantUI creates the one explicit OAuth2 credential-delivery
 // consent grant through the account UI and returns its public grant metadata.
-func createOAuth2GrantUI(t *testing.T, owner *http.Client, base string, cookie *http.Cookie, headers map[string]string, collection, connection, consumer string) ([]byte, int64) {
+func createOAuth2GrantUI(t *testing.T, owner *http.Client, base string, cookie *http.Cookie, headers map[string]string, collection, connection, consumer string, allowRefresh bool) ([]byte, int64) {
 	t.Helper()
 	connectionPath := base + "/auth/v1/account/connections/" + url.PathEscape(collection) + "/" + url.PathEscape(connection)
 	var metadata struct {
@@ -107,6 +107,11 @@ func createOAuth2GrantUI(t *testing.T, owner *http.Client, base string, cookie *
 			t.Fatal(err)
 		}
 	}
+	if allowRefresh {
+		if err := chromedp.Run(ctx, chromedp.Click(selector("grant-refresh"))); err != nil {
+			t.Fatalf("select refresh consent: %v", err)
+		}
+	}
 	assertUnchanged("review")
 	if err := chromedp.Run(ctx,
 		chromedp.Click(selector("grant-review")),
@@ -138,6 +143,7 @@ func createOAuth2GrantUI(t *testing.T, owner *http.Client, base string, cookie *
 		Revision           int64  `json:"revision"`
 		ProviderRevision   int64  `json:"provider_revision"`
 		Expires            int64  `json:"expires_at_unix_ms"`
+		AllowRefresh       bool   `json:"allow_refresh"`
 		Revoked            bool   `json:"revoked"`
 	}
 	var grants []oauth2Grant
@@ -164,7 +170,7 @@ func createOAuth2GrantUI(t *testing.T, owner *http.Client, base string, cookie *
 		t.Fatalf("OAuth2 UI did not create exactly one new grant for %q: %#v", consumer, grants)
 	}
 	grant := created[0]
-	if grant.ID == "" || grant.Owner == "" || grant.CollectionID != collection || grant.ConnectionID != connection || grant.Consumer != consumer || grant.Mode != "credential_delivery" || grant.Purpose != "oauth-browser-consent" || grant.Resource != useGrantResource || grant.Generation == "" || grant.ConsumerGeneration == "" || grant.Provider == "" || grant.Digest != "" || grant.Revision != 1 || grant.ProviderRevision <= 0 || grant.Revoked || grant.Expires != expiry {
+	if grant.ID == "" || grant.Owner == "" || grant.CollectionID != collection || grant.ConnectionID != connection || grant.Consumer != consumer || grant.Mode != "credential_delivery" || grant.Purpose != "oauth-browser-consent" || grant.Resource != useGrantResource || grant.Generation == "" || grant.ConsumerGeneration == "" || grant.Provider == "" || grant.Digest != "" || grant.Revision != 1 || grant.ProviderRevision <= 0 || grant.Revoked || grant.AllowRefresh != allowRefresh || grant.Expires != expiry {
 		t.Fatalf("OAuth2 UI grant mismatch: %#v", grants)
 	}
 	grantJSON, err := json.Marshal(grant)

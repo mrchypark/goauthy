@@ -23,7 +23,7 @@ test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | 
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | (.spec.template.spec.containers[0].ports | length)' "$render")" = 1
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.containers[0].env | map(select(.name == "GOAUTHY_RHIZA_PROFILE") | .value) | .[]' "$render")" = standalone
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.containers[0].ports[0].name' "$render")" = http
-# minio-ingress admits TCP/9000 only from pods carrying
+# versity-ingress admits TCP/9000 only from pods carrying
 # app.kubernetes.io/component: object-store-client, so the pod template must keep it.
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.metadata.labels."app.kubernetes.io/component"' "$render")" = object-store-client
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .metadata.name' "$render" | awk 'END { print NR }')" = 1
@@ -33,10 +33,10 @@ if grep -E -n 'GOAUTHY_RHIZA_(PEER_ADDR|MEMBERS|ADMIN_TOKEN)|name: peer|targetPo
 	exit 1
 fi
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.containers[0].env | map(select(.name == "GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE") | .value) | .[]' "$render")" = true
-test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "minio") | .metadata.name' "$render" | awk 'END { print NR }')" = 1
-test "$(yq -r 'select(.kind == "Service" and .metadata.name == "minio") | .metadata.name' "$render" | awk 'END { print NR }')" = 1
-test "$(yq -r 'select(.kind == "Job" and .metadata.name == "minio-init") | .metadata.name' "$render" | awk 'END { print NR }')" = 1
-test "$(yq -r 'select(.kind == "NetworkPolicy" and .metadata.name == "minio-ingress") | .metadata.name' "$render" | awk 'END { print NR }')" = 1
+test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "versity") | .metadata.name' "$render" | awk 'END { print NR }')" = 1
+test "$(yq -r 'select(.kind == "Service" and .metadata.name == "versity") | .metadata.name' "$render" | awk 'END { print NR }')" = 1
+test "$(yq -r 'select(.kind == "Job" and .metadata.name == "versity-init") | .metadata.name' "$render" | awk 'END { print NR }')" = 1
+test "$(yq -r 'select(.kind == "NetworkPolicy" and .metadata.name == "versity-ingress") | .metadata.name' "$render" | awk 'END { print NR }')" = 1
 test "$(yq -r 'select(.kind == "NetworkPolicy" and .metadata.name == "object-store-client-egress") | .metadata.name' "$render" | awk 'END { print NR }')" = 1
 test "$(yq -r 'select(.kind == "NetworkPolicy" and .metadata.name == "standalone-goauthy-ingress") | .spec.egress[]?.ports[]? | select(.protocol == "TCP" and .port == 9000) | .port' "$render")" = 9000
 

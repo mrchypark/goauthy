@@ -155,13 +155,15 @@ type IssuedSession struct {
 
 // UpstreamSessionBinding identifies the upstream OIDC session that established
 // an external browser session. SessionID is the optional upstream `sid` claim.
-// All values are persisted exactly as verified by the upstream provider.
+// Identity fields are persisted exactly as verified by the upstream provider.
 type UpstreamSessionBinding struct {
 	Issuer    string
 	ClientID  string
 	Subject   string
 	SessionID string
 	MFAPassed bool
+	// AuthenticationTime is signed OIDC auth_time, used only during completion, not persisted.
+	AuthenticationTime int64
 }
 
 func (s *Store) CreateSession(ctx context.Context, subject, authMethod string, expiresAt time.Time, peerIP string) (IssuedSession, error) {
@@ -196,6 +198,10 @@ func (s *Store) CreateInitSession(ctx context.Context, expiresAt time.Time, peer
 }
 
 func (s *Store) createSession(ctx context.Context, subject, authMethod string, expiresAt time.Time, peerIP string, binding *UpstreamSessionBinding) (IssuedSession, error) {
+	return s.createSessionWithParent(ctx, subject, authMethod, expiresAt, peerIP, binding, nil)
+}
+
+func (s *Store) createSessionWithParent(ctx context.Context, subject, authMethod string, expiresAt time.Time, peerIP string, binding *UpstreamSessionBinding, parent *Session) (IssuedSession, error) {
 	now := s.timeNow()
 	expiresAt = expiresAt.UTC()
 	if !expiresAt.After(now) {
@@ -212,6 +218,13 @@ func (s *Store) createSession(ctx context.Context, subject, authMethod string, e
 			WHERE subject=? AND disabled=0 AND (user_expires_at_unix_ms IS NULL OR user_expires_at_unix_ms > ?)`,
 			Args: []any{digest, authMethod, now.UnixMilli(), expiresAt.UnixMilli(), expiresAt.UnixMilli(), now.UnixMilli(), peerIP, subject, now.UnixMilli()}}
 	}
+	if parent != nil {
+		guard, args := s.SessionAuthorizationGuard(*parent, peerIP)
+		insert.SQL += " AND (" + guard + ")"
+		insert.Args = append(insert.Args, args...)
+		one := int64(1)
+		insert.ExpectedRowsAffected = &one
+	}
 	statements := []rhiza.SQLStatement{
 		// Rhiza does not enforce SQLite foreign keys. Remove bindings before their
 		// expired sessions so session-digest lookups cannot retain stale rows.
@@ -223,6 +236,16 @@ func (s *Store) createSession(ctx context.Context, subject, authMethod string, e
 		statements = append(statements, rhiza.SQLStatement{SQL: `INSERT INTO browser_upstream_session_bindings (session_digest, issuer, client_id, upstream_subject, upstream_sid, created_at_unix_ms)
 			SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM browser_sessions WHERE token_digest=? AND subject=? AND auth_method=? AND created_at_unix_ms=?)`,
 			Args: []any{digest, binding.Issuer, binding.ClientID, binding.Subject, nullableUpstreamSessionID(binding.SessionID), now.UnixMilli(), digest, subject, authMethod, now.UnixMilli()}})
+	}
+	if parent != nil {
+		if binding == nil {
+			// Copy provenance in the same transaction as replacement and retirement.
+			// An upstream logout either revokes the parent first or sees the new binding.
+			statements = append(statements, rhiza.SQLStatement{SQL: `INSERT INTO browser_upstream_session_bindings(session_digest,issuer,client_id,upstream_subject,upstream_sid,created_at_unix_ms)
+    SELECT ?,issuer,client_id,upstream_subject,upstream_sid,? FROM browser_upstream_session_bindings WHERE session_digest=?`, Args: []any{digest, now.UnixMilli(), parent.ID}})
+		}
+		one := int64(1)
+		statements = append(statements, rhiza.SQLStatement{SQL: `UPDATE browser_sessions SET revoked_at_unix_ms=? WHERE token_digest=? AND revoked_at_unix_ms IS NULL`, Args: []any{now.UnixMilli(), parent.ID}, ExpectedRowsAffected: &one})
 	}
 	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID:  mutationID("session-create", digest),
@@ -559,6 +582,10 @@ func (s *Store) ConsumeAuthorizationInteractionByDigest(ctx context.Context, ses
 }
 
 func (s *Store) consumeAuthorizationInteraction(ctx context.Context, sessionDigest, digest string, requireInitSession bool) (AuthorizationInteraction, error) {
+	return s.consumeAuthorizationInteractionGuarded(ctx, sessionDigest, digest, requireInitSession, "", nil)
+}
+
+func (s *Store) consumeAuthorizationInteractionGuarded(ctx context.Context, sessionDigest, digest string, requireInitSession bool, parentGuard string, parentArgs []any) (AuthorizationInteraction, error) {
 	attempt, err := randomID(16)
 	if err != nil {
 		return AuthorizationInteraction{}, err
@@ -568,14 +595,18 @@ func (s *Store) consumeAuthorizationInteraction(ctx context.Context, sessionDige
 	if requireInitSession {
 		sessionCondition = `subject = '' AND auth_method = ''`
 	}
+	if parentGuard != "" {
+		parentGuard = " AND (" + parentGuard + ")"
+	}
+	consumeArgs := append([]any{attempt, now, digest, sessionDigest, now, sessionDigest, now, now - s.idleTimeout.Milliseconds(), now}, parentArgs...)
 	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID: mutationID("authorization-consume", digest, attempt),
 		Statements: []rhiza.SQLStatement{{SQL: `UPDATE browser_authorization_interactions
 			SET consumed_attempt = ?, consumed_at_unix_ms = ?
 			WHERE token_digest = ? AND session_digest = ? AND consumed_attempt IS NULL AND expires_at_unix_ms > ?
 			AND EXISTS (SELECT 1 FROM browser_sessions WHERE token_digest = ? AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ? AND last_seen_at_unix_ms > ?
-				AND (` + sessionCondition + `) AND ` + activeSessionSubjectSQL + `)`,
-			Args: []any{attempt, now, digest, sessionDigest, now, sessionDigest, now, now - s.idleTimeout.Milliseconds(), now}},
+				AND (` + sessionCondition + `) AND ` + activeSessionSubjectSQL + `)` + parentGuard,
+			Args: consumeArgs},
 			{SQL: `UPDATE browser_sessions SET last_seen_at_unix_ms = ?
 			WHERE token_digest = ? AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ?
 			AND last_seen_at_unix_ms > ? AND last_seen_at_unix_ms <= ?

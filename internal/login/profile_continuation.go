@@ -13,7 +13,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/identity"
 )
 
-var profilePage = template.Must(template.New("profile").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>Update Profile</title></head><body><main><h1>Update Profile</h1>{{if .Error}}<p style="color:red">{{.Error}}</p>{{end}}<form method="post" action=""><input type="hidden" name="interaction" value="{{.Interaction}}"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{range .Fields}}{{if .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{else}}<label>{{.Label}} <input name="{{.Name}}" value="{{.Value}}"{{if .Readonly}} readonly{{end}}{{if .Required}} required{{end}}></label>{{end}}{{end}}<button type="submit">Save</button></form></main></body></html>`))
+var profilePage = template.Must(template.New("profile").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>Update Profile</title></head><body><main><h1>Update Profile</h1>{{if .Error}}<p style="color:red">{{.Error}}</p>{{end}}<form method="post" action=""><input type="hidden" name="interaction" value="{{.Interaction}}"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{range .Fields}}{{if .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{else}}<label>{{.Label}} <input name="{{.Name}}" value="{{.Value}}"{{if .Readonly}} readonly{{end}}{{if .Required}} required{{end}}></label>{{end}}{{end}}<button type="submit">Save</button></form></main></body></html>`))
 
 type profileField struct {
 	Name     string
@@ -25,6 +25,7 @@ type profileField struct {
 }
 
 type profilePageData struct {
+	IssuerPath  string
 	Interaction string
 	CSRFToken   string
 	ThemeURL    string
@@ -66,7 +67,11 @@ func profileIssuerPath(issuer string) string {
 // bound to the authenticated raw session token with the validated requestID
 // and the original URL payload with 5m expiry, and redirects to the profile page.
 func (h *Handler) createProfileInteraction(w http.ResponseWriter, r *http.Request, sessionToken string, requestID string, session browser.Session, originalURL string) {
-	interaction, err := h.browser.CreateAuthorizationInteraction(r.Context(), sessionToken, requestID, []byte(originalURL), h.now().Add(interactionLifetime))
+	h.createProfileInteractionPayload(w, r, sessionToken, requestID, []byte(originalURL))
+}
+
+func (h *Handler) createProfileInteractionPayload(w http.ResponseWriter, r *http.Request, sessionToken, requestID string, payload []byte) {
+	interaction, err := h.browser.CreateAuthorizationInteraction(r.Context(), sessionToken, requestID, payload, h.now().Add(interactionLifetime))
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
@@ -93,12 +98,8 @@ func (h *Handler) profileGET(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid profile request", http.StatusForbidden)
 		return
 	}
-	original, err := h.originalAuthorizeRequest(r, interaction.Payload)
-	if err != nil {
-		http.Error(w, "Invalid profile request", http.StatusForbidden)
-		return
-	}
-	request, err := h.oauth.ValidateAuthorizationRequest(original)
+	target, err := h.resolveProfileRequest(r, interaction.Payload, session)
+	request := target.policy
 	if err != nil {
 		http.Error(w, "Invalid profile request", http.StatusForbidden)
 		return
@@ -134,6 +135,7 @@ func (h *Handler) profileGET(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Security-Policy", authorizationFormCSP(request.RedirectURI))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = profilePage.Execute(w, profilePageData{
+		IssuerPath:  strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile"),
 		Interaction: interactionToken,
 		CSRFToken:   csrf,
 		Fields:      fields,
@@ -199,12 +201,8 @@ func (h *Handler) profilePOST(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid profile request", http.StatusForbidden)
 		return
 	}
-	original, err := h.originalAuthorizeRequest(r, interaction.Payload)
-	if err != nil {
-		http.Error(w, "Invalid profile request", http.StatusForbidden)
-		return
-	}
-	request, err := h.oauth.ValidateAuthorizationRequest(original)
+	target, err := h.resolveProfileRequest(r, interaction.Payload, session)
+	request := target.policy
 	if err != nil {
 		http.Error(w, "Invalid profile request", http.StatusForbidden)
 		return
@@ -294,6 +292,7 @@ func (h *Handler) profilePOST(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusBadRequest)
 			_ = profilePage.Execute(w, profilePageData{
+				IssuerPath:  strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile"),
 				Interaction: interactionToken,
 				CSRFToken:   csrf,
 				Error:       errMsg,
@@ -317,17 +316,16 @@ func (h *Handler) profilePOST(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid profile request", http.StatusForbidden)
 		return
 	}
-	originalAfterConsume, err := h.originalAuthorizeRequest(r, consumed.Payload)
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	targetAfterConsume, err := h.resolveProfileRequest(r, consumed.Payload, session)
+	if err != nil || (targetAfterConsume.policy.ForceMFA && session.AuthenticationMethod != "mfa") {
+		http.Error(w, "Invalid profile request", http.StatusForbidden)
 		return
 	}
-	requestAfterConsume, err := h.oauth.ValidateAuthorizationRequest(originalAfterConsume)
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	if targetAfterConsume.approval != nil {
+		h.redirectApproval(w, targetAfterConsume.approval)
 		return
 	}
-	h.oauth.CompleteAuthorizationWithSession(w, originalAfterConsume, session.Subject, requestAfterConsume.RequestedScopes, session.CreatedAt, session.ID, session.AuthenticationMethod)
+	h.oauth.CompleteAuthorizationWithSession(w, targetAfterConsume.original, session.Subject, targetAfterConsume.policy.RequestedScopes, session.CreatedAt, session.ID, session.AuthenticationMethod)
 }
 
 // Profile handles GET/POST /auth/profile for profile continuation.
@@ -379,4 +377,17 @@ func buildProfileFields(policy identity.UserValuesPolicy, claims identity.Profil
 	addField("country", "Country", cfg.Country, claims.Country, false)
 	addField("tz", "Timezone", cfg.Timezone, claims.Timezone, false)
 	return fields
+}
+
+// Profile continuations are bound to the already authenticated session and
+// subject. An initial approval-login payload is not a profile continuation.
+func (h *Handler) resolveProfileRequest(r *http.Request, payload []byte, session browser.Session) (authenticationRequest, error) {
+	target, err := h.resolveAuthenticationRequest(r, payload)
+	if err != nil {
+		return authenticationRequest{}, err
+	}
+	if target.approval != nil && target.approval.ProfileSubject != session.Subject {
+		return authenticationRequest{}, errors.New("invalid profile subject")
+	}
+	return target, nil
 }

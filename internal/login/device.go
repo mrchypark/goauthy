@@ -5,28 +5,18 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"html/template"
 	"mime"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/device"
 )
 
-const (
-	deviceLoginPayload            = "goauthy-device-login/v1"
-	connectionHandoffLoginPayload = "goauthy-connection-handoff-login/v1"
-)
-
 var deviceLoginCode = regexp.MustCompile(`^[A-Z0-9]{4,32}$`)
-var deviceLoginPage = template.Must(template.New("device-login").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.Title}}</title></head><body><main><h1>{{.Title}}</h1><p>{{.Intro}}</p><form method="post" action="{{.Action}}"><input type="hidden" name="interaction" value="{{.Interaction}}"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Username <input name="username" autocomplete="username" required></label><label>Password <input type="password" name="password" autocomplete="current-password" required></label><button type="submit">Sign in</button></form></main></body></html>`))
-
-type deviceLoginData struct{ Action, Title, Intro, Interaction, CSRFToken, ThemeURL string }
-type deviceLoginInteraction struct{ Purpose, UserCode string }
-type connectionHandoffLoginInteraction struct{ Purpose, HandoffID string }
 
 // DeviceLoginHandler authenticates a browser for the device verification page.
 // It never looks up the code, so this boundary cannot disclose whether a code exists.
@@ -58,7 +48,7 @@ func (h *Handler) deviceLoginGet(w http.ResponseWriter, r *http.Request, forceMF
 	}
 	if current, _, ok := h.session(r); ok && current.Authenticated() {
 		if forceMFA && current.AuthenticationMethod != "mfa" {
-			http.Error(w, "Invalid login request", http.StatusForbidden)
+			h.startApprovalReauthentication(w, r, approvalLoginInteraction{Purpose: approvalLoginPayload, DeviceCode: &code, ForceMFA: true}, "/oidc/device/login")
 			return
 		}
 		h.deviceLoginRedirect(w, code)
@@ -69,7 +59,7 @@ func (h *Handler) deviceLoginGet(w http.ResponseWriter, r *http.Request, forceMF
 		http.Error(w, "Invalid login request", http.StatusBadRequest)
 		return
 	}
-	payload, _ := json.Marshal(deviceLoginInteraction{Purpose: deviceLoginPayload, UserCode: code})
+	payload, _ := json.Marshal(approvalLoginInteraction{Purpose: approvalLoginPayload, DeviceCode: &code, ForceMFA: forceMFA})
 	interaction, csrf, cookie, err := h.createLoginInteraction(r, peerIP, payload)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
@@ -82,7 +72,7 @@ func (h *Handler) deviceLoginGet(w http.ResponseWriter, r *http.Request, forceMF
 	}
 	http.SetCookie(w, cookie)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = deviceLoginPage.Execute(w, deviceLoginData{Action: "login", Title: "Device sign in", Intro: "Sign in to review the code from your device. Signing in does not approve it.", Interaction: interaction.Token, CSRFToken: csrf, ThemeURL: themeURL})
+	h.renderApprovalLoginPage(w, r, payload, "/oidc/device/login", "Sign in to review the code from your device. Signing in does not approve it.", interaction.Token, csrf, themeURL)
 }
 
 func (h *Handler) deviceLoginPost(w http.ResponseWriter, r *http.Request, forceMFA bool) {
@@ -111,53 +101,31 @@ func (h *Handler) loginPost(w http.ResponseWriter, r *http.Request, forceMFA boo
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	auth, peerIP, started, ok := h.authenticatePassword(w, r, form.Username, form.Password)
-	if !ok {
-		return
-	}
-	if forceMFA {
-		http.Error(w, "Invalid login request", http.StatusForbidden)
-		return
-	}
-	interaction, err := h.browser.ConsumeAuthorizationInteraction(r.Context(), sessionToken, form.Interaction)
+	interaction, err := h.browser.LoadAuthorizationInteractionReadOnly(r.Context(), sessionToken, form.Interaction)
 	if err != nil {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	var deviceSaved deviceLoginInteraction
-	var handoffSaved connectionHandoffLoginInteraction
-	switch destination {
-	case deviceLoginDestination:
-		if json.Unmarshal(interaction.Payload, &deviceSaved) != nil || deviceSaved.Purpose != deviceLoginPayload || (deviceSaved.UserCode != "" && !deviceLoginCode.MatchString(deviceSaved.UserCode)) {
-			http.Error(w, "Invalid login request", http.StatusForbidden)
-			return
-		}
-	case connectionHandoffDestination:
-		if json.Unmarshal(interaction.Payload, &handoffSaved) != nil || handoffSaved.Purpose != connectionHandoffLoginPayload {
-			http.Error(w, "Invalid login request", http.StatusForbidden)
-			return
-		}
-		if _, ok := canonicalHandoffID(handoffSaved.HandoffID); !ok {
-			http.Error(w, "Invalid login request", http.StatusForbidden)
-			return
-		}
-	default:
+	target, err := h.resolveAuthenticationRequest(r, interaction.Payload)
+	if err != nil || target.approval == nil || (forceMFA && !target.policy.ForceMFA) {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	if err := h.recordSuccessfulAuthentication(r.Context(), peerIP, h.now().Sub(started), nil); err != nil {
-		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+	if (destination == deviceLoginDestination && target.approval.DeviceCode == nil) || (destination == connectionHandoffDestination && target.approval.HandoffID == "") {
+		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	if _, err := h.rotateBrowserSession(w, r, sessionToken, auth.Subject, "pwd", peerIP); err != nil {
-		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+	h.loginPassword(w, r, loginForm{interaction: form.Interaction, username: form.Username, password: form.Password})
+}
+
+func (h *Handler) renderApprovalLoginPage(w http.ResponseWriter, r *http.Request, payload []byte, path, intro, interaction, csrf, theme string) {
+	target, err := h.resolveAuthenticationRequest(r, payload)
+	if err != nil {
+		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	if destination == deviceLoginDestination {
-		h.deviceLoginRedirect(w, deviceSaved.UserCode)
-	} else {
-		h.connectionHandoffRedirect(w, handoffSaved.HandoffID)
-	}
+	issuerURL, _ := url.Parse(h.issuer)
+	h.renderAuthenticationPage(w, r, target.policy, loginPageData{Action: strings.TrimRight(issuerURL.Path, "/") + path, Intro: intro, Interaction: interaction, CSRFToken: csrf, ThemeURL: theme})
 }
 
 type deviceLoginForm struct{ Interaction, CSRFToken, Username, Password string }
@@ -273,7 +241,7 @@ func (h *Handler) connectionHandoffLoginGet(w http.ResponseWriter, r *http.Reque
 	}
 	if current, _, ok := h.session(r); ok && current.Authenticated() {
 		if forceMFA && current.AuthenticationMethod != "mfa" {
-			http.Error(w, "Invalid login request", http.StatusForbidden)
+			h.startApprovalReauthentication(w, r, approvalLoginInteraction{Purpose: approvalLoginPayload, HandoffID: handoffID, ForceMFA: true}, "/account/connection-login")
 			return
 		}
 		h.connectionHandoffRedirect(w, handoffID)
@@ -284,7 +252,7 @@ func (h *Handler) connectionHandoffLoginGet(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "Invalid login request", http.StatusBadRequest)
 		return
 	}
-	payload, _ := json.Marshal(connectionHandoffLoginInteraction{Purpose: connectionHandoffLoginPayload, HandoffID: handoffID})
+	payload, _ := json.Marshal(approvalLoginInteraction{Purpose: approvalLoginPayload, HandoffID: handoffID, ForceMFA: forceMFA})
 	interaction, csrf, cookie, err := h.createLoginInteraction(r, peerIP, payload)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
@@ -297,7 +265,7 @@ func (h *Handler) connectionHandoffLoginGet(w http.ResponseWriter, r *http.Reque
 	}
 	http.SetCookie(w, cookie)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = deviceLoginPage.Execute(w, deviceLoginData{Action: "connection-login", Title: "Continue connection handoff", Intro: "Sign in to review this connection handoff. Signing in does not approve it.", Interaction: interaction.Token, CSRFToken: csrf, ThemeURL: themeURL})
+	h.renderApprovalLoginPage(w, r, payload, "/account/connection-login", "Sign in to review this connection handoff. Signing in does not approve it.", interaction.Token, csrf, themeURL)
 }
 
 func (h *Handler) connectionHandoffLoginPost(w http.ResponseWriter, r *http.Request, forceMFA bool) {

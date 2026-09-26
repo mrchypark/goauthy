@@ -71,12 +71,12 @@ image_container=
 cp "$temp_dir/public-ca.crt" "$temp_dir/ca-certificates.crt"
 awk '1' "$temp_dir/ca.crt" >>"$temp_dir/ca-certificates.crt"
 
-minio_image=minio/minio:RELEASE.2025-04-22T22-12-26Z
-mc_image=minio/mc:RELEASE.2025-04-16T18-13-26Z
-for fixture_image in "$minio_image" "$mc_image"; do
+object_store_image=versity/versitygw:v1.8.0
+s3_client_image=curlimages/curl:8.16.0
+for fixture_image in "$object_store_image" "$s3_client_image"; do
 	docker image inspect "$fixture_image" >/dev/null 2>&1 || docker pull "$fixture_image"
 done
-docker image save --output "$temp_dir/minio-images.tar" "$minio_image" "$mc_image"
+docker image save --output "$temp_dir/s3-images.tar" "$object_store_image" "$s3_client_image"
 
 
 kind create cluster --name "$KIND_CLUSTER" --wait 120s
@@ -90,11 +90,11 @@ kind load docker-image "$GOAUTHY_UPSTREAM_FIXTURE_IMAGE" --name "$KIND_CLUSTER"
 kind load docker-image "$GOAUTHY_SMTP_SINK_IMAGE" --name "$KIND_CLUSTER"
 kind_node="$KIND_CLUSTER-control-plane"
 platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$GOAUTHY_IMAGE")
-# Stream minio images archive into the Kind node; docker cp cannot write below
+# Stream S3 fixture images archive into the Kind node; docker cp cannot write below
 # Kind's mounted /tmp, so we pipe through docker exec -i cat.
-docker exec -i "$kind_node" sh -ec 'umask 077; cat > "$1"' sh /tmp/goauthy-minio-images.tar <"$temp_dir/minio-images.tar"
-docker exec "$kind_node" test -s /tmp/goauthy-minio-images.tar
-docker exec "$kind_node" ctr --namespace=k8s.io images import --platform "$platform" /tmp/goauthy-minio-images.tar
+docker exec -i "$kind_node" sh -ec 'umask 077; cat > "$1"' sh /tmp/goauthy-s3-images.tar <"$temp_dir/s3-images.tar"
+docker exec "$kind_node" test -s /tmp/goauthy-s3-images.tar
+docker exec "$kind_node" ctr --namespace=k8s.io images import --platform "$platform" /tmp/goauthy-s3-images.tar
 
 kubectl --context "$context" apply -f deploy/k8s/namespace.yaml
 browser_password=correct-horse-browser-staple
@@ -107,8 +107,8 @@ kubectl --context "$context" -n "$K8S_NAMESPACE" create secret generic goauthy-s
 	--from-literal=bootstrap-user-password-phc="$browser_phc" \
 	--from-literal=rhiza-admin-token=goauthy-e2e-admin-token \
 	--from-literal='rhiza-members=[{"node_id":"goauthy-0","peer_url":"quic://goauthy-0.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-0-token"},{"node_id":"goauthy-1","peer_url":"quic://goauthy-1.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-1-token"},{"node_id":"goauthy-2","peer_url":"quic://goauthy-2.goauthy.goauthy.svc.cluster.local:8444","token":"goauthy-e2e-voter-2-token"}]' \
-	--from-literal=minio-root-user=goauthy-e2e \
-	--from-literal=minio-root-password=goauthy-e2e-minio-password \
+	--from-literal=versity-root-user=goauthy-e2e \
+	--from-literal=versity-root-password=goauthy-e2e-versity-password \
 	--from-literal=password-reset-key=0123456789abcdef0123456789abcdef \
 	--dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
 kubectl --context "$context" -n "$K8S_NAMESPACE" create secret generic goauthy-tls --from-file=tls.crt="$temp_dir/goauthy.crt" --from-file=tls.key="$temp_dir/goauthy.key" --dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
@@ -129,8 +129,8 @@ case "$fixture_cluster_ip" in
 	''|None|*[!0-9.]*) echo 'upstream-fixture service did not receive a ClusterIP' >&2; exit 1;;
 esac
 kubectl --context "$context" -n "$K8S_NAMESPACE" patch statefulset/goauthy --type=merge -p "{\"spec\":{\"template\":{\"spec\":{\"hostAliases\":[{\"ip\":\"$fixture_cluster_ip\",\"hostnames\":[\"github.com\",\"api.github.com\"]}]}}}}"
-kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status statefulset/minio --timeout=180s
-kubectl --context "$context" -n "$K8S_NAMESPACE" wait --for=condition=complete job/minio-init --timeout=180s
+kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status statefulset/versity --timeout=180s
+kubectl --context "$context" -n "$K8S_NAMESPACE" wait --for=condition=complete job/versity-init --timeout=180s
 kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status deployment/goauthy-smtp-sink --timeout=180s
 kubectl --context "$context" -n "$K8S_NAMESPACE" rollout status deployment/upstream-fixture --timeout=180s
 if [ "${GOAUTHY_UPSTREAM_MANAGED_E2E:-}" = "1" ]; then
