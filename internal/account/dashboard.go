@@ -10,10 +10,11 @@ import (
 	"strings"
 
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/identity"
 )
 
-//go:embed dashboard.html dashboard.js dashboard.css connections.js connection_grants.js devices.js
+//go:embed dashboard.html dashboard.js dashboard.css locale.js connections.js connection_grants.js devices.js
 var dashboardFS embed.FS
 
 var dashboardTemplate = template.Must(template.ParseFS(dashboardFS, "dashboard.html"))
@@ -23,7 +24,7 @@ var dashboardTemplate = template.Must(template.ParseFS(dashboardFS, "dashboard.h
 func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	securityHeaders(w)
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	if r == nil || r.URL == nil || r.Method != http.MethodGet {
 		methodNotAllowed(w, http.MethodGet)
 		return
@@ -41,13 +42,18 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
-	case "/account", "/account/data", "/account/app.js", "/account/connections.js", "/account/connection-grants.js", "/account/devices.js", "/account/account.css":
+	case "/account", "/account/data", "/account/app.js", "/account/locale.js", "/account/connections.js", "/account/connection-grants.js", "/account/devices.js", "/account/account.css":
 	default:
 		http.NotFound(w, r)
 		return
 	}
 	session, token, ok := h.session(r)
 	if !ok {
+		if r.URL.Path == "/account" && strings.Contains(r.Header.Get("Accept"), "text/html") {
+			issuer, _ := url.Parse(h.issuer)
+			http.Redirect(w, r, strings.TrimRight(issuer.Path, "/")+"/account/login", http.StatusSeeOther)
+			return
+		}
 		unauthorized(w)
 		return
 	}
@@ -86,8 +92,11 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch r.URL.Path {
-	case "/account/app.js", "/account/connections.js", "/account/connection-grants.js", "/account/devices.js", "/account/account.css":
+	case "/account/app.js", "/account/locale.js", "/account/connections.js", "/account/connection-grants.js", "/account/devices.js", "/account/account.css":
 		name, media := "dashboard.js", "text/javascript; charset=utf-8"
+		if strings.HasSuffix(r.URL.Path, "locale.js") {
+			name = "locale.js"
+		}
 		if strings.HasSuffix(r.URL.Path, "connections.js") {
 			name = "connections.js"
 		}
@@ -105,6 +114,14 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(data)
 	default:
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = dashboardTemplate.Execute(w, struct{ BasePath string }{base})
+		language := i18n.UILanguageFromRequest(r)
+		w.Header().Set("Content-Language", language)
+		w.Header().Add("Vary", "Accept-Language")
+		w.Header().Add("Vary", "Cookie")
+		admin, err := h.isAdminResult(r.Context(), session.Subject)
+		_ = dashboardTemplate.Execute(w, struct {
+			BasePath, Language string
+			IsAdmin            bool
+		}{base, language, err == nil && admin})
 	}
 }

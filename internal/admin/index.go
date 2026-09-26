@@ -34,6 +34,7 @@ var indexTemplate = template.Must(template.ParseFS(indexFS, "index.html"))
 type Handler struct {
 	browserAdmin BrowserAdministrator
 	routes       []Route
+	basePath     string
 }
 
 // NewIndexHandler validates and copies the concrete links used by the index.
@@ -54,6 +55,13 @@ func NewIndexHandler(browserAdmin BrowserAdministrator, routes ...Route) (*Handl
 		seen[route.Path] = struct{}{}
 	}
 	return &Handler{browserAdmin: browserAdmin, routes: copyRoutes}, nil
+}
+
+// SetIssuer uses the configured public prefix for all administrator navigation.
+func (h *Handler) SetIssuer(issuer string) {
+	if parsed, err := url.Parse(issuer); err == nil {
+		h.basePath = strings.TrimRight(parsed.EscapedPath(), "/")
+	}
 }
 
 // Index serves GET /auth/v1/admin. Authentication is delegated only to the
@@ -82,18 +90,17 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.browserAdmin(w, r, false) {
+		if wantsHTML(r) {
+			renderAccessPage(w, r, h.basePath)
+		}
 		return
 	}
-	if err := indexTemplate.Execute(w, struct{ Routes []Route }{Routes: h.routes}); err != nil {
-		// The embedded template is parsed at init; this is defensive for future
-		// template changes and avoids writing an error body that could be cached.
-		return
-	}
+	http.Redirect(w, r, h.basePath+"/auth/v1/admin/dashboard", http.StatusSeeOther)
 }
 
 func (h *Handler) headers(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

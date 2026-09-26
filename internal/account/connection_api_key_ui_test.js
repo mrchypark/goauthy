@@ -30,7 +30,7 @@ function setup({ providerIds = ['provider-1'], connector = 'valid', registered =
     state: { csrf: 'csrf' }, ready: Promise.resolve(), connectionDeps: {
       status: () => {}, request: async (url, options = {}) => {
         calls.push({ url, options });
-        if (fail) throw new Error('Request failed (409). secret-not-for-display');
+        if (fail) { const error = new Error('Request failed (409). secret-not-for-display'); error.status = 409; throw error; }
         if (url.endsWith('/auth-collections')) return response([definition]);
         if (url.endsWith('/connections/keys')) return response([{ id: 'c1', revision: 1, metadata: {} }]);
         if (url.endsWith('/api-key/connector')) { connectorRequestedResolve(); if (connector === 'failed') throw new Error('connector unavailable'); return pendingConnector ? await pendingConnector : response(connectorInfo); }

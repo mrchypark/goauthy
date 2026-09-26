@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/oidc"
 )
 
@@ -36,15 +37,18 @@ const (
 	defaultVerificationLimit = 20
 )
 
-var verificationPage = template.Must(template.New("device-verification").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Device verification</title><link rel="stylesheet" href="{{.CSS}}"></head><body><main><header class="page-header"><div><p class="eyebrow">GoAuthy · Device access</p><h1>Device verification</h1></div></header>
-{{if .Message}}<p role="alert">{{.Message}}</p>{{end}}
-{{if .Review}}<p>Only approve if you started this request and the code matches your device. Signing in has not granted access.</p><dl class="connection-key-settings"><dt>Requesting app (client ID)</dt><dd id="device-client">{{.Review.ClientID}}</dd>{{if .Review.Resource}}<dt>Resource receiving access</dt><dd>{{.Review.Resource}}</dd>{{end}}</dl><h2>Requested permissions</h2><ul id="device-scopes">{{range .Review.Scopes}}<li>{{.}}</li>{{else}}<li>No named permissions requested</li>{{end}}</ul>
-<form method="post" action="verify"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>Code <input name="user_code" value="{{.UserCode}}" readonly required></label><button type="submit" name="action" value="approve">Approve device</button><button class="secondary" type="submit" name="action" value="deny">Deny request</button></form><p><a href="verify">Enter a different code</a></p>
-{{else}}<p>Enter the code shown on your device to review its requested access.</p><form method="get" action="verify"><label>Device code <input name="user_code" autocomplete="one-time-code" maxlength="64" required></label><button type="submit">Review request</button></form>{{end}}</main></body></html>`))
+var verificationPage = template.Must(template.New("device-verification").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{if eq .Language "ko"}}기기 확인{{else}}Device verification{{end}}</title><link rel="stylesheet" href="{{.CSS}}"></head><body class="auth-page"><header><a class="auth-brand" href="{{.Account}}"><span class="brand-symbol" aria-hidden="true"></span>GoAuthy</a></header><main class="auth-panel"><p class="auth-eyebrow">{{if eq .Language "ko"}}기기 접근{{else}}Device access{{end}}</p><h1>{{if eq .Language "ko"}}기기 확인{{else}}Device verification{{end}}</h1>
+{{if .Message}}<p class="auth-error" role="alert">{{.Message}}</p>{{end}}
+{{if .Complete}}<p><a id="device-account-link" class="button" href="{{.Account}}">{{if eq .Language "ko"}}계정으로 돌아가기{{else}}Return to account{{end}}</a></p>
+{{else if .Review}}<p>{{if eq .Language "ko"}}직접 시작했고 코드가 기기의 코드와 일치할 때만 승인하세요. 로그인만으로는 접근 권한이 부여되지 않습니다.{{else}}Only approve if you started this request and the code matches your device. Signing in has not granted access.{{end}}</p><dl class="connection-key-settings"><dt>{{if eq .Language "ko"}}요청 앱(클라이언트 ID){{else}}Requesting app (client ID){{end}}</dt><dd id="device-client">{{.Review.ClientID}}</dd>{{if .Review.Resource}}<dt>{{if eq .Language "ko"}}접근 권한을 받는 리소스{{else}}Resource receiving access{{end}}</dt><dd>{{.Review.Resource}}</dd>{{end}}</dl><h2>{{if eq .Language "ko"}}요청된 권한{{else}}Requested permissions{{end}}</h2><ul id="device-scopes">{{range .Review.Scopes}}<li>{{.}}</li>{{else}}<li>{{if eq .Language "ko"}}이름이 지정된 권한이 없습니다{{else}}No named permissions requested{{end}}</li>{{end}}</ul>
+<form method="post" action="verify"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><label>{{if eq .Language "ko"}}코드{{else}}Code{{end}} <input name="user_code" value="{{.UserCode}}" readonly required></label><button type="submit" name="action" value="approve">{{if eq .Language "ko"}}기기 승인{{else}}Approve device{{end}}</button><button class="secondary" type="submit" name="action" value="deny">{{if eq .Language "ko"}}요청 거부{{else}}Deny request{{end}}</button></form><p class="auth-return"><a href="verify">{{if eq .Language "ko"}}다른 코드 입력{{else}}Enter a different code{{end}}</a> · <a href="{{.Account}}">{{if eq .Language "ko"}}계정으로 나가기{{else}}Exit to account{{end}}</a></p>
+{{else}}<p>{{if eq .Language "ko"}}기기에 표시된 코드를 입력하여 요청된 접근 권한을 검토하세요.{{else}}Enter the code shown on your device to review its requested access.{{end}}</p><form method="get" action="verify"><label>{{if eq .Language "ko"}}기기 코드{{else}}Device code{{end}} <input name="user_code" autocomplete="one-time-code" maxlength="64" required></label><button type="submit">{{if eq .Language "ko"}}요청 검토{{else}}Review request{{end}}</button></form><p class="auth-return"><a href="{{.Account}}">{{if eq .Language "ko"}}계정으로 나가기{{else}}Exit to account{{end}}</a></p>{{end}}</main></body></html>`))
 
 type verificationPageData struct {
 	UserCode, CSRFToken, CSS, Message string
+	Language, Account                 string
 	Review                            *Review
+	Complete                          bool
 }
 
 // ClientAuthorizer authenticates the parsed request and checks device grant/scope
@@ -200,10 +204,13 @@ func (h *Handler) verifyPage(w http.ResponseWriter, r *http.Request) {
 		h.redirectToDeviceLogin(w, r)
 		return
 	}
-	data := verificationPageData{CSS: h.endpoint("/account/account.css")}
+	data := verificationPageData{CSS: h.endpoint("/auth/v1/theme/global.css"), Language: i18n.UILanguageFromRequest(r), Account: h.endpoint("/account")}
 	render := func(status int) {
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Language", data.Language)
+		w.Header().Add("Vary", "Accept-Language")
+		w.Header().Add("Vary", "Cookie")
 		w.WriteHeader(status)
 		_ = verificationPage.Execute(w, data)
 	}
@@ -222,6 +229,9 @@ func (h *Handler) verifyPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		data.Message = "This code is unavailable. Check the code or start a new request on your device."
+		if data.Language == "ko" {
+			data.Message = "사용할 수 없는 코드입니다. 코드를 확인하거나 기기에서 새 요청을 시작하세요."
+		}
 		render(http.StatusBadRequest)
 		return
 	}
@@ -307,7 +317,20 @@ func (h *Handler) verifyDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	// One-use cookie reduces accidental repeated approval from a browser back button.
 	http.SetCookie(w, &http.Cookie{Name: h.csrfCookieName(), Value: "", Path: "/", HttpOnly: true, Secure: h.issuer.Scheme == "https", SameSite: http.SameSiteLaxMode, MaxAge: -1})
-	writeHTMLStatus(w, http.StatusOK, message)
+	data := verificationPageData{CSS: h.endpoint("/auth/v1/theme/global.css"), Language: i18n.UILanguageFromRequest(r), Account: h.endpoint("/account"), Message: message, Complete: true}
+	if data.Language == "ko" {
+		data.Message = "기기가 승인되었습니다."
+		if action == "deny" {
+			data.Message = "기기 요청을 거부했습니다."
+		}
+	}
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Language", data.Language)
+	w.Header().Add("Vary", "Accept-Language")
+	w.Header().Add("Vary", "Cookie")
+	w.WriteHeader(http.StatusOK)
+	_ = verificationPage.Execute(w, data)
 }
 
 func parseDeviceForm(w http.ResponseWriter, r *http.Request) (string, []string, error) {

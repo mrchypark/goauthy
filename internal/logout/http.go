@@ -29,7 +29,7 @@ const (
 	logoutRequestPrefix   = "logout-"
 )
 
-var confirmationPage = template.Must(template.New("logout-confirmation").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><title>{{.SignOut}}</title></head><body><main><h1>{{.SignOut}}</h1><p>{{.ConfirmSignOut}}</p><form method="post" action="logout"><input type="hidden" name="confirmation" value="{{.Interaction}}"><button type="submit">{{.SignOut}}</button></form></main></body></html>`))
+var confirmationPage = template.Must(template.New("logout-confirmation").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="{{.BasePath}}/auth/v1/theme/global.css"><title>{{.SignOut}}</title></head><body class="auth-page"><header class="auth-brand"><span class="brand-symbol" aria-hidden="true"></span><span>GoAuthy</span></header><main class="auth-panel"><h1>{{.SignOut}}</h1><p>{{.ConfirmSignOut}}</p><form method="post" action="logout"><input type="hidden" name="confirmation" value="{{.Interaction}}"><button type="submit">{{.SignOut}}</button></form><a class="auth-return" href="{{.BasePath}}/account">{{if eq .Language "ko"}}취소하고 내 계정으로{{else}}Cancel and return to my account{{end}}</a></main></body></html>`))
 
 var errLogoutUnavailable = errors.New("logout state unavailable")
 
@@ -244,12 +244,14 @@ func (h *Handler) renderConfirmation(w http.ResponseWriter, r *http.Request, coo
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	messages := i18n.MessagesFor(strings.Join(r.Header.Values("Accept-Language"), ","))
+	messages := i18n.MessagesFor(i18n.UILanguageFromRequest(r))
 	localizedLogoutHTMLHeaders(w, messages.Language)
-	_ = confirmationPage.Execute(w, confirmationPageData{Interaction: interaction.Token, Messages: messages})
+	issuerURL, _ := url.Parse(h.issuer)
+	_ = confirmationPage.Execute(w, confirmationPageData{BasePath: strings.TrimRight(issuerURL.Path, "/"), Interaction: interaction.Token, Messages: messages})
 }
 
 type confirmationPageData struct {
+	BasePath    string
 	Interaction string
 	i18n.Messages
 }
@@ -340,11 +342,12 @@ func logoutSecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'")
 	w.Header().Set("X-Frame-Options", "DENY")
 }
 
 func localizedLogoutHTMLHeaders(w http.ResponseWriter, language string) {
 	w.Header().Set("Content-Language", language)
 	w.Header().Add("Vary", "Accept-Language")
+	w.Header().Add("Vary", "Cookie")
 }

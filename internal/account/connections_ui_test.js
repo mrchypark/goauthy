@@ -33,7 +33,7 @@ function run() {
         status: (id, message, error) => { elements[id].textContent = message; elements[id].className = error ? 'status error' : 'status'; },
         request: async (url, options = {}) => {
           calls.push({ url, options });
-          if (conflict) throw new Error('Request failed (409).');
+          if (conflict) { const error = new Error('Request failed (409).'); error.status = 409; throw error; }
           if (url.endsWith('/auth-collections')) return response([definition]);
           if (url.endsWith('/connections/github') && (!options.method || options.method === 'GET')) return response([]);
           if (url.includes('/connections/conn-1')) return response({});

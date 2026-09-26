@@ -36,7 +36,7 @@ func authorizationFormCSP(validatedRedirect string) string {
 			action += " " + u.Scheme + "://" + host
 		}
 	}
-	return "default-src 'none'; style-src 'self'; form-action " + action + "; frame-ancestors 'none'"
+	return "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; form-action " + action + "; frame-ancestors 'none'"
 }
 
 // authorizationFormCSPWithNonce returns the same policy as authorizationFormCSP

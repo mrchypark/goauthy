@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -135,7 +137,9 @@ func TestTernalDeviceCLILive(t *testing.T) {
 		t.Fatal("ternalctl login failed")
 	}
 
-	sessionPath := filepath.Join(configDir, "ternal", "session.json")
+	apiOrigin := "http://" + apiAddr
+	originHash := sha256.Sum256([]byte(apiOrigin))
+	sessionPath := filepath.Join(configDir, "ternal", fmt.Sprintf("session-%x.json", originHash[:8]))
 	info, err := os.Stat(sessionPath)
 	if err != nil {
 		t.Fatal(err)
@@ -145,15 +149,19 @@ func TestTernalDeviceCLILive(t *testing.T) {
 	}
 	data, err := os.ReadFile(sessionPath)
 	var session map[string]json.RawMessage
-	if err != nil || json.Unmarshal(data, &session) != nil || len(session) != 3 {
+	if err != nil || json.Unmarshal(data, &session) != nil || len(session) != 4 {
 		t.Fatal("session file is incomplete")
 	}
-	for _, key := range []string{"cookie", "csrf_token", "expires_at"} {
+	for _, key := range []string{"cookie", "csrf_token", "expires_at", "api_url"} {
 		if _, ok := session[key]; !ok {
 			t.Fatal("session file is incomplete")
 		}
 	}
 	var cookie, csrf string
+	var storedOrigin string
+	if json.Unmarshal(session["api_url"], &storedOrigin) != nil || storedOrigin != apiOrigin {
+		t.Fatal("session file is not bound to the expected API origin")
+	}
 	var expiry int64
 	if json.Unmarshal(session["cookie"], &cookie) != nil || json.Unmarshal(session["csrf_token"], &csrf) != nil || json.Unmarshal(session["expires_at"], &expiry) != nil || cookie == "" || csrf == "" || expiry <= time.Now().Unix() {
 		t.Fatal("session file is incomplete")

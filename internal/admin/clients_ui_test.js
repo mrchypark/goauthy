@@ -4,6 +4,7 @@ const elements = new Map(), calls = [];
 const decode = s => s.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 const get = id => elements.get(id) || null;
 const buttons = () => [...elements.values()].filter(e => e.tagName === 'BUTTON');
+const controls = () => [...elements.values()].filter(e => ['BUTTON', 'INPUT', 'TEXTAREA', 'SELECT'].includes(e.tagName));
 let current, handler;
 const ctx = {
   console, location: {href: ''}, encodeURIComponent,
@@ -11,6 +12,7 @@ const ctx = {
   confirm: s => { assert.equal(s, 'Delete client c1 permanently?'); return true; },
   document: {getElementById: get, querySelectorAll(selector) {
     if (selector === '#client-form button') return buttons();
+    if (selector === '#client-form input, #client-form select, #client-form textarea, #client-form button') return controls();
     if (selector === '[data-client-flow]') return [...elements.values()].filter(e => e.dataset.clientFlow);
     if (selector === '[data-client-flow]:checked') return [...elements.values()].filter(e => e.dataset.clientFlow && e.checked);
     throw Error('Unexpected selector: ' + selector);
@@ -33,6 +35,7 @@ vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(__dirname + '/clients.js', 'utf8'), ctx);
 const submit = () => get('client-form').onsubmit({preventDefault() {}});
 const fixture = confidential => ({id: 'c1', name: 'One', confidential, enabled: true, revision: 7,
+  backchannel_logout_uri: 'https://app.example/logout', restrict_group_prefix: 'team/',
   redirect_uris: ['https://app.example/cb?a=one,two'], scopes: ['goauthy.read', 'offline_access'],
   audience: ['https://resource.example/api/one,two'], default_scopes: ['goauthy.read'], enabled_flows: ['authorization_code', 'refresh_token', device]});
 function normalAPI(_url, opts) {
@@ -50,6 +53,8 @@ function normalAPI(_url, opts) {
   assert.deepEqual(JSON.parse(update.opts.body).enabled_flows, current.enabled_flows);
   assert.deepEqual(JSON.parse(update.opts.body).redirect_uris, ['https://app.example/cb?a=one,two']);
   assert.deepEqual(JSON.parse(update.opts.body).audience, ['https://resource.example/api/one,two']);
+  assert.equal(JSON.parse(update.opts.body).backchannel_logout_uri, current.backchannel_logout_uri);
+  assert.equal(JSON.parse(update.opts.body).restrict_group_prefix, current.restrict_group_prefix);
   await submit();
   assert.equal(calls.filter(c => c.opts.method === 'PUT').at(-1).opts.headers['If-Match'], '"11"');
   await ctx.clients('new', 'new');
@@ -90,11 +95,13 @@ function normalAPI(_url, opts) {
   const count = calls.length, pending = submit();
   assert.equal(get('client-secret').textContent, 'Secret is hidden.');
   assert.ok(buttons().every(b => b.disabled));
+  assert.ok(controls().every(control => control.disabled));
   await submit();
   assert.equal(calls.length, count + 1);
   assert.equal(calls.at(-1).opts.headers['If-Match'], '"29"');
   handler = normalAPI; release({...current}); await pending;
   assert.ok(buttons().every(b => !b.disabled));
+  assert.ok(controls().every(control => !control.disabled));
   handler = async () => { throw Error('409 conflict'); };
   get('client-name').value = 'Keep my input';
   await submit();

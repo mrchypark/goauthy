@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/identity"
 )
 
-var profilePage = template.Must(template.New("profile").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>Update Profile</title></head><body><main><h1>Update Profile</h1>{{if .Error}}<p style="color:red">{{.Error}}</p>{{end}}<form method="post" action=""><input type="hidden" name="interaction" value="{{.Interaction}}"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{range .Fields}}{{if .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{else}}<label>{{.Label}} <input name="{{.Name}}" value="{{.Value}}"{{if .Readonly}} readonly{{end}}{{if .Required}} required{{end}}></label>{{end}}{{end}}<button type="submit">Save</button></form></main></body></html>`))
+var profilePage = template.Must(template.New("profile").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{if eq .Language "ko"}}프로필 업데이트{{else}}Update Profile{{end}}</title></head><body class="auth-page"><header class="auth-brand"><span class="brand-symbol" aria-hidden="true"></span><span>GoAuthy</span></header><main class="auth-panel"><p class="auth-eyebrow">{{if eq .Language "ko"}}내 계정{{else}}YOUR ACCOUNT{{end}}</p><h1>{{if eq .Language "ko"}}프로필 업데이트{{else}}Update Profile{{end}}</h1>{{if .Error}}<p class="auth-error" role="alert">{{.Error}}</p>{{end}}<form method="post" action=""><input type="hidden" name="interaction" value="{{.Interaction}}"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{range .Fields}}{{if .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{else}}<label>{{.Label}} <input name="{{.Name}}" value="{{.Value}}"{{if .Readonly}} readonly{{end}}{{if .Required}} required{{end}}></label>{{end}}{{end}}<button type="submit">{{if eq .Language "ko"}}저장{{else}}Save{{end}}</button></form><p><a id="profile-account-link" href="{{.Account}}">{{if eq .Language "ko"}}계정으로 나가기{{else}}Exit to account{{end}}</a></p></main></body></html>`))
 
 type profileField struct {
 	Name     string
@@ -25,12 +26,13 @@ type profileField struct {
 }
 
 type profilePageData struct {
-	IssuerPath  string
-	Interaction string
-	CSRFToken   string
-	ThemeURL    string
-	Error       string
-	Fields      []profileField
+	IssuerPath        string
+	Interaction       string
+	CSRFToken         string
+	ThemeURL          string
+	Error             string
+	Language, Account string
+	Fields            []profileField
 }
 
 // SetUserValuesPolicy validates and stores a static profile continuation policy.
@@ -132,12 +134,16 @@ func (h *Handler) profileGET(w http.ResponseWriter, r *http.Request) {
 	}
 	fields := buildProfileFields(policy, claims)
 	securityHeaders(w)
+	language := i18n.UILanguageFromRequest(r)
+	localizedHTMLHeaders(w, language)
 	w.Header().Set("Content-Security-Policy", authorizationFormCSP(request.RedirectURI))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = profilePage.Execute(w, profilePageData{
 		IssuerPath:  strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile"),
 		Interaction: interactionToken,
 		CSRFToken:   csrf,
+		Language:    language,
+		Account:     strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile") + "/account",
 		Fields:      fields,
 	})
 }
@@ -288,6 +294,11 @@ func (h *Handler) profilePOST(w http.ResponseWriter, r *http.Request) {
 				errMsg = "preferred username unavailable"
 			}
 			securityHeaders(w)
+			language := i18n.UILanguageFromRequest(r)
+			if language == "ko" && errors.Is(err, identity.ErrPreferredUsernameUnavailable) {
+				errMsg = "선호 사용자 이름을 사용할 수 없습니다"
+			}
+			localizedHTMLHeaders(w, language)
 			w.Header().Set("Content-Security-Policy", authorizationFormCSP(request.RedirectURI))
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusBadRequest)
@@ -296,6 +307,8 @@ func (h *Handler) profilePOST(w http.ResponseWriter, r *http.Request) {
 				Interaction: interactionToken,
 				CSRFToken:   csrf,
 				Error:       errMsg,
+				Language:    language,
+				Account:     strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile") + "/account",
 				Fields:      fields,
 			})
 			return

@@ -97,6 +97,19 @@ func TestPasswordLoginMissingProfileYieldsProfileContinuation(t *testing.T) {
 	}
 }
 
+func TestProfileContinuationUsesSelectedLocaleAndSafeExit(t *testing.T) {
+	t.Parallel()
+	h, _, cookie, location := profileSetup(t)
+	r := httptest.NewRequest(http.MethodGet, location, nil)
+	r.AddCookie(cookie)
+	r.AddCookie(&http.Cookie{Name: "goauthy_ui_locale", Value: "ko"})
+	w := httptest.NewRecorder()
+	h.Profile(w, r)
+	if w.Code != http.StatusOK || w.Header().Get("Content-Language") != "ko" || !strings.Contains(w.Body.String(), "프로필 업데이트") || !strings.Contains(w.Body.String(), `id="profile-account-link" href="/account"`) {
+		t.Fatalf("status=%d language=%q body=%s", w.Code, w.Header().Get("Content-Language"), w.Body.String())
+	}
+}
+
 func TestAuthenticatedSessionRetainedAfterProfileSubmission(t *testing.T) {
 	t.Parallel()
 	h, db := testHandlerWithDB(t, false)

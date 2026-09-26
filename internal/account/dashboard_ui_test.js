@@ -7,7 +7,7 @@ function element(id) {
   if (!elements.has(id)) elements.set(id, { id, value: '', textContent: '', className: '', hidden: true, dataset: {}, children: [], addEventListener() {}, append(...children) { this.children.push(...children); }, reset() {}, querySelector() { return { disabled: false }; }, querySelectorAll() { return []; } });
   return elements.get(id);
 }
-const form = (id) => Object.assign(element(id), { querySelectorAll() { return []; }, reset() {} });
+const form = (id) => Object.assign(element(id), { submitButton: { disabled: false }, querySelector() { return this.submitButton; }, querySelectorAll() { return []; }, reset() {} });
 const requests = [];
 const responses = [
   { ok: true, json: async () => ({ subject: 'user/1', email: 'a@example.test', given_name: 'A', csrf_token: 'csrf' }) },
@@ -19,6 +19,7 @@ const responses = [
 ];
 const context = {
   console,
+  GoAuthyI18n: { t(message, values = {}) { const translated = message === 'Request failed ({status}).' && values.status === 406 ? '요청에 실패했습니다 ({status}).' : message; return translated.replace(/\{(\w+)\}/g, (match, name) => Object.hasOwn(values, name) ? String(values[name]) : match); } },
   window: { location: { pathname: '/account' } },
   document: { querySelector(selector) { return element(selector[0] === '#' ? selector.slice(1) : selector); }, getElementById: element, createElement(tag) { return { tagName: tag, id: '', value: '', textContent: '', className: '', hidden: false, dataset: {}, htmlFor: '', append() {}, addEventListener() {} }; } },
   fetch: async (url, options) => { requests.push({ url, options }); return responses.shift(); },
@@ -30,24 +31,37 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
   await context.accountDashboard.ready;
   assert.equal(context.accountDashboard.state.account.subject, 'user/1');
   element('preferred-username').value = 'new-name';
-  await context.accountDashboard.submitUsername({ preventDefault() {} });
+  const usernameForm = form('username-form');
+  await context.accountDashboard.submitUsername({ preventDefault() {}, target: usernameForm });
   assert.equal(requests[3].url, '/auth/v1/users/user%2F1/self/preferred_username');
   assert.equal(requests[3].options.method, 'PUT');
   assert.equal(requests[3].options.headers['X-CSRF-Token'], 'csrf');
   assert.deepEqual(JSON.parse(requests[3].options.body), { preferred_username: 'new-name' });
+  let finishUsername;
+  context.fetch = (url, options) => { requests.push({ url, options }); return new Promise((resolve) => { finishUsername = () => resolve({ ok: true }); }); };
+  const pendingForm = form('username-form-pending');
+  const beforePending = requests.length;
+  const pendingSave = context.accountDashboard.submitUsername({ preventDefault() {}, target: pendingForm });
+  assert.equal(pendingForm.submitButton.disabled, true);
+  await context.accountDashboard.submitUsername({ preventDefault() {}, target: pendingForm });
+  assert.equal(requests.length, beforePending + 1, 'a pending username save must not be submitted twice');
+  finishUsername();
+  await pendingSave;
+  assert.equal(pendingForm.submitButton.disabled, false);
+  context.fetch = async (url, options) => { requests.push({ url, options }); return responses.shift(); };
 
   element('password-current').value = 'CurrentPassword1';
   element('password-new').value = 'NewPassword2';
   element('password-confirm').value = 'NewPassword2';
-  const passwordForm = Object.assign(form('password-form'), { querySelector() { return { disabled: false }; } });
+  const passwordForm = form('password-form');
   await context.accountDashboard.submitPassword({ preventDefault() {}, target: passwordForm });
-  assert.equal(requests[4].url, '/auth/v1/users/user%2F1/self');
-  assert.equal(requests[4].options.method, 'PUT');
-  assert.deepEqual(JSON.parse(requests[4].options.body), { password_current: 'CurrentPassword1', password_new: 'NewPassword2' });
+  assert.equal(requests[5].url, '/auth/v1/users/user%2F1/self');
+  assert.equal(requests[5].options.method, 'PUT');
+  assert.deepEqual(JSON.parse(requests[5].options.body), { password_current: 'CurrentPassword1', password_new: 'NewPassword2' });
   assert.match(element('password-status').textContent, /Password changed/);
-  const attributeForm = { querySelectorAll() { return [{ dataset: { attribute: 'score' }, value: '8' }, { dataset: { attribute: 'enabled' }, value: 'false' }, { dataset: { attribute: 'metadata' }, value: '{"team":"b"}' }]; } };
+  const attributeForm = { submitButton: { disabled: false }, querySelector() { return this.submitButton; }, querySelectorAll() { return [{ dataset: { attribute: 'score' }, value: '8' }, { dataset: { attribute: 'enabled' }, value: 'false' }, { dataset: { attribute: 'metadata' }, value: '{"team":"b"}' }]; } };
   await context.accountDashboard.submitAttributes({ preventDefault() {}, target: attributeForm });
-  assert.deepEqual(JSON.parse(requests[5].options.body), { values: [{ key: 'score', value: 8 }, { key: 'enabled', value: false }, { key: 'metadata', value: { team: 'b' } }] });
+  assert.deepEqual(JSON.parse(requests[6].options.body), { values: [{ key: 'score', value: 8 }, { key: 'enabled', value: false }, { key: 'metadata', value: { team: 'b' } }] });
   element('passkey-name').value = '';
   const beforePasskey = requests.length;
   await context.accountDashboard.addPasskey({ preventDefault() {} });
@@ -160,6 +174,7 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
     await context.accountDashboard.checkSelfDelete();
     assert.equal(context.accountDashboard.state.selfDeleteAllowed, false);
     assert.equal(element('self-delete-section').hidden, failure === 406);
+    if (failure === 406) assert.match(element('self-delete-status').textContent, /^요청에 실패했습니다 \(406\)\.$/);
     assert.equal(element('self-delete-button').disabled, true);
     element('self-delete-confirm').value = 'a@example.test';
     const forbiddenDelete = requests.length;

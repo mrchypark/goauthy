@@ -200,3 +200,17 @@ func TestConnectionHandoffPageEscapesReviewMetadata(t *testing.T) {
 		t.Fatal("approval/deny controls missing")
 	}
 }
+
+func TestConnectionHandoffPageLocaleAndSafeExit(t *testing.T) {
+	t.Parallel()
+	h, cookie, _ := handoffHTTPFixture(t)
+	r := httptest.NewRequest(http.MethodGet, "/account/connection-handoffs/"+pageTicket, nil)
+	r.SetPathValue("handoff_id", pageTicket)
+	r.AddCookie(cookie)
+	r.AddCookie(&http.Cookie{Name: "goauthy_ui_locale", Value: "ko"})
+	w := httptest.NewRecorder()
+	h.ConnectionHandoffPage(w, r)
+	if w.Code != http.StatusNotFound || w.Header().Get("Content-Language") != "ko" || !strings.Contains(w.Body.String(), "계정으로 나가기") || !strings.Contains(w.Body.String(), `href="https://issuer.example.test/account"`) {
+		t.Fatalf("status=%d language=%q body=%s", w.Code, w.Header().Get("Content-Language"), w.Body.String())
+	}
+}

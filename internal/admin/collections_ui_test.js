@@ -12,6 +12,8 @@ function element(id) {
 }
 const ctx = {
   console,
+  location: {href: ''},
+  GoAuthyI18n: {t: key => ({'Provider IDs': '공급자 ID', 'OAuth 2': 'OAuth 2', 'API key': 'API 키', 'Device flow': '기기 흐름'}[key] || key)},
   document: {getElementById: element, querySelectorAll: () => []},
   root,
   esc: value => String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c])),
@@ -30,6 +32,9 @@ vm.runInContext(source, ctx, {filename: 'collections.js'});
   await ctx.collections('missing');
   assert.match(element('collection-error').textContent || root.innerHTML, /missing collection/);
   await ctx.collections('new', 'new');
+  assert.match(root.innerHTML, /공급자 ID/);
+  assert.match(root.innerHTML, />API 키</);
+  assert.match(root.innerHTML, />기기 흐름</);
   element('collection-id').value = 'draft-one';
   element('collection-name').value = 'Draft one';
   element('collection-method').value = 'oauth2';
@@ -48,9 +53,10 @@ vm.runInContext(source, ctx, {filename: 'collections.js'});
   };
   collectionFields.querySelectorAll = selector => selector === '.collection-field' ? [enumRow] : [];
   await element('collection-form').onsubmit({preventDefault() {}});
-  const created = calls.at(-2);
+  const created = calls.filter(call => call.opts.method === 'POST').at(-1);
   assert.equal(created.url, '/auth/v1/auth-collections');
   assert.equal(created.opts.method, 'POST');
+  assert.equal(ctx.location.href, '/auth/v1/admin/collections');
   const createdBody = JSON.parse(created.opts.body);
   assert.equal(createdBody.id, 'draft-one');
   assert.deepEqual(createdBody.fields[0].options, enumOptions);
@@ -67,10 +73,11 @@ vm.runInContext(source, ctx, {filename: 'collections.js'});
   element('collection-name').value = 'Login';
   element('collection-providers').value = 'github\ngoogle';
   await element('collection-form').onsubmit({preventDefault() {}});
-  const updated = calls.at(-2);
+  const updated = calls.filter(call => call.opts.method === 'PUT').at(-1);
   assert.equal(updated.url, '/auth/v1/auth-collections/login');
   assert.equal(updated.opts.method, 'PUT');
   assert.equal(updated.opts.headers['If-Match'], '"3"');
+  assert.equal(ctx.location.href, '/auth/v1/admin/collections');
   assert.equal(updated.opts.body, '{"name":"Login","auth_method":"oauth2","enabled":true,"provider_ids":["github","google"],"fields":[]}');
   element('collection-providers').value = 'github\ngithub';
   const writesBeforeDuplicate = calls.filter(call => call.opts.method === 'PUT').length;
@@ -90,7 +97,7 @@ vm.runInContext(source, ctx, {filename: 'collections.js'});
   element('collection-enabled').checked = true;
   const apiKeyWrites = calls.filter(call => call.opts.method === 'POST').length;
   await element('collection-form').onsubmit({preventDefault() {}});
-  const apiKeyCreated = calls.at(-2);
+  const apiKeyCreated = calls.filter(call => call.opts.method === 'POST').at(-1);
   assert.equal(apiKeyCreated.opts.method, 'POST');
   assert.deepEqual(JSON.parse(apiKeyCreated.opts.body).provider_ids, ['registered-api']);
   assert.equal(calls.filter(call => call.opts.method === 'POST').length, apiKeyWrites + 1);
@@ -108,8 +115,8 @@ vm.runInContext(source, ctx, {filename: 'collections.js'});
   element('collection-method').value = 'api_key';
   element('collection-providers').value = '';
   await element('collection-form').onsubmit({preventDefault() {}});
-  assert.equal(calls.at(-2).opts.method, 'POST');
-  assert.deepEqual(JSON.parse(calls.at(-2).opts.body).provider_ids, []);
+  assert.equal(calls.filter(call => call.opts.method === 'POST').at(-1).opts.method, 'POST');
+  assert.deepEqual(JSON.parse(calls.filter(call => call.opts.method === 'POST').at(-1).opts.body).provider_ids, []);
 
   ctx.api = async (url, opts = {}) => {
     calls.push({url, opts});
@@ -128,7 +135,7 @@ vm.runInContext(source, ctx, {filename: 'collections.js'});
   element('collection-providers').value = 'registered-api';
   ctx.confirm = () => true;
   await element('collection-form').onsubmit({preventDefault() {}});
-  const apiKeyUpdated = calls.at(-2);
+  const apiKeyUpdated = calls.filter(call => call.opts.method === 'PUT').at(-1);
   assert.equal(apiKeyUpdated.opts.method, 'PUT');
   assert.deepEqual(JSON.parse(apiKeyUpdated.opts.body).provider_ids, ['registered-api']);
 
@@ -144,9 +151,10 @@ vm.runInContext(source, ctx, {filename: 'collections.js'});
   assert.equal(element('collection-name').value, 'Login');
   ctx.api = async (url, opts = {}) => { calls.push({url, opts}); return opts.method ? {} : {id: 'login', name: 'Login', auth_method: 'oauth2', enabled: true, revision: 3, fields: []}; };
   await element('collection-delete').onclick();
-  const deleted = calls.at(-2);
+  const deleted = calls.filter(call => call.opts.method === 'DELETE').at(-1);
   assert.equal(deleted.opts.method, 'DELETE');
   assert.equal(deleted.opts.headers['If-Match'], '"3"');
+  assert.equal(ctx.location.href, '/auth/v1/admin/collections');
   assert.match(source, /If-Match/);
   assert.match(source, /metadata-only/);
   assert.match(source, /data-field-type/);

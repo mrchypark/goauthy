@@ -21,6 +21,7 @@ type approvalLoginInteraction struct {
 	Purpose             string
 	DeviceCode          *string `json:",omitempty"`
 	HandoffID           string  `json:",omitempty"`
+	Account             bool    `json:",omitempty"`
 	ForceMFA            bool
 	ExpectedSubject     string `json:",omitempty"`
 	ParentSessionDigest string `json:",omitempty"`
@@ -45,11 +46,23 @@ func (h *Handler) resolveAuthenticationRequest(r *http.Request, payload []byte) 
 		if decoder.Decode(&saved) != nil || decoder.Decode(new(any)) != io.EOF || saved.Purpose != approvalLoginPayload {
 			return authenticationRequest{}, errors.New("invalid login continuation")
 		}
+		targets := 0
 		if saved.DeviceCode != nil {
-			if saved.HandoffID != "" || (*saved.DeviceCode != "" && !deviceLoginCode.MatchString(*saved.DeviceCode)) {
+			targets++
+			if *saved.DeviceCode != "" && !deviceLoginCode.MatchString(*saved.DeviceCode) {
 				return authenticationRequest{}, errors.New("invalid device continuation")
 			}
-		} else if _, ok := canonicalHandoffID(saved.HandoffID); !ok {
+		}
+		if saved.HandoffID != "" {
+			targets++
+			if _, ok := canonicalHandoffID(saved.HandoffID); !ok {
+				return authenticationRequest{}, errors.New("invalid handoff continuation")
+			}
+		}
+		if saved.Account {
+			targets++
+		}
+		if targets != 1 {
 			return authenticationRequest{}, errors.New("invalid handoff continuation")
 		}
 		if saved.ProfileSubject != "" && (saved.ExpectedSubject != "" || saved.ParentSessionDigest != "") {
@@ -136,6 +149,8 @@ func (h *Handler) startApprovalReauthentication(w http.ResponseWriter, r *http.R
 func (h *Handler) redirectApproval(w http.ResponseWriter, saved *approvalLoginInteraction) {
 	if saved.DeviceCode != nil {
 		h.deviceLoginRedirect(w, *saved.DeviceCode)
+	} else if saved.Account {
+		h.accountLoginRedirect(w)
 	} else {
 		h.connectionHandoffRedirect(w, saved.HandoffID)
 	}
