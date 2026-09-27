@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -584,6 +585,181 @@ func TestSessionIdleBoundaryAndTouchThrottle(t *testing.T) {
 	now = idle.CreatedAt.Add(DefaultIdleTimeout)
 	if _, err := store.LoadSession(ctx, idle.Token); !errors.Is(err, ErrExpired) {
 		t.Fatalf("idle boundary err=%v", err)
+	}
+}
+
+func TestLoadSessionForPeerRejectsMismatchBeforeTouch(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	issued, err := store.CreateSession(ctx, "user-1", "pwd", now.Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(touchInterval + time.Second)
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "browser-reject-peer-touch-trigger", SQL: `CREATE TRIGGER reject_browser_session_touch BEFORE UPDATE OF last_seen_at_unix_ms ON browser_sessions BEGIN SELECT RAISE(ABORT, 'unexpected session touch'); END`}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LoadSessionForPeer(ctx, issued.Token, "198.51.100.9"); !errors.Is(err, ErrPeerIPMismatch) {
+		t.Fatalf("wrong peer load err=%v want %v", err, ErrPeerIPMismatch)
+	}
+	if got := sessionLastSeen(t, store, issued.Token); !got.Equal(issued.CreatedAt) {
+		t.Fatalf("wrong peer touched session: got %s want %s", got, issued.CreatedAt)
+	}
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "browser-remove-peer-touch-trigger", SQL: `DROP TRIGGER reject_browser_session_touch`}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LoadSessionForPeer(ctx, issued.Token, "203.0.113.8"); err != nil {
+		t.Fatalf("matching peer load err=%v", err)
+	}
+	if got := sessionLastSeen(t, store, issued.Token); !got.Equal(now) {
+		t.Fatalf("matching peer last_seen=%s want %s", got, now)
+	}
+}
+
+func TestLoadSessionForPeerRechecksBindingAfterNoopTouch(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	issued, err := store.CreateSession(ctx, "user-1", "pwd", now.Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(touchInterval + time.Second)
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "browser-change-peer-on-touch", SQL: `CREATE TRIGGER change_browser_session_peer_on_touch BEFORE UPDATE OF last_seen_at_unix_ms ON browser_sessions BEGIN UPDATE browser_sessions SET peer_ip='198.51.100.9' WHERE token_digest=OLD.token_digest; SELECT RAISE(IGNORE); END`}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LoadSessionForPeer(ctx, issued.Token, "203.0.113.8"); !errors.Is(err, ErrPeerIPMismatch) {
+		t.Fatalf("peer change during no-op touch err=%v want %v", err, ErrPeerIPMismatch)
+	}
+	if got := sessionLastSeen(t, store, issued.Token); !got.Equal(issued.CreatedAt) {
+		t.Fatalf("no-op touch changed last_seen: got %s want %s", got, issued.CreatedAt)
+	}
+}
+
+func TestLoadSessionForPeerTouchesLegacyEmptyBinding(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	issued, err := store.CreateSession(ctx, "user-1", "pwd", now.Add(time.Hour), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(touchInterval + time.Second)
+	if _, err := store.LoadSessionForPeer(ctx, issued.Token, "198.51.100.9"); err != nil {
+		t.Fatalf("legacy empty peer binding rejected: %v", err)
+	}
+	if got := sessionLastSeen(t, store, issued.Token); !got.Equal(now) {
+		t.Fatalf("legacy session last_seen=%s want %s", got, now)
+	}
+}
+
+func TestSessionTouchReplayIsStableAcrossPeerCallers(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	issued, err := store.CreateSession(ctx, "user-1", "pwd", now.Add(time.Hour), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(touchInterval + time.Second)
+	if _, err := store.LoadSession(ctx, issued.Token); err != nil {
+		t.Fatalf("initial touch: %v", err)
+	}
+	resetLastSeen := func(requestID string) {
+		t.Helper()
+		if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: requestID, SQL: `UPDATE browser_sessions SET last_seen_at_unix_ms=? WHERE token_digest=?`, Args: []any{issued.CreatedAt.UnixMilli(), issued.ID}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resetLastSeen("browser-reset-touch-replay-one")
+	if _, err := store.LoadSessionForPeer(ctx, issued.Token, "198.51.100.9"); err != nil {
+		t.Fatalf("same-ms touch through peer API: %v", err)
+	}
+	resetLastSeen("browser-reset-touch-replay-two")
+	if _, err := store.LoadSessionForPeer(ctx, issued.Token, "203.0.113.17"); err != nil {
+		t.Fatalf("same-ms legacy touch through another peer: %v", err)
+	}
+}
+
+func TestLoadSessionForPeerPreservesValidityGuards(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	expired, err := store.CreateSession(ctx, "user-external", "pwd", now.Add(5*time.Second), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revoked, err := store.CreateSession(ctx, "user-1", "pwd", now.Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inactive, err := store.CreateSession(ctx, "user-2", "pwd", now.Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(touchInterval + time.Second)
+	if err := store.RevokeSession(ctx, revoked.Token); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "browser-disable-touched-session", SQL: `UPDATE identity_users SET disabled=1 WHERE subject='user-2'`}); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name   string
+		issued IssuedSession
+		want   error
+	}{{"expired", expired, ErrExpired}, {"revoked", revoked, ErrRevoked}, {"inactive", inactive, ErrNotFound}} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := store.LoadSessionForPeer(ctx, test.issued.Token, "203.0.113.8"); !errors.Is(err, test.want) {
+				t.Fatalf("load err=%v want %v", err, test.want)
+			}
+			if got := sessionLastSeen(t, store, test.issued.Token); !got.Equal(test.issued.CreatedAt) {
+				t.Fatalf("invalid session touched: got %s want %s", got, test.issued.CreatedAt)
+			}
+		})
+	}
+}
+
+func TestConcurrentLoadSessionForPeerTouches(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	base := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	store.now = func() time.Time { return base }
+	issued, err := store.CreateSession(ctx, "user-1", "pwd", base.Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int64
+	store.now = func() time.Time { return base.Add(touchInterval + time.Duration(calls.Add(1))*time.Millisecond) }
+	const readers = 16
+	start := make(chan struct{})
+	errs := make(chan error, readers)
+	var wait sync.WaitGroup
+	for range readers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			_, err := store.LoadSessionForPeer(ctx, issued.Token, "203.0.113.8")
+			errs <- err
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent load err=%v", err)
+		}
+	}
+	if got := sessionLastSeen(t, store, issued.Token); got.Before(base.Add(touchInterval)) {
+		t.Fatalf("concurrent loads did not touch session: last_seen=%s", got)
 	}
 }
 
