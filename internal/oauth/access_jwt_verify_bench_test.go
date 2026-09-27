@@ -19,6 +19,13 @@ import (
 )
 
 func BenchmarkIntrospectionHTTP(b *testing.B) {
+	// This is a serial, in-process httptest benchmark of the real introspection
+	// handler, Fosite chain, and local Rhiza session store. The test package sets
+	// bcryptHashCost to bcrypt.MinCost; signing verification keys come from an
+	// in-memory loader. It does not include network, production key-database, or
+	// deployment costs. Both controls run in this same binary and fixture.
+	// ns/op, B/op, and allocs/op include request/recorder setup in the timed loop;
+	// p95/p99 timestamps bracket ServeHTTP only, excluding that setup and checks.
 	db := oauthTestDB(b)
 	private := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
 	public := private.Public().(ed25519.PublicKey)
@@ -42,7 +49,7 @@ func BenchmarkIntrospectionHTTP(b *testing.B) {
 	for _, tc := range []struct {
 		name  string
 		reuse bool
-	}{{"baseline", false}, {"candidate", true}} {
+	}{{"serial-in-process-httptest/bcrypt-min-cost/in-memory-key-loader/real-rhiza-store/baseline-no-reuse", false}, {"serial-in-process-httptest/bcrypt-min-cost/in-memory-key-loader/real-rhiza-store/candidate-request-local-reuse", true}} {
 		b.Run(tc.name, func(b *testing.B) {
 			verifyCalls, keyLoads := 0, 0
 			strategy.verifyToken = func(token string, keys jose.JSONWebKeySet, issuer string, now time.Time) (oidc.AccessTokenClaims, error) {
@@ -55,7 +62,7 @@ func BenchmarkIntrospectionHTTP(b *testing.B) {
 			}
 			handler := server.introspectionHandler(tc.reuse)
 			latency := make([]int64, b.N)
-			cpuProfile := startIssue106CPUProfile(b, tc.name)
+			cpuProfile := startIntrospectionCPUProfile(b, tc.name)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -71,29 +78,29 @@ func BenchmarkIntrospectionHTTP(b *testing.B) {
 				}
 			}
 			b.StopTimer()
-			stopIssue106CPUProfile(b, cpuProfile)
+			stopIntrospectionCPUProfile(b, cpuProfile)
 			sort.Slice(latency, func(i, j int) bool { return latency[i] < latency[j] })
-			b.ReportMetric(float64(percentileIssue106(latency, 95)), "p95-ns")
-			b.ReportMetric(float64(percentileIssue106(latency, 99)), "p99-ns")
+			b.ReportMetric(float64(percentileLatency(latency, 95)), "p95-ns")
+			b.ReportMetric(float64(percentileLatency(latency, 99)), "p99-ns")
 			b.ReportMetric(float64(verifyCalls)/float64(b.N), "crypto-verifies/op")
 			b.ReportMetric(float64(keyLoads)/float64(b.N), "key-loads/op")
 		})
 	}
 }
 
-func percentileIssue106(sorted []int64, percentile int) int64 {
+func percentileLatency(sorted []int64, percentile int) int64 {
 	return sorted[(len(sorted)*percentile+99)/100-1]
 }
 
-func startIssue106CPUProfile(b *testing.B, name string) *os.File {
-	directory := os.Getenv("ISSUE106_CPU_PROFILE_DIR")
+func startIntrospectionCPUProfile(b *testing.B, name string) *os.File {
+	directory := os.Getenv("ISSUE117_CPU_PROFILE_DIR")
 	if directory == "" {
 		return nil
 	}
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		b.Fatal(err)
 	}
-	file, err := os.Create(filepath.Join(directory, name+".cpu"))
+	file, err := os.Create(filepath.Join(directory, strings.ReplaceAll(name, "/", "_")+".cpu"))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -104,7 +111,7 @@ func startIssue106CPUProfile(b *testing.B, name string) *os.File {
 	return file
 }
 
-func stopIssue106CPUProfile(b *testing.B, file *os.File) {
+func stopIntrospectionCPUProfile(b *testing.B, file *os.File) {
 	if file == nil {
 		return
 	}

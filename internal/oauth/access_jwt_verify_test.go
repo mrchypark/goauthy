@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,35 +29,44 @@ func TestIntrospectionVerifiesJWTOncePerRequest(t *testing.T) {
 	}))
 	strategy := server.accessTokens.(*signedAccessTokenStrategy)
 	original := strategy.verifyToken
-	verifications := 0
+	var verifications atomic.Int64
 	strategy.verifyToken = func(token string, keys jose.JSONWebKeySet, issuer string, now time.Time) (oidc.AccessTokenClaims, error) {
-		verifications++
+		verifications.Add(1)
 		return original(token, keys, issuer, now)
 	}
+	// Reuse the same handler value throughout. Reconstructing it per call would
+	// let handler-scoped state accidentally pass this request-scoped assertion.
+	handler := server.IntrospectionHandler()
 	for want := 1; want <= 2; want++ {
-		response := postOAuthForm(server.IntrospectionHandler(), url.Values{"token": {issued.AccessToken}}, testClientID, testClientSecret)
-		if response.Code != 200 || !strings.Contains(response.Body.String(), `"active":true`) || verifications != want {
-			t.Fatalf("request %d status=%d verifies=%d body=%s", want, response.Code, verifications, response.Body.String())
+		response := postOAuthForm(handler, url.Values{"token": {issued.AccessToken}}, testClientID, testClientSecret)
+		if response.Code != 200 || !strings.Contains(response.Body.String(), `"active":true`) || verifications.Load() != int64(want) {
+			t.Fatalf("request %d status=%d verifies=%d body=%s", want, response.Code, verifications.Load(), response.Body.String())
 		}
 	}
-	strategy.verifyToken = original
 	var requests sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		requests.Add(1)
 		go func() {
 			defer requests.Done()
-			response := postOAuthForm(server.IntrospectionHandler(), url.Values{"token": {issued.AccessToken}}, testClientID, testClientSecret)
+			response := postOAuthForm(handler, url.Values{"token": {issued.AccessToken}}, testClientID, testClientSecret)
 			if response.Code != 200 || !strings.Contains(response.Body.String(), `"active":true`) {
 				t.Errorf("concurrent introspection status=%d body=%s", response.Code, response.Body.String())
 			}
 		}()
 	}
 	requests.Wait()
+	if got := verifications.Load(); got != 10 {
+		t.Fatalf("serial plus concurrent requests verified %d times, want exactly one per request (10)", got)
+	}
 	revoked := postOAuthForm(server.RevocationHandler(), url.Values{"token": {issued.AccessToken}}, testClientID, testClientSecret)
 	if revoked.Code != 200 {
 		t.Fatalf("signed token revocation status=%d body=%s", revoked.Code, revoked.Body.String())
 	}
-	assertInactive(t, postOAuthForm(server.IntrospectionHandler(), url.Values{"token": {issued.AccessToken}}, testClientID, testClientSecret))
+	beforeRevokedIntrospection := verifications.Load()
+	assertInactive(t, postOAuthForm(handler, url.Values{"token": {issued.AccessToken}}, testClientID, testClientSecret))
+	if got := verifications.Load(); got != beforeRevokedIntrospection+1 {
+		t.Fatalf("post-revocation introspection added %d signature verifications, want 1", got-beforeRevokedIntrospection)
+	}
 }
 
 func TestCachedJWTValidationUsesCurrentStoredClientAndAudience(t *testing.T) {
@@ -150,6 +160,58 @@ func TestAccessTokenVerificationCacheRechecksClockAndSigningKeys(t *testing.T) {
 	strategy.issuer = "https://changed-issuer.example.test"
 	if _, err := strategy.verify(ctx, token); err == nil || verifyCalls != 6 {
 		t.Fatalf("changed issuer reused cached verification: err=%v verifies=%d", err, verifyCalls)
+	}
+}
+
+func TestAccessTokenVerificationCacheRejectsRemovedKeysLoadErrorsAndClockRollback(t *testing.T) {
+	private := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{4}, ed25519.SeedSize))
+	public := private.Public().(ed25519.PublicKey)
+	key := oidc.SigningKey{Private: private, PublicJWK: jose.JSONWebKey{Key: public, KeyID: "cache-removal-key", Algorithm: string(jose.EdDSA), Use: "sig"}}
+	now := time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC)
+	claims := oidc.AccessTokenClaims{Issuer: "https://issuer.example.test", Subject: "subject", Audience: []string{"client"}, IssuedAt: now, NotBefore: now, ExpiresAt: now.Add(time.Hour), ID: "jti", AuthorizedParty: "client", Type: "Bearer"}
+	token, err := oidc.SignAccessToken(key, claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeKeys := []jose.JSONWebKey{key.PublicJWK}
+	var loadErr error
+	verifyCalls := 0
+	strategy := &signedAccessTokenStrategy{
+		issuer: claims.Issuer,
+		loadKeys: func(context.Context) ([]jose.JSONWebKey, error) {
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			return activeKeys, nil
+		},
+		verifyToken: func(token string, keys jose.JSONWebKeySet, issuer string, at time.Time) (oidc.AccessTokenClaims, error) {
+			verifyCalls++
+			return oidc.VerifyAccessToken(token, keys, issuer, at)
+		},
+		now: func() time.Time { return now },
+	}
+	ctx := withAccessTokenVerificationCache(context.Background())
+	if _, err := strategy.verify(ctx, token); err != nil {
+		t.Fatal(err)
+	}
+
+	activeKeys = nil // Removing a key must invalidate the cached success.
+	if _, err := strategy.verify(ctx, token); err == nil || verifyCalls != 2 {
+		t.Fatalf("removed key reused cached verification: verifies=%d err=%v", verifyCalls, err)
+	}
+	activeKeys = []jose.JSONWebKey{key.PublicJWK}
+	if _, err := strategy.verify(ctx, token); err != nil || verifyCalls != 2 {
+		t.Fatalf("restored key verification: verifies=%d err=%v", verifyCalls, err)
+	}
+
+	loadErr = errors.New("verification key source unavailable")
+	if _, err := strategy.verify(ctx, token); err == nil || verifyCalls != 2 {
+		t.Fatalf("cached success bypassed key-load error: verifies=%d err=%v", verifyCalls, err)
+	}
+	loadErr = nil
+	now = claims.IssuedAt.Add(-time.Nanosecond) // Rollback places iat in the future.
+	if _, err := strategy.verify(ctx, token); err == nil || verifyCalls != 3 {
+		t.Fatalf("clock rollback reused cached verification: verifies=%d err=%v", verifyCalls, err)
 	}
 }
 
