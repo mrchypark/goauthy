@@ -38,11 +38,12 @@ var (
 )
 
 type Keyring struct {
-	mu        sync.RWMutex
-	active    string
-	keys      map[string][32]byte
-	directory string
-	signing   *signingMaterialCache
+	mu                sync.RWMutex
+	active            string
+	keys              map[string][32]byte
+	directory         string
+	signing           *signingMaterialCache
+	signingGeneration uint64
 }
 
 type signingMaterialCache struct {
@@ -237,10 +238,17 @@ func LoadActiveSigningKey(ctx context.Context, db *rhiza.DB, keyring *Keyring, i
 }
 
 func loadSigningKey(ctx context.Context, db *rhiza.DB, keyring *Keyring, issuer, kid, state string) (loaded SigningKey, loadErr error) {
+	var generation uint64
 	if state == "active" {
+		// Capture before the query: older row snapshots must not mutate newer cache state.
+		if keyring != nil {
+			keyring.mu.RLock()
+			generation = keyring.signingGeneration
+			keyring.mu.RUnlock()
+		}
 		defer func() {
 			if loadErr != nil {
-				keyring.clearSigningMaterial()
+				keyring.clearSigningMaterial(generation)
 			}
 		}()
 	}
@@ -286,7 +294,7 @@ func loadSigningKey(ctx context.Context, db *rhiza.DB, keyring *Keyring, issuer,
 		return SigningKey{}, fmt.Errorf("invalid signing key creation time")
 	}
 	if state == "active" {
-		if key, ok := keyring.cachedSigningMaterial(issuer, kid, publicJSON, encodedEnvelope, createdAt); ok {
+		if key, ok := keyring.cachedSigningMaterial(&generation, issuer, kid, publicJSON, encodedEnvelope, createdAt); ok {
 			return key, nil
 		}
 	}
@@ -322,35 +330,40 @@ func loadSigningKey(ctx context.Context, db *rhiza.DB, keyring *Keyring, issuer,
 		wipeBytes(key.Private)
 		return SigningKey{}, fmt.Errorf("stored public JWK does not match private key")
 	}
-	if state == "active" && !keyring.cacheSigningMaterial(issuer, kid, publicJSON, encodedEnvelope, createdAt, masterKeyID, key) {
+	if state == "active" && !keyring.cacheSigningMaterial(generation, issuer, kid, publicJSON, encodedEnvelope, createdAt, masterKeyID, key) {
 		wipeBytes(key.Private)
 		return SigningKey{}, fmt.Errorf("signing key master key was removed during load")
 	}
 	return key, nil
 }
 
-func (keyring *Keyring) cachedSigningMaterial(issuer, kid, publicJWK, envelope string, createdAt int64) (SigningKey, bool) {
+func (keyring *Keyring) cachedSigningMaterial(generation *uint64, issuer, kid, publicJWK, envelope string, createdAt int64) (SigningKey, bool) {
 	if keyring == nil {
 		return SigningKey{}, false
 	}
 	keyring.mu.Lock()
 	defer keyring.mu.Unlock()
+	if *generation != keyring.signingGeneration {
+		return SigningKey{}, false
+	}
 	entry := keyring.signing
 	if entry == nil {
 		return SigningKey{}, false
 	}
 	if entry.issuer != issuer || entry.kid != kid || entry.publicJWK != publicJWK || entry.envelope != envelope || entry.createdAtUnixMS != createdAt {
 		keyring.clearSigningMaterialLocked()
+		*generation = keyring.signingGeneration
 		return SigningKey{}, false
 	}
 	if _, ok := keyring.keys[entry.masterKeyID]; !ok {
 		keyring.clearSigningMaterialLocked()
+		*generation = keyring.signingGeneration
 		return SigningKey{}, false
 	}
 	return cloneSigningKey(entry.key), true
 }
 
-func (keyring *Keyring) cacheSigningMaterial(issuer, kid, publicJWK, envelope string, createdAt int64, masterKeyID string, key SigningKey) bool {
+func (keyring *Keyring) cacheSigningMaterial(generation uint64, issuer, kid, publicJWK, envelope string, createdAt int64, masterKeyID string, key SigningKey) bool {
 	if keyring == nil {
 		return false
 	}
@@ -358,6 +371,10 @@ func (keyring *Keyring) cacheSigningMaterial(issuer, kid, publicJWK, envelope st
 	defer keyring.mu.Unlock()
 	if _, ok := keyring.keys[masterKeyID]; !ok {
 		return false
+	}
+	// A superseded load may return its validated query snapshot, but cannot cache it.
+	if generation != keyring.signingGeneration {
+		return true
 	}
 	keyring.clearSigningMaterialLocked()
 	keyring.signing = &signingMaterialCache{
@@ -367,16 +384,20 @@ func (keyring *Keyring) cacheSigningMaterial(issuer, kid, publicJWK, envelope st
 	return true
 }
 
-func (keyring *Keyring) clearSigningMaterial() {
+func (keyring *Keyring) clearSigningMaterial(generation uint64) {
 	if keyring == nil {
 		return
 	}
 	keyring.mu.Lock()
 	defer keyring.mu.Unlock()
-	keyring.clearSigningMaterialLocked()
+	if generation == keyring.signingGeneration {
+		keyring.clearSigningMaterialLocked()
+	}
 }
 
 func (keyring *Keyring) clearSigningMaterialLocked() {
+	// Even an empty cache must fence loads already in flight.
+	keyring.signingGeneration++
 	if keyring.signing != nil {
 		wipeBytes(keyring.signing.key.Private)
 		keyring.signing = nil

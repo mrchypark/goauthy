@@ -184,8 +184,12 @@ func TestLoadActiveSigningKeyCacheRejectsRemovedMasterKey(t *testing.T) {
 	if _, err := LoadActiveSigningKey(context.Background(), db, rotated, issuer); err != nil {
 		t.Fatal("warm key under rotated keyring:", err)
 	}
+	cachedPrivate := rotated.signing.key.Private
 	if err := rotated.RemoveKey("master-a"); err != nil {
 		t.Fatal("remove signing envelope master key:", err)
+	}
+	if rotated.signing != nil || !bytes.Equal(cachedPrivate, make([]byte, len(cachedPrivate))) {
+		t.Fatal("removal did not immediately detach and wipe cached private material")
 	}
 	if _, err := LoadActiveSigningKey(context.Background(), db, rotated, issuer); err == nil {
 		t.Fatal("cached signing key survived master-key removal")
@@ -223,6 +227,7 @@ func TestLoadActiveSigningKeyCacheReturnsDefensiveCopiesConcurrently(t *testing.
 				return
 			}
 			got.Private[0] ^= 0xff
+			got.PublicJWK.Key.(ed25519.PublicKey)[0] ^= 0xff
 		}()
 	}
 	wait.Wait()
@@ -231,8 +236,120 @@ func TestLoadActiveSigningKeyCacheReturnsDefensiveCopiesConcurrently(t *testing.
 		t.Error(err)
 	}
 	got, err := LoadActiveSigningKey(context.Background(), db, keyring, issuer)
-	if err != nil || !bytes.Equal(got.Private, want.Private) {
+	if err != nil || !bytes.Equal(got.Private, want.Private) || !bytes.Equal(got.PublicJWK.Key.(ed25519.PublicKey), want.PublicJWK.Key.(ed25519.PublicKey)) {
 		t.Fatalf("caller mutation affected cached key: err=%v", err)
+	}
+}
+
+func TestSigningMaterialGenerationFence(t *testing.T) {
+	key, _, _, err := signingKeyFromSeed(bytes.Repeat([]byte{1}, ed25519.SeedSize), time.Unix(1, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []string{"invalidate empty", "invalidate populated", "replace", "remove master"} {
+		t.Run(change, func(t *testing.T) {
+			kr := fixedKeyring("master-b")
+			if change != "invalidate empty" {
+				kr.cacheSigningMaterial(kr.signingGeneration, "issuer", "old", "public", "envelope", 1, "master-a", key)
+			}
+			// Model a load paused after taking its pre-query generation and row snapshot.
+			stale := kr.signingGeneration
+			var evicted ed25519.PrivateKey
+			if kr.signing != nil {
+				evicted = kr.signing.key.Private
+			}
+			switch change {
+			case "replace":
+				kr.cacheSigningMaterial(stale, "issuer", "new", "public", "new-envelope", 2, "master-b", key)
+			case "remove master":
+				if err := kr.RemoveKey("master-a"); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				kr.clearSigningMaterial(stale)
+			}
+			if !bytes.Equal(evicted, make([]byte, len(evicted))) {
+				t.Fatal("superseded private material was not wiped")
+			}
+			want, generation := kr.signing, kr.signingGeneration
+			if _, hit := kr.cachedSigningMaterial(&stale, "issuer", "old", "public", "envelope", 1); hit {
+				t.Fatal("stale lookup hit")
+			}
+			if kr.signing != want || kr.signingGeneration != generation {
+				t.Fatal("stale mismatch evicted newer state")
+			}
+			ok := kr.cacheSigningMaterial(stale, "issuer", "old", "public", "envelope", 1, "master-a", key)
+			if ok != (change != "remove master") {
+				t.Fatal("superseded load did not preserve removed-master failure")
+			}
+			if kr.signing != want || kr.signingGeneration != generation {
+				t.Fatal("stale publication replaced newer state")
+			}
+			kr.clearSigningMaterial(stale)
+			if kr.signing != want || kr.signingGeneration != generation {
+				t.Fatal("stale error cleared newer state")
+			}
+			if want != nil && !bytes.Equal(want.key.Private, key.Private) {
+				t.Fatal("newer private material was wiped")
+			}
+		})
+	}
+
+	t.Run("current mismatch can publish replacement", func(t *testing.T) {
+		kr := fixedKeyring("master-a")
+		kr.cacheSigningMaterial(kr.signingGeneration, "issuer", "old", "public", "envelope", 1, "master-a", key)
+		old := kr.signing
+		generation := kr.signingGeneration
+		if _, hit := kr.cachedSigningMaterial(&generation, "issuer", "new", "public", "new-envelope", 2); hit {
+			t.Fatal("changed row hit cache")
+		}
+		if generation != kr.signingGeneration || kr.signing != nil || !bytes.Equal(old.key.Private, make([]byte, len(old.key.Private))) {
+			t.Fatal("current mismatch did not wipe cache and advance its own generation")
+		}
+		if !kr.cacheSigningMaterial(generation, "issuer", "new", "public", "new-envelope", 2, "master-a", key) || kr.signing == nil || kr.signing.kid != "new" {
+			t.Fatal("current load could not publish after its own eviction")
+		}
+	})
+}
+
+func TestLoadSigningKeyCacheFailureBoundaries(t *testing.T) {
+	db := testDB(t)
+	kr := fixedKeyring("master-a")
+	ctx := context.Background()
+	issuer := "https://id.example.com"
+	now := time.Unix(1_800_000_000, 0)
+	if _, err := EnsureSigningKey(ctx, db, kr, issuer, now); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := PrepareSigningKey(ctx, db, kr, issuer, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, generation := kr.signing, kr.signingGeneration
+	wantPrivate := append(ed25519.PrivateKey(nil), want.key.Private...)
+	if _, err := loadSigningKey(ctx, db, kr, issuer, pending.PendingKID, "pending"); err != nil {
+		t.Fatal(err)
+	}
+	if kr.signing != want || kr.signingGeneration != generation {
+		t.Fatal("pending success changed active cache")
+	}
+	if _, err := loadSigningKey(ctx, db, kr, "https://wrong.example.com", pending.PendingKID, "pending"); err == nil {
+		t.Fatal("invalid pending envelope accepted")
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := loadSigningKey(canceled, db, kr, issuer, pending.PendingKID, "pending"); err == nil {
+		t.Fatal("pending query failure accepted")
+	}
+	if kr.signing != want || kr.signingGeneration != generation || !bytes.Equal(want.key.Private, wantPrivate) {
+		t.Fatal("pending failure changed active cache")
+	}
+	private := want.key.Private
+	if _, err := LoadActiveSigningKey(canceled, db, kr, issuer); err == nil {
+		t.Fatal("active query failure fell back to cache")
+	}
+	if kr.signing != nil || !bytes.Equal(private, make([]byte, len(private))) {
+		t.Fatal("active query failure did not detach and wipe cache")
 	}
 }
 

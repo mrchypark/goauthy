@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -139,7 +140,7 @@ func BenchmarkLoadActiveSigningKeyStages(b *testing.B) {
 	b.Run("stored-public-jwk-parse", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			var stored any
+			var stored jose.JSONWebKey
 			if err := json.Unmarshal([]byte(f.publicJSON), &stored); err != nil {
 				b.Fatal("parse stored public JWK:", err)
 			}
