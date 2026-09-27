@@ -111,6 +111,12 @@ type Registry struct {
 	securityTokenOK     prometheus.Counter
 	securityTokenReject prometheus.Counter
 
+	apiKeyFailureIntervalSuppressed prometheus.Counter
+	apiKeyFailureBusySuppressed     prometheus.Counter
+	apiKeyFailureStatementFailed    prometheus.Counter
+	apiKeyFailureStorageFailed      prometheus.Counter
+	apiKeyFailureWriteSuccess       prometheus.Counter
+
 	cacheHits      *prometheus.CounterVec
 	cacheMisses    *prometheus.CounterVec
 	cacheEvictions *prometheus.CounterVec
@@ -208,6 +214,26 @@ func newRegistry(clk clock) *Registry {
 				Help: "Total number of failed token validations.",
 			},
 		),
+		apiKeyFailureIntervalSuppressed: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "goauthy_api_key_auth_failure_suppressed_interval_total",
+			Help: "API key authentication failure events suppressed by the admission interval.",
+		}),
+		apiKeyFailureBusySuppressed: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "goauthy_api_key_auth_failure_suppressed_busy_total",
+			Help: "API key authentication failure events suppressed while an audit write was in flight.",
+		}),
+		apiKeyFailureStatementFailed: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "goauthy_api_key_auth_failure_statement_failed_total",
+			Help: "API key authentication failure audit statements that could not be constructed.",
+		}),
+		apiKeyFailureStorageFailed: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "goauthy_api_key_auth_failure_storage_failed_total",
+			Help: "API key authentication failure audit writes that failed.",
+		}),
+		apiKeyFailureWriteSuccess: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "goauthy_api_key_auth_failure_write_success_total",
+			Help: "API key authentication failure audit events successfully written.",
+		}),
 
 		dbQueryDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
@@ -254,6 +280,11 @@ func newRegistry(clk clock) *Registry {
 		r.securityAuthFailure,
 		r.securityTokenOK,
 		r.securityTokenReject,
+		r.apiKeyFailureIntervalSuppressed,
+		r.apiKeyFailureBusySuppressed,
+		r.apiKeyFailureStatementFailed,
+		r.apiKeyFailureStorageFailed,
+		r.apiKeyFailureWriteSuccess,
 		r.cacheHits,
 		r.cacheMisses,
 		r.cacheEvictions,
@@ -415,6 +446,33 @@ func (r *Registry) TokenOK() { r.securityTokenOK.Inc() }
 
 // TokenReject increments the failed token-validation counter.
 func (r *Registry) TokenReject() { r.securityTokenReject.Inc() }
+
+// APIKeyAuthFailureSuppressedInterval records an auth-failure event skipped by
+// the per-recorder admission interval. Counters remain visible after traffic stops.
+func (r *Registry) APIKeyAuthFailureSuppressedInterval() {
+	r.apiKeyFailureIntervalSuppressed.Inc()
+}
+
+// APIKeyAuthFailureSuppressedBusy records an auth-failure event skipped while
+// the single permitted audit write is still in flight.
+func (r *Registry) APIKeyAuthFailureSuppressedBusy() {
+	r.apiKeyFailureBusySuppressed.Inc()
+}
+
+// APIKeyAuthFailureStatementFailed records failure to construct an audit statement.
+func (r *Registry) APIKeyAuthFailureStatementFailed() {
+	r.apiKeyFailureStatementFailed.Inc()
+}
+
+// APIKeyAuthFailureStorageFailed records a failed audit write.
+func (r *Registry) APIKeyAuthFailureStorageFailed() {
+	r.apiKeyFailureStorageFailed.Inc()
+}
+
+// APIKeyAuthFailureWriteSuccess records a successfully written audit event.
+func (r *Registry) APIKeyAuthFailureWriteSuccess() {
+	r.apiKeyFailureWriteSuccess.Inc()
+}
 
 // DBQueryDuration records a database query duration.
 func (r *Registry) DBQueryDuration(operation string, seconds float64) {
