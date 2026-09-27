@@ -58,17 +58,18 @@ func (h *passwordGrantHandler) Authenticate(ctx context.Context, username, passw
 		return "", fosite.ErrServerError
 	}
 	started := time.Now()
+	now := h.now().UTC()
 	if err := h.checkLockdown(ctx, username); err != nil {
 		return "", err
 	}
-	status, err := h.locks.Check(ctx, peer, started.UTC())
+	status, err := h.locks.Check(ctx, peer, now)
 	if err != nil {
 		return "", fosite.ErrServerError
 	}
 	if !status.BlockedUntil.IsZero() {
 		return "", fosite.ErrAccessDenied.WithWrap(errPasswordAdmission)
 	}
-	allowed, err := h.locks.Allow(ctx, peer, started.UTC())
+	allowed, err := h.locks.Allow(ctx, peer, now)
 	if err != nil {
 		return "", fosite.ErrServerError
 	}
@@ -77,7 +78,7 @@ func (h *passwordGrantHandler) Authenticate(ctx context.Context, username, passw
 	}
 	// The browser path refuses an actively locked account before checking
 	// credentials; this grant must not be a way around that lock (GA-OAUTH-006).
-	locked, _, err := h.locks.CheckAccountLock(ctx, loginpolicy.AccountStuffingDigest(username), time.Now().UTC())
+	locked, _, err := h.locks.CheckAccountLock(ctx, loginpolicy.AccountStuffingDigest(username), h.now().UTC())
 	if err != nil {
 		return "", fosite.ErrServerError
 	}
@@ -92,11 +93,11 @@ func (h *passwordGrantHandler) Authenticate(ctx context.Context, username, passw
 		return "", fosite.ErrAccessDenied.WithHint("Password reset required.").WithWrap(errPasswordResetRequired)
 	}
 	if errors.Is(err, identity.ErrInvalidCredentials) {
-		status, failureErr := h.locks.Failure(ctx, peer, time.Now().UTC())
+		status, failureErr := h.locks.Failure(ctx, peer, h.now().UTC())
 		if failureErr != nil {
 			return "", fosite.ErrServerError
 		}
-		if _, _, failureErr := h.locks.RecordAccountFailure(ctx, loginpolicy.AccountStuffingDigest(username), peer, time.Now().UTC()); failureErr != nil {
+		if _, _, failureErr := h.locks.RecordAccountFailure(ctx, loginpolicy.AccountStuffingDigest(username), peer, h.now().UTC()); failureErr != nil {
 			return "", fosite.ErrServerError
 		}
 		delay := loginpolicy.Delay(status, time.Since(started))
