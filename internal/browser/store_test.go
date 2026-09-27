@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -597,7 +598,16 @@ func TestLoadSessionForPeerRejectsMismatchBeforeTouch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	now = now.Add(touchInterval + time.Second)
+	now = issued.CreatedAt.Add(touchInterval - time.Millisecond)
+	for _, peerIP := range []string{"198.51.100.9", ""} {
+		if _, err := store.LoadSessionForPeer(ctx, issued.Token, peerIP); !errors.Is(err, ErrPeerIPMismatch) {
+			t.Fatalf("peer %q within throttle err=%v want %v", peerIP, err, ErrPeerIPMismatch)
+		}
+	}
+	if got := sessionLastSeen(t, store, issued.Token); !got.Equal(issued.CreatedAt) {
+		t.Fatalf("within-throttle mismatch touched session: got %s want %s", got, issued.CreatedAt)
+	}
+	now = issued.CreatedAt.Add(touchInterval + time.Second)
 	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "browser-reject-peer-touch-trigger", SQL: `CREATE TRIGGER reject_browser_session_touch BEFORE UPDATE OF last_seen_at_unix_ms ON browser_sessions BEGIN SELECT RAISE(ABORT, 'unexpected session touch'); END`}); err != nil {
 		t.Fatal(err)
 	}
@@ -615,6 +625,47 @@ func TestLoadSessionForPeerRejectsMismatchBeforeTouch(t *testing.T) {
 	}
 	if got := sessionLastSeen(t, store, issued.Token); !got.Equal(now) {
 		t.Fatalf("matching peer last_seen=%s want %s", got, now)
+	}
+}
+
+func TestSessionTouchV2DoesNotConflictWithBaseReceipt(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	store.now = func() time.Time { return now }
+	issued, err := store.CreateSession(ctx, "user-1", "pwd", now.Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := tokenDigest(issued.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = issued.CreatedAt.Add(touchInterval + time.Second)
+	baseRequestID := mutationID("session-touch", digest, fmt.Sprint(now.UnixMilli()))
+	headRequestID := mutationID("session-touch-v2", digest, fmt.Sprint(now.UnixMilli()))
+	if baseRequestID == headRequestID {
+		t.Fatal("HEAD touch reused the pre-#104 request ID")
+	}
+	// This is the six-argument mutation submitted by the pre-#104 BASE binary.
+	baseResponse, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
+		RequestID: baseRequestID,
+		SQL: `UPDATE browser_sessions SET last_seen_at_unix_ms = ?
+			WHERE token_digest = ? AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ?
+			AND last_seen_at_unix_ms > ? AND last_seen_at_unix_ms <= ? AND ` + activeSessionSubjectSQL,
+		Args: []any{now.UnixMilli(), digest, now.UnixMilli(), now.Add(-store.idleTimeout).UnixMilli(), now.Add(-touchInterval).UnixMilli(), now.UnixMilli()},
+	})
+	if err != nil || baseResponse.MutationReceipt.RowsAffected != 1 {
+		t.Fatalf("BASE touch receipt=%+v err=%v", baseResponse.MutationReceipt, err)
+	}
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "browser-reset-base-touch", SQL: `UPDATE browser_sessions SET last_seen_at_unix_ms=? WHERE token_digest=?`, Args: []any{issued.CreatedAt.UnixMilli(), digest}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LoadSessionForPeer(ctx, issued.Token, "203.0.113.8"); err != nil {
+		t.Fatalf("HEAD touch conflicted with BASE receipt: %v", err)
+	}
+	if got := sessionLastSeen(t, store, issued.Token); !got.Equal(now) {
+		t.Fatalf("HEAD touch last_seen=%s want %s", got, now)
 	}
 }
 

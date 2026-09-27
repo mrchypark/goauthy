@@ -293,7 +293,7 @@ func (s *Store) loadSessionAndTouch(ctx context.Context, token string, peerIP *s
 	// statement stays identical across callers and legacy peer addresses.
 	touchArgs := []any{now.UnixMilli(), digest, now.UnixMilli(), now.Add(-s.idleTimeout).UnixMilli(), now.Add(-touchInterval).UnixMilli(), now.UnixMilli(), session.PeerIP}
 	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
-		RequestID: mutationID("session-touch", digest, fmt.Sprint(now.UnixMilli())),
+		RequestID: mutationID("session-touch-v2", digest, fmt.Sprint(now.UnixMilli())),
 		SQL:       touchSQL,
 		Args:      touchArgs,
 	})
