@@ -28,6 +28,10 @@ func TestRewrapSigningKeyEnvelopeBatchRewrapsAllStates(t *testing.T) {
 	insertSigningRewrapRow(t, db, oldKeyring, issuer, bytes.Repeat([]byte{3}, ed25519.SeedSize), "retiring", now.Add(time.Second))
 
 	rotated := fixedKeyring("master-b")
+	if _, err := LoadActiveSigningKey(context.Background(), db, rotated, issuer); err != nil {
+		t.Fatalf("warm signing key before rewrap: %v", err)
+	}
+	oldCache := rotated.signing
 	batch, err := RewrapSigningKeyEnvelopeBatch(context.Background(), db, rotated, issuer, "")
 	if err != nil {
 		t.Fatal(err)
@@ -35,8 +39,19 @@ func TestRewrapSigningKeyEnvelopeBatchRewrapsAllStates(t *testing.T) {
 	if batch.Rewrapped != 3 || !batch.Done || batch.Cursor == "" {
 		t.Fatalf("batch=%+v", batch)
 	}
-	if _, err := LoadActiveSigningKey(context.Background(), db, rotated, issuer); err != nil {
+	if rotated.signing == nil || rotated.signing == oldCache || rotated.signing.masterKeyID != "master-b" || rotated.signing.envelope == oldCache.envelope {
+		t.Fatal("rewrap did not replace cached envelope before master-key removal")
+	}
+	if !bytes.Equal(oldCache.key.Private, make([]byte, len(oldCache.key.Private))) || !bytes.Equal(rotated.signing.key.Private, active.Private) {
+		t.Fatal("rewrap did not wipe old cache and preserve signing identity")
+	}
+	if err := rotated.RemoveKey("master-a"); err != nil {
+		t.Fatalf("remove rewrapped master key: %v", err)
+	}
+	if key, err := LoadActiveSigningKey(context.Background(), db, rotated, issuer); err != nil {
 		t.Fatalf("active signing key after rewrap: %v", err)
+	} else if !ed25519.Verify(active.PublicJWK.Key.(ed25519.PublicKey), []byte("rewrapped"), ed25519.Sign(key.Private, []byte("rewrapped"))) {
+		t.Fatal("rewrapped key no longer signs with the original identity")
 	}
 	assertSigningRowsUseKey(t, db, rotated, issuer, "master-b")
 
@@ -47,7 +62,6 @@ func TestRewrapSigningKeyEnvelopeBatchRewrapsAllStates(t *testing.T) {
 	if second.Rewrapped != 0 || !second.Done {
 		t.Fatalf("second batch=%+v", second)
 	}
-	_ = active
 }
 
 func TestRewrapSigningKeyEnvelopeBatchCursorIsBounded(t *testing.T) {
