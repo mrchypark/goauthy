@@ -42,6 +42,13 @@ type Keyring struct {
 	active    string
 	keys      map[string][32]byte
 	directory string
+	signing   *signingMaterialCache
+}
+
+type signingMaterialCache struct {
+	issuer, kid, publicJWK, envelope, masterKeyID string
+	createdAtUnixMS                               int64
+	key                                           SigningKey
 }
 
 type SigningKey struct {
@@ -77,6 +84,9 @@ func (keyring *Keyring) RemoveKey(id string) error {
 	keyring.mu.Lock()
 	defer keyring.mu.Unlock()
 	if _, ok := keyring.keys[id]; !ok {
+		if keyring.signing != nil && keyring.signing.masterKeyID == id {
+			keyring.clearSigningMaterialLocked()
+		}
 		return nil
 	}
 	if keyring.directory != "" {
@@ -85,6 +95,9 @@ func (keyring *Keyring) RemoveKey(id string) error {
 		if err := os.Remove(filepath.Join(keyring.directory, id)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
+	}
+	if keyring.signing != nil && keyring.signing.masterKeyID == id {
+		keyring.clearSigningMaterialLocked()
 	}
 	delete(keyring.keys, id)
 	return nil
@@ -223,7 +236,14 @@ func LoadActiveSigningKey(ctx context.Context, db *rhiza.DB, keyring *Keyring, i
 	return loadSigningKey(ctx, db, keyring, issuer, "", "active")
 }
 
-func loadSigningKey(ctx context.Context, db *rhiza.DB, keyring *Keyring, issuer, kid, state string) (SigningKey, error) {
+func loadSigningKey(ctx context.Context, db *rhiza.DB, keyring *Keyring, issuer, kid, state string) (loaded SigningKey, loadErr error) {
+	if state == "active" {
+		defer func() {
+			if loadErr != nil {
+				keyring.clearSigningMaterial()
+			}
+		}()
+	}
 	query := `SELECT kid, public_jwk, private_envelope, created_at_unix_ms
 		FROM oidc_signing_keys WHERE state = ?`
 	args := []any{state}
@@ -261,35 +281,120 @@ func loadSigningKey(ctx context.Context, db *rhiza.DB, keyring *Keyring, issuer,
 	if !ok {
 		return SigningKey{}, fmt.Errorf("invalid private envelope storage type")
 	}
-	envelope, err := base64.RawURLEncoding.DecodeString(encodedEnvelope)
-	if err != nil {
-		return SigningKey{}, fmt.Errorf("invalid private envelope encoding")
-	}
 	createdAt, ok := result.Rows[0][3].(int64)
 	if !ok {
 		return SigningKey{}, fmt.Errorf("invalid signing key creation time")
 	}
+	if state == "active" {
+		if key, ok := keyring.cachedSigningMaterial(issuer, kid, publicJSON, encodedEnvelope, createdAt); ok {
+			return key, nil
+		}
+	}
+	envelope, err := base64.RawURLEncoding.DecodeString(encodedEnvelope)
+	if err != nil {
+		return SigningKey{}, fmt.Errorf("invalid private envelope encoding")
+	}
 
+	masterKeyID, _, err := parseEnvelopeHeader(envelope, envelopeMagic, envelopeVersion, "invalid signing key envelope")
+	if err != nil {
+		return SigningKey{}, err
+	}
 	seed, err := openEnvelope(keyring, issuer, kid, envelope)
 	if err != nil {
 		return SigningKey{}, err
 	}
+	defer wipeBytes(seed)
 	key, _, _, err := signingKeyFromSeed(seed, time.UnixMilli(createdAt))
 	if err != nil {
 		return SigningKey{}, err
 	}
 	if key.PublicJWK.KeyID != kid {
+		wipeBytes(key.Private)
 		return SigningKey{}, fmt.Errorf("signing key thumbprint mismatch")
 	}
 	var stored jose.JSONWebKey
 	if err := json.Unmarshal([]byte(publicJSON), &stored); err != nil || !stored.IsPublic() {
+		wipeBytes(key.Private)
 		return SigningKey{}, fmt.Errorf("invalid stored public JWK")
 	}
 	storedPublic, ok := stored.Key.(ed25519.PublicKey)
 	if !ok || stored.KeyID != kid || stored.Algorithm != string(jose.EdDSA) || stored.Use != "sig" || !bytes.Equal(storedPublic, key.PublicJWK.Key.(ed25519.PublicKey)) {
+		wipeBytes(key.Private)
 		return SigningKey{}, fmt.Errorf("stored public JWK does not match private key")
 	}
+	if state == "active" && !keyring.cacheSigningMaterial(issuer, kid, publicJSON, encodedEnvelope, createdAt, masterKeyID, key) {
+		wipeBytes(key.Private)
+		return SigningKey{}, fmt.Errorf("signing key master key was removed during load")
+	}
 	return key, nil
+}
+
+func (keyring *Keyring) cachedSigningMaterial(issuer, kid, publicJWK, envelope string, createdAt int64) (SigningKey, bool) {
+	if keyring == nil {
+		return SigningKey{}, false
+	}
+	keyring.mu.Lock()
+	defer keyring.mu.Unlock()
+	entry := keyring.signing
+	if entry == nil {
+		return SigningKey{}, false
+	}
+	if entry.issuer != issuer || entry.kid != kid || entry.publicJWK != publicJWK || entry.envelope != envelope || entry.createdAtUnixMS != createdAt {
+		keyring.clearSigningMaterialLocked()
+		return SigningKey{}, false
+	}
+	if _, ok := keyring.keys[entry.masterKeyID]; !ok {
+		keyring.clearSigningMaterialLocked()
+		return SigningKey{}, false
+	}
+	return cloneSigningKey(entry.key), true
+}
+
+func (keyring *Keyring) cacheSigningMaterial(issuer, kid, publicJWK, envelope string, createdAt int64, masterKeyID string, key SigningKey) bool {
+	if keyring == nil {
+		return false
+	}
+	keyring.mu.Lock()
+	defer keyring.mu.Unlock()
+	if _, ok := keyring.keys[masterKeyID]; !ok {
+		return false
+	}
+	keyring.clearSigningMaterialLocked()
+	keyring.signing = &signingMaterialCache{
+		issuer: issuer, kid: kid, publicJWK: publicJWK, envelope: envelope,
+		createdAtUnixMS: createdAt, masterKeyID: masterKeyID, key: cloneSigningKey(key),
+	}
+	return true
+}
+
+func (keyring *Keyring) clearSigningMaterial() {
+	if keyring == nil {
+		return
+	}
+	keyring.mu.Lock()
+	defer keyring.mu.Unlock()
+	keyring.clearSigningMaterialLocked()
+}
+
+func (keyring *Keyring) clearSigningMaterialLocked() {
+	if keyring.signing != nil {
+		wipeBytes(keyring.signing.key.Private)
+		keyring.signing = nil
+	}
+}
+
+func cloneSigningKey(key SigningKey) SigningKey {
+	key.Private = append(ed25519.PrivateKey(nil), key.Private...)
+	if public, ok := key.PublicJWK.Key.(ed25519.PublicKey); ok {
+		key.PublicJWK.Key = append(ed25519.PublicKey(nil), public...)
+	}
+	return key
+}
+
+func wipeBytes(value []byte) {
+	for i := range value {
+		value[i] = 0
+	}
 }
 
 func generateSigningKey(keyring *Keyring, writerKeyID, issuer string, now time.Time) (SigningKey, []byte, []byte, error) {

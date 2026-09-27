@@ -28,12 +28,18 @@ func TestRewrapSigningKeyEnvelopeBatchRewrapsAllStates(t *testing.T) {
 	insertSigningRewrapRow(t, db, oldKeyring, issuer, bytes.Repeat([]byte{3}, ed25519.SeedSize), "retiring", now.Add(time.Second))
 
 	rotated := fixedKeyring("master-b")
+	if _, err := LoadActiveSigningKey(context.Background(), db, rotated, issuer); err != nil {
+		t.Fatalf("warm signing key before rewrap: %v", err)
+	}
 	batch, err := RewrapSigningKeyEnvelopeBatch(context.Background(), db, rotated, issuer, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if batch.Rewrapped != 3 || !batch.Done || batch.Cursor == "" {
 		t.Fatalf("batch=%+v", batch)
+	}
+	if err := rotated.RemoveKey("master-a"); err != nil {
+		t.Fatalf("remove rewrapped master key: %v", err)
 	}
 	if _, err := LoadActiveSigningKey(context.Background(), db, rotated, issuer); err != nil {
 		t.Fatalf("active signing key after rewrap: %v", err)

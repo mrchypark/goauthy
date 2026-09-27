@@ -60,6 +60,9 @@ func TestSigningKeyPrepublicationPreventsCachedJWKSBreakage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := LoadActiveSigningKey(context.Background(), db, keyring, issuer); err != nil {
+		t.Fatal("warm active signing key before rotation:", err)
+	}
 	cached, err := LoadJWKSKeys(context.Background(), db, now)
 	if err != nil || len(cached) != 1 {
 		t.Fatalf("cached JWKS=%#v err=%v", cached, err)
@@ -78,6 +81,10 @@ func TestSigningKeyPrepublicationPreventsCachedJWKSBreakage(t *testing.T) {
 	rotation, err := ActivatePreparedSigningKey(context.Background(), db, keyring, issuer, old.PublicJWK.KeyID, prepared.PendingKID, retireAfter, prepared.ActivatesAfter)
 	if err != nil || !rotation.Activated {
 		t.Fatalf("activate=%#v err=%v", rotation, err)
+	}
+	loaded, err := LoadActiveSigningKey(context.Background(), db, keyring, issuer)
+	if err != nil || loaded.PublicJWK.KeyID != rotation.Active.PublicJWK.KeyID {
+		t.Fatalf("loaded rotated active key=%q want=%q err=%v", loaded.PublicJWK.KeyID, rotation.Active.PublicJWK.KeyID, err)
 	}
 	if prepared.ActivatesAfter.Sub(now) != JWKSCacheMaxAge {
 		t.Fatal("activation did not wait for JWKS cache lifetime")

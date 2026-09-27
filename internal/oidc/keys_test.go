@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -95,6 +96,143 @@ func TestSigningKeyBootstrapConvergesAndSigns(t *testing.T) {
 	payload, err := parsed.Verify(keys[0].PublicJWK.Key)
 	if err != nil || string(payload) != "goauthy" {
 		t.Fatalf("verify payload=%q err=%v", payload, err)
+	}
+}
+
+func TestLoadActiveSigningKeyCacheRejectsStoredRowChanges(t *testing.T) {
+	for _, test := range []struct {
+		name, column, value string
+	}{
+		{name: "envelope", column: "private_envelope", value: base64.RawURLEncoding.EncodeToString([]byte("tampered"))},
+		{name: "public JWK", column: "public_jwk", value: `{}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := testDB(t)
+			keyring := fixedKeyring("master-a")
+			issuer := "https://id.example.com"
+			key, err := EnsureSigningKey(context.Background(), db, keyring, issuer, time.Unix(1_800_000_000, 0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadActiveSigningKey(context.Background(), db, keyring, issuer); err != nil {
+				t.Fatal("warm signing material:", err)
+			}
+			keyring.mu.RLock()
+			cachedPrivate := keyring.signing.key.Private
+			keyring.mu.RUnlock()
+			_, err = storage.Execute(context.Background(), db, rhiza.ExecuteRequest{
+				RequestID: "tamper-cached-signing-key-" + test.name,
+				SQL:       `UPDATE oidc_signing_keys SET ` + test.column + ` = ? WHERE kid = ?`,
+				Args:      []any{test.value, key.PublicJWK.KeyID},
+			})
+			if err != nil {
+				t.Fatal("tamper signing-key row:", err)
+			}
+			if _, err := LoadActiveSigningKey(context.Background(), db, keyring, issuer); err == nil {
+				t.Fatal("changed active signing-key row was accepted from cache")
+			}
+			keyring.mu.RLock()
+			cached := keyring.signing != nil
+			keyring.mu.RUnlock()
+			if cached {
+				t.Fatal("tampered active row retained cached private material")
+			}
+			if !bytes.Equal(cachedPrivate, make([]byte, len(cachedPrivate))) {
+				t.Fatal("evicted private material was not wiped")
+			}
+		})
+	}
+}
+
+func TestLoadActiveSigningKeyWithoutActiveRow(t *testing.T) {
+	db := testDB(t)
+	emptyDB := testDB(t)
+	keyring := fixedKeyring("master-a")
+	issuer := "https://id.example.com"
+	_, err := EnsureSigningKey(context.Background(), db, keyring, issuer, time.Unix(1_800_000_000, 0))
+	if err != nil {
+		t.Fatal("create active key:", err)
+	}
+	if _, err := LoadActiveSigningKey(context.Background(), db, keyring, issuer); err != nil {
+		t.Fatal("warm active key:", err)
+	}
+	keyring.mu.RLock()
+	cachedPrivate := keyring.signing.key.Private
+	keyring.mu.RUnlock()
+	if _, err := LoadActiveSigningKey(context.Background(), emptyDB, keyring, issuer); !errors.Is(err, ErrNoSigningKey) {
+		t.Fatalf("load without active key err=%v", err)
+	}
+	keyring.mu.RLock()
+	cached := keyring.signing != nil
+	keyring.mu.RUnlock()
+	if cached {
+		t.Fatal("no-active result retained cached private material")
+	}
+	if !bytes.Equal(cachedPrivate, make([]byte, len(cachedPrivate))) {
+		t.Fatal("no-active result did not wipe cached private material")
+	}
+}
+
+func TestLoadActiveSigningKeyCacheRejectsRemovedMasterKey(t *testing.T) {
+	db := testDB(t)
+	issuer := "https://id.example.com"
+	oldKeyring := fixedKeyring("master-a")
+	if _, err := EnsureSigningKey(context.Background(), db, oldKeyring, issuer, time.Unix(1_800_000_000, 0)); err != nil {
+		t.Fatal("create active key:", err)
+	}
+	rotated := fixedKeyring("master-b")
+	if _, err := LoadActiveSigningKey(context.Background(), db, rotated, issuer); err != nil {
+		t.Fatal("warm key under rotated keyring:", err)
+	}
+	if err := rotated.RemoveKey("master-a"); err != nil {
+		t.Fatal("remove signing envelope master key:", err)
+	}
+	if _, err := LoadActiveSigningKey(context.Background(), db, rotated, issuer); err == nil {
+		t.Fatal("cached signing key survived master-key removal")
+	}
+	rotated.mu.RLock()
+	cached := rotated.signing != nil
+	rotated.mu.RUnlock()
+	if cached {
+		t.Fatal("removed master key left cached private material")
+	}
+}
+
+func TestLoadActiveSigningKeyCacheReturnsDefensiveCopiesConcurrently(t *testing.T) {
+	db := testDB(t)
+	keyring := fixedKeyring("master-a")
+	issuer := "https://id.example.com"
+	want, err := EnsureSigningKey(context.Background(), db, keyring, issuer, time.Unix(1_800_000_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const workers = 8
+	var wait sync.WaitGroup
+	errs := make(chan error, workers)
+	for range workers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			got, err := LoadActiveSigningKey(context.Background(), db, keyring, issuer)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if !bytes.Equal(got.Private, want.Private) {
+				errs <- errors.New("loaded private key changed")
+				return
+			}
+			got.Private[0] ^= 0xff
+		}()
+	}
+	wait.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
+	}
+	got, err := LoadActiveSigningKey(context.Background(), db, keyring, issuer)
+	if err != nil || !bytes.Equal(got.Private, want.Private) {
+		t.Fatalf("caller mutation affected cached key: err=%v", err)
 	}
 }
 
