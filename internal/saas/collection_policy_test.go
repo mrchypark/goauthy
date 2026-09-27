@@ -17,7 +17,7 @@ func TestCredentialCollectionProviderRemovalCannotResurrect(t *testing.T) {
 	if err := store.Install(ctx, wrong, testCredential(), credentialAuthority()); !errors.Is(err, ErrCredentialConflict) {
 		t.Fatalf("unapproved provider install=%v", err)
 	}
-	if err := store.Install(ctx, binding, testCredential(), credentialAuthority()); err != nil {
+	if err := store.Install(ctx, binding, refreshCredentialFixture(), credentialAuthority()); err != nil {
 		t.Fatal(err)
 	}
 	_, err := store.refreshCredential(ctx, binding, credentialAuthority(), func(context.Context, credential) (credential, error) {

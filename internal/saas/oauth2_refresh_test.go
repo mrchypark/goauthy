@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -27,9 +28,10 @@ type refreshFixture struct {
 	tokenCalls, identityCalls atomic.Int32
 	mode                      atomic.Value
 	beforeTokenReply          func()
+	allowRotatedRefreshToken  bool
 }
 
-func newRefreshFixture(t *testing.T, account string) *refreshFixture {
+func newRefreshFixture(t testing.TB, account string) *refreshFixture {
 	t.Helper()
 	f := &refreshFixture{}
 	f.mode.Store("success")
@@ -39,7 +41,9 @@ func newRefreshFixture(t *testing.T, account string) *refreshFixture {
 			if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Basic Y2xpZW50OnNlY3JldA==" {
 				t.Error("wrong token endpoint authentication or method")
 			}
-			if err := r.ParseForm(); err != nil || r.Form.Get("refresh_token") != "refresh-old" || r.Form.Get("grant_type") != "refresh_token" {
+			parseErr := r.ParseForm()
+			refreshToken := r.Form.Get("refresh_token")
+			if parseErr != nil || (refreshToken != "refresh-old" && !(f.allowRotatedRefreshToken && refreshToken == "refresh-new")) || r.Form.Get("grant_type") != "refresh_token" {
 				t.Error("wrong refresh request form")
 			}
 			if f.beforeTokenReply != nil {
@@ -204,12 +208,40 @@ func TestRefreshOAuth2RegisteredTLSSuccessAndFences(t *testing.T) {
 	}
 }
 
+func BenchmarkRefreshOAuth2LocalPath(b *testing.B) {
+	f := newRefreshFixture(b, "account-1")
+	f.allowRotatedRefreshToken = true
+	latency := make([]int64, b.N)
+	version := f.b.TokenVersion
+	binding := f.b
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		started := time.Now()
+		status, err := f.s.refreshOAuth2(f.ctx, f.o, binding, f.guard)
+		latency[i] = time.Since(started).Nanoseconds()
+		if err != nil || !status.Connected || status.Version != version+1 {
+			b.Fatalf("refresh status=%+v expected-version=%d err=%v", status, version, err)
+		}
+		version++
+		binding.TokenVersion = version
+	}
+	b.StopTimer()
+	sort.Slice(latency, func(i, j int) bool { return latency[i] < latency[j] })
+	b.ReportMetric(float64(latency[(len(latency)*95+99)/100-1]), "p95-ns")
+	b.ReportMetric(float64(latency[(len(latency)*99+99)/100-1]), "p99-ns")
+}
+
 func TestRefreshOAuth2RetainsOmittedRefreshAndRejectsMissingOrStale(t *testing.T) {
 	t.Parallel()
 	f := newRefreshFixture(t, "")
 	t.Cleanup(f.server.Close)
 	if _, err := f.s.refreshOAuth2(f.ctx, f.o, f.b, f.guard); !errors.Is(err, ErrCredentialNotFound) || f.tokenCalls.Load() != 0 {
 		t.Fatalf("missing account err=%v calls=%d", err, f.tokenCalls.Load())
+	}
+	q, err := f.s.db.Query(f.ctx, rhiza.QueryRequest{SQL: `SELECT state,refresh_claim FROM saas_connection_credentials WHERE connection_id=?`, Args: []any{f.b.ConnectionID}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(q.Rows) != 1 || q.Rows[0][0] != "ready" || q.Rows[0][1] != nil {
+		t.Fatalf("missing account mutated refresh state rows=%v err=%v", q.Rows, err)
 	}
 	if _, err := f.s.RefreshOAuth2(f.ctx, f.p, f.b.Owner, f.b.CollectionID, f.b.ConnectionID, 2, credentialAuthority()); !errors.Is(err, ErrCredentialNotFound) || f.tokenCalls.Load() != 0 {
 		t.Fatalf("stale refresh err=%v calls=%d", err, f.tokenCalls.Load())

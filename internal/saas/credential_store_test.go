@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func saasMigratedTemplate(t *testing.T) string {
+func saasMigratedTemplate(t testing.TB) string {
 	t.Helper()
 	saasTemplateOnce.Do(func() {
 		directory, err := os.MkdirTemp("", "goauthy-saas-template-")
@@ -82,7 +82,7 @@ func copyDirTree(source, destination string) error {
 		return os.WriteFile(target, c2, 0o644)
 	})
 }
-func credentialStoreFixture(t *testing.T) (context.Context, *CredentialStore, *rhiza.DB, credentialBinding) {
+func credentialStoreFixture(t testing.TB) (context.Context, *CredentialStore, *rhiza.DB, credentialBinding) {
 	t.Helper()
 	ctx := context.Background()
 	directory := t.TempDir()

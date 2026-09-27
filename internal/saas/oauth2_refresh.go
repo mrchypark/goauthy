@@ -51,14 +51,7 @@ func (s *CredentialStore) refreshOAuth2(ctx context.Context, oauthClient *OAuth2
 	if ctx == nil || s == nil || oauthClient == nil {
 		return OAuth2Status{}, ErrCredentialNotFound
 	}
-	current, err := s.Load(ctx, binding, providerGuard)
-	if err != nil {
-		return OAuth2Status{}, err
-	}
-	if strings.TrimSpace(current.AccountID) == "" || current.RefreshToken == "" {
-		return OAuth2Status{}, ErrCredentialNotFound
-	}
-	_, err = s.refreshCredential(ctx, binding, providerGuard, func(ctx context.Context, old credential) (credential, error) {
+	_, err := s.refreshCredential(ctx, binding, providerGuard, func(ctx context.Context, old credential) (credential, error) {
 		token, err := oauthClient.Refresh(ctx, old.RefreshToken)
 		if err != nil || token == nil || strings.TrimSpace(token.AccessToken) == "" {
 			return credential{}, ErrOAuth2Exchange

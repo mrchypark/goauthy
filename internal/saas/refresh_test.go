@@ -8,10 +8,16 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
+func refreshCredentialFixture() credential {
+	value := testCredential()
+	value.AccountID = "account-1"
+	return value
+}
+
 func TestRefreshCredentialCommitsBeforeReturningBinding(t *testing.T) {
 	t.Parallel()
 	ctx, store, _, binding := credentialStoreFixture(t)
-	if err := store.Install(ctx, binding, testCredential(), credentialAuthority()); err != nil {
+	if err := store.Install(ctx, binding, refreshCredentialFixture(), credentialAuthority()); err != nil {
 		t.Fatal(err)
 	}
 	calls := 0
@@ -23,7 +29,7 @@ func TestRefreshCredentialCommitsBeforeReturningBinding(t *testing.T) {
 		if _, err := store.ClaimRefresh(ctx, binding, credentialAuthority()); !errors.Is(err, ErrCredentialConflict) {
 			t.Fatalf("competing claim=%v", err)
 		}
-		return credential{AccessToken: "new-access", RefreshToken: "rotated-refresh"}, nil
+		return credential{AccountID: old.AccountID, AccessToken: "new-access", RefreshToken: "rotated-refresh"}, nil
 	})
 	if err != nil || next.TokenVersion != 2 || calls != 1 {
 		t.Fatalf("next=%+v calls=%d err=%v", next, calls, err)
@@ -39,7 +45,7 @@ func TestRefreshCredentialUncertainNeverRetries(t *testing.T) {
 	for _, canceled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "provider-error", true: "canceled-after-send"}[canceled], func(t *testing.T) {
 			ctx, store, db, binding := credentialStoreFixture(t)
-			if err := store.Install(ctx, binding, testCredential(), credentialAuthority()); err != nil {
+			if err := store.Install(ctx, binding, refreshCredentialFixture(), credentialAuthority()); err != nil {
 				t.Fatal(err)
 			}
 			request, cancel := context.WithCancel(ctx)
@@ -69,7 +75,7 @@ func TestRefreshCredentialUncertainNeverRetries(t *testing.T) {
 func TestRefreshCredentialRevocationDuringExchangePreventsCommit(t *testing.T) {
 	t.Parallel()
 	ctx, store, _, binding := credentialStoreFixture(t)
-	if err := store.Install(ctx, binding, testCredential(), credentialAuthority()); err != nil {
+	if err := store.Install(ctx, binding, refreshCredentialFixture(), credentialAuthority()); err != nil {
 		t.Fatal(err)
 	}
 	_, err := store.refreshCredential(ctx, binding, credentialAuthority(), func(context.Context, credential) (credential, error) {
@@ -93,7 +99,7 @@ func TestRefreshCredentialChecksExpiryAndCurrentAuthority(t *testing.T) {
 	t.Parallel()
 	ctx, store, _, binding := credentialStoreFixture(t)
 	store.now = func() int64 { return 1000 }
-	value := testCredential()
+	value := refreshCredentialFixture()
 	value.RefreshExpiresAtUnixMS = 1001
 	if err := store.Install(ctx, binding, value, credentialAuthority()); err != nil {
 		t.Fatal(err)
@@ -101,7 +107,7 @@ func TestRefreshCredentialChecksExpiryAndCurrentAuthority(t *testing.T) {
 	calls := 0
 	exchange := func(context.Context, credential) (credential, error) {
 		calls++
-		return testCredential(), nil
+		return refreshCredentialFixture(), nil
 	}
 	denied := func() (string, []any) { return "0", nil }
 	if _, err := store.refreshCredential(ctx, binding, denied, exchange); err == nil || calls != 0 {
