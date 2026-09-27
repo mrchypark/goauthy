@@ -968,6 +968,11 @@ func TestMetricNamesAreStable(t *testing.T) {
 		"goauthy_security_auth_failure_total",
 		"goauthy_security_token_validation_success_total",
 		"goauthy_security_token_validation_failure_total",
+		"goauthy_api_key_auth_failure_suppressed_interval_total",
+		"goauthy_api_key_auth_failure_suppressed_busy_total",
+		"goauthy_api_key_auth_failure_statement_failed_total",
+		"goauthy_api_key_auth_failure_storage_failed_total",
+		"goauthy_api_key_auth_failure_write_success_total",
 	}
 	families, err := reg.reg.Gather()
 	if err != nil {
@@ -1006,6 +1011,44 @@ func TestMetricNamesAreStable(t *testing.T) {
 		if !got[name] {
 			t.Errorf("metric %q not registered after use", name)
 		}
+	}
+}
+
+func TestAPIKeyAuthFailureOutcomeCountersAreFixedAndScrapeable(t *testing.T) {
+	reg := NewRegistry()
+	reg.APIKeyAuthFailureSuppressedInterval()
+	reg.APIKeyAuthFailureSuppressedInterval()
+	reg.APIKeyAuthFailureSuppressedBusy()
+	reg.APIKeyAuthFailureStatementFailed()
+	reg.APIKeyAuthFailureStorageFailed()
+	reg.APIKeyAuthFailureWriteSuccess()
+
+	want := map[string]float64{
+		"goauthy_api_key_auth_failure_suppressed_interval_total": 2,
+		"goauthy_api_key_auth_failure_suppressed_busy_total":     1,
+		"goauthy_api_key_auth_failure_statement_failed_total":    1,
+		"goauthy_api_key_auth_failure_storage_failed_total":      1,
+		"goauthy_api_key_auth_failure_write_success_total":       1,
+	}
+	families, err := reg.reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	for _, family := range families {
+		value, ok := want[family.GetName()]
+		if !ok {
+			continue
+		}
+		if len(family.Metric) != 1 || len(family.Metric[0].Label) != 0 || family.Metric[0].GetCounter().GetValue() != value {
+			t.Errorf("%s has metrics %#v, want one unlabeled counter with value %v", family.GetName(), family.Metric, value)
+		}
+		delete(want, family.GetName())
+	}
+	if len(want) > 0 {
+		t.Errorf("outcome metrics missing from registry: %v", want)
+	}
+	if text := gatherText(t, reg); !strings.Contains(text, "goauthy_api_key_auth_failure_suppressed_interval_total 2") {
+		t.Errorf("scrape omitted settled suppression count: %s", text)
 	}
 }
 

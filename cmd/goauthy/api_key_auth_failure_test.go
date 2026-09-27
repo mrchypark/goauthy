@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/metrics"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -60,19 +62,49 @@ func assertAPIKeyFailureEvent(t *testing.T, db *rhiza.DB, wantIP any) {
 	}
 }
 
+func assertAPIKeyFailureMetric(t *testing.T, registry *metrics.Registry, name string, want float64) float64 {
+	t.Helper()
+	response := httptest.NewRecorder()
+	registry.Handler("").ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	for _, line := range strings.Split(response.Body.String(), "\n") {
+		if strings.HasPrefix(line, name+" ") {
+			fields := strings.Fields(line)
+			got, err := strconv.ParseFloat(fields[1], 64)
+			if err != nil || got != want {
+				t.Fatalf("metric %s=%v err=%v, want %v", name, got, err, want)
+			}
+			return got
+		}
+	}
+	t.Fatalf("metric %s not exposed", name)
+	return 0
+}
+
 func TestAPIKeyAuthFailureCallbackPersistsWrongSecretAndUnknownIP(t *testing.T) {
 	db, keys, token := apiKeyFailureTestStore(t)
-	handler := newAPIKeyAuthFailureHandler(t.Context(), db, time.Now, slog.Default())
+	registry := metrics.NewRegistry()
+	handler := newAPIKeyAuthFailureHandler(t.Context(), db, time.Now, slog.Default(), registry)
 	keys.OnAuthFailure = handler
 	if _, err := keys.Authenticate(t.Context(), "API-Key "+wrongAPIKeySecret(token)); !errors.Is(err, apikey.ErrUnauthorized) {
 		t.Fatalf("wrong secret err=%v", err)
 	}
 	assertAPIKeyFailureEvent(t, db, nil)
+	assertAPIKeyFailureMetric(t, registry, "goauthy_api_key_auth_failure_suppressed_interval_total", 0)
+}
+
+func TestAPIKeyAuthFailureStatementConstructionFailureIsCounted(t *testing.T) {
+	_, keys, token := apiKeyFailureTestStore(t)
+	registry := metrics.NewRegistry()
+	keys.OnAuthFailure = newAPIKeyAuthFailureHandler(t.Context(), nil, func() time.Time { return time.Unix(-1, 0) }, slog.Default(), registry)
+	if _, err := keys.Authenticate(t.Context(), "API-Key "+wrongAPIKeySecret(token)); !errors.Is(err, apikey.ErrUnauthorized) {
+		t.Fatalf("wrong secret err=%v", err)
+	}
+	assertAPIKeyFailureMetric(t, registry, "goauthy_api_key_auth_failure_statement_failed_total", 1)
 }
 
 func TestAPIKeyAuthFailureCallbackPersistsExpiredKey(t *testing.T) {
 	db, keys, token := apiKeyFailureTestStore(t)
-	keys.OnAuthFailure = newAPIKeyAuthFailureHandler(t.Context(), db, time.Now, slog.Default())
+	keys.OnAuthFailure = newAPIKeyAuthFailureHandler(t.Context(), db, time.Now, slog.Default(), nil)
 	if _, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{RequestID: "expire-api-key", Statements: []rhiza.SQLStatement{{SQL: `UPDATE api_keys SET expires_at_unix_ms=? WHERE name=?`, Args: []any{time.Now().Add(-time.Second).UnixMilli(), "svc-backend"}}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +126,7 @@ func TestAPIKeyAuthFailureUsesTrustedCanonicalPeerIP(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db, keys, token := apiKeyFailureTestStore(t)
-			keys.OnAuthFailure = newAPIKeyAuthFailureHandler(t.Context(), db, time.Now, slog.Default())
+			keys.OnAuthFailure = newAPIKeyAuthFailureHandler(t.Context(), db, time.Now, slog.Default(), nil)
 			inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if _, err := keys.Authenticate(r.Context(), "API-Key "+wrongAPIKeySecret(token)); err == nil {
 					t.Error("wrong secret authenticated")
@@ -117,10 +149,11 @@ func TestAPIKeyAuthFailureUsesTrustedCanonicalPeerIP(t *testing.T) {
 
 func TestAPIKeyAuthFailureEventsBoundWritesAndReportStorageErrors(t *testing.T) {
 	db, keys, token := apiKeyFailureTestStore(t)
+	registry := metrics.NewRegistry()
 	now := time.Unix(1_800_005_000, 0).UTC()
 	var log bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&log, nil))
-	keys.OnAuthFailure = newAPIKeyAuthFailureHandler(t.Context(), db, func() time.Time { return now }, logger)
+	keys.OnAuthFailure = newAPIKeyAuthFailureHandler(t.Context(), db, func() time.Time { return now }, logger, registry)
 	badHeader := "API-Key " + wrongAPIKeySecret(token)
 	for range 20 {
 		if _, err := keys.Authenticate(t.Context(), badHeader); !errors.Is(err, apikey.ErrUnauthorized) {
@@ -132,6 +165,7 @@ func TestAPIKeyAuthFailureEventsBoundWritesAndReportStorageErrors(t *testing.T) 
 	if _, err := keys.Authenticate(t.Context(), badHeader); !errors.Is(err, apikey.ErrUnauthorized) {
 		t.Fatalf("wrong secret err=%v", err)
 	}
+	assertAPIKeyFailureMetric(t, registry, "goauthy_api_key_auth_failure_write_success_total", 2)
 	rows, err := db.Query(t.Context(), rhiza.QueryRequest{SQL: `SELECT COUNT(*) FROM event_log WHERE typ='SuspiciousApiScan'`, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil || len(rows.Rows) != 1 || rows.Rows[0][0] != int64(2) {
 		t.Fatalf("bounded event count rows=%#v err=%v", rows.Rows, err)
@@ -139,6 +173,7 @@ func TestAPIKeyAuthFailureEventsBoundWritesAndReportStorageErrors(t *testing.T) 
 	if !strings.Contains(log.String(), "API key authentication failure events suppressed") || !strings.Contains(log.String(), "count=19") || strings.Contains(log.String(), badHeader) {
 		t.Fatalf("suppression was not safely reported: %s", log.String())
 	}
+	assertAPIKeyFailureMetric(t, registry, "goauthy_api_key_auth_failure_suppressed_interval_total", 19)
 	if _, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{RequestID: "reject-api-key-failure-event", Statements: []rhiza.SQLStatement{{SQL: `CREATE TRIGGER reject_api_key_failure_event BEFORE INSERT ON event_log WHEN NEW.typ='SuspiciousApiScan' BEGIN SELECT RAISE(ABORT, 'test event failure'); END`}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +185,15 @@ func TestAPIKeyAuthFailureEventsBoundWritesAndReportStorageErrors(t *testing.T) 
 	}
 	if !strings.Contains(log.String(), "API key authentication failure event was not written") || strings.Contains(log.String(), badHeader) || strings.Contains(log.String(), peerIP) {
 		t.Fatalf("storage error was not safely reported: %s", log.String())
+	}
+	assertAPIKeyFailureMetric(t, registry, "goauthy_api_key_auth_failure_storage_failed_total", 1)
+	intervalSuppressed := assertAPIKeyFailureMetric(t, registry, "goauthy_api_key_auth_failure_suppressed_interval_total", 19)
+	busySuppressed := assertAPIKeyFailureMetric(t, registry, "goauthy_api_key_auth_failure_suppressed_busy_total", 0)
+	statementFailed := assertAPIKeyFailureMetric(t, registry, "goauthy_api_key_auth_failure_statement_failed_total", 0)
+	writeSuccess := assertAPIKeyFailureMetric(t, registry, "goauthy_api_key_auth_failure_write_success_total", 2)
+	storageFailed := assertAPIKeyFailureMetric(t, registry, "goauthy_api_key_auth_failure_storage_failed_total", 1)
+	if got := intervalSuppressed + busySuppressed + statementFailed + writeSuccess + storageFailed; got != 22 {
+		t.Fatalf("settled failure outcomes sum=%v, want 22", got)
 	}
 }
 
@@ -166,9 +210,10 @@ func TestAPIKeyAuthFailureFloodDoesNotAddWritesWhileStorageStalls(t *testing.T) 
 	releaseStorage := func() { releaseOnce.Do(func() { close(release) }) }
 	defer releaseStorage()
 	var writeCalls atomic.Int32
+	registry := metrics.NewRegistry()
 	recorder := &apiKeyAuthFailureRecorder{
 		ctx: t.Context(), now: func() time.Time { return time.Unix(0, clock.Load()) },
-		logger: slog.Default(), writeTimeout: time.Minute,
+		logger: slog.Default(), metrics: registry, writeTimeout: time.Minute,
 		execute: func(ctx context.Context, _ rhiza.ExecuteRequest) error {
 			if writeCalls.Add(1) == 1 {
 				firstWrite <- struct{}{}
@@ -232,12 +277,8 @@ func TestAPIKeyAuthFailureFloodDoesNotAddWritesWhileStorageStalls(t *testing.T) 
 			t.Fatal("flood did not complete while audit storage was stalled")
 		}
 	}
-	recorder.mu.Lock()
-	suppressed := recorder.suppressed
-	recorder.mu.Unlock()
-	if suppressed != 20 {
-		t.Fatalf("suppressed=%d, want 20", suppressed)
-	}
+	assertAPIKeyFailureMetric(t, registry, "goauthy_api_key_auth_failure_suppressed_busy_total", 20)
+	assertAPIKeyFailureMetric(t, registry, "goauthy_api_key_auth_failure_suppressed_interval_total", 0)
 	releaseStorage()
 	if err := <-firstDone; !errors.Is(err, apikey.ErrUnauthorized) {
 		t.Fatalf("first authentication result err=%v", err)
@@ -245,6 +286,8 @@ func TestAPIKeyAuthFailureFloodDoesNotAddWritesWhileStorageStalls(t *testing.T) 
 	if got := writeCalls.Load(); got != 1 {
 		t.Fatalf("writes after releasing storage=%d, want 1", got)
 	}
+	assertAPIKeyFailureMetric(t, registry, "goauthy_api_key_auth_failure_suppressed_busy_total", 20)
+	assertAPIKeyFailureMetric(t, registry, "goauthy_api_key_auth_failure_write_success_total", 1)
 }
 
 func TestAPIKeyAuthFailureWriteTimesOut(t *testing.T) {
@@ -274,7 +317,7 @@ func TestAPIKeyAuthFailureWriteTimesOut(t *testing.T) {
 
 func TestAPIKeyAuthFailureCallbackReadsCanonicalIPFromContext(t *testing.T) {
 	db, keys, token := apiKeyFailureTestStore(t)
-	keys.OnAuthFailure = newAPIKeyAuthFailureHandler(t.Context(), db, time.Now, slog.Default())
+	keys.OnAuthFailure = newAPIKeyAuthFailureHandler(t.Context(), db, time.Now, slog.Default(), nil)
 	ctx := browser.ContextWithPeerIP(t.Context(), "203.0.113.9")
 	if _, err := keys.Authenticate(ctx, "API-Key "+wrongAPIKeySecret(token)); !errors.Is(err, apikey.ErrUnauthorized) {
 		t.Fatalf("wrong secret err=%v", err)
