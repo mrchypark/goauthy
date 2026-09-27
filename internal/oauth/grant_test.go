@@ -218,7 +218,7 @@ func TestTokenIssueRemovesExpiredState(t *testing.T) {
 	}
 }
 
-func oauthTestDB(t *testing.T) *rhiza.DB {
+func oauthTestDB(t testing.TB) *rhiza.DB {
 	t.Helper()
 	directory := t.TempDir()
 	if err := copyDirTree(oauthMigratedTemplate(t), directory); err != nil {
@@ -255,7 +255,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func oauthMigratedTemplate(t *testing.T) string {
+func oauthMigratedTemplate(t testing.TB) string {
 	t.Helper()
 	oauthTemplateOnce.Do(func() {
 		directory, err := os.MkdirTemp("", "goauthy-oauth-template-")
@@ -315,7 +315,7 @@ func oauthTestServer(t *testing.T, db *rhiza.DB, hmacSecret []byte) *Server {
 	return server
 }
 
-func issueCode(t *testing.T, server *Server, verifier string) string {
+func issueCode(t testing.TB, server *Server, verifier string) string {
 	t.Helper()
 	seedOAuthUser(t, server.store.db, "user-1")
 	digest := sha256.Sum256([]byte(verifier))
@@ -333,7 +333,7 @@ func issueCode(t *testing.T, server *Server, verifier string) string {
 	return location.Query().Get("code")
 }
 
-func seedOAuthUser(t *testing.T, db *rhiza.DB, subject string) {
+func seedOAuthUser(t testing.TB, db *rhiza.DB, subject string) {
 	t.Helper()
 	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{
 		RequestID: "seed-oauth-user-" + subject,
@@ -353,7 +353,7 @@ func postToken(server *Server, values url.Values) *httptest.ResponseRecorder {
 	return response
 }
 
-func decodeToken(t *testing.T, response *httptest.ResponseRecorder) tokenResponse {
+func decodeToken(t testing.TB, response *httptest.ResponseRecorder) tokenResponse {
 	t.Helper()
 	var token tokenResponse
 	if err := json.Unmarshal(response.Body.Bytes(), &token); err != nil {

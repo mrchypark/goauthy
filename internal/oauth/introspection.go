@@ -28,6 +28,11 @@ func formRequest(w http.ResponseWriter, r *http.Request) error {
 // IntrospectionHandler serves RFC 7662 to authenticated registered clients.
 // Caller authentication does not currently impose an audience-specific ACL.
 func (s *Server) IntrospectionHandler() http.Handler {
+	return s.introspectionHandler(true)
+}
+
+// The false path keeps the pre-cache behavior available to the package benchmark.
+func (s *Server) introspectionHandler(reuseVerification bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := formRequest(w, r); err != nil {
 			s.provider.WriteIntrospectionError(r.Context(), w, err)
@@ -36,6 +41,9 @@ func (s *Server) IntrospectionHandler() http.Handler {
 		if _, _, ok := r.BasicAuth(); !ok {
 			s.provider.WriteIntrospectionError(r.Context(), w, fosite.ErrRequestUnauthorized.WithHint("HTTP Basic authentication is required."))
 			return
+		}
+		if reuseVerification {
+			r = r.WithContext(withAccessTokenVerificationCache(r.Context()))
 		}
 		response, err := s.provider.NewIntrospectionRequest(r.Context(), r, &fosite.DefaultSession{})
 		if err != nil {
