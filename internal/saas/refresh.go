@@ -3,6 +3,7 @@ package saas
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -22,7 +23,10 @@ func (s *CredentialStore) refreshCredential(ctx context.Context, b credentialBin
 	if err != nil {
 		return credentialBinding{}, err
 	}
-	if current.RefreshToken == "" || (current.RefreshExpiresAtUnixMS != 0 && current.RefreshExpiresAtUnixMS <= s.now()) {
+	if strings.TrimSpace(current.AccountID) == "" || current.RefreshToken == "" {
+		return credentialBinding{}, ErrCredentialNotFound
+	}
+	if current.RefreshExpiresAtUnixMS != 0 && current.RefreshExpiresAtUnixMS <= s.now() {
 		return credentialBinding{}, errCredential
 	}
 	claim, err := s.ClaimRefresh(ctx, b, authority)

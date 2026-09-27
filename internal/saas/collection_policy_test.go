@@ -17,14 +17,15 @@ func TestCredentialCollectionProviderRemovalCannotResurrect(t *testing.T) {
 	if err := store.Install(ctx, wrong, testCredential(), credentialAuthority()); !errors.Is(err, ErrCredentialConflict) {
 		t.Fatalf("unapproved provider install=%v", err)
 	}
-	if err := store.Install(ctx, binding, testCredential(), credentialAuthority()); err != nil {
+	if err := store.Install(ctx, binding, refreshCredentialFixture(), credentialAuthority()); err != nil {
 		t.Fatal(err)
 	}
-	_, err := store.refreshCredential(ctx, binding, credentialAuthority(), func(context.Context, credential) (credential, error) {
+	_, err := store.refreshCredential(ctx, binding, credentialAuthority(), func(_ context.Context, old credential) (credential, error) {
 		if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "remove-provider", SQL: `UPDATE auth_collection_definitions SET providers_json='[]' WHERE id=?`, Args: []any{binding.CollectionID}}); err != nil {
 			t.Fatal(err)
 		}
-		return credential{AccessToken: "must-not-commit"}, nil
+		old.AccessToken = "must-not-commit"
+		return old, nil
 	})
 	if !errors.Is(err, errRefreshUncertain) {
 		t.Fatalf("removed provider refresh=%v", err)

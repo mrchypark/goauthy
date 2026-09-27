@@ -11,7 +11,7 @@ import (
 
 func TestAbandonedRefreshClaimRequiresOwnerRecovery(t *testing.T) {
 	ctx, original, db, old := credentialStoreFixture(t)
-	if err := original.Install(ctx, old, testCredential(), credentialAuthority()); err != nil {
+	if err := original.Install(ctx, old, refreshCredentialFixture(), credentialAuthority()); err != nil {
 		t.Fatal(err)
 	}
 	claim, err := original.ClaimRefresh(ctx, old, credentialAuthority())
