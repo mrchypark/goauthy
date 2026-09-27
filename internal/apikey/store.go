@@ -66,7 +66,7 @@ type Store struct {
 	beforeMutation  func()
 	beforeAuditRead func()
 	beforeSubmit    func(rhiza.ExecuteRequest)
-	OnAuthFailure   func(keyName, ip string)
+	OnAuthFailure   func(context.Context, string)
 }
 
 func NewStore(db *rhiza.DB) (*Store, error) {
@@ -92,7 +92,7 @@ func (s *Store) Authenticate(ctx context.Context, header string) (Principal, err
 	stored, ok := r.Rows[0][0].(string)
 	if !ok || subtle.ConstantTimeCompare([]byte(stored), []byte(d)) != 1 {
 		if s.OnAuthFailure != nil {
-			s.OnAuthFailure(name, "")
+			s.OnAuthFailure(ctx, name)
 		}
 		return Principal{}, ErrUnauthorized
 	}
@@ -100,7 +100,7 @@ func (s *Store) Authenticate(ctx context.Context, header string) (Principal, err
 		e, ok := r.Rows[0][1].(int64)
 		if !ok || s.timeNow().UnixMilli() > e {
 			if s.OnAuthFailure != nil {
-				s.OnAuthFailure(name, "")
+				s.OnAuthFailure(ctx, name)
 			}
 			return Principal{}, ErrUnauthorized
 		}

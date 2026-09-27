@@ -85,6 +85,7 @@ func main() {
 }
 
 func run() (err error) {
+	registry := metrics.NewRegistry()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	tracingShutdown, tracingErr := tracing.Init(ctx)
@@ -371,13 +372,7 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
-	apiKeyStore.OnAuthFailure = func(keyName, ip string) {
-		op := "suspicious-api-scan/" + rand.Text()
-		event := eventlog.SuspiciousApiScanEvent(op, keyName, ip, time.Now())
-		if stmt, stmtErr := event.Statement("1=1"); stmtErr == nil {
-			storage.Execute(ctx, db, rhiza.ExecuteRequest{Statements: []rhiza.SQLStatement{stmt}})
-		}
-	}
+	apiKeyStore.OnAuthFailure = newAPIKeyAuthFailureHandler(ctx, db, time.Now, slog.Default(), registry)
 	eventRetention, err := eventRetentionFromEnv(os.Getenv)
 	if err != nil {
 		return err
@@ -1078,7 +1073,6 @@ func run() (err error) {
 			return fmt.Errorf("enable FedCM browser cookies: %w", err)
 		}
 	}
-	var registry *metrics.Registry
 	handler := newHandlerWithReadiness(db, func(ok bool) {
 		if registry != nil {
 			registry.DBReadiness(ok)
@@ -1356,7 +1350,6 @@ func run() (err error) {
 		if tokErr != nil {
 			return tokErr
 		}
-		registry = metrics.NewRegistry()
 		oauthServer.SetMetrics(registry)
 		loginHandler.SetMetrics(registry)
 		appHandler = registry.Instrument(appHandler)
