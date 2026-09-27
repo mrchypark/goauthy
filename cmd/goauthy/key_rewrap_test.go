@@ -339,9 +339,6 @@ func TestMasterKeyRewrapRunFamilyTimeoutAllowsLaterTickRecovery(t *testing.T) {
 				starved <- err
 				return oidc.SigningKeyRewrapBatchResult{}, err
 			}
-			if loginRevokeCalls == 2 {
-				close(secondFinished)
-			}
 			return oidc.SigningKeyRewrapBatchResult{Done: true}, nil
 		},
 		rewrapEmailOutbox: func(ctx context.Context, _ string) (oidc.SigningKeyRewrapBatchResult, error) {
@@ -350,6 +347,10 @@ func TestMasterKeyRewrapRunFamilyTimeoutAllowsLaterTickRecovery(t *testing.T) {
 			if err := ctx.Err(); err != nil {
 				starved <- err
 				return oidc.SigningKeyRewrapBatchResult{}, err
+			}
+			// Let the last configured family check its context before stopping the worker.
+			if emailOutboxCalls == 2 {
+				close(secondFinished)
 			}
 			return oidc.SigningKeyRewrapBatchResult{Done: true}, nil
 		},

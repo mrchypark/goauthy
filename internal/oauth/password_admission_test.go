@@ -46,6 +46,8 @@ func TestPasswordHTTPAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	now := time.Date(2026, time.January, 1, 0, 0, 59, 999000000, time.UTC)
+	s.store.now = func() time.Time { return now }
 	request := func(peer, password string) *httptest.ResponseRecorder {
 		t.Helper()
 		form := url.Values{"grant_type": {"password"}, "client_id": {c.ID}, "username": {"alice"}, "password": {password}}
@@ -65,28 +67,31 @@ func TestPasswordHTTPAdmission(t *testing.T) {
 	})
 	t.Run("shared attempt budget blocks before password verification", func(t *testing.T) {
 		for i := 0; i < loginpolicy.DefaultAttemptLimit; i++ {
-			if ok, err := policy.Allow(t.Context(), "192.0.2.2", time.Now()); err != nil || !ok {
+			if ok, err := policy.Allow(t.Context(), "192.0.2.2", now); err != nil || !ok {
 				t.Fatalf("seed %v %v", ok, err)
 			}
 		}
 		if w := request("192.0.2.2", "wrong password"); w.Code == 200 || !strings.Contains(w.Body.String(), "access_denied") {
 			t.Fatalf("%d %s", w.Code, w.Body.String())
 		}
-		status, err := policy.Check(t.Context(), "192.0.2.2", time.Now())
+		status, err := policy.Check(t.Context(), "192.0.2.2", now)
 		if err != nil || status.Failures != 0 {
 			t.Fatalf("password checked despite budget: %+v %v", status, err)
+		}
+		// The shared budget resets at the next minute, even just one millisecond later.
+		now = now.Add(time.Millisecond)
+		if w := request("192.0.2.2", "correct password"); w.Code != 200 {
+			t.Fatalf("next minute: %d %s", w.Code, w.Body.String())
 		}
 	})
 	t.Run("failures reach shared enforcement", func(t *testing.T) {
 		if w := request("192.0.2.3", "wrong password"); w.Code == 200 {
 			t.Fatal("accepted wrong password")
 		}
-		status, err := policy.Check(t.Context(), "192.0.2.3", time.Now())
+		status, err := policy.Check(t.Context(), "192.0.2.3", now)
 		if err != nil || status.Failures != 1 {
 			t.Fatalf("%+v %v", status, err)
 		}
-	})
-	t.Run("account failures reach shared detector", func(t *testing.T) {
 		result, err := db.Query(t.Context(), rhiza.QueryRequest{SQL: "SELECT COUNT(*) FROM login_account_ip_failures WHERE account_hash=?", Args: []any{loginpolicy.AccountStuffingDigest("alice")}, Consistency: rhiza.ConsistencyLinearizable})
 		if err != nil || len(result.Rows) != 1 || result.Rows[0][0] != int64(1) {
 			t.Fatalf("account failures=%v err=%v", result.Rows, err)
