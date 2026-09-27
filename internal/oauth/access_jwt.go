@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,9 +26,29 @@ type signedAccessTokenStrategy struct {
 	issuer       string
 	loadKey      func(context.Context) (oidc.SigningKey, error)
 	loadKeys     func(context.Context) ([]jose.JSONWebKey, error)
+	verifyToken  func(string, jose.JSONWebKeySet, string, time.Time) (oidc.AccessTokenClaims, error)
 	now          func() time.Time
 	mu           sync.RWMutex
 	issuedPublic map[string]jose.JSONWebKey
+}
+
+type accessTokenVerificationContextKey struct{}
+
+type accessTokenVerification struct {
+	strategy *signedAccessTokenStrategy
+	token    string
+	claims   oidc.AccessTokenClaims
+	keys     []jose.JSONWebKey
+}
+
+// Fosite runs the introspection validator chain synchronously on the request
+// goroutine, so this short-lived context entry needs no lock.
+type accessTokenVerificationCache struct {
+	entry *accessTokenVerification
+}
+
+func withAccessTokenVerificationCache(ctx context.Context) context.Context {
+	return context.WithValue(ctx, accessTokenVerificationContextKey{}, &accessTokenVerificationCache{})
 }
 
 var _ oauth2.CoreStrategy = (*signedAccessTokenStrategy)(nil)
@@ -35,7 +56,7 @@ var _ oauth2.CoreStrategy = (*signedAccessTokenStrategy)(nil)
 const accessDefaultAudiencesExtra = "goauthy_default_audiences"
 
 func newSignedAccessTokenStrategy(core oauth2.CoreStrategy, issuer string, loadKey func(context.Context) (oidc.SigningKey, error), loadKeys func(context.Context) ([]jose.JSONWebKey, error), now func() time.Time) *signedAccessTokenStrategy {
-	return &signedAccessTokenStrategy{CoreStrategy: core, issuer: issuer, loadKey: loadKey, loadKeys: loadKeys, now: now, issuedPublic: make(map[string]jose.JSONWebKey)}
+	return &signedAccessTokenStrategy{CoreStrategy: core, issuer: issuer, loadKey: loadKey, loadKeys: loadKeys, verifyToken: oidc.VerifyAccessToken, now: now, issuedPublic: make(map[string]jose.JSONWebKey)}
 }
 
 func (s *signedAccessTokenStrategy) GenerateAccessToken(ctx context.Context, request fosite.Requester) (string, string, error) {
@@ -99,7 +120,30 @@ func (s *signedAccessTokenStrategy) verify(ctx context.Context, token string) (o
 	if err != nil {
 		return oidc.AccessTokenClaims{}, err
 	}
-	return oidc.VerifyAccessToken(token, jose.JSONWebKeySet{Keys: keys}, s.issuer, s.now().UTC())
+	now := s.now().UTC()
+	if cache, _ := ctx.Value(accessTokenVerificationContextKey{}).(*accessTokenVerificationCache); cache != nil && cache.entry != nil {
+		entry := cache.entry
+		if entry.strategy == s && entry.token == token && entry.claims.Issuer == s.issuer && now.Before(entry.claims.ExpiresAt) && !now.Before(entry.claims.NotBefore) && !now.Before(entry.claims.IssuedAt) && reflect.DeepEqual(entry.keys, keys) {
+			return entry.claims, nil
+		}
+	}
+	claims, err := s.verifyToken(token, jose.JSONWebKeySet{Keys: keys}, s.issuer, now)
+	if err == nil {
+		if cache, _ := ctx.Value(accessTokenVerificationContextKey{}).(*accessTokenVerificationCache); cache != nil {
+			cache.entry = &accessTokenVerification{strategy: s, token: token, claims: claims, keys: cloneAccessVerificationKeys(keys)}
+		}
+	}
+	return claims, err
+}
+
+func cloneAccessVerificationKeys(keys []jose.JSONWebKey) []jose.JSONWebKey {
+	cloned := append([]jose.JSONWebKey(nil), keys...)
+	for i := range cloned {
+		if key, ok := cloned[i].Key.(ed25519.PublicKey); ok {
+			cloned[i].Key = append(ed25519.PublicKey(nil), key...)
+		}
+	}
+	return cloned
 }
 
 func (s *signedAccessTokenStrategy) verificationKeys(ctx context.Context) ([]jose.JSONWebKey, error) {
