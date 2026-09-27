@@ -265,6 +265,10 @@ func (s *Store) createSessionWithParent(ctx context.Context, subject, authMethod
 // LoadSession uses a linearizable read because a revoked or expired session is
 // a security decision.
 func (s *Store) LoadSession(ctx context.Context, token string) (Session, error) {
+	return s.loadSessionAndTouch(ctx, token, nil)
+}
+
+func (s *Store) loadSessionAndTouch(ctx context.Context, token string, peerIP *string) (Session, error) {
 	digest, err := tokenDigest(token)
 	if err != nil {
 		return Session{}, ErrNotFound
@@ -274,15 +278,24 @@ func (s *Store) LoadSession(ctx context.Context, token string) (Session, error) 
 	if err != nil {
 		return Session{}, err
 	}
+	if peerIP != nil {
+		if err := CheckPeerIP(session, *peerIP); err != nil {
+			return session, err
+		}
+	}
 	if now.Sub(lastSeen) < touchInterval {
 		return session, nil
 	}
+	touchSQL := `UPDATE browser_sessions SET last_seen_at_unix_ms = ?
+		WHERE token_digest = ? AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ?
+		AND last_seen_at_unix_ms > ? AND last_seen_at_unix_ms <= ? AND ` + activeSessionSubjectSQL + ` AND peer_ip=?`
+	// Guard against changes since the read. Use the stored value so this
+	// statement stays identical across callers and legacy peer addresses.
+	touchArgs := []any{now.UnixMilli(), digest, now.UnixMilli(), now.Add(-s.idleTimeout).UnixMilli(), now.Add(-touchInterval).UnixMilli(), now.UnixMilli(), session.PeerIP}
 	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
-		RequestID: mutationID("session-touch", digest, fmt.Sprint(now.UnixMilli())),
-		SQL: `UPDATE browser_sessions SET last_seen_at_unix_ms = ?
-			WHERE token_digest = ? AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ?
-			AND last_seen_at_unix_ms > ? AND last_seen_at_unix_ms <= ? AND ` + activeSessionSubjectSQL,
-		Args: []any{now.UnixMilli(), digest, now.UnixMilli(), now.Add(-s.idleTimeout).UnixMilli(), now.Add(-touchInterval).UnixMilli(), now.UnixMilli()},
+		RequestID: mutationID("session-touch-v2", digest, fmt.Sprint(now.UnixMilli())),
+		SQL:       touchSQL,
+		Args:      touchArgs,
 	})
 	if err != nil {
 		return Session{}, err
@@ -293,6 +306,9 @@ func (s *Store) LoadSession(ctx context.Context, token string) (Session, error) 
 	// A concurrent touch can make the guarded update a no-op. Re-read rather
 	// than treating an ambiguous write as authorization.
 	session, _, err = s.loadSession(ctx, digest, now)
+	if err == nil && peerIP != nil {
+		err = CheckPeerIP(session, *peerIP)
+	}
 	return session, err
 }
 
@@ -314,11 +330,7 @@ func (s *Store) LoadSessionReadOnly(ctx context.Context, token string) (Session,
 // followed by a separate CheckPeerIP, as reordering or early-return bugs
 // can silently weaken the binding.
 func (s *Store) LoadSessionForPeer(ctx context.Context, token string, peerIP string) (Session, error) {
-	session, err := s.LoadSession(ctx, token)
-	if err != nil {
-		return session, err
-	}
-	return session, CheckPeerIP(session, peerIP)
+	return s.loadSessionAndTouch(ctx, token, &peerIP)
 }
 
 // LoadSessionReadOnlyForPeer applies the same atomic load+check without
