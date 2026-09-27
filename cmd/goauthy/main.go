@@ -371,13 +371,7 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
-	apiKeyStore.OnAuthFailure = func(keyName, ip string) {
-		op := "suspicious-api-scan/" + rand.Text()
-		event := eventlog.SuspiciousApiScanEvent(op, keyName, ip, time.Now())
-		if stmt, stmtErr := event.Statement("1=1"); stmtErr == nil {
-			storage.Execute(ctx, db, rhiza.ExecuteRequest{Statements: []rhiza.SQLStatement{stmt}})
-		}
-	}
+	apiKeyStore.OnAuthFailure = newAPIKeyAuthFailureHandler(ctx, db, time.Now, slog.Default())
 	eventRetention, err := eventRetentionFromEnv(os.Getenv)
 	if err != nil {
 		return err
