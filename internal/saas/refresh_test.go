@@ -3,6 +3,7 @@ package saas
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/mrchypark/rhiza"
@@ -29,7 +30,9 @@ func TestRefreshCredentialCommitsBeforeReturningBinding(t *testing.T) {
 		if _, err := store.ClaimRefresh(ctx, binding, credentialAuthority()); !errors.Is(err, ErrCredentialConflict) {
 			t.Fatalf("competing claim=%v", err)
 		}
-		return credential{AccountID: old.AccountID, AccessToken: "new-access", RefreshToken: "rotated-refresh"}, nil
+		old.AccessToken = "new-access"
+		old.RefreshToken = "rotated-refresh"
+		return old, nil
 	})
 	if err != nil || next.TokenVersion != 2 || calls != 1 {
 		t.Fatalf("next=%+v calls=%d err=%v", next, calls, err)
@@ -37,6 +40,9 @@ func TestRefreshCredentialCommitsBeforeReturningBinding(t *testing.T) {
 	got, err := store.Load(ctx, next, credentialAuthority())
 	if err != nil || got.AccessToken != "new-access" || got.RefreshToken != "rotated-refresh" {
 		t.Fatalf("stored credential mismatch: %v", err)
+	}
+	if want := refreshCredentialFixture(); got.AccountID != want.AccountID || !slices.Equal(got.Scopes, want.Scopes) {
+		t.Fatal("refresh changed account or scopes")
 	}
 }
 
@@ -78,11 +84,12 @@ func TestRefreshCredentialRevocationDuringExchangePreventsCommit(t *testing.T) {
 	if err := store.Install(ctx, binding, refreshCredentialFixture(), credentialAuthority()); err != nil {
 		t.Fatal(err)
 	}
-	_, err := store.refreshCredential(ctx, binding, credentialAuthority(), func(context.Context, credential) (credential, error) {
+	_, err := store.refreshCredential(ctx, binding, credentialAuthority(), func(_ context.Context, old credential) (credential, error) {
 		if err := store.Revoke(ctx, binding, credentialAuthority()); err != nil {
 			t.Fatal(err)
 		}
-		return credential{AccessToken: "must-not-be-used"}, nil
+		old.AccessToken = "must-not-be-used"
+		return old, nil
 	})
 	if !errors.Is(err, errRefreshUncertain) {
 		t.Fatalf("refresh=%v", err)
@@ -120,10 +127,11 @@ func TestRefreshCredentialChecksExpiryAndCurrentAuthority(t *testing.T) {
 	store.now = func() int64 { return 1000 }
 	allowed := true
 	authority := func() (string, []any) { return "?", []any{allowed} }
-	_, err := store.refreshCredential(ctx, binding, authority, func(context.Context, credential) (credential, error) {
+	_, err := store.refreshCredential(ctx, binding, authority, func(_ context.Context, old credential) (credential, error) {
 		calls++
 		allowed = false
-		return credential{AccessToken: "must-not-commit"}, nil
+		old.AccessToken = "must-not-commit"
+		return old, nil
 	})
 	if !errors.Is(err, errRefreshUncertain) || calls != 1 {
 		t.Fatalf("authority revoked during exchange calls=%d err=%v", calls, err)
