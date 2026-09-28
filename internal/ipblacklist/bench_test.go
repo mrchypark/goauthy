@@ -29,7 +29,7 @@ const (
 // benchStore opens a store on a migrated database. store_test.go's
 // newTestStore takes *testing.T and builds a narrowed fixture schema, so it is
 // not reusable here; storage.Migrate gives the production schema instead.
-func benchStore(b *testing.B, maxEntries int) *Store {
+func benchStore(b testing.TB, maxEntries int) *Store {
 	b.Helper()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "bench-ipbl", DataDir: b.TempDir()})
 	if err != nil {
