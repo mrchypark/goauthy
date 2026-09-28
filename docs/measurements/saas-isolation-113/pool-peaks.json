@@ -1,0 +1,62 @@
+[
+  {
+    "run": 1,
+    "allocated_between_samples": 1013832752,
+    "owners": [
+      {
+        "owner": "api",
+        "entries": 3,
+        "leases": 4,
+        "dials": 0,
+        "connections": 4
+      },
+      {
+        "owner": "oauth",
+        "entries": 3,
+        "leases": 3,
+        "dials": 0,
+        "connections": 4
+      }
+    ]
+  },
+  {
+    "run": 2,
+    "allocated_between_samples": 1013216944,
+    "owners": [
+      {
+        "owner": "api",
+        "entries": 3,
+        "leases": 4,
+        "dials": 0,
+        "connections": 4
+      },
+      {
+        "owner": "oauth",
+        "entries": 3,
+        "leases": 3,
+        "dials": 0,
+        "connections": 4
+      }
+    ]
+  },
+  {
+    "run": 3,
+    "allocated_between_samples": 1013184080,
+    "owners": [
+      {
+        "owner": "api",
+        "entries": 3,
+        "leases": 4,
+        "dials": 0,
+        "connections": 4
+      },
+      {
+        "owner": "oauth",
+        "entries": 3,
+        "leases": 3,
+        "dials": 0,
+        "connections": 4
+      }
+    ]
+  }
+]

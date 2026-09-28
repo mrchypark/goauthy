@@ -1,0 +1,46 @@
+Untimed post-review validation; no load campaign.
+Focused race:
+=== RUN   TestIsolation113RefreshObservation
+=== RUN   TestIsolation113RefreshObservation/accepted-old-ready
+=== RUN   TestIsolation113RefreshObservation/accepted-cleanup-pending
+=== RUN   TestIsolation113RefreshObservation/accepted-uncertain
+=== RUN   TestIsolation113RefreshObservation/accepted-completed
+=== RUN   TestIsolation113RefreshObservation/untouched
+=== RUN   TestIsolation113RefreshObservation/claimed-before-dispatch
+=== RUN   TestIsolation113RefreshObservation/failed-before-dispatch
+=== RUN   TestIsolation113RefreshObservation/completion-without-post
+=== RUN   TestIsolation113RefreshObservation/repeated-post
+=== RUN   TestIsolation113RefreshObservation/invalid-state
+=== RUN   TestIsolation113RefreshObservation/invalid-version
+--- PASS: TestIsolation113RefreshObservation (0.00s)
+    --- PASS: TestIsolation113RefreshObservation/accepted-old-ready (0.00s)
+    --- PASS: TestIsolation113RefreshObservation/accepted-cleanup-pending (0.00s)
+    --- PASS: TestIsolation113RefreshObservation/accepted-uncertain (0.00s)
+    --- PASS: TestIsolation113RefreshObservation/accepted-completed (0.00s)
+    --- PASS: TestIsolation113RefreshObservation/untouched (0.00s)
+    --- PASS: TestIsolation113RefreshObservation/claimed-before-dispatch (0.00s)
+    --- PASS: TestIsolation113RefreshObservation/failed-before-dispatch (0.00s)
+    --- PASS: TestIsolation113RefreshObservation/completion-without-post (0.00s)
+    --- PASS: TestIsolation113RefreshObservation/repeated-post (0.00s)
+    --- PASS: TestIsolation113RefreshObservation/invalid-state (0.00s)
+    --- PASS: TestIsolation113RefreshObservation/invalid-version (0.00s)
+=== RUN   TestIsolation113RetainedRefreshObservations
+    saas_isolation_measurement_darwin_test.go:887: run2.json: validated 111 OAuth rows, 110 accepted POSTs (including controls)
+    saas_isolation_measurement_darwin_test.go:887: run3.json: validated 111 OAuth rows, 110 accepted POSTs (including controls)
+    saas_isolation_measurement_darwin_test.go:887: run1.json: validated 111 OAuth rows, 110 accepted POSTs (including controls)
+--- PASS: TestIsolation113RetainedRefreshObservations (0.36s)
+=== RUN   TestIsolation113ReservationSurvivesClientCancellation
+--- PASS: TestIsolation113ReservationSurvivesClientCancellation (0.00s)
+PASS
+ok  	github.com/mrchypark/goauthy/cmd/goauthy	3.029s
+Negative control: overlay removes only the version-1 ready posts==0 guard.
+Expected failure (exit 1):
+=== RUN   TestIsolation113RefreshObservation
+=== RUN   TestIsolation113RefreshObservation/accepted-old-ready
+    saas_isolation_measurement_darwin_test.go:818: state=ready version=1 posts=1: valid=true want=false
+--- FAIL: TestIsolation113RefreshObservation (0.00s)
+    --- FAIL: TestIsolation113RefreshObservation/accepted-old-ready (0.00s)
+FAIL
+FAIL	github.com/mrchypark/goauthy/cmd/goauthy	1.109s
+FAIL
+go vet -tags goauthy_integration ./cmd/goauthy: exit 0
