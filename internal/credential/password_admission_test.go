@@ -131,6 +131,50 @@ func TestPasswordAdmissionCancellationBoundaries(t *testing.T) {
 		})
 	}
 }
+func TestPasswordOccupiedSlotCancellationBeforeKDF(t *testing.T) {
+	p := DefaultPolicy()
+	p.MaxConcurrency = 1
+	p.MemoryBudgetKiB = maxMemoryKiB
+	p.WaitTimeout = -1
+	h, err := NewHasher(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	occupied, resume := make(chan struct{}), make(chan struct{})
+	var started, computed bool
+	h.observer = func(e passwordWorkEvent) {
+		switch e.Stage {
+		case "slot":
+			close(occupied)
+			<-resume
+		case "start":
+			started = true
+		case "finish":
+			computed = e.Outcome == "ok"
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, _, err := h.VerifyOrDummy(ctx, []byte("password"), "")
+		result <- err
+	}()
+	<-occupied
+	if len(h.slots) != cap(h.slots) {
+		t.Error("worker did not occupy all slots")
+	}
+	cancel()
+	close(resume)
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("pre-KDF cancellation: %v", err)
+	}
+	if started || computed {
+		t.Fatal("occupied slot was incorrectly treated as an entered KDF")
+	}
+	assertAdmissionEmpty(t, h)
+}
+
 func TestPasswordCostClassificationAndFinalCancel(t *testing.T) {
 	valid := func(memory uint32) string {
 		return encode(parameters{memory: memory, time: 2, parallelism: 1}, make([]byte, 16), make([]byte, 32))

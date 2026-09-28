@@ -234,9 +234,9 @@ func TestPasswordMeasurementQuantiles(t *testing.T) {
 }
 func usageSeconds(v syscall.Timeval) float64 { return float64(v.Sec) + float64(v.Usec)/1e6 }
 
-// Real KDFs occupy every slot while queued requests exercise the production
-// 100ms timeout and caller cancellation. Cancellation after admission must not
-// make a slot available before the synchronous KDF returns.
+// Real KDFs finish before cancellation, with their operations held before lease
+// release. This measures queued deadlines and post-IDKey lease lifetime, not
+// cancellation during IDKey or proof of entry from slot occupancy.
 func TestPasswordRealKDFCancellationMeasurement(t *testing.T) {
 	if os.Getenv("GOAUTHY_MEASURE_CANCEL") == "" {
 		t.Skip("set GOAUTHY_MEASURE_CANCEL=1 for real KDF cancellation checks")
@@ -253,6 +253,19 @@ func TestPasswordRealKDFCancellationMeasurement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Install the observer on a fresh hasher before use, separate from fixtures.
+	h, err = NewHasher(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := make(chan struct{}, cap(h.slots))
+	finish := make(chan struct{})
+	h.observer = func(e passwordWorkEvent) {
+		if e.ID <= uint64(cap(h.slots)) && e.Stage == "finish" && e.Outcome == "ok" {
+			completed <- struct{}{}
+			<-finish
+		}
+	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	start := make(chan struct{})
@@ -265,14 +278,10 @@ func TestPasswordRealKDFCancellationMeasurement(t *testing.T) {
 			}
 		})
 	}
-	defer wg.Wait()
+	defer func() { close(finish); wg.Wait() }()
 	close(start)
-	until := time.Now().Add(time.Second)
-	for len(h.slots) != cap(h.slots) {
-		if time.Now().After(until) {
-			t.Fatal("KDFs did not occupy slots")
-		}
-		runtime.Gosched()
+	for range cap(h.slots) {
+		<-completed
 	}
 	cancel()
 	held := len(h.slots)
@@ -284,11 +293,9 @@ func TestPasswordRealKDFCancellationMeasurement(t *testing.T) {
 	defer cancelQueued()
 	_, _, err = h.VerifyOrDummy(queued, []byte("password"), "")
 	cancelWait := time.Since(begin)
-	// Under scheduling delay both select cases may be ready. The existing
-	// admission code does not prioritize caller cancellation over its timer.
 	callerOutcome := err
 	if !errors.Is(queued.Err(), context.DeadlineExceeded) ||
-		(!errors.Is(err, context.DeadlineExceeded) && !(errors.Is(err, ErrWorkLimit) && cancelWait >= policy.WaitTimeout)) {
+		!errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("queued cancellation=%v context=%v elapsed=%s", err, queued.Err(), cancelWait)
 	}
 	begin = time.Now()
@@ -297,7 +304,11 @@ func TestPasswordRealKDFCancellationMeasurement(t *testing.T) {
 	if !errors.Is(err, ErrWorkLimit) {
 		t.Fatalf("100ms rejection=%v", err)
 	}
-	t.Logf("occupied after cancel=%d caller-budget return=%s outcome=%v admission rejection=%s", held, cancelWait, callerOutcome, rejectWait)
+	t.Logf("held after IDKey and cancellation=%d caller-budget return=%s outcome=%v admission rejection=%s", held, cancelWait, callerOutcome, rejectWait)
+	// Release the barrier without closing it twice in deferred cleanup.
+	for range cap(h.slots) {
+		finish <- struct{}{}
+	}
 	wg.Wait()
 	if len(h.slots) != 0 {
 		t.Fatal("slots did not release after KDF return")

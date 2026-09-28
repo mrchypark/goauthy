@@ -102,6 +102,17 @@ because those operations occupy slots longer.
 
 ## Cancellation check and remaining hook limitation
 
+Correction after PR122 review: the following describes the historical baseline
+check, not a valid proof that occupied slots have entered IDKey. The current
+test waits for successful real-KDF finish events and holds operations before
+lease release, then cancels. Its scope is cancellation **after IDKey but before
+lease release**, not during computation. Queued caller expiry now strictly
+requires context.DeadlineExceeded under the production caller-error precedence.
+A separate deterministic slot-barrier regression proves cancellation before
+IDKey returns context.Canceled and drains reservations; final pre-KDF cancellation
+coverage remains in TestPasswordCostClassificationAndFinalCancel. Historical
+timings below have not been rerun or reinterpreted as evidence for the new scope.
+
 A separate opt-in check uses four real 128 MiB, five-iteration verifications to
 maintain overlap. It observes all four slots occupied, cancels their caller,
 then issues a 20 ms caller-budget verification and a default 100 ms admission
