@@ -57,6 +57,9 @@ type ProviderInput struct {
 type ProviderStore struct {
 	db   *rhiza.DB
 	keys *oidc.Keyring
+	http restrictedTransport
+	// OnPolicyChange is configured before serving to invalidate sibling owners.
+	OnPolicyChange func(string)
 }
 
 func NewProviderStore(db *rhiza.DB, keys *oidc.Keyring) (*ProviderStore, error) {
@@ -287,6 +290,7 @@ func (s *ProviderStore) Update(ctx context.Context, id string, revision int64, i
 	if r.MutationReceipt.RowsAffected != 1 {
 		return Provider{}, ErrProviderConflict
 	}
+	s.invalidateConnections(id)
 	return providerFromInput(in, revision+1), nil
 }
 
@@ -310,6 +314,7 @@ func (s *ProviderStore) Delete(ctx context.Context, id string, revision int64, a
 	if r.MutationReceipt.RowsAffected != 1 {
 		return ErrProviderConflict
 	}
+	s.invalidateConnections(id)
 	return nil
 }
 

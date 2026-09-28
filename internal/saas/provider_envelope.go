@@ -44,7 +44,12 @@ func (s *ProviderStore) LoadOAuth2(ctx context.Context, id string, authority fun
 	}
 	defer clear(plain)
 	style := oauthStyle(p.AuthStyle)
-	return NewOAuth2(OAuth2Config{ClientID: p.ClientID, AuthorizationURL: p.AuthorizationURL, TokenURL: p.TokenURL, CallbackURL: p.CallbackURI, Scopes: p.Scopes, AuthStyle: style, IdentityEndpoint: p.IdentityEndpoint, SubjectField: p.SubjectField}, string(plain))
+	o, err := NewOAuth2(OAuth2Config{ClientID: p.ClientID, AuthorizationURL: p.AuthorizationURL, TokenURL: p.TokenURL, CallbackURL: p.CallbackURI, Scopes: p.Scopes, AuthStyle: style, IdentityEndpoint: p.IdentityEndpoint, SubjectField: p.SubjectField}, string(plain))
+	if err != nil {
+		return nil, err
+	}
+	o.client = providerHTTPClient(&s.http, s.db, p.ID, p.Kind, p.Revision)
+	return o, nil
 }
 
 func oauthStyle(style string) oauth2.AuthStyle {

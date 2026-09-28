@@ -10,9 +10,22 @@ import (
 // decrypted value. The parent and authority predicates are evaluated in the
 // same linearizable read as the credential lookup.
 func (s *CredentialStore) loadAPIKey(ctx context.Context, owner, collection, connection string, authority func() (string, []any)) (credentialBinding, credential, error) {
+	return s.loadAPIKeyForDispatch(ctx, owner, collection, connection, authority, nil)
+}
+
+func (s *CredentialStore) loadAPIKeyForDispatch(ctx context.Context, owner, collection, connection string, authority func() (string, []any), expected *providerHTTPBinding) (credentialBinding, credential, error) {
 	info, generation, err := s.registeredAPIKeyInfo(ctx, owner, collection, connection, authority)
 	if err != nil {
 		return credentialBinding{}, credential{}, err
+	}
+	if expected != nil {
+		var current providerHTTPBinding
+		if info.ID != "" {
+			current = info.Connector.registered
+		}
+		if *expected != current {
+			return credentialBinding{}, credential{}, ErrCredentialUnauthorized
+		}
 	}
 	providerID := apiKeyProviderID
 	if info.ID != "" {

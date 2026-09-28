@@ -751,6 +751,17 @@ func run() (err error) {
 	if err != nil {
 		return fmt.Errorf("configure SaaS providers: %w", err)
 	}
+	closeSaaSProviders := func() {
+		for _, p := range saasProviders {
+			if p.OAuth2 != nil {
+				p.OAuth2.CloseConnections()
+			}
+			if p.GitHub != nil {
+				p.GitHub.CloseConnections()
+			}
+		}
+	}
+	defer closeSaaSProviders()
 	saasCatalog := make([]rbac.SaaSProviderInfo, 0, len(saasProviders))
 	for id, provider := range saasProviders {
 		saasCatalog = append(saasCatalog, rbac.SaaSProviderInfo{ID: id, Kind: provider.Kind, CallbackURI: provider.CallbackURI, Scopes: provider.Scopes})
@@ -762,6 +773,7 @@ func run() (err error) {
 	if err != nil {
 		return fmt.Errorf("configure SaaS provider store: %w", err)
 	}
+	defer providerStore.CloseConnections()
 	registeredProviders, err := providerStore.List(ctx, func() (string, []any) { return "1", nil })
 	if err != nil {
 		return fmt.Errorf("inspect registered SaaS providers: %w", err)
@@ -778,6 +790,8 @@ func run() (err error) {
 	if err != nil {
 		return fmt.Errorf("configure SaaS credential store: %w", err)
 	}
+	defer saasCredentials.CloseConnections()
+	providerStore.OnPolicyChange = saasCredentials.InvalidateProviderConnections
 	if err := rbacHandler.BindSaaSCredentials(saasCredentials); err != nil {
 		return fmt.Errorf("configure SaaS credential HTTP: %w", err)
 	}
@@ -1377,10 +1391,15 @@ func run() (err error) {
 		}()
 	}
 
+	// A shutdown signal stops acceptance first; active token/identity/commit
+	// sequences retain their context until the bounded inbound drain finishes.
+	requestCtx, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelRequests()
+	drain := &requestDrain{next: healthBypass(issuerPathMiddleware(peerIPMiddleware(appHandler, trustedProxies), issuer), handler), done: make(chan struct{})}
 	server := &http.Server{
-		BaseContext:       func(net.Listener) context.Context { return ctx },
+		BaseContext:       func(net.Listener) context.Context { return requestCtx },
 		Addr:              env("GOAUTHY_LISTEN_ADDR", ":8080"),
-		Handler:           healthBypass(issuerPathMiddleware(peerIPMiddleware(appHandler, trustedProxies), issuer), handler),
+		Handler:           drain,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      serverWriteTimeout,
@@ -1403,7 +1422,24 @@ func run() (err error) {
 		errCh <- server.ListenAndServe()
 	}()
 
-	return lifecycle(ctx, server, metricsServer, errCh, metricsErrCh)
+	lifecycleErr := lifecycle(ctx, server, metricsServer, errCh, metricsErrCh)
+	drained := drain.seal()
+	cancelRequests()
+	_ = server.Close()
+	providerStore.CloseConnections()
+	saasCredentials.CloseConnections()
+	closeSaaSProviders()
+	// Storage is still open while refresh handlers record uncertainty. If any
+	// handler ignores cancellation, don't close the DB underneath that work.
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cleanupCancel()
+	select {
+	case <-drained:
+	case <-cleanupCtx.Done():
+		dbCloseAllowed = false
+		lifecycleErr = errors.Join(lifecycleErr, errors.New("request cleanup did not drain"))
+	}
+	return lifecycleErr
 }
 
 // metricsListenAddrFromEnv validates the optional metrics TCP bind address
@@ -2521,6 +2557,7 @@ func lifecycle(ctx context.Context, appServer *http.Server, metricsServer *http.
 
 	case err := <-appErr:
 		_ = shutdownServer(metricsServer)
+		_ = shutdownServer(appServer)
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
