@@ -3081,22 +3081,18 @@ func Execute(ctx context.Context, db *rhiza.DB, request rhiza.ExecuteRequest) (r
 			return response, errors.Join(err, statusErr)
 		}
 		switch status.State {
-		case "committed":
+		case "committed", "rejected":
 			if status.Receipt == nil {
 				return response, fmt.Errorf("rhiza mutation %q: %s status without receipt", request.RequestID, status.State)
 			}
 			response.MutationReceipt = *status.Receipt
+			// Status is an ID-only local lookup for either outcome. Replay the
+			// exact request to confirm its fingerprint and configured ACK durability.
 			recovered, retryErr := db.Execute(ctx, request)
 			if retryErr != nil {
 				return response, errors.Join(err, retryErr)
 			}
 			return validateReceipt(request.RequestID, recovered)
-		case "rejected":
-			if status.Receipt == nil {
-				return response, fmt.Errorf("rhiza mutation %q: %s status without receipt", request.RequestID, status.State)
-			}
-			response.MutationReceipt = *status.Receipt
-			return validateReceipt(request.RequestID, response)
 		case "unknown_or_expired":
 			if attempt == 1 {
 				return response, err

@@ -54,15 +54,24 @@ func TestRunDeadlineCancelsJobAndStops(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	reports := 0
-	// Attempt timeout must leave headroom for consensus-backed lease
-	// acquisition (CAS budget ttl/3); a tighter budget flakes under loaded
-	// -race CI while proving nothing about deadline cancellation.
-	err = schedule.Run(ctx, db, "deadline", time.UTC, time.Second, 2*time.Second, func(jobCtx context.Context) error {
+	// The first renewal is ten seconds after acquisition, beyond even the
+	// parent deadline. Keep the two-second production attempt timeout while
+	// isolating its cancellation from consensus-backed renewal failure.
+	// Lease renewal and ownership loss are exercised separately in lease_test.go.
+	err = schedule.Run(ctx, db, "deadline", time.UTC, 30*time.Second, 2*time.Second, func(jobCtx context.Context) error {
+		deadline, ok := jobCtx.Deadline()
+		parentDeadline, _ := ctx.Deadline()
+		if !ok || !deadline.Before(parentDeadline) || time.Until(deadline) > 2*time.Second {
+			return errors.New("job did not inherit the production attempt deadline")
+		}
 		<-jobCtx.Done()
+		if ctx.Err() != nil {
+			t.Errorf("parent expired before attempt cancellation: %v", ctx.Err())
+		}
 		return jobCtx.Err()
 	}, func(_ time.Time, executed bool, err error) {
 		reports++
-		if !executed || !errors.Is(err, context.DeadlineExceeded) {
+		if !executed || !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrLeaseLost) {
 			t.Errorf("executed=%t err=%v", executed, err)
 		}
 		cancel()

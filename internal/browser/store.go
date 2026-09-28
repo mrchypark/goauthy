@@ -455,25 +455,31 @@ func (s *Store) CreateAuthorizationInteraction(ctx context.Context, sessionToken
 	if err != nil {
 		return IssuedAuthorizationInteraction{}, err
 	}
-	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
+	// Success proves guarded insertion at this mutation's position in the order,
+	// not existence or authority at a later snapshot. Loads/consumes revalidate.
+	one := int64(1)
+	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID: mutationID("authorization-create", digest),
 		Statements: []rhiza.SQLStatement{
 			{SQL: `DELETE FROM browser_authorization_interactions WHERE expires_at_unix_ms <= ?`, Args: []any{now.UnixMilli()}},
 			{SQL: `INSERT INTO browser_authorization_interactions (token_digest, request_id, session_digest, payload, created_at_unix_ms, expires_at_unix_ms)
 				SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM browser_sessions WHERE token_digest=?
 				AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ? AND last_seen_at_unix_ms > ? AND ` + activeSessionSubjectSQL + `)`,
-				Args: []any{digest, requestID, sessionDigest, base64.RawURLEncoding.EncodeToString(payload), now.UnixMilli(), expiresAt.UnixMilli(), sessionDigest, now.UnixMilli(), now.Add(-s.idleTimeout).UnixMilli(), now.UnixMilli()}},
+				Args: []any{digest, requestID, sessionDigest, base64.RawURLEncoding.EncodeToString(payload), now.UnixMilli(), expiresAt.UnixMilli(), sessionDigest, now.UnixMilli(), now.Add(-s.idleTimeout).UnixMilli(), now.UnixMilli()}, ExpectedRowsAffected: &one},
 		},
 	})
 	if err != nil {
+		// Recovery can return a populated receipt without confirming the exact
+		// request or ACK durability. Such errors must not become absence.
+		if errors.Is(err, rhiza.ErrCommitUnknown) || errors.Is(err, rhiza.ErrRequestConflict) {
+			return IssuedAuthorizationInteraction{}, err
+		}
+		// Only the INSERT has a precondition. Its rejection also rolls cleanup
+		// back; do not infer insertion from the batch's aggregate RowsAffected.
+		if response.Status == rhiza.MutationRejected && response.ErrorCode == rhiza.MutationErrorCodePreconditionFailed {
+			return IssuedAuthorizationInteraction{}, ErrNotFound
+		}
 		return IssuedAuthorizationInteraction{}, err
-	}
-	created, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT 1 FROM browser_authorization_interactions WHERE token_digest=?`, Args: []any{digest}, Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil {
-		return IssuedAuthorizationInteraction{}, err
-	}
-	if len(created.Rows) != 1 {
-		return IssuedAuthorizationInteraction{}, ErrNotFound
 	}
 	return IssuedAuthorizationInteraction{AuthorizationInteraction: AuthorizationInteraction{RequestID: requestID, Payload: append([]byte(nil), payload...), ExpiresAt: expiresAt}, Token: token}, nil
 }
