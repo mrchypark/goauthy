@@ -117,10 +117,14 @@ small 2.26–2.58 CPU seconds / 76.58–82.13 MB RSS; medium 2.23–2.40 seconds
 7.58–9.24 seconds including setup, and recovery where enabled. See `process.tsv`.
 These are not per-operation CPU or a deployment capacity qualification.
 
-`storage.tsv` retains per-process nearest-rank P50/P95/P99 for **100 individual
-issue calls and 50 individual consume calls**. Issue P50: 14.76–17.07 ms;
-P99: 24.90–33.55 ms. These intervals include real transaction work and storage
-waits. Consume excludes the subsequent browser consume. They are not benchmark
+`storage.tsv` retains per-process nearest-rank P50/P95/P99 for **100 instrumented
+storage-scenario issue intervals and 50 individual consume calls**. Issue P50:
+14.76–17.07 ms; P99: 24.90–33.55 ms. The issue intervals include real transaction
+work and storage waits, plus measurement-only `json.Marshal` of the staged
+`rhiza.ExecuteRequest` and command-byte accounting before Commit. They are not
+uninstrumented issuance or endpoint latency; the historical values are retained
+without subtracting instrumentation costs. Consume excludes the subsequent
+browser consume. They are not benchmark
 batch means relabeled as tails; at n=50 P99 is the maximum. No pooled tail claim.
 
 A separate fixed-10,000-iteration CPU/allocation profiling pass covers six
