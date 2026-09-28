@@ -150,7 +150,7 @@ func TestHasherSlotsAreIndependentAndContextAware(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	release, err := first.tryAcquire(context.Background())
+	release, err := first.tryAcquire(context.Background(), first.work("test", first.policy.MemoryKiB))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestHasherSlotsAreIndependentAndContextAware(t *testing.T) {
 	if _, _, err := first.VerifyOrDummy(context.Background(), []byte("password"), ""); !errors.Is(err, ErrWorkLimit) {
 		t.Fatalf("occupied VerifyOrDummy error=%v", err)
 	}
-	if releaseSecond, err := second.tryAcquire(context.Background()); err != nil {
+	if releaseSecond, err := second.tryAcquire(context.Background(), second.work("test", second.policy.MemoryKiB)); err != nil {
 		t.Fatalf("independent hasher acquire: %v", err)
 	} else {
 		releaseSecond()

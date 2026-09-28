@@ -76,7 +76,7 @@ func BenchmarkTryAcquireContended(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			release, err := h.tryAcquire(ctx)
+			release, err := h.tryAcquire(ctx, h.work("admission", h.policy.MemoryKiB))
 			if err != nil {
 				b.Fatal(err)
 			}

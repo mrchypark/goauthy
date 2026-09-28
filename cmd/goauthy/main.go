@@ -1794,6 +1794,9 @@ func argonPolicyFromEnv(getenv func(string) string) (credential.Policy, error) {
 	if policy.MemoryKiB, err = argonEnvUint32(getenv, "GOAUTHY_ARGON2_MEMORY_KIB", policy.MemoryKiB); err != nil {
 		return credential.Policy{}, err
 	}
+	if policy.MemoryBudgetKiB, err = argonEnvUint32(getenv, "GOAUTHY_ARGON2_MEMORY_BUDGET_KIB", policy.MemoryBudgetKiB); err != nil {
+		return credential.Policy{}, err
+	}
 	if policy.Iterations, err = argonEnvUint32(getenv, "GOAUTHY_ARGON2_ITERATIONS", policy.Iterations); err != nil {
 		return credential.Policy{}, err
 	}

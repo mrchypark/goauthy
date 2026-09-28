@@ -1349,6 +1349,7 @@ func TestArgonPolicyFromEnv(t *testing.T) {
 	configured.Iterations = 3
 	configured.Parallelism = 2
 	configured.MaxConcurrency = 4
+	configured.MemoryBudgetKiB = 196608
 	for _, test := range []struct {
 		name string
 		env  map[string]string
@@ -1357,10 +1358,11 @@ func TestArgonPolicyFromEnv(t *testing.T) {
 	}{
 		{name: "defaults", want: defaults, ok: true},
 		{name: "configured", env: map[string]string{
-			"GOAUTHY_ARGON2_MEMORY_KIB":      "32768",
-			"GOAUTHY_ARGON2_ITERATIONS":      "3",
-			"GOAUTHY_ARGON2_PARALLELISM":     "2",
-			"GOAUTHY_ARGON2_MAX_CONCURRENCY": "4",
+			"GOAUTHY_ARGON2_MEMORY_KIB":        "32768",
+			"GOAUTHY_ARGON2_ITERATIONS":        "3",
+			"GOAUTHY_ARGON2_PARALLELISM":       "2",
+			"GOAUTHY_ARGON2_MAX_CONCURRENCY":   "4",
+			"GOAUTHY_ARGON2_MEMORY_BUDGET_KIB": "196608",
 		}, want: configured, ok: true},
 		{name: "signed", env: map[string]string{"GOAUTHY_ARGON2_MEMORY_KIB": "+32768"}},
 		{name: "whitespace", env: map[string]string{"GOAUTHY_ARGON2_ITERATIONS": " 3"}},
@@ -1368,6 +1370,13 @@ func TestArgonPolicyFromEnv(t *testing.T) {
 		{name: "non canonical", env: map[string]string{"GOAUTHY_ARGON2_ITERATIONS": "03"}},
 		{name: "overflow", env: map[string]string{"GOAUTHY_ARGON2_MAX_CONCURRENCY": "999999999999999999999999"}},
 		{name: "below memory policy", env: map[string]string{"GOAUTHY_ARGON2_MEMORY_KIB": "1"}},
+		{name: "budget zero", env: map[string]string{"GOAUTHY_ARGON2_MEMORY_BUDGET_KIB": "0"}, want: defaults, ok: true},
+		{name: "budget too small", env: map[string]string{"GOAUTHY_ARGON2_MEMORY_BUDGET_KIB": "131071"}},
+		{name: "budget signed", env: map[string]string{"GOAUTHY_ARGON2_MEMORY_BUDGET_KIB": "+131072"}},
+		{name: "budget whitespace", env: map[string]string{"GOAUTHY_ARGON2_MEMORY_BUDGET_KIB": " 131072"}},
+		{name: "budget leading zero", env: map[string]string{"GOAUTHY_ARGON2_MEMORY_BUDGET_KIB": "0131072"}},
+		{name: "budget fractional", env: map[string]string{"GOAUTHY_ARGON2_MEMORY_BUDGET_KIB": "131072.0"}},
+		{name: "budget overflow", env: map[string]string{"GOAUTHY_ARGON2_MEMORY_BUDGET_KIB": "4294967296"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got, err := argonPolicyFromEnv(func(name string) string { return test.env[name] })

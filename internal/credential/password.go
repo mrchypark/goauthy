@@ -10,9 +10,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
-	"golang.org/x/crypto/argon2"
+	"golang.org/x/sync/semaphore"
 )
 
 const (
@@ -20,6 +21,7 @@ const (
 	maxPHCBytes      = 512
 	saltLength       = 16
 	keyLength        = 32
+	maxMemoryKiB     = 128 * 1024
 )
 
 var (
@@ -33,7 +35,10 @@ type Policy struct {
 	Iterations     uint32
 	Parallelism    uint8
 	MaxConcurrency int
-	// WaitTimeout is the maximum duration to wait for a hashing slot.
+	// MemoryBudgetKiB is a per-Hasher reservation limit; zero disables it.
+	// Positive budgets must admit every accepted PHC cost when idle.
+	MemoryBudgetKiB uint32
+	// WaitTimeout bounds total admission through the slot and memory gates.
 	// Zero means non-blocking (fail immediately). Negative means wait forever.
 	WaitTimeout time.Duration
 }
@@ -48,6 +53,11 @@ func DefaultPolicy() Policy {
 type Hasher struct {
 	policy Policy
 	slots  chan struct{}
+	memory *semaphore.Weighted
+	// observer is installed before use; callbacks must be short and must not
+	// reenter the hasher. It is deliberately private and nil in production.
+	observer func(passwordWorkEvent)
+	sequence atomic.Uint64
 }
 
 // NewHasher validates and snapshots policy. Its work limit is independent of other hashers.
@@ -55,7 +65,11 @@ func NewHasher(policy Policy) (*Hasher, error) {
 	if !validWritePolicy(policy) {
 		return nil, ErrInvalidCredential
 	}
-	return &Hasher{policy: policy, slots: make(chan struct{}, policy.MaxConcurrency)}, nil
+	h := &Hasher{policy: policy, slots: make(chan struct{}, policy.MaxConcurrency)}
+	if policy.MemoryBudgetKiB != 0 {
+		h.memory = semaphore.NewWeighted(int64(policy.MemoryBudgetKiB))
+	}
+	return h, nil
 }
 
 var defaultHasher = mustNewHasher(DefaultPolicy())
@@ -85,7 +99,8 @@ func (h *Hasher) Hash(ctx context.Context, password []byte) (string, error) {
 	if !validPassword(password) {
 		return "", ErrInvalidCredential
 	}
-	release, err := h.tryAcquire(ctx)
+	w := h.work("hash", h.policy.MemoryKiB)
+	release, err := h.tryAcquire(ctx, w)
 	if err != nil {
 		return "", err
 	}
@@ -95,28 +110,54 @@ func (h *Hasher) Hash(ctx context.Context, password []byte) (string, error) {
 		return "", fmt.Errorf("generate password salt: %w", err)
 	}
 	p := h.parameters()
-	key := argon2.IDKey(password, salt, p.time, p.memory, p.parallelism, p.keyLength)
+	key, err := w.derive(ctx, password, salt, p, p.keyLength)
+	if err != nil {
+		return "", err
+	}
 	return encode(p, salt, key), nil
 }
 
 // VerifyOrDummy verifies a credential, or performs configured dummy work for
 // missing and malformed credentials. It never exposes credential parsing errors.
 func (h *Hasher) VerifyOrDummy(ctx context.Context, password []byte, encoded string) (valid, upgradeEligible bool, err error) {
-	release, err := h.tryAcquire(ctx)
+	if err := ctx.Err(); err != nil {
+		return false, false, err
+	}
+	p := h.parameters()
+	var salt, expected []byte
+	dummy := encoded == "" || !validPassword(password)
+	if !dummy {
+		parsed, parsedSalt, parsedKey, parseErr := parse(encoded)
+		dummy = parseErr != nil
+		if !dummy {
+			p, salt, expected = parsed, parsedSalt, parsedKey
+		}
+	}
+	kind := "verify"
+	if dummy {
+		kind = "dummy"
+	}
+	w := h.work(kind, p.memory)
+	release, err := h.tryAcquire(ctx, w)
 	if err != nil {
 		return false, false, err
 	}
 	defer release()
-	if encoded == "" || !validPassword(password) {
-		h.dummyWork(password)
+	if dummy {
+		if len(password) > maxPasswordBytes {
+			password = password[:maxPasswordBytes]
+		}
+		key, err := w.derive(ctx, password, []byte("goauthy-dummy-v1"), p, p.keyLength)
+		if err != nil {
+			return false, false, err
+		}
+		_ = subtle.ConstantTimeCompare(key, make([]byte, len(key)))
 		return false, false, nil
 	}
-	p, salt, expected, err := parse(encoded)
+	actual, err := w.derive(ctx, password, salt, p, uint32(len(expected)))
 	if err != nil {
-		h.dummyWork(password)
-		return false, false, nil
+		return false, false, err
 	}
-	actual := argon2.IDKey(password, salt, p.time, p.memory, p.parallelism, uint32(len(expected)))
 	return subtle.ConstantTimeCompare(actual, expected) == 1, eligibleForUpgrade(h.parameters(), p, len(expected)), nil
 }
 
@@ -133,47 +174,6 @@ func (h *Hasher) ValidateCurrentPHC(encoded string) error {
 	return nil
 }
 
-func (h *Hasher) dummyWork(password []byte) {
-	if len(password) > maxPasswordBytes {
-		password = password[:maxPasswordBytes]
-	}
-	p := h.parameters()
-	key := argon2.IDKey(password, []byte("goauthy-dummy-v1"), p.time, p.memory, p.parallelism, p.keyLength)
-	_ = subtle.ConstantTimeCompare(key, make([]byte, len(key)))
-}
-
-func (h *Hasher) tryAcquire(ctx context.Context) (func(), error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	// Non-blocking fast path.
-	select {
-	case h.slots <- struct{}{}:
-		return func() { <-h.slots }, nil
-	default:
-	}
-	// If no wait timeout configured, fail immediately.
-	if h.policy.WaitTimeout == 0 {
-		return nil, ErrWorkLimit
-	}
-	// Wait with timeout for a slot to become available.
-	var timer *time.Timer
-	var timeout <-chan time.Time
-	if h.policy.WaitTimeout > 0 {
-		timer = time.NewTimer(h.policy.WaitTimeout)
-		timeout = timer.C
-		defer timer.Stop()
-	}
-	select {
-	case h.slots <- struct{}{}:
-		return func() { <-h.slots }, nil
-	case <-timeout:
-		return nil, ErrWorkLimit
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
 // Hash uses DefaultPolicy for backwards compatibility.
 func Hash(password []byte) (string, error) { return defaultHasher.Hash(context.Background(), password) }
 
@@ -186,12 +186,16 @@ func Verify(password []byte, encoded string) (valid, upgradeEligible bool, err e
 	if err != nil {
 		return false, false, err
 	}
-	release, err := defaultHasher.tryAcquire(context.Background())
+	w := defaultHasher.work("verify", p.memory)
+	release, err := defaultHasher.tryAcquire(context.Background(), w)
 	if err != nil {
 		return false, false, err
 	}
 	defer release()
-	actual := argon2.IDKey(password, salt, p.time, p.memory, p.parallelism, uint32(len(expected)))
+	actual, err := w.derive(context.Background(), password, salt, p, uint32(len(expected)))
+	if err != nil {
+		return false, false, err
+	}
 	return subtle.ConstantTimeCompare(actual, expected) == 1, eligibleForUpgrade(defaultHasher.parameters(), p, len(expected)), nil
 }
 
@@ -221,7 +225,9 @@ func acquireArgon() func() {
 	return func() { <-defaultHasher.slots }
 }
 
-func tryAcquireArgon(ctx context.Context) (func(), error) { return defaultHasher.tryAcquire(ctx) }
+func tryAcquireArgon(ctx context.Context) (func(), error) {
+	return defaultHasher.tryAcquire(ctx, defaultHasher.work("test", defaultHasher.policy.MemoryKiB))
+}
 
 func eligibleForUpgrade(target, stored parameters, storedKeyLength int) bool {
 	if target.memory < stored.memory || target.time < stored.time || target.parallelism < stored.parallelism || int(target.keyLength) < storedKeyLength {
@@ -295,9 +301,9 @@ func validPassword(password []byte) bool {
 }
 
 func validWritePolicy(p Policy) bool {
-	return p.MemoryKiB >= 19*1024 && p.MemoryKiB <= 128*1024 && p.Iterations >= 2 && p.Iterations <= 5 && p.Parallelism >= 1 && p.Parallelism <= 8 && p.MaxConcurrency >= 1 && p.MaxConcurrency <= 8
+	return p.MemoryKiB >= 19*1024 && p.MemoryKiB <= maxMemoryKiB && p.Iterations >= 2 && p.Iterations <= 5 && p.Parallelism >= 1 && p.Parallelism <= 8 && p.MaxConcurrency >= 1 && p.MaxConcurrency <= 8 && (p.MemoryBudgetKiB == 0 || p.MemoryBudgetKiB >= maxMemoryKiB)
 }
 
 func validParameters(p parameters) bool {
-	return p.memory >= 8*1024 && p.memory <= 128*1024 && p.time >= 1 && p.time <= 5 && p.parallelism >= 1 && p.parallelism <= 8
+	return p.memory >= 8*1024 && p.memory <= maxMemoryKiB && p.time >= 1 && p.time <= 5 && p.parallelism >= 1 && p.parallelism <= 8
 }

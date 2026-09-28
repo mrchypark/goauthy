@@ -19,33 +19,44 @@ import (
 	"time"
 )
 
-// Explicit opt-in: ordinary tests must not run a load experiment. Invoke this
-// test binary once per case so RSS and GC history are not shared between cases.
+// Explicit opt-in; each case runs in a fresh process. All experiment settings
+// are bounded independently of the public policy/configuration surface.
 func TestPasswordContentionMeasurement(t *testing.T) {
 	mix := os.Getenv("GOAUTHY_MEASURE_MIX")
 	if mix == "" {
-		t.Skip("set GOAUTHY_MEASURE_MIX=small|large|mixed for bounded measurement")
+		t.Skip("set GOAUTHY_MEASURE_MIX=small|large|mixed")
 	}
 	if mix != "small" && mix != "large" && mix != "mixed" {
 		t.Fatal("invalid mix")
 	}
-	workers, err := strconv.Atoi(os.Getenv("GOAUTHY_MEASURE_CONCURRENCY"))
-	if err != nil || (workers != 1 && workers != 4 && workers != 8) {
-		t.Fatal("concurrency must be 1, 4 or 8")
+	setting := func(name string, fallback int, allowed ...int) int {
+		raw := os.Getenv(name)
+		if raw == "" {
+			return fallback
+		}
+		n, err := strconv.Atoi(raw)
+		if err != nil || !slices.Contains(allowed, n) {
+			t.Fatalf("invalid %s", name)
+		}
+		return n
 	}
-	const calls = 128
+	workers := setting("GOAUTHY_MEASURE_CONCURRENCY", 8, 1, 4, 8)
+	calls := setting("GOAUTHY_MEASURE_CALLS", 128, 128, 256)
+	slots := setting("GOAUTHY_MEASURE_SLOTS", 4, 1, 2, 4)
+	budget := setting("GOAUTHY_MEASURE_BUDGET_MIB", 0, 0, 128, 192, 256, 512)
+	rate := setting("GOAUTHY_MEASURE_RATE", 0, 0, 20)
 	password := []byte("measurement-password")
-	phcs := make(map[uint32]string)
 	costs := []uint32{19 * 1024}
 	if mix == "large" {
-		costs = []uint32{128 * 1024}
+		costs = []uint32{maxMemoryKiB}
 	} else if mix == "mixed" {
-		costs = append(costs, 128*1024)
+		costs = append(costs, maxMemoryKiB)
 	}
+	phcs := make(map[uint32]string)
 	for _, cost := range costs {
-		policy := DefaultPolicy()
-		policy.MemoryKiB = cost
-		fixture, err := NewHasher(policy)
+		p := DefaultPolicy()
+		p.MemoryKiB = cost
+		fixture, err := NewHasher(p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -55,11 +66,15 @@ func TestPasswordContentionMeasurement(t *testing.T) {
 		}
 		phcs[cost] = phc
 	}
-	h, err := NewHasher(DefaultPolicy())
+	policy := DefaultPolicy()
+	policy.MaxConcurrency = slots
+	policy.MemoryBudgetKiB = uint32(budget) * 1024
+	h, err := NewHasher(policy)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Discard fixture KDF garbage before measurement, never force GC in the loop.
+	observer := newPasswordMeasurementObserver()
+	h.observer = observer.observe
 	debug.FreeOSMemory()
 	var before runtime.MemStats
 	runtime.ReadMemStats(&before)
@@ -67,11 +82,7 @@ func TestPasswordContentionMeasurement(t *testing.T) {
 	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &cpuBefore); err != nil {
 		t.Fatal(err)
 	}
-	var mu sync.Mutex
-	running := make(map[int]uint32) // calls, including queueing, NOT KDF admission
-	records := make([]passwordMeasurementCall, calls)
-	peakSlots, peakWaiting := 0, 0
-	var peakLower, peakUpper, peakHeap, peakInuse, peakHeapSys uint64
+	var peakHeap, peakInuse, peakHeapSys uint64
 	stop, sampled := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(sampled)
@@ -83,33 +94,14 @@ func TestPasswordContentionMeasurement(t *testing.T) {
 				return
 			case <-ticker.C:
 			}
-			var mem runtime.MemStats
-			runtime.ReadMemStats(&mem)
-			mu.Lock()
-			slots := len(h.slots)
-			activeCosts := make([]uint32, 0, len(running))
-			for _, cost := range running {
-				activeCosts = append(activeCosts, cost)
-			}
-			slices.Sort(activeCosts)
-			// Holding mu stabilizes call registration. A slot can still be released
-			// concurrently; these are sampled occupancy estimates, not exact KDF bytes.
-			k := min(slots, len(activeCosts))
-			var lower, upper uint64
-			for i := 0; i < k; i++ {
-				lower += uint64(activeCosts[i]) * 1024
-				upper += uint64(activeCosts[len(activeCosts)-1-i]) * 1024
-			}
-			peakSlots = max(peakSlots, slots)
-			peakWaiting = max(peakWaiting, len(running)-slots)
-			peakLower = max(peakLower, lower)
-			peakUpper = max(peakUpper, upper)
-			peakHeap = max(peakHeap, mem.HeapAlloc)
-			peakInuse = max(peakInuse, mem.HeapInuse)
-			peakHeapSys = max(peakHeapSys, mem.HeapSys)
-			mu.Unlock()
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			peakHeap = max(peakHeap, m.HeapAlloc)
+			peakInuse = max(peakInuse, m.HeapInuse)
+			peakHeapSys = max(peakHeapSys, m.HeapSys)
 		}
 	}()
+	records := make([]passwordMeasurementCall, calls)
 	jobs := make(chan int)
 	var wg sync.WaitGroup
 	started := time.Now()
@@ -117,9 +109,6 @@ func TestPasswordContentionMeasurement(t *testing.T) {
 		wg.Go(func() {
 			for i := range jobs {
 				cost := costs[i%len(costs)]
-				mu.Lock()
-				running[i] = cost
-				mu.Unlock()
 				begin := time.Now()
 				valid, _, err := h.VerifyOrDummy(t.Context(), password, phcs[cost])
 				elapsed := time.Since(begin)
@@ -127,18 +116,27 @@ func TestPasswordContentionMeasurement(t *testing.T) {
 				if errors.Is(err, ErrWorkLimit) {
 					outcome = "rejected"
 				} else if err != nil || !valid {
-					t.Errorf("unexpected verification valid=%v err=%v", valid, err)
+					t.Errorf("valid=%v err=%v", valid, err)
 					outcome = "error"
 				}
-				mu.Lock()
-				delete(running, i)
 				records[i] = passwordMeasurementCall{cost, outcome, float64(elapsed) / float64(time.Millisecond)}
-				mu.Unlock()
 			}
 		})
 	}
+	var maxGeneratorLag time.Duration
 	for i := range calls {
-		jobs <- i
+		if rate == 0 {
+			jobs <- i
+			continue
+		}
+		target := started.Add(time.Duration(i) * time.Second / time.Duration(rate))
+		time.Sleep(time.Until(target))
+		maxGeneratorLag = max(maxGeneratorLag, time.Since(target))
+		select {
+		case jobs <- i:
+		default:
+			records[i] = passwordMeasurementCall{costs[i%len(costs)], "generator-drop", 0}
+		}
 	}
 	close(jobs)
 	wg.Wait()
@@ -155,9 +153,10 @@ func TestPasswordContentionMeasurement(t *testing.T) {
 	if runtime.GOOS == "linux" {
 		rss *= 1024
 	}
+	spans := observer.results()
 	distributions := map[string]passwordLatency{}
 	for _, cost := range costs {
-		for _, outcome := range []string{"success", "rejected"} {
+		for _, outcome := range []string{"success", "rejected", "generator-drop"} {
 			var values []float64
 			for _, r := range records {
 				if r.MemoryKiB == cost && r.Outcome == outcome {
@@ -167,28 +166,38 @@ func TestPasswordContentionMeasurement(t *testing.T) {
 			distributions[fmt.Sprintf("%dKiB/%s", cost, outcome)] = passwordQuantiles(values)
 		}
 	}
-	report := struct {
-		Mix                                                                                                  string
-		Workers, Calls, Slots                                                                                int
-		WaitMS                                                                                               int
-		GoVersion, OS, Arch                                                                                  string
-		GOMAXPROCS                                                                                           int
-		WallSeconds, UserSeconds, SystemSeconds                                                              float64
-		PeakOccupiedSlots, PeakWaitingCalls                                                                  int
-		SampledLogicalLowerBytes, SampledLogicalUpperBytes                                                   uint64
-		BaselineHeapBytes, PeakHeapBytes, PeakHeapInuseBytes, PeakHeapSysBytes, EndHeapBytes, AllocatedBytes uint64
-		GCCycles                                                                                             uint32
-		ProcessMaxRSSBytes                                                                                   int64
-		Distributions                                                                                        map[string]passwordLatency
-		Records                                                                                              []passwordMeasurementCall
-	}{mix, workers, calls, cap(h.slots), 100, runtime.Version(), runtime.GOOS, runtime.GOARCH, runtime.GOMAXPROCS(0), elapsed.Seconds(), usageSeconds(cpuAfter.Utime) - usageSeconds(cpuBefore.Utime), usageSeconds(cpuAfter.Stime) - usageSeconds(cpuBefore.Stime), peakSlots, peakWaiting, peakLower, peakUpper, before.HeapAlloc, peakHeap, peakInuse, peakHeapSys, after.HeapAlloc, after.TotalAlloc - before.TotalAlloc, after.NumGC - before.NumGC, rss, distributions, records}
+	report := map[string]any{
+		"Mix": mix, "Workers": workers, "Calls": calls, "Slots": slots, "MemoryBudgetMiB": budget, "Rate": rate, "WaitMS": 100,
+		"GoVersion": runtime.Version(), "OS": runtime.GOOS, "Arch": runtime.GOARCH, "GOMAXPROCS": runtime.GOMAXPROCS(0),
+		"WallSeconds": elapsed.Seconds(), "UserSeconds": usageSeconds(cpuAfter.Utime) - usageSeconds(cpuBefore.Utime), "SystemSeconds": usageSeconds(cpuAfter.Stime) - usageSeconds(cpuBefore.Stime),
+		"MaxGeneratorLagMS": float64(maxGeneratorLag) / float64(time.Millisecond),
+		"PeakReservedSlots": observer.PeakSlots, "PeakSlotWaiters": observer.PeakSlotWaiters, "PeakMemoryWaiters": observer.PeakMemoryWaiters, "PeakComputing": observer.PeakComputing,
+		"PeakReservedKiB": observer.PeakReservedKiB, "PeakComputingKiB": observer.PeakComputingKiB,
+		"BaselineHeapBytes": before.HeapAlloc, "PeakHeapBytes": peakHeap, "PeakHeapInuseBytes": peakInuse, "PeakHeapSysBytes": peakHeapSys, "EndHeapBytes": after.HeapAlloc, "AllocatedBytes": after.TotalAlloc - before.TotalAlloc,
+		"GCCycles": after.NumGC - before.NumGC, "ProcessMaxRSSBytes": rss, "Distributions": distributions, "Records": records, "Spans": spans,
+	}
 	encoded, err := json.Marshal(report)
 	if err != nil {
 		t.Fatal(err)
 	}
 	fmt.Printf("PASSWORD_MEASUREMENT %s\n", encoded)
+	if observer.slots != 0 || observer.slotWaiters != 0 || observer.memoryWaiters != 0 || observer.computing != 0 || observer.reservedKiB != 0 || observer.computingKiB != 0 {
+		t.Fatal("observer accounting did not drain")
+	}
+	if observer.PeakSlots > slots || observer.PeakComputing > slots {
+		t.Fatal("concurrency bound exceeded")
+	}
+	if budget > 0 && observer.PeakReservedKiB > uint64(budget)*1024 {
+		t.Fatal("memory reservation bound exceeded")
+	}
 	if len(h.slots) != 0 {
 		t.Fatal("work slots leaked")
+	}
+	if h.memory != nil {
+		if !h.memory.TryAcquire(int64(policy.MemoryBudgetKiB)) {
+			t.Fatal("memory leaked")
+		}
+		h.memory.Release(int64(policy.MemoryBudgetKiB))
 	}
 }
 

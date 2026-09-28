@@ -137,6 +137,9 @@ func TestRunConfigCommandRejectsInvalidRuntimeConfiguration(t *testing.T) {
 		wantErr string
 	}{
 		{name: "argon2 policy", env: map[string]string{"GOAUTHY_ARGON2_MEMORY_KIB": "8192"}, wantErr: "invalid Argon2 password policy"},
+		{name: "argon2 memory budget floor", env: map[string]string{"GOAUTHY_ARGON2_MEMORY_BUDGET_KIB": "131071"}, wantErr: "invalid Argon2 password policy"},
+		{name: "argon2 memory budget syntax", env: map[string]string{"GOAUTHY_ARGON2_MEMORY_BUDGET_KIB": "+131072"}, wantErr: "GOAUTHY_ARGON2_MEMORY_BUDGET_KIB"},
+		{name: "argon2 memory budget overflow", env: map[string]string{"GOAUTHY_ARGON2_MEMORY_BUDGET_KIB": "4294967296"}, wantErr: "GOAUTHY_ARGON2_MEMORY_BUDGET_KIB"},
 		{name: "impossible password policy", env: map[string]string{"GOAUTHY_PASSWORD_LENGTH_MAX": "14", "GOAUTHY_PASSWORD_LOWER_CASE": "8", "GOAUTHY_PASSWORD_UPPER_CASE": "8"}, wantErr: "invalid password rules"},
 		{name: "dcr anonymous", env: map[string]string{"GOAUTHY_DCR_ANONYMOUS": "yes"}, wantErr: "GOAUTHY_DCR_ANONYMOUS"},
 		{name: "dcr anonymous cleanup", env: map[string]string{"GOAUTHY_DCR_ANONYMOUS": "true", "GOAUTHY_DCR_ANONYMOUS_CLEANUP_LIMIT": "0"}, wantErr: "GOAUTHY_DCR_ANONYMOUS_CLEANUP_LIMIT"},
@@ -363,5 +366,22 @@ func TestRunConfigCommandRejectsInvalidDeploymentSecrets(t *testing.T) {
 	var out bytes.Buffer
 	if err := runConfigCommand([]string{"check"}, env, &out); err != nil {
 		t.Fatalf("valid deployment secrets rejected: %v", err)
+	}
+}
+
+func TestRunConfigCommandArgonMemoryBudgetAccepted(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{"0", "131072", "196608", "4294967295"} {
+		t.Run(raw, func(t *testing.T) {
+			getenv := applicationConfigTestEnv(t, map[string]string{"GOAUTHY_ARGON2_MEMORY_BUDGET_KIB": raw})
+			// Startup uses the same loader before opening Rhiza/listeners.
+			if _, err := loadApplicationConfig(getenv); err != nil {
+				t.Fatalf("startup configuration=%v", err)
+			}
+			var out bytes.Buffer
+			if err := runConfigCommand([]string{"check"}, getenv, &out); err != nil {
+				t.Fatalf("config check=%v", err)
+			}
+		})
 	}
 }
