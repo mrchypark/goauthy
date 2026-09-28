@@ -58,6 +58,9 @@ func BenchmarkVerifyOrDummyMiss(b *testing.B) {
 	}
 }
 
+// BenchmarkTryAcquireContended measures admission bookkeeping only. Real mixed
+// PHC contention, per-call latency and process resources are measured separately
+// by the opt-in TestPasswordContentionMeasurement in fresh processes.
 func BenchmarkTryAcquireContended(b *testing.B) {
 	h, err := NewHasher(Policy{
 		MemoryKiB:      19 * 1024,
@@ -73,7 +76,7 @@ func BenchmarkTryAcquireContended(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			release, err := h.tryAcquire(ctx)
+			release, err := h.tryAcquire(ctx, h.work("admission", h.policy.MemoryKiB))
 			if err != nil {
 				b.Fatal(err)
 			}

@@ -120,9 +120,14 @@ rate(goauthy_cache_evictions_total[5m])
 # Argon2 동시성 (기본: 4)
 GOAUTHY_ARGON2_MAX_CONCURRENCY=4
 
-# Argon2 대기 타임아웃 (기본: 100ms)
-GOAUTHY_ARGON2_WAIT_TIMEOUT=100ms
+# Optional memory admission gate in KiB; off by default.
+GOAUTHY_ARGON2_MEMORY_BUDGET_KIB=0
 ```
+
+The total slot-plus-memory admission timeout is 100 ms in the runtime policy;
+there is no wait-time environment variable. Positive memory budgets must be at
+least 131072 KiB. This bounds nominal reservations, not process RSS. See the
+[measurement report](measurements/argon2-109-budget.md) before opting in.
 
 ### 캐시 크기 조정
 

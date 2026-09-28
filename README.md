@@ -645,8 +645,8 @@ never reset by a later startup.
 ## Password hashing policy
 
 GoAuthy writes Argon2id v=19 credentials with the OWASP baseline by default:
-`m=19456` KiB, `t=2`, `p=1`, and at most two concurrent password operations
-per GoAuthy process. This is deliberately lower than Rauthy v0.36.2's default
+`m=19456` KiB, `t=2`, `p=1`, and at most four admitted password operations
+per hasher. The server shares one hasher through its identity store. This is deliberately lower than Rauthy v0.36.2's default
 (`m=131072`, `t=4`, `p=8`, `max_hash_threads=2`); it is a bounded portable
 default, not a claim of identical cost. Rauthy's fixed-tag
 [configuration](https://raw.githubusercontent.com/sebadob/rauthy/v0.36.2/config.toml)
@@ -665,9 +665,31 @@ go run ./cmd/goauthy
 Every value must be an unsigned, canonical decimal integer (no sign,
 whitespace, or leading zero). Accepted write-policy bounds are memory
 `19456..131072` KiB, iterations `2..5`, parallelism `1..8`, and concurrency
-`1..8`. Reserve at least `MAX_CONCURRENCY * MEMORY_KIB / 1024` MiB plus normal
-process and node headroom; never choose a setting merely because it fits an
-unloaded developer machine.
+`1..8`. Verification uses each stored PHC's validated cost, which can be as high
+as 128 MiB even when new hashes use 19 MiB. Slot-only admission can therefore
+reserve up to `MAX_CONCURRENCY * 128` MiB of principal KDF work arrays. Heap,
+RSS, queued requests and the rest of the service need additional headroom.
+
+`GOAUTHY_ARGON2_MEMORY_BUDGET_KIB` optionally limits the sum of reserved KDF
+memory per hasher. Omitted or `0` leaves this gate **off**, preserving the default.
+Positive values must be at least `131072` KiB so every accepted PHC can run when
+idle; this floor is a compatibility rule, not a deployment recommendation.
+The value must be canonical unsigned decimal within uint32 range. Startup and
+`config check` reject invalid values instead of clamping or falling back.
+
+Admission takes a concurrency slot before a weighted memory reservation, sharing
+one 100 ms wait budget. Waiting for memory holds a slot but does not compute.
+Caller cancellation observed before synchronous computation prevents the KDF;
+once computation starts both reservations remain held until it returns. The gate
+does not free Go heap on release and is **not an RSS limit**. It is independent
+of other hashers and processes. No default memory budget has been selected.
+
+Missing/malformed credentials retain configured-cost dummy work. A higher-cost
+valid PHC can have different timing and overload/rejection probability; weighted
+admission does not make these cost classes indistinguishable. Slot-first ordering
+and the weighted semaphore can also block small work behind a large waiter.
+See [the comparative measurements](docs/measurements/argon2-109-budget.md) for
+limitations, including the unqualified 512 MiB/500m deployment.
 
 The bootstrap helper accepts the same memory/iteration/parallelism policy via
 `-memory-kib`, `-iterations`, and `-parallelism`; it has no concurrency flag
