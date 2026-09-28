@@ -43,3 +43,19 @@ but the SQLite background phase was not. Acceptance remains incomplete.
 Earlier development checks and reused existing regressions are described in
 report.md, including their initial harness failures. They are not hidden or
 substituted for primary samples.
+
+Pro127 follow-up (current source only; no DB fixture or campaign):
+Go go1.27.0 darwin/arm64, GOMAXPROCS=4.
+go test -tags=integration ./internal/oauth -run '^TestExpiry65(Finalization|CheckpointMetadata)$' -count=1 -timeout=60s
+PASS, 0.959s.
+Same selection with -race: PASS, 2.141s.
+Finalizer cases: success, actual checksum-path write error (directory at
+SHA256SUMS), deterministic post-hash and pending-publication deadline crossings,
+and prior failure. Both deadline gates assert persisted status is still pending.
+No sleeps, database, replacement sample, or production change.
+go vet -tags=integration ./internal/oauth: PASS.
+git diff --check: PASS.
+All 49 original raw SHA256SUMS entries verified unchanged; measured source hash
+remains c114ead923e1ba73975c2dc8e5b0ac68789b55b240872a47b04912fe490c51d2.
+An initial vet invocation from raw/ used a repo-relative package path and failed
+to locate it; the repository-root invocation above completed successfully.

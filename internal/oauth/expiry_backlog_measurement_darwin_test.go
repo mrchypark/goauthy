@@ -107,6 +107,12 @@ func TestExpiry65Campaign(t *testing.T) {
 	}
 	reducerHash := sha256.Sum256(reducer)
 	manifest["reducer_source_sha256"] = hex.EncodeToString(reducerHash[:])
+	finalizer, err := os.ReadFile("expiry_backlog_finalization_darwin_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalizerHash := sha256.Sum256(finalizer)
+	manifest["finalizer_source_sha256"] = hex.EncodeToString(finalizerHash[:])
 	b, _ := json.MarshalIndent(manifest, "", "  ")
 	if err := os.WriteFile(filepath.Join(root, "manifest.json"), b, 0600); err != nil {
 		t.Fatal(err)
@@ -117,36 +123,8 @@ func TestExpiry65Campaign(t *testing.T) {
 		if err := expiry65Summarize(root); err != nil {
 			t.Error(err)
 		}
-		if time.Since(started) > 600*time.Second {
-			t.Error("aggregate cap exceeded")
-		}
-		b, _ := json.MarshalIndent(map[string]any{"completed_cases": completed, "planned_cases": 45, "elapsed_ns": time.Since(started).Nanoseconds(), "sampled_peak_file_bytes": peak, "failed": t.Failed(), "complete": completed == 45 && !t.Failed()}, "", "  ")
-		if err := os.WriteFile(filepath.Join(root, "outcome.json"), b, 0600); err != nil {
+		if err := expiry65Finalize(root, started, time.Now, completed, peak, t.Failed()); err != nil {
 			t.Error(err)
-		}
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		var hashes strings.Builder
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			raw, err := os.ReadFile(filepath.Join(root, entry.Name()))
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			sum := sha256.Sum256(raw)
-			fmt.Fprintf(&hashes, "%x  %s\n", sum, entry.Name())
-		}
-		if err := os.WriteFile(filepath.Join(root, "SHA256SUMS"), []byte(hashes.String()), 0600); err != nil {
-			t.Error(err)
-		}
-		if time.Since(started) > 600*time.Second {
-			t.Error("aggregate evidence cap exceeded")
 		}
 	}()
 	for rep := 1; rep <= 3; rep++ {
@@ -614,7 +592,7 @@ func runExpiry65Case(t *testing.T, op, state string, bundles int, root string) {
 			t.Fatalf("seed oracle table=%s", table)
 		}
 	}
-	expiry65JSON(t, "case", map[string]any{"operation": op, "state": state, "backlog_bundles": map[bool]int{true: 0, false: bundles}[state == "empty"], "before": before, "checkpoint_history": "fresh open; no periodic checkpoint before 1h/512MiB; case <=60s; disk <=256MiB"})
+	expiry65JSON(t, "case", map[string]any{"operation": op, "state": state, "backlog_bundles": map[bool]int{true: 0, false: bundles}[state == "empty"], "before": before, "checkpoint_history": expiry65CheckpointHistory})
 	f.observe("before")
 	expiry65JSON(t, "empty_bracket", expiry65Measure("empty", func() {}))
 	for i := range 2 {

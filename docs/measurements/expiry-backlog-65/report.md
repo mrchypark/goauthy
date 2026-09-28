@@ -158,8 +158,11 @@ grant timings, optimal cleanup cadence and any cleanup-worker benefit.
 ## Results and checks
 
 One primary campaign: **45 cases / 90 timed operations**, all runtime checks
-returned PASS, **204.05 seconds** including setup, validation, controls, close,
-fixture removal, CSV/summary reduction and raw hashing. Sampled peak active
+returned PASS, **204.05 seconds** as reported by the campaign test driver.
+The historical outcome's precise **204,041,125,209 ns** counter was captured
+after setup, validation, controls, close, fixture removal and CSV/summary
+reduction, but **before raw hashing and final deadline checking**. It is not
+an inclusive finalization-time certificate. Sampled peak active
 fixture plus retained raw evidence file length: **29,870,196 bytes** (256-MiB
 cap, 240-MiB stop threshold). No cap was hit and no primary case was replaced.
 The generated `raw/outcome.json` records runtime completion, **not acceptance
@@ -218,11 +221,29 @@ the correction. The original campaign's evidence was not rewritten or replaced.
 [Measured source](measured-harness.go.txt) has SHA256
 `c114ead923e1ba73975c2dc8e5b0ac68789b55b240872a47b04912fe490c51d2`, matching
 `raw/manifest.json`; current harness source intentionally differs by the oracle
-correction. The reducer SHA256 is
+correction and the subsequent untimed finalization/metadata corrections below.
+The reducer SHA256 is
 `f81d7c28898a6a2375165396f0a54f8796211c9d03f2443c04b3777a32c4c85d`.
 All 49 original [raw hashes](raw/SHA256SUMS) verified. No keys, cookies, token
 values or database dumps are published; inventories contain relative storage
 filenames/lengths and hashes only.
+
+The current harness now writes explicit pending/failed finalization status
+until evidence hashing, pending-status publication and deadline gates succeed.
+Its mutable `outcome.json` is excluded
+from the new checksum inventory; missing, unreadable, pending or failed status
+cannot certify completion. The new elapsed counter is post-hash but before
+pending-status publication, which has its own deadline check. The final status
+write reports that gate result and does not certify its own elapsed time.
+Isolated filesystem tests force checksum-write failure and deadline crossings
+before and after pending-status publication, with successful and prior-failure
+controls; they open no database.
+Current checkpoint metadata separately identifies excluded Rhiza archive
+checkpoints and uncontrolled default one-second SQLite PASSIVE checkpoints.
+The current manifest also hashes the separate finalization helper source.
+These are current-source corrections, not new measurements. Historical raw
+logs, outcome, hashes, manifest and measured source remain unchanged. Neither
+review finding demonstrates historical finalization failure or a production bug.
 
 **Stop decision:** retain these qualified observations and the corrected harness
 for independent/Pro review. The sentinel evidence gap and unaligned SQLite
