@@ -151,3 +151,28 @@ Observed results (three 100-operation runs, timing shown as median):
 The retained per-operation DNS check is intentional: this optimization reduces
 connection/handshake work, not DNS validation. Shared-host scheduling and
 speculative connection acquisition make timing and concurrent counts variable.
+
+### Shutdown and cancellation regression checks
+
+Run the command integration tests explicitly with the test-fixture build tag:
+
+```sh
+go test -race -tags=goauthy_integration ./cmd/goauthy -run 'TestRuntimeShutdownRegisteredRefresh|TestRequestDrain|TestLifecycle' -count=2 -timeout=120s
+go test -race ./internal/saas -run 'TestSaaSPool(WarmDNSRejection|StalledTCPFallback|CallerDeadlineStages)$' -count=3 -timeout=60s
+```
+
+The tagged fixture enables only local test roots, DNS answers and TCP routing;
+normal builds contain no fixture API. The command test calls the actual
+`lifecycle` and `requestDrain` with a real registered `RefreshOAuth2`, real
+HTTP/TLS sockets and Rhiza storage. It passes the cancellation context to
+`rhiza.Open`, detaches only the inbound request context as `run` does, and
+executes the post-lifecycle owner/handler/storage shutdown order. It verifies
+one token request, identity verification and version 2 during graceful drain;
+the real ten-second forced drain instead leaves version 1 uncertain. Both
+states survive database close/reopen, and a fresh owner rejects version-1 replay.
+
+This covers the single-node runtime components, not an OS-signal subprocess
+launch of all of `run`, or a clustered quorum test. Rhiza's peer and engine
+lifetime still inherits the Open context; these tests do not establish clustered
+persistence availability after that context is canceled. No production lifetime
+change is justified by the passing single-node cases alone.

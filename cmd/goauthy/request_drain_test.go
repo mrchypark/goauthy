@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestRequestDrainKeepsCleanupBeforeStorageClose(t *testing.T) {
+func TestRequestDrainSealWaitsForActiveHandlers(t *testing.T) {
 	started, cleanup := make(chan struct{}), make(chan struct{})
 	d := &requestDrain{done: make(chan struct{}), next: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		close(started)
@@ -17,7 +17,7 @@ func TestRequestDrainKeepsCleanupBeforeStorageClose(t *testing.T) {
 	done := d.seal()
 	select {
 	case <-done:
-		t.Fatal("active cleanup released storage")
+		t.Fatal("seal completed with an active handler")
 	default:
 	}
 	w := httptest.NewRecorder()
