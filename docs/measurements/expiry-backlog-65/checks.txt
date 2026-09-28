@@ -1,0 +1,45 @@
+Expiry65 verification (all correctness checks outside primary timing)
+
+Final current-source normal command:
+GOMAXPROCS=4 go test -tags=integration ./internal/oauth -run '^TestExpiry65(FixtureShapes|TransactionBoundaries)$' -count=1 -v -timeout=90s
+PASS: package 19.821s; all five two-bundle shapes and transaction boundaries.
+
+Final current-source race command:
+GOMAXPROCS=4 go test -race -tags=integration ./internal/oauth -run '^TestExpiry65(FixtureShapes|TransactionBoundaries)$' -count=1 -v -timeout=150s
+PASS: package 71.723s; all five two-bundle shapes and transaction boundaries.
+
+Final vet:
+GOMAXPROCS=4 go vet -tags=integration ./internal/oauth ./internal/browser
+Exit 0, no output.
+
+Negative control: temporary Go overlay restores the measured wrong digest
+calculation (SHA256 of encoded token) immediately before the sentinel list.
+The canonical lookup's new exactly-one-row assertion is retained.
+GOMAXPROCS=4 go test -overlay /tmp/expiry65-oracle-mutant/overlay.json -tags=integration ./internal/oauth -run '^TestExpiry65FixtureShapes$/^interaction$' -count=1 -v -timeout=60s
+Expected exit 1, package 3.725s:
+sentinel lookup browser_authorization_interactions returned 0 rows, want exactly one
+FAIL TestExpiry65FixtureShapes/interaction (2.70s).
+This was a valid compiled overlay, not a syntax/SQL/argument failure.
+The working tree was not mutated by the overlay. No primary campaign rerun.
+
+Retained-primary audit:
+45 initial case records contain the SHA256(null) interaction sentinel hash:
+74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b
+The exact live interaction sentinel fields therefore remain unproven for the
+primary dataset. The other table sentinels have nonempty-row hashes.
+
+Original raw/SHA256SUMS: all 49 entries verified.
+Current source differs from measured-harness.go.txt only by canonical sentinel
+lookup and mandatory exactly-one-row validation; the measured source's hash
+matches raw/manifest.json. Reducer source hash matches the manifest.
+No private-key blocks, credential-valued token fields, Authorization bearer
+headers, cookie headers or fixture client-secret value found in retained logs.
+
+Read-only pinned-source audit found an unconditional one-second SQLite PASSIVE
+checkpoint worker (Rhiza v0.12.3 pkg/materializer/materializer.go:922), not
+controlled by Config. Rhiza archive checkpoint time/tail policy was frozen,
+but the SQLite background phase was not. Acceptance remains incomplete.
+
+Earlier development checks and reused existing regressions are described in
+report.md, including their initial harness failures. They are not hidden or
+substituted for primary samples.
