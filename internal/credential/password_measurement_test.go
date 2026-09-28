@@ -269,19 +269,35 @@ func TestPasswordRealKDFCancellationMeasurement(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	start := make(chan struct{})
+	workerErrors := make(chan error, cap(h.slots))
 	var wg sync.WaitGroup
 	for range cap(h.slots) {
 		wg.Go(func() {
 			<-start
 			if valid, _, err := h.VerifyOrDummy(ctx, password, phc); err != nil || !valid {
-				t.Errorf("started KDF: valid=%v err=%v", valid, err)
+				workerErrors <- fmt.Errorf("started KDF: valid=%v err=%v", valid, err)
 			}
 		})
 	}
-	defer func() { close(finish); wg.Wait() }()
+	defer func() {
+		cancel()
+		close(finish)
+		wg.Wait()
+		if len(h.slots) != 0 {
+			t.Error("cleanup leaked slots")
+		}
+	}()
 	close(start)
+	barrierTimeout := time.NewTimer(30 * time.Second)
+	defer barrierTimeout.Stop()
 	for range cap(h.slots) {
-		<-completed
+		select {
+		case <-completed:
+		case err := <-workerErrors:
+			t.Fatal(err)
+		case <-barrierTimeout.C:
+			t.Fatal("timed out waiting for real KDF finish barriers")
+		}
 	}
 	cancel()
 	held := len(h.slots)
@@ -310,6 +326,11 @@ func TestPasswordRealKDFCancellationMeasurement(t *testing.T) {
 		finish <- struct{}{}
 	}
 	wg.Wait()
+	select {
+	case err := <-workerErrors:
+		t.Fatal(err)
+	default:
+	}
 	if len(h.slots) != 0 {
 		t.Fatal("slots did not release after KDF return")
 	}
