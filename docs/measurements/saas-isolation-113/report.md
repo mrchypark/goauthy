@@ -270,3 +270,42 @@ Sanitized raw evidence occupies 1,852 KiB on disk before compression; the archiv
 is 143,136 bytes. The entire report directory is below 256 MiB. No primary run
 failed a correctness/resource oracle; the excluded initial fixture check and
 run 2's performance breach remain visible rather than being replaced.
+
+## Post-review untimed oracle correction (Pro125)
+
+The original final-state predicate could accept `ready/v1` after one accepted
+OAuth token POST. The finite inventory would not retry that credential, so the
+observed maximum of one POST alone did not prove non-replayability. This was an
+oracle gap, not an observed production regression: the published rows already
+have the expected outcomes.
+
+The final harness check now shares `isolationValidRefreshObservation` with an
+untimed retained-raw test. An accepted POST rejects `ready` at original version
+1; `refreshing/v1`, `uncertain/v1` and `ready/v2` remain valid. Zero-POST untouched
+`ready/v1` remains valid, as do pre-dispatch claimed/uncertain states. More than
+one POST, unsupported states/versions and completion without a POST are rejected.
+
+`TestIsolation113RefreshObservation` covers the unsafe observation and legitimate
+alternatives. `TestIsolation113RetainedRefreshObservations` reads the unchanged
+archive directly and validates all three primary raw files, each with 222 total
+rows, 111 OAuth rows and 110 accepted POSTs including controls. All passed the
+stronger predicate. An overlay deleting only the `posts == 0` guard failed the
+`accepted-old-ready` case, demonstrating sensitivity to the original gap.
+
+These are new **untimed validations**, not new measurements. The measured
+executable/source remains frozen at `1eb345e85b431b3705205b76a7a2149234703e75`;
+its archived hashes describe that historical source, not the updated harness.
+The raw archive, manifest, protocol, published results and pool peaks remain
+byte-identical to `c439596437b92fa077e9f9381b21f1d784088bbc`. No load campaign,
+replacement samples, production changes or admission experiment was run.
+Performance remains inconclusive and #113 remains open.
+
+Focused verification (see [oracle-validation.log](oracle-validation.log)):
+
+```sh
+GOMAXPROCS=4 go test -race -tags goauthy_integration ./cmd/goauthy -run '^TestIsolation113(RefreshObservation|RetainedRefreshObservations|ReservationSurvivesClientCancellation)$' -count=1 -v -timeout=90s
+GOMAXPROCS=4 go vet -tags goauthy_integration ./cmd/goauthy
+```
+
+Race checks passed in 3.029s; vet passed. The separate negative-control overlay
+failed as expected in 1.109s. Archive and report checksum verification passed.

@@ -3,7 +3,9 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -736,7 +738,7 @@ func TestSaaSIsolation113Measurement(t *testing.T) {
 	for _, row := range rows.Rows {
 		id, state, version := row[0].(string), row[1].(string), row[2].(int64)
 		if strings.Contains(id, "-oauth-") {
-			if version < 1 || version > 2 || version == 2 && (state != "ready" || r.posts[id] != 1) || version == 1 && state != "ready" && state != "refreshing" && state != "uncertain" {
+			if !isolationValidRefreshObservation(state, version, r.posts[id]) {
 				r.violation("invalid durable outcome " + id)
 			}
 		} else if state != "ready" || version != 1 {
@@ -775,6 +777,119 @@ func TestSaaSIsolation113Measurement(t *testing.T) {
 	}
 }
 func isolationMicros(v syscall.Timeval) int64 { return v.Sec*1000000 + int64(v.Usec) }
+
+// Untimed final-state oracle shared with validation of the retained raw samples.
+// An accepted token mutation must never leave the original credential replayable.
+func isolationValidRefreshObservation(state string, version int64, posts int) bool {
+	if posts < 0 || posts > 1 {
+		return false
+	}
+	switch version {
+	case 1:
+		return state == "refreshing" || state == "uncertain" || state == "ready" && posts == 0
+	case 2:
+		return state == "ready" && posts == 1
+	default:
+		return false
+	}
+}
+
+func TestIsolation113RefreshObservation(t *testing.T) {
+	for _, tc := range []struct {
+		name, state string
+		version     int64
+		posts       int
+		valid       bool
+	}{
+		{"accepted-old-ready", "ready", 1, 1, false},
+		{"accepted-cleanup-pending", "refreshing", 1, 1, true},
+		{"accepted-uncertain", "uncertain", 1, 1, true},
+		{"accepted-completed", "ready", 2, 1, true},
+		{"untouched", "ready", 1, 0, true},
+		{"claimed-before-dispatch", "refreshing", 1, 0, true},
+		{"failed-before-dispatch", "uncertain", 1, 0, true},
+		{"completion-without-post", "ready", 2, 0, false},
+		{"repeated-post", "ready", 2, 2, false},
+		{"invalid-state", "invalid", 1, 1, false},
+		{"invalid-version", "ready", 3, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isolationValidRefreshObservation(tc.state, tc.version, tc.posts); got != tc.valid {
+				t.Fatalf("state=%s version=%d posts=%d: valid=%t want=%t", tc.state, tc.version, tc.posts, got, tc.valid)
+			}
+		})
+	}
+}
+
+func TestIsolation113RetainedRefreshObservations(t *testing.T) {
+	f, err := os.Open("../../docs/measurements/saas-isolation-113/raw-evidence.tar.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gz.Close()
+	archive := tar.NewReader(gz)
+	seen := make(map[string]bool)
+	for {
+		header, err := archive.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		name := strings.TrimPrefix(header.Name, "./")
+		if name != "run1.json" && name != "run2.json" && name != "run3.json" {
+			continue
+		}
+		if seen[name] {
+			t.Fatalf("duplicate retained sample %s", name)
+		}
+		seen[name] = true
+		var raw struct {
+			Posts   map[string]int
+			Durable [][]json.RawMessage
+		}
+		if err := json.NewDecoder(archive).Decode(&raw); err != nil {
+			t.Fatal(err)
+		}
+		if len(raw.Durable) != 222 {
+			t.Fatalf("%s: durable inventory=%d want=222", name, len(raw.Durable))
+		}
+		checked, accepted := 0, 0
+		for _, row := range raw.Durable {
+			if len(row) != 3 {
+				t.Fatalf("%s: malformed durable row", name)
+			}
+			var id, state string
+			var version int64
+			for i, target := range []any{&id, &state, &version} {
+				if err := json.Unmarshal(row[i], target); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !strings.Contains(id, "-oauth-") {
+				continue
+			}
+			checked++
+			accepted += raw.Posts[id]
+			if !isolationValidRefreshObservation(state, version, raw.Posts[id]) {
+				t.Errorf("%s: %s state=%s version=%d posts=%d", name, id, state, version, raw.Posts[id])
+			}
+		}
+		if checked != 111 || accepted != 110 {
+			t.Fatalf("%s: OAuth rows=%d accepted POSTs=%d want=111/110", name, checked, accepted)
+		}
+		t.Logf("%s: validated %d OAuth rows, %d accepted POSTs (including controls)", name, checked, accepted)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("retained primary files=%d want=3", len(seen))
+	}
+}
 
 func isolationBearer(t *testing.T, s *oauth.Server, issuer string) string {
 	t.Helper()
