@@ -1,0 +1,254 @@
+[
+  {
+    "shape": "large",
+    "phase": "empty",
+    "n": 3,
+    "wall_ms": {
+      "min": 0.0015,
+      "max": 0.002917
+    },
+    "cpu_ms": {
+      "min": 0.005,
+      "max": 0.011
+    },
+    "alloc_bytes": {
+      "min": 0,
+      "max": 0
+    },
+    "mallocs": {
+      "min": 0,
+      "max": 0
+    }
+  },
+  {
+    "shape": "large",
+    "phase": "extract",
+    "n": 3,
+    "wall_ms": {
+      "min": 40.0195,
+      "max": 61.713125
+    },
+    "cpu_ms": {
+      "min": 37.72,
+      "max": 50.947
+    },
+    "alloc_bytes": {
+      "min": 14371952,
+      "max": 14371968
+    },
+    "mallocs": {
+      "min": 550,
+      "max": 550
+    }
+  },
+  {
+    "shape": "large",
+    "phase": "open_ready",
+    "n": 3,
+    "wall_ms": {
+      "min": 388.134125,
+      "max": 519.580375
+    },
+    "cpu_ms": {
+      "min": 86.364,
+      "max": 137.915
+    },
+    "alloc_bytes": {
+      "min": 5735456,
+      "max": 5743776
+    },
+    "mallocs": {
+      "min": 9818,
+      "max": 9854
+    }
+  },
+  {
+    "shape": "large",
+    "phase": "restore",
+    "n": 3,
+    "wall_ms": {
+      "min": 85.338792,
+      "max": 160.773208
+    },
+    "cpu_ms": {
+      "min": 43.154,
+      "max": 74.002
+    },
+    "alloc_bytes": {
+      "min": 423872,
+      "max": 428856
+    },
+    "mallocs": {
+      "min": 1565,
+      "max": 1578
+    }
+  },
+  {
+    "shape": "medium",
+    "phase": "empty",
+    "n": 3,
+    "wall_ms": {
+      "min": 0.001625,
+      "max": 0.002542
+    },
+    "cpu_ms": {
+      "min": 0.006,
+      "max": 0.008
+    },
+    "alloc_bytes": {
+      "min": 0,
+      "max": 0
+    },
+    "mallocs": {
+      "min": 0,
+      "max": 0
+    }
+  },
+  {
+    "shape": "medium",
+    "phase": "extract",
+    "n": 3,
+    "wall_ms": {
+      "min": 9.173584,
+      "max": 19.332916
+    },
+    "cpu_ms": {
+      "min": 9.567,
+      "max": 12.956
+    },
+    "alloc_bytes": {
+      "min": 2894288,
+      "max": 2903120
+    },
+    "mallocs": {
+      "min": 369,
+      "max": 374
+    }
+  },
+  {
+    "shape": "medium",
+    "phase": "open_ready",
+    "n": 3,
+    "wall_ms": {
+      "min": 299.431875,
+      "max": 497.773583
+    },
+    "cpu_ms": {
+      "min": 51.777,
+      "max": 68.134
+    },
+    "alloc_bytes": {
+      "min": 5739344,
+      "max": 5740528
+    },
+    "mallocs": {
+      "min": 9810,
+      "max": 9832
+    }
+  },
+  {
+    "shape": "medium",
+    "phase": "restore",
+    "n": 3,
+    "wall_ms": {
+      "min": 36.602125,
+      "max": 59.2815
+    },
+    "cpu_ms": {
+      "min": 16.978,
+      "max": 29.91
+    },
+    "alloc_bytes": {
+      "min": 422936,
+      "max": 424032
+    },
+    "mallocs": {
+      "min": 1561,
+      "max": 1565
+    }
+  },
+  {
+    "shape": "small",
+    "phase": "empty",
+    "n": 3,
+    "wall_ms": {
+      "min": 0.002125,
+      "max": 0.011416
+    },
+    "cpu_ms": {
+      "min": 0.007,
+      "max": 0.016
+    },
+    "alloc_bytes": {
+      "min": 0,
+      "max": 0
+    },
+    "mallocs": {
+      "min": 0,
+      "max": 0
+    }
+  },
+  {
+    "shape": "small",
+    "phase": "extract",
+    "n": 3,
+    "wall_ms": {
+      "min": 5.995125,
+      "max": 11.1715
+    },
+    "cpu_ms": {
+      "min": 8.093,
+      "max": 12.054
+    },
+    "alloc_bytes": {
+      "min": 1788928,
+      "max": 1789024
+    },
+    "mallocs": {
+      "min": 356,
+      "max": 358
+    }
+  },
+  {
+    "shape": "small",
+    "phase": "open_ready",
+    "n": 3,
+    "wall_ms": {
+      "min": 327.555166,
+      "max": 344.955416
+    },
+    "cpu_ms": {
+      "min": 70.858,
+      "max": 76.543
+    },
+    "alloc_bytes": {
+      "min": 5731400,
+      "max": 5735248
+    },
+    "mallocs": {
+      "min": 9796,
+      "max": 9825
+    }
+  },
+  {
+    "shape": "small",
+    "phase": "restore",
+    "n": 3,
+    "wall_ms": {
+      "min": 34.491208,
+      "max": 48.626875
+    },
+    "cpu_ms": {
+      "min": 13.109,
+      "max": 22.923
+    },
+    "alloc_bytes": {
+      "min": 421584,
+      "max": 429944
+    },
+    "mallocs": {
+      "min": 1554,
+      "max": 1584
+    }
+  }
+]

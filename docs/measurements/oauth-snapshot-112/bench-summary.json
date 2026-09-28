@@ -1,0 +1,155 @@
+[
+  {
+    "name": "BenchmarkSnapshot112/large/Encode-4",
+    "n": 5,
+    "median_ns": 27309,
+    "min_ns": 25744,
+    "max_ns": 31389,
+    "B_op": 56969,
+    "allocs_op": 25
+  },
+  {
+    "name": "BenchmarkSnapshot112/large/FullStaticAuthorityDecode-4",
+    "n": 5,
+    "median_ns": 50535,
+    "min_ns": 50271,
+    "max_ns": 51294,
+    "B_op": 59708,
+    "allocs_op": 116
+  },
+  {
+    "name": "BenchmarkSnapshot112/large/InteractionDecode-4",
+    "n": 5,
+    "median_ns": 37370,
+    "min_ns": 36670,
+    "max_ns": 62681,
+    "B_op": 65536,
+    "allocs_op": 1
+  },
+  {
+    "name": "BenchmarkSnapshot112/large/InteractionEncode-4",
+    "n": 5,
+    "median_ns": 47811,
+    "min_ns": 41997,
+    "max_ns": 51869,
+    "B_op": 180224,
+    "allocs_op": 2
+  },
+  {
+    "name": "BenchmarkSnapshot112/large/JSONOnlyDecode-4",
+    "n": 5,
+    "median_ns": 49998,
+    "min_ns": 45051,
+    "max_ns": 81435,
+    "B_op": 56789,
+    "allocs_op": 98
+  },
+  {
+    "name": "BenchmarkSnapshot112/medium/Encode-4",
+    "n": 5,
+    "median_ns": 7129,
+    "min_ns": 6839,
+    "max_ns": 8260,
+    "B_op": 11334,
+    "allocs_op": 25
+  },
+  {
+    "name": "BenchmarkSnapshot112/medium/FullStaticAuthorityDecode-4",
+    "n": 5,
+    "median_ns": 12921,
+    "min_ns": 12038,
+    "max_ns": 17224,
+    "B_op": 12595,
+    "allocs_op": 60
+  },
+  {
+    "name": "BenchmarkSnapshot112/medium/InteractionDecode-4",
+    "n": 5,
+    "median_ns": 2524,
+    "min_ns": 2428,
+    "max_ns": 4736,
+    "B_op": 4096,
+    "allocs_op": 1
+  },
+  {
+    "name": "BenchmarkSnapshot112/medium/InteractionEncode-4",
+    "n": 5,
+    "median_ns": 3799,
+    "min_ns": 3425,
+    "max_ns": 4159,
+    "B_op": 12288,
+    "allocs_op": 2
+  },
+  {
+    "name": "BenchmarkSnapshot112/medium/JSONOnlyDecode-4",
+    "n": 5,
+    "median_ns": 12149,
+    "min_ns": 10759,
+    "max_ns": 27764,
+    "B_op": 11217,
+    "allocs_op": 46
+  },
+  {
+    "name": "BenchmarkSnapshot112/small/Encode-4",
+    "n": 5,
+    "median_ns": 3063,
+    "min_ns": 3003,
+    "max_ns": 3783,
+    "B_op": 3713,
+    "allocs_op": 25
+  },
+  {
+    "name": "BenchmarkSnapshot112/small/FullStaticAuthorityDecode-4",
+    "n": 5,
+    "median_ns": 4701,
+    "min_ns": 4448,
+    "max_ns": 4936,
+    "B_op": 4289,
+    "allocs_op": 41
+  },
+  {
+    "name": "BenchmarkSnapshot112/small/InteractionDecode-4",
+    "n": 5,
+    "median_ns": 176.5,
+    "min_ns": 175.9,
+    "max_ns": 299.4,
+    "B_op": 256,
+    "allocs_op": 1
+  },
+  {
+    "name": "BenchmarkSnapshot112/small/InteractionEncode-4",
+    "n": 5,
+    "median_ns": 265.8,
+    "min_ns": 226.4,
+    "max_ns": 271.8,
+    "B_op": 704,
+    "allocs_op": 2
+  },
+  {
+    "name": "BenchmarkSnapshot112/small/JSONOnlyDecode-4",
+    "n": 5,
+    "median_ns": 4679,
+    "min_ns": 4013,
+    "max_ns": 6648,
+    "B_op": 3296,
+    "allocs_op": 31
+  },
+  {
+    "name": "BenchmarkSnapshot112Authority/EphemeralMedium-4",
+    "n": 5,
+    "median_ns": 15124,
+    "min_ns": 14574,
+    "max_ns": 17092,
+    "B_op": 14324,
+    "allocs_op": 80
+  },
+  {
+    "name": "BenchmarkSnapshot112Authority/ManagedMedium-4",
+    "n": 5,
+    "median_ns": 100431,
+    "min_ns": 76097,
+    "max_ns": 147220,
+    "B_op": 20198,
+    "allocs_op": 256
+  }
+]
