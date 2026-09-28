@@ -1,0 +1,1700 @@
+[
+  {
+    "mode": "primary",
+    "go": "go1.27.0",
+    "gomaxprocs": 4,
+    "violations": [],
+    "attempts": 260,
+    "groups": [
+      {
+        "phase": "baseline",
+        "route": "api-body",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 32.02225,
+          "p95_ms": 72.057834,
+          "p99_ms": 72.057834,
+          "max_ms": 72.057834
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.051583,
+          "p95_ms": 6.569333,
+          "p99_ms": 6.569333,
+          "max_ms": 6.569333
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "api-dial",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 33.214083,
+          "p95_ms": 67.994291,
+          "p99_ms": 67.994291,
+          "max_ms": 67.994291
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 2.633875,
+          "p95_ms": 6.343166,
+          "p99_ms": 6.343166,
+          "max_ms": 6.343166
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "api-healthy",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 32.100792,
+          "p95_ms": 56.661459,
+          "p99_ms": 56.661459,
+          "max_ms": 56.661459
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 2.67925,
+          "p95_ms": 6.534041,
+          "p99_ms": 6.534041,
+          "max_ms": 6.534041
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "iam",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 173.266584,
+          "p95_ms": 222.221459,
+          "p99_ms": 222.221459,
+          "max_ms": 222.221459
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 2.487291,
+          "p95_ms": 6.316958,
+          "p99_ms": 6.316958,
+          "max_ms": 6.316958
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "oauth-cancel",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 67.519333,
+          "p95_ms": 129.465834,
+          "p99_ms": 129.465834,
+          "max_ms": 129.465834
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.06325,
+          "p95_ms": 6.454375,
+          "p99_ms": 6.454375,
+          "max_ms": 6.454375
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "oauth-header",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 65.936542,
+          "p95_ms": 117.078708,
+          "p99_ms": 117.078708,
+          "max_ms": 117.078708
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 2.598083,
+          "p95_ms": 6.343041,
+          "p99_ms": 6.343041,
+          "max_ms": 6.343041
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "oauth-healthy",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 67.651709,
+          "p95_ms": 120.688375,
+          "p99_ms": 120.688375,
+          "max_ms": 120.688375
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 2.581125,
+          "p95_ms": 6.37125,
+          "p99_ms": 6.37125,
+          "max_ms": 6.37125
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "mixed",
+        "route": "api-body",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "client-error",
+            "n": 16
+          }
+        ],
+        "success": null,
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.527042,
+          "p95_ms": 6.617167,
+          "p99_ms": 6.617167,
+          "max_ms": 6.617167
+        },
+        "client_done_handler_active": 16
+      },
+      {
+        "phase": "mixed",
+        "route": "api-dial",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "http-502",
+            "n": 16
+          }
+        ],
+        "success": null,
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.1385,
+          "p95_ms": 6.2745,
+          "p99_ms": 6.2745,
+          "max_ms": 6.2745
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "mixed",
+        "route": "api-healthy",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 36.087625,
+          "p95_ms": 67.382791,
+          "p99_ms": 67.382791,
+          "max_ms": 67.382791
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.251542,
+          "p95_ms": 6.293875,
+          "p99_ms": 6.293875,
+          "max_ms": 6.293875
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "mixed",
+        "route": "iam",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 187.358875,
+          "p95_ms": 218.520167,
+          "p99_ms": 218.520167,
+          "max_ms": 218.520167
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 2.833083,
+          "p95_ms": 6.17,
+          "p99_ms": 6.17,
+          "max_ms": 6.17
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "mixed",
+        "route": "oauth-cancel",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "client-error",
+            "n": 16
+          }
+        ],
+        "success": null,
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.209875,
+          "p95_ms": 6.393708,
+          "p99_ms": 6.393708,
+          "max_ms": 6.393708
+        },
+        "client_done_handler_active": 16
+      },
+      {
+        "phase": "mixed",
+        "route": "oauth-header",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "client-error",
+            "n": 16
+          }
+        ],
+        "success": null,
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.526208,
+          "p95_ms": 6.242375,
+          "p99_ms": 6.242375,
+          "max_ms": 6.242375
+        },
+        "client_done_handler_active": 16
+      },
+      {
+        "phase": "mixed",
+        "route": "oauth-healthy",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 72.828167,
+          "p95_ms": 97.753833,
+          "p99_ms": 97.753833,
+          "max_ms": 97.753833
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 2.897542,
+          "p95_ms": 6.228458,
+          "p99_ms": 6.228458,
+          "max_ms": 6.228458
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "recovery",
+        "route": "api-healthy",
+        "offered": 12,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 12
+          }
+        ],
+        "success": {
+          "n": 12,
+          "p50_ms": 26.045625,
+          "p95_ms": 58.525458,
+          "p99_ms": 58.525458,
+          "max_ms": 58.525458
+        },
+        "scheduling": {
+          "n": 12,
+          "p50_ms": 1.676417,
+          "p95_ms": 5.951458,
+          "p99_ms": 5.951458,
+          "max_ms": 5.951458
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "recovery",
+        "route": "iam",
+        "offered": 12,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 12
+          }
+        ],
+        "success": {
+          "n": 12,
+          "p50_ms": 156.928834,
+          "p95_ms": 192.650917,
+          "p99_ms": 192.650917,
+          "max_ms": 192.650917
+        },
+        "scheduling": {
+          "n": 12,
+          "p50_ms": 1.596875,
+          "p95_ms": 5.882958,
+          "p99_ms": 5.882958,
+          "max_ms": 5.882958
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "recovery",
+        "route": "oauth-healthy",
+        "offered": 12,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 12
+          }
+        ],
+        "success": {
+          "n": 12,
+          "p50_ms": 51.083667,
+          "p95_ms": 67.61175,
+          "p99_ms": 67.61175,
+          "max_ms": 67.61175
+        },
+        "scheduling": {
+          "n": 12,
+          "p50_ms": 1.7355,
+          "p95_ms": 5.945125,
+          "p99_ms": 5.945125,
+          "max_ms": 5.945125
+        },
+        "client_done_handler_active": 0
+      }
+    ],
+    "protected_comparisons": [
+      {
+        "phase": "mixed",
+        "route": "api-healthy",
+        "n": 16,
+        "p95_ms": 67.382791,
+        "p95_limit_ms": 81.66145900000001,
+        "p99_ms": 67.382791,
+        "p99_limit_ms": 106.66145900000001,
+        "pass": true
+      },
+      {
+        "phase": "mixed",
+        "route": "iam",
+        "n": 16,
+        "p95_ms": 218.520167,
+        "p95_limit_ms": 277.77682375,
+        "p99_ms": 218.520167,
+        "p99_limit_ms": 333.33218850000003,
+        "pass": true
+      },
+      {
+        "phase": "mixed",
+        "route": "oauth-healthy",
+        "n": 16,
+        "p95_ms": 97.753833,
+        "p95_limit_ms": 150.86046875,
+        "p99_ms": 97.753833,
+        "p99_limit_ms": 181.03256249999998,
+        "pass": true
+      },
+      {
+        "phase": "recovery",
+        "route": "api-healthy",
+        "n": 12,
+        "p95_ms": 58.525458,
+        "p95_limit_ms": 81.66145900000001,
+        "p99_ms": 58.525458,
+        "p99_limit_ms": 106.66145900000001,
+        "pass": true
+      },
+      {
+        "phase": "recovery",
+        "route": "iam",
+        "n": 12,
+        "p95_ms": 192.650917,
+        "p95_limit_ms": 277.77682375,
+        "p99_ms": 192.650917,
+        "p99_limit_ms": 333.33218850000003,
+        "pass": true
+      },
+      {
+        "phase": "recovery",
+        "route": "oauth-healthy",
+        "n": 12,
+        "p95_ms": 67.61175,
+        "p95_limit_ms": 150.86046875,
+        "p99_ms": 67.61175,
+        "p99_limit_ms": 181.03256249999998,
+        "pass": true
+      }
+    ],
+    "resources": {
+      "sample_count": 793,
+      "max_rss_bytes": 176734208,
+      "sampled_heap_peak_bytes": 83240144,
+      "sampled_goroutine_peak": 233,
+      "sampled_active_handlers_peak": 11
+    },
+    "cpu_user_ms": 5952.946,
+    "cpu_system_ms": 1270.978,
+    "peak_workflows": [
+      5,
+      5,
+      1,
+      1,
+      1
+    ],
+    "final_pools": [
+      {
+        "Owner": "oauth",
+        "Entries": 3,
+        "Retiring": 0,
+        "Leases": 0,
+        "Dials": 0,
+        "Connections": 0,
+        "DNS": 238,
+        "TCP": 33,
+        "TLS": 33,
+        "DialFailures": 0
+      },
+      {
+        "Owner": "api",
+        "Entries": 3,
+        "Retiring": 0,
+        "Leases": 0,
+        "Dials": 0,
+        "Connections": 0,
+        "DNS": 159,
+        "TCP": 33,
+        "TLS": 33,
+        "DialFailures": 16
+      }
+    ],
+    "mutations": {
+      "bindings": 108,
+      "total": 108,
+      "max_per_old_version": 1
+    },
+    "durable": [
+      {
+        "state": "ready",
+        "version": 1,
+        "n": 112
+      },
+      {
+        "state": "ready",
+        "version": 2,
+        "n": 78
+      },
+      {
+        "state": "uncertain",
+        "version": 1,
+        "n": 32
+      }
+    ],
+    "mixed_refresh": [
+      {
+        "state": "ready",
+        "version": 2,
+        "n": 16
+      },
+      {
+        "state": "uncertain",
+        "version": 1,
+        "n": 32
+      }
+    ],
+    "run": 1
+  },
+  {
+    "mode": "primary",
+    "go": "go1.27.0",
+    "gomaxprocs": 4,
+    "violations": [],
+    "attempts": 260,
+    "groups": [
+      {
+        "phase": "baseline",
+        "route": "api-body",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 30.878958,
+          "p95_ms": 105.231167,
+          "p99_ms": 105.231167,
+          "max_ms": 105.231167
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.038041,
+          "p95_ms": 6.4355,
+          "p99_ms": 6.4355,
+          "max_ms": 6.4355
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "api-dial",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 30.595458,
+          "p95_ms": 58.753875,
+          "p99_ms": 58.753875,
+          "max_ms": 58.753875
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 2.983791,
+          "p95_ms": 6.231875,
+          "p99_ms": 6.231875,
+          "max_ms": 6.231875
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "api-healthy",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 32.067,
+          "p95_ms": 107.106042,
+          "p99_ms": 107.106042,
+          "max_ms": 107.106042
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.0325,
+          "p95_ms": 6.326083,
+          "p99_ms": 6.326083,
+          "max_ms": 6.326083
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "iam",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 175.046416,
+          "p95_ms": 635.402041,
+          "p99_ms": 635.402041,
+          "max_ms": 635.402041
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 2.964083,
+          "p95_ms": 6.161416,
+          "p99_ms": 6.161416,
+          "max_ms": 6.161416
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "oauth-cancel",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 66.51775,
+          "p95_ms": 214.960458,
+          "p99_ms": 214.960458,
+          "max_ms": 214.960458
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 2.987916,
+          "p95_ms": 6.263625,
+          "p99_ms": 6.263625,
+          "max_ms": 6.263625
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "oauth-header",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 66.649125,
+          "p95_ms": 212.501208,
+          "p99_ms": 212.501208,
+          "max_ms": 212.501208
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.12825,
+          "p95_ms": 6.340666,
+          "p99_ms": 6.340666,
+          "max_ms": 6.340666
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "oauth-healthy",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 59.203,
+          "p95_ms": 212.610167,
+          "p99_ms": 212.610167,
+          "max_ms": 212.610167
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.0635,
+          "p95_ms": 6.2005,
+          "p99_ms": 6.2005,
+          "max_ms": 6.2005
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "mixed",
+        "route": "api-body",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "client-error",
+            "n": 16
+          }
+        ],
+        "success": null,
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 1.843125,
+          "p95_ms": 4.857041,
+          "p99_ms": 4.857041,
+          "max_ms": 4.857041
+        },
+        "client_done_handler_active": 15
+      },
+      {
+        "phase": "mixed",
+        "route": "api-dial",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "http-502",
+            "n": 16
+          }
+        ],
+        "success": null,
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 1.652791,
+          "p95_ms": 4.708333,
+          "p99_ms": 4.708333,
+          "max_ms": 4.708333
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "mixed",
+        "route": "api-healthy",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 34.648459,
+          "p95_ms": 164.605708,
+          "p99_ms": 164.605708,
+          "max_ms": 164.605708
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 1.765875,
+          "p95_ms": 4.819958,
+          "p99_ms": 4.819958,
+          "max_ms": 4.819958
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "mixed",
+        "route": "iam",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 182.802499,
+          "p95_ms": 329.237667,
+          "p99_ms": 329.237667,
+          "max_ms": 329.237667
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 1.617833,
+          "p95_ms": 4.686708,
+          "p99_ms": 4.686708,
+          "max_ms": 4.686708
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "mixed",
+        "route": "oauth-cancel",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "client-error",
+            "n": 16
+          }
+        ],
+        "success": null,
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 1.733,
+          "p95_ms": 4.757625,
+          "p99_ms": 4.757625,
+          "max_ms": 4.757625
+        },
+        "client_done_handler_active": 16
+      },
+      {
+        "phase": "mixed",
+        "route": "oauth-header",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "client-error",
+            "n": 16
+          }
+        ],
+        "success": null,
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 1.707333,
+          "p95_ms": 4.926958,
+          "p99_ms": 4.926958,
+          "max_ms": 4.926958
+        },
+        "client_done_handler_active": 16
+      },
+      {
+        "phase": "mixed",
+        "route": "oauth-healthy",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 63.471458,
+          "p95_ms": 183.865959,
+          "p99_ms": 183.865959,
+          "max_ms": 183.865959
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 1.721125,
+          "p95_ms": 4.732625,
+          "p99_ms": 4.732625,
+          "max_ms": 4.732625
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "recovery",
+        "route": "api-healthy",
+        "offered": 12,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 12
+          }
+        ],
+        "success": {
+          "n": 12,
+          "p50_ms": 20.811083,
+          "p95_ms": 32.688834,
+          "p99_ms": 32.688834,
+          "max_ms": 32.688834
+        },
+        "scheduling": {
+          "n": 12,
+          "p50_ms": 2.991584,
+          "p95_ms": 5.859,
+          "p99_ms": 5.859,
+          "max_ms": 5.859
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "recovery",
+        "route": "iam",
+        "offered": 12,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 12
+          }
+        ],
+        "success": {
+          "n": 12,
+          "p50_ms": 153.056583,
+          "p95_ms": 174.600625,
+          "p99_ms": 174.600625,
+          "max_ms": 174.600625
+        },
+        "scheduling": {
+          "n": 12,
+          "p50_ms": 2.966084,
+          "p95_ms": 5.847917,
+          "p99_ms": 5.847917,
+          "max_ms": 5.847917
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "recovery",
+        "route": "oauth-healthy",
+        "offered": 12,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 12
+          }
+        ],
+        "success": {
+          "n": 12,
+          "p50_ms": 43.694542,
+          "p95_ms": 72.165166,
+          "p99_ms": 72.165166,
+          "max_ms": 72.165166
+        },
+        "scheduling": {
+          "n": 12,
+          "p50_ms": 3.023709,
+          "p95_ms": 5.843042,
+          "p99_ms": 5.843042,
+          "max_ms": 5.843042
+        },
+        "client_done_handler_active": 0
+      }
+    ],
+    "protected_comparisons": [
+      {
+        "phase": "mixed",
+        "route": "api-healthy",
+        "n": 16,
+        "p95_ms": 164.605708,
+        "p95_limit_ms": 133.8825525,
+        "p99_ms": 164.605708,
+        "p99_limit_ms": 160.659063,
+        "pass": false
+      },
+      {
+        "phase": "mixed",
+        "route": "iam",
+        "n": 16,
+        "p95_ms": 329.237667,
+        "p95_limit_ms": 794.2525512500001,
+        "p99_ms": 329.237667,
+        "p99_limit_ms": 953.1030615000001,
+        "pass": true
+      },
+      {
+        "phase": "mixed",
+        "route": "oauth-healthy",
+        "n": 16,
+        "p95_ms": 183.865959,
+        "p95_limit_ms": 265.76270875,
+        "p99_ms": 183.865959,
+        "p99_limit_ms": 318.91525049999996,
+        "pass": true
+      },
+      {
+        "phase": "recovery",
+        "route": "api-healthy",
+        "n": 12,
+        "p95_ms": 32.688834,
+        "p95_limit_ms": 133.8825525,
+        "p99_ms": 32.688834,
+        "p99_limit_ms": 160.659063,
+        "pass": true
+      },
+      {
+        "phase": "recovery",
+        "route": "iam",
+        "n": 12,
+        "p95_ms": 174.600625,
+        "p95_limit_ms": 794.2525512500001,
+        "p99_ms": 174.600625,
+        "p99_limit_ms": 953.1030615000001,
+        "pass": true
+      },
+      {
+        "phase": "recovery",
+        "route": "oauth-healthy",
+        "n": 12,
+        "p95_ms": 72.165166,
+        "p95_limit_ms": 265.76270875,
+        "p99_ms": 72.165166,
+        "p99_limit_ms": 318.91525049999996,
+        "pass": true
+      }
+    ],
+    "resources": {
+      "sample_count": 794,
+      "max_rss_bytes": 159072256,
+      "sampled_heap_peak_bytes": 64619640,
+      "sampled_goroutine_peak": 192,
+      "sampled_active_handlers_peak": 12
+    },
+    "cpu_user_ms": 4768.422,
+    "cpu_system_ms": 1081.592,
+    "peak_workflows": [
+      5,
+      5,
+      1,
+      1,
+      1
+    ],
+    "final_pools": [
+      {
+        "Owner": "oauth",
+        "Entries": 3,
+        "Retiring": 0,
+        "Leases": 0,
+        "Dials": 0,
+        "Connections": 0,
+        "DNS": 238,
+        "TCP": 33,
+        "TLS": 33,
+        "DialFailures": 0
+      },
+      {
+        "Owner": "api",
+        "Entries": 3,
+        "Retiring": 0,
+        "Leases": 0,
+        "Dials": 0,
+        "Connections": 0,
+        "DNS": 159,
+        "TCP": 33,
+        "TLS": 33,
+        "DialFailures": 16
+      }
+    ],
+    "mutations": {
+      "bindings": 108,
+      "total": 108,
+      "max_per_old_version": 1
+    },
+    "durable": [
+      {
+        "state": "ready",
+        "version": 1,
+        "n": 112
+      },
+      {
+        "state": "ready",
+        "version": 2,
+        "n": 78
+      },
+      {
+        "state": "uncertain",
+        "version": 1,
+        "n": 32
+      }
+    ],
+    "mixed_refresh": [
+      {
+        "state": "ready",
+        "version": 2,
+        "n": 16
+      },
+      {
+        "state": "uncertain",
+        "version": 1,
+        "n": 32
+      }
+    ],
+    "run": 2
+  },
+  {
+    "mode": "primary",
+    "go": "go1.27.0",
+    "gomaxprocs": 4,
+    "violations": [],
+    "attempts": 260,
+    "groups": [
+      {
+        "phase": "baseline",
+        "route": "api-body",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 33.689667,
+          "p95_ms": 136.18175,
+          "p99_ms": 136.18175,
+          "max_ms": 136.18175
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 2.997792,
+          "p95_ms": 6.655042,
+          "p99_ms": 6.655042,
+          "max_ms": 6.655042
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "api-dial",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 32.245541,
+          "p95_ms": 59.332959,
+          "p99_ms": 59.332959,
+          "max_ms": 59.332959
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 2.9115,
+          "p95_ms": 6.367542,
+          "p99_ms": 6.367542,
+          "max_ms": 6.367542
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "api-healthy",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 30.560583,
+          "p95_ms": 52.68625,
+          "p99_ms": 52.68625,
+          "max_ms": 52.68625
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.110459,
+          "p95_ms": 6.484834,
+          "p99_ms": 6.484834,
+          "max_ms": 6.484834
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "iam",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 173.251083,
+          "p95_ms": 265.216333,
+          "p99_ms": 265.216333,
+          "max_ms": 265.216333
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 2.863792,
+          "p95_ms": 6.335167,
+          "p99_ms": 6.335167,
+          "max_ms": 6.335167
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "oauth-cancel",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 58.049458,
+          "p95_ms": 161.07875,
+          "p99_ms": 161.07875,
+          "max_ms": 161.07875
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 2.938875,
+          "p95_ms": 6.435125,
+          "p99_ms": 6.435125,
+          "max_ms": 6.435125
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "oauth-header",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 60.034917,
+          "p95_ms": 163.917084,
+          "p99_ms": 163.917084,
+          "max_ms": 163.917084
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.055709,
+          "p95_ms": 6.509959,
+          "p99_ms": 6.509959,
+          "max_ms": 6.509959
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "baseline",
+        "route": "oauth-healthy",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 56.141958,
+          "p95_ms": 157.947833,
+          "p99_ms": 157.947833,
+          "max_ms": 157.947833
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.040542,
+          "p95_ms": 6.446084,
+          "p99_ms": 6.446084,
+          "max_ms": 6.446084
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "mixed",
+        "route": "api-body",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "client-error",
+            "n": 16
+          }
+        ],
+        "success": null,
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 4.000292,
+          "p95_ms": 5.951167,
+          "p99_ms": 5.951167,
+          "max_ms": 5.951167
+        },
+        "client_done_handler_active": 13
+      },
+      {
+        "phase": "mixed",
+        "route": "api-dial",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "http-502",
+            "n": 16
+          }
+        ],
+        "success": null,
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.68225,
+          "p95_ms": 5.628959,
+          "p99_ms": 5.628959,
+          "max_ms": 5.628959
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "mixed",
+        "route": "api-healthy",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 30.478833,
+          "p95_ms": 71.725458,
+          "p99_ms": 71.725458,
+          "max_ms": 71.725458
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.894125,
+          "p95_ms": 5.874709,
+          "p99_ms": 5.874709,
+          "max_ms": 5.874709
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "mixed",
+        "route": "iam",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 162.528292,
+          "p95_ms": 218.511208,
+          "p99_ms": 218.511208,
+          "max_ms": 218.511208
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.60775,
+          "p95_ms": 5.766584,
+          "p99_ms": 5.766584,
+          "max_ms": 5.766584
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "mixed",
+        "route": "oauth-cancel",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "client-error",
+            "n": 16
+          }
+        ],
+        "success": null,
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 4.072209,
+          "p95_ms": 5.830542,
+          "p99_ms": 5.830542,
+          "max_ms": 5.830542
+        },
+        "client_done_handler_active": 16
+      },
+      {
+        "phase": "mixed",
+        "route": "oauth-header",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "client-error",
+            "n": 16
+          }
+        ],
+        "success": null,
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.73075,
+          "p95_ms": 6.058584,
+          "p99_ms": 6.058584,
+          "max_ms": 6.058584
+        },
+        "client_done_handler_active": 16
+      },
+      {
+        "phase": "mixed",
+        "route": "oauth-healthy",
+        "offered": 16,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 16
+          }
+        ],
+        "success": {
+          "n": 16,
+          "p50_ms": 56.0565,
+          "p95_ms": 108.622458,
+          "p99_ms": 108.622458,
+          "max_ms": 108.622458
+        },
+        "scheduling": {
+          "n": 16,
+          "p50_ms": 3.649167,
+          "p95_ms": 6.149875,
+          "p99_ms": 6.149875,
+          "max_ms": 6.149875
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "recovery",
+        "route": "api-healthy",
+        "offered": 12,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 12
+          }
+        ],
+        "success": {
+          "n": 12,
+          "p50_ms": 33.004542,
+          "p95_ms": 40.941208,
+          "p99_ms": 40.941208,
+          "max_ms": 40.941208
+        },
+        "scheduling": {
+          "n": 12,
+          "p50_ms": 4.312458,
+          "p95_ms": 6.378292,
+          "p99_ms": 6.378292,
+          "max_ms": 6.378292
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "recovery",
+        "route": "iam",
+        "offered": 12,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 12
+          }
+        ],
+        "success": {
+          "n": 12,
+          "p50_ms": 159.043375,
+          "p95_ms": 179.332418,
+          "p99_ms": 179.332418,
+          "max_ms": 179.332418
+        },
+        "scheduling": {
+          "n": 12,
+          "p50_ms": 4.244083,
+          "p95_ms": 6.280708,
+          "p99_ms": 6.280708,
+          "max_ms": 6.280708
+        },
+        "client_done_handler_active": 0
+      },
+      {
+        "phase": "recovery",
+        "route": "oauth-healthy",
+        "offered": 12,
+        "outcomes": [
+          {
+            "outcome": "success",
+            "n": 12
+          }
+        ],
+        "success": {
+          "n": 12,
+          "p50_ms": 49.710791,
+          "p95_ms": 55.193875,
+          "p99_ms": 55.193875,
+          "max_ms": 55.193875
+        },
+        "scheduling": {
+          "n": 12,
+          "p50_ms": 4.315542,
+          "p95_ms": 6.376333,
+          "p99_ms": 6.376333,
+          "max_ms": 6.376333
+        },
+        "client_done_handler_active": 0
+      }
+    ],
+    "protected_comparisons": [
+      {
+        "phase": "mixed",
+        "route": "api-healthy",
+        "n": 16,
+        "p95_ms": 71.725458,
+        "p95_limit_ms": 77.68625,
+        "p99_ms": 71.725458,
+        "p99_limit_ms": 102.68625,
+        "pass": true
+      },
+      {
+        "phase": "mixed",
+        "route": "iam",
+        "n": 16,
+        "p95_ms": 218.511208,
+        "p95_limit_ms": 331.52041625000004,
+        "p99_ms": 218.511208,
+        "p99_limit_ms": 397.8244995,
+        "pass": true
+      },
+      {
+        "phase": "mixed",
+        "route": "oauth-healthy",
+        "n": 16,
+        "p95_ms": 108.622458,
+        "p95_limit_ms": 197.43479125,
+        "p99_ms": 108.622458,
+        "p99_limit_ms": 236.9217495,
+        "pass": true
+      },
+      {
+        "phase": "recovery",
+        "route": "api-healthy",
+        "n": 12,
+        "p95_ms": 40.941208,
+        "p95_limit_ms": 77.68625,
+        "p99_ms": 40.941208,
+        "p99_limit_ms": 102.68625,
+        "pass": true
+      },
+      {
+        "phase": "recovery",
+        "route": "iam",
+        "n": 12,
+        "p95_ms": 179.332418,
+        "p95_limit_ms": 331.52041625000004,
+        "p99_ms": 179.332418,
+        "p99_limit_ms": 397.8244995,
+        "pass": true
+      },
+      {
+        "phase": "recovery",
+        "route": "oauth-healthy",
+        "n": 12,
+        "p95_ms": 55.193875,
+        "p95_limit_ms": 197.43479125,
+        "p99_ms": 55.193875,
+        "p99_limit_ms": 236.9217495,
+        "pass": true
+      }
+    ],
+    "resources": {
+      "sample_count": 793,
+      "max_rss_bytes": 151339008,
+      "sampled_heap_peak_bytes": 83088480,
+      "sampled_goroutine_peak": 184,
+      "sampled_active_handlers_peak": 11
+    },
+    "cpu_user_ms": 5814.584,
+    "cpu_system_ms": 1289.07,
+    "peak_workflows": [
+      5,
+      5,
+      1,
+      1,
+      1
+    ],
+    "final_pools": [
+      {
+        "Owner": "oauth",
+        "Entries": 3,
+        "Retiring": 0,
+        "Leases": 0,
+        "Dials": 0,
+        "Connections": 0,
+        "DNS": 238,
+        "TCP": 33,
+        "TLS": 33,
+        "DialFailures": 0
+      },
+      {
+        "Owner": "api",
+        "Entries": 3,
+        "Retiring": 0,
+        "Leases": 0,
+        "Dials": 0,
+        "Connections": 0,
+        "DNS": 159,
+        "TCP": 33,
+        "TLS": 33,
+        "DialFailures": 16
+      }
+    ],
+    "mutations": {
+      "bindings": 108,
+      "total": 108,
+      "max_per_old_version": 1
+    },
+    "durable": [
+      {
+        "state": "ready",
+        "version": 1,
+        "n": 112
+      },
+      {
+        "state": "ready",
+        "version": 2,
+        "n": 78
+      },
+      {
+        "state": "uncertain",
+        "version": 1,
+        "n": 32
+      }
+    ],
+    "mixed_refresh": [
+      {
+        "state": "ready",
+        "version": 2,
+        "n": 16
+      },
+      {
+        "state": "uncertain",
+        "version": 1,
+        "n": 32
+      }
+    ],
+    "run": 3
+  }
+]
