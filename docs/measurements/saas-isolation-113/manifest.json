@@ -1,0 +1,19 @@
+{
+  "Version": 1,
+  "PhaseSeconds": 16,
+  "RecoverySeconds": 50,
+  "RecoveryProbeSeconds": 12,
+  "Inventory": 16,
+  "IAMIntervalMS": 1000,
+  "SaaSIntervalMS": 1000,
+  "RequestDeadlineMS": 3000,
+  "SampleMS": 100,
+  "FaultOAuth": 12,
+  "FaultAPI": 12,
+  "HealthyOAuth": 4,
+  "HealthyAPI": 4,
+  "IAM": 4,
+  "RSSLimit": 314474496,
+  "HeapLimit": 124526000,
+  "GoroutineLimit": 390
+}
