@@ -751,6 +751,17 @@ func run() (err error) {
 	if err != nil {
 		return fmt.Errorf("configure SaaS providers: %w", err)
 	}
+	closeSaaSProviders := func() {
+		for _, p := range saasProviders {
+			if p.OAuth2 != nil {
+				p.OAuth2.CloseConnections()
+			}
+			if p.GitHub != nil {
+				p.GitHub.CloseConnections()
+			}
+		}
+	}
+	defer closeSaaSProviders()
 	saasCatalog := make([]rbac.SaaSProviderInfo, 0, len(saasProviders))
 	for id, provider := range saasProviders {
 		saasCatalog = append(saasCatalog, rbac.SaaSProviderInfo{ID: id, Kind: provider.Kind, CallbackURI: provider.CallbackURI, Scopes: provider.Scopes})
@@ -762,6 +773,7 @@ func run() (err error) {
 	if err != nil {
 		return fmt.Errorf("configure SaaS provider store: %w", err)
 	}
+	defer providerStore.CloseConnections()
 	registeredProviders, err := providerStore.List(ctx, func() (string, []any) { return "1", nil })
 	if err != nil {
 		return fmt.Errorf("inspect registered SaaS providers: %w", err)
@@ -778,6 +790,8 @@ func run() (err error) {
 	if err != nil {
 		return fmt.Errorf("configure SaaS credential store: %w", err)
 	}
+	defer saasCredentials.CloseConnections()
+	providerStore.OnPolicyChange = saasCredentials.InvalidateProviderConnections
 	if err := rbacHandler.BindSaaSCredentials(saasCredentials); err != nil {
 		return fmt.Errorf("configure SaaS credential HTTP: %w", err)
 	}
@@ -1378,7 +1392,6 @@ func run() (err error) {
 	}
 
 	server := &http.Server{
-		BaseContext:       func(net.Listener) context.Context { return ctx },
 		Addr:              env("GOAUTHY_LISTEN_ADDR", ":8080"),
 		Handler:           healthBypass(issuerPathMiddleware(peerIPMiddleware(appHandler, trustedProxies), issuer), handler),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -1388,6 +1401,8 @@ func run() (err error) {
 		MaxHeaderBytes:    16 << 10,
 		TLSConfig:         tlsConfig,
 	}
+	drain := newRequestDrain(ctx, server)
+	defer drain.cancel()
 	if tlsReloader != nil {
 		go reloadTLS(ctx, tlsReloader)
 	}
@@ -1403,7 +1418,12 @@ func run() (err error) {
 		errCh <- server.ListenAndServe()
 	}()
 
-	return lifecycle(ctx, server, metricsServer, errCh, metricsErrCh)
+	dbCloseAllowed, err = drain.runLifecycle(ctx, server, metricsServer, errCh, metricsErrCh, func() {
+		providerStore.CloseConnections()
+		saasCredentials.CloseConnections()
+		closeSaaSProviders()
+	})
+	return err
 }
 
 // metricsListenAddrFromEnv validates the optional metrics TCP bind address
@@ -2521,6 +2541,7 @@ func lifecycle(ctx context.Context, appServer *http.Server, metricsServer *http.
 
 	case err := <-appErr:
 		_ = shutdownServer(metricsServer)
+		_ = shutdownServer(appServer)
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}

@@ -24,6 +24,7 @@ type CredentialStore struct {
 	db   *rhiza.DB
 	keys *oidc.Keyring
 	now  func() int64
+	http restrictedTransport
 }
 
 func NewCredentialStore(db *rhiza.DB, keys *oidc.Keyring) (*CredentialStore, error) {

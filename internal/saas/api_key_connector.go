@@ -36,6 +36,7 @@ type APIKeyConnector struct {
 	operations map[string]APIKeyOperationConfig
 	digest     string
 	client     *http.Client
+	registered providerHTTPBinding
 }
 
 // APIKeyConnectorInfo is the credential-free contract displayed for owner consent.

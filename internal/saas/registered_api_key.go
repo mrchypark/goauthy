@@ -61,6 +61,8 @@ func (s *CredentialStore) registeredAPIKeyInfo(ctx context.Context, owner, colle
 	if err != nil {
 		return registeredAPIKey{}, "", errCredential
 	}
+	connector.registered = providerHTTPBinding{db: s.db, id: id, kind: kind, revision: revision}
+	connector.client = providerHTTPClient(&s.http, s.db, id, kind, revision)
 	return registeredAPIKey{ID: id, Revision: revision, Enabled: enabled != 0, Connector: connector}, generation, nil
 }
 

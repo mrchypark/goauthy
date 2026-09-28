@@ -12,7 +12,7 @@ func (s *CredentialStore) CallAPIKey(ctx context.Context, owner, collection, con
 	if connector == nil || connector.Digest() == "" {
 		return nil, ErrAPIKeyConnectorConfig
 	}
-	binding, value, err := s.loadAPIKey(ctx, owner, collection, connection, authority)
+	binding, value, err := s.loadAPIKeyForDispatch(ctx, owner, collection, connection, authority, &connector.registered)
 	if err != nil {
 		return nil, err
 	}
@@ -24,7 +24,7 @@ func (s *CredentialStore) CallAPIKey(ctx context.Context, owner, collection, con
 	if err != nil {
 		return nil, err
 	}
-	current, value, err := s.loadAPIKey(ctx, owner, collection, connection, authority)
+	current, value, err := s.loadAPIKeyForDispatch(ctx, owner, collection, connection, authority, &connector.registered)
 	if err != nil {
 		return nil, err
 	}

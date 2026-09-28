@@ -2,13 +2,12 @@ package saas
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
-	"strconv"
+	"sync"
 	"time"
 )
 
@@ -25,79 +24,22 @@ type restrictedTransport struct {
 	base     *http.Transport
 	resolver ipResolver
 	dial     func(context.Context, string, string) (net.Conn, error)
+	mu       sync.Mutex
+	entries  []*httpPoolEntry
+	closed   bool
 }
 
 func newSaaSHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout:       15 * time.Second,
-		Transport:     &restrictedTransport{base: &http.Transport{Proxy: nil, DisableCompression: true, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}, resolver: net.DefaultResolver},
+		Transport:     &restrictedTransport{},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return errSaaSHTTP },
 	}
 }
 
 func (t *restrictedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req == nil || req.URL == nil || req.URL.Scheme != "https" || req.URL.Hostname() == "" || req.URL.User != nil || req.URL.Fragment != "" {
-		return nil, errSaaSUnsafeAddress
-	}
-	host := req.URL.Hostname()
-	port := req.URL.Port()
-	if port == "" {
-		port = "443"
-	} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
-		return nil, errSaaSUnsafeAddress
-	}
-	resolver := t.resolver
-	if resolver == nil {
-		resolver = net.DefaultResolver
-	}
-	addrs, err := resolver.LookupNetIP(req.Context(), "ip", host)
-	if err != nil {
-		return nil, errSaaSUnsafeAddress
-	}
-	var ip netip.Addr
-	for _, candidate := range addrs {
-		candidate = candidate.Unmap()
-		if !allowedOutboundIP(candidate) {
-			return nil, errSaaSUnsafeAddress
-		}
-		if !ip.IsValid() {
-			ip = candidate
-		}
-	}
-	if !ip.IsValid() {
-		return nil, errSaaSUnsafeAddress
-	}
-
-	base := t.base
-	if base == nil {
-		base = &http.Transport{Proxy: nil, DisableCompression: true, TLSHandshakeTimeout: 15 * time.Second, ResponseHeaderTimeout: 15 * time.Second, MaxResponseHeaderBytes: 8 << 10, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
-	}
-	transport := base.Clone()
-	transport.Proxy = nil
-	transport.DisableKeepAlives = true
-	if transport.TLSClientConfig == nil {
-		transport.TLSClientConfig = &tls.Config{}
-	} else {
-		transport.TLSClientConfig = transport.TLSClientConfig.Clone()
-	}
-	transport.TLSClientConfig.MinVersion = tls.VersionTLS12
-	transport.TLSClientConfig.ServerName = host
-	transport.TLSHandshakeTimeout = 15 * time.Second
-	transport.ResponseHeaderTimeout = 15 * time.Second
-	transport.MaxResponseHeaderBytes = 8 << 10
-	transport.ForceAttemptHTTP2 = false
-	if t.dial != nil {
-		transport.DialContext = t.dial
-	}
-	clone := req.Clone(req.Context())
-	clone.URL = cloneURL(req.URL, net.JoinHostPort(ip.String(), port))
-	clone.Host = req.Host
-	if clone.Host == "" {
-		clone.Host = req.URL.Host
-	}
-	return transport.RoundTrip(clone)
+	return t.roundTrip(req, providerHTTPBinding{})
 }
-
 func cloneURL(src *url.URL, host string) *url.URL {
 	u := *src
 	u.Host = host
