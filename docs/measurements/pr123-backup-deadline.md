@@ -101,3 +101,46 @@ This diagnosis does not turn the failed CI run green or claim PR123 acceptance.
   negative-control result, not a passing regression test.
 - No CI rerun, race-job cancellation, production edit, dependency change, or
   timeout/assertion relaxation. The original CI failure remains unresolved.
+
+## Bounded test repair (after diagnosis commit 0522da6)
+
+The unresolved-repair discussion above records the initial diagnosis. The chosen
+repair uses existing configuration; no production seam is necessary. Only
+`TestRunDeadlineCancelsJobAndStops` changes. Its production attempt timeout stays
+two seconds, and its parent timeout stays ten seconds. A 30-second test lease
+places the first renewal ten seconds **after acquisition**, later than the parent
+deadline established before dispatch. Thus renewal cannot be the first deadline
+while the parent is live. No sleeps, retries, production changes, or Rhiza edits
+are involved.
+
+The job verifies that its deadline precedes the parent's and is at most two
+seconds away, then waits for actual production cancellation. It requires the
+parent still be live at that point. The existing executed/DeadlineExceeded,
+one-report, and final Canceled assertions remain; the report additionally rejects
+ErrLeaseLost. Real database acquisition is still subject to the two-second
+attempt budget; this is not a guarantee against arbitrary host stalls.
+
+Separate real renewal and forced-loss coverage remains unchanged:
+`TestWithLeaseRenewsPastOriginalTTL`,
+`TestWithLeaseLosesOwnershipWithoutDeletingSuccessor`, and
+`TestRunSlotLostHolderCannotCompleteOrDeleteSuccessorLease`. The latter two force
+a successor token rather than depending on an accidental slow renewal; they
+check cancellation, preservation of the successor, and no completion watermark.
+
+Validation on Go 1.27.0 darwin/arm64, GOMAXPROCS=4:
+
+- Focused deadline/renewal/forced-loss tests, `-race -count=5 -timeout=180s`:
+  PASS, 27.079s (`repair-race.log`).
+- Temporary overlay replaces production `context.WithTimeout(ctx, timeout)`
+  with `context.WithCancel(ctx)`: expected FAIL, 1.371s, explicitly reporting
+  `job did not inherit the production attempt deadline` (`no-timeout.log`).
+- A second temporary overlay retains timeout creation but passes `ctx` instead
+  of `attempt` to production RunSlot: expected FAIL, 1.737s, same assertion
+  (`ignore-timeout.log`). Neither mutation edits repository production source.
+
+All logs and overlays are under `/tmp/goauthy-pr123-lease-proof/`. The old CI log
+and diagnosis remain preserved. CI has not been rerun or canceled; independent
+and Pro follow-up review remain required before pushing.
+- Full `go test -race ./internal/backupschedule -count=1 -timeout=90s`:
+  PASS, 20.109s (`repair-package-race.log`), including the lost-holder completion
+  fence. `git diff --check` also passed.
