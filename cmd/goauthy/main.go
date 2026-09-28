@@ -1391,15 +1391,9 @@ func run() (err error) {
 		}()
 	}
 
-	// A shutdown signal stops acceptance first; active token/identity/commit
-	// sequences retain their context until the bounded inbound drain finishes.
-	requestCtx, cancelRequests := context.WithCancel(context.WithoutCancel(ctx))
-	defer cancelRequests()
-	drain := &requestDrain{next: healthBypass(issuerPathMiddleware(peerIPMiddleware(appHandler, trustedProxies), issuer), handler), done: make(chan struct{})}
 	server := &http.Server{
-		BaseContext:       func(net.Listener) context.Context { return requestCtx },
 		Addr:              env("GOAUTHY_LISTEN_ADDR", ":8080"),
-		Handler:           drain,
+		Handler:           healthBypass(issuerPathMiddleware(peerIPMiddleware(appHandler, trustedProxies), issuer), handler),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      serverWriteTimeout,
@@ -1407,6 +1401,8 @@ func run() (err error) {
 		MaxHeaderBytes:    16 << 10,
 		TLSConfig:         tlsConfig,
 	}
+	drain := newRequestDrain(ctx, server)
+	defer drain.cancel()
 	if tlsReloader != nil {
 		go reloadTLS(ctx, tlsReloader)
 	}
@@ -1422,24 +1418,12 @@ func run() (err error) {
 		errCh <- server.ListenAndServe()
 	}()
 
-	lifecycleErr := lifecycle(ctx, server, metricsServer, errCh, metricsErrCh)
-	drained := drain.seal()
-	cancelRequests()
-	_ = server.Close()
-	providerStore.CloseConnections()
-	saasCredentials.CloseConnections()
-	closeSaaSProviders()
-	// Storage is still open while refresh handlers record uncertainty. If any
-	// handler ignores cancellation, don't close the DB underneath that work.
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 6*time.Second)
-	defer cleanupCancel()
-	select {
-	case <-drained:
-	case <-cleanupCtx.Done():
-		dbCloseAllowed = false
-		lifecycleErr = errors.Join(lifecycleErr, errors.New("request cleanup did not drain"))
-	}
-	return lifecycleErr
+	dbCloseAllowed, err = drain.runLifecycle(ctx, server, metricsServer, errCh, metricsErrCh, func() {
+		providerStore.CloseConnections()
+		saasCredentials.CloseConnections()
+		closeSaaSProviders()
+	})
+	return err
 }
 
 // metricsListenAddrFromEnv validates the optional metrics TCP bind address

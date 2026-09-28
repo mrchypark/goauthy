@@ -88,3 +88,6 @@ jobs:
       - name: test -race
         run: go test -race -timeout=90m -p 3 ./...
         # Known passing race suite (OAuth) takes ~56m; 60m timeout has too little headroom.
+
+      - name: Registered refresh shutdown integration -race
+        run: go test -race -tags=goauthy_integration ./cmd/goauthy -run '^TestRuntimeShutdownRegisteredRefresh$' -count=1 -timeout=120s

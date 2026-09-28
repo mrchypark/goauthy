@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -72,11 +71,11 @@ func TestRuntimeShutdownRegisteredRefresh(t *testing.T) {
 			defer provider.Close()
 			defer unblock()
 			providers, credentials, keys := saas.IntegrationRegisteredRefresh(t, db, provider)
-			requestCtx, cancelRequests := context.WithCancel(context.WithoutCancel(signalCtx))
-			defer cancelRequests()
+			requestContexts := make(chan context.Context, 1)
 			refreshDone := make(chan error, 1)
 			authority := func() (string, []any) { return "1", nil }
-			drain := &requestDrain{done: make(chan struct{}), next: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			app := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requestContexts <- r.Context()
 				_, err := credentials.RefreshOAuth2(r.Context(), providers, "owner", "collection", "connection", 1, authority)
 				refreshDone <- err
 				if err != nil {
@@ -84,9 +83,9 @@ func TestRuntimeShutdownRegisteredRefresh(t *testing.T) {
 					return
 				}
 				w.WriteHeader(http.StatusNoContent)
-			})}
-			app := httptest.NewUnstartedServer(drain)
-			app.Config.BaseContext = func(net.Listener) context.Context { return requestCtx }
+			}))
+			drain := newRequestDrain(signalCtx, app.Config)
+			defer drain.cancel()
 			app.Start()
 			defer app.Close()
 			responseDone := make(chan struct{})
@@ -103,10 +102,25 @@ func TestRuntimeShutdownRegisteredRefresh(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("refresh did not reach provider")
 			}
+			requestCtx := <-requestContexts
 			shutdownEntered := make(chan struct{})
 			app.Config.RegisterOnShutdown(func() { close(shutdownEntered) })
 			lifecycleDone := make(chan error, 1)
-			go func() { lifecycleDone <- lifecycle(signalCtx, app.Config, nil, nil, nil) }()
+			go func() {
+				storageMayClose, err := drain.runLifecycle(signalCtx, app.Config, nil, nil, nil, func() {
+					providers.CloseConnections()
+					credentials.CloseConnections()
+				})
+				if !storageMayClose {
+					t.Error("cleanup did not drain; storage cannot close")
+				}
+				select {
+				case <-drain.done:
+				default:
+					t.Error("shared lifecycle returned before handler cleanup")
+				}
+				lifecycleDone <- err
+			}()
 			stop()
 			<-shutdownEntered
 			if requestCtx.Err() != nil {
@@ -121,18 +135,6 @@ func TestRuntimeShutdownRegisteredRefresh(t *testing.T) {
 			}
 			if !forced && lifecycleErr != nil {
 				t.Fatalf("graceful drain=%v", lifecycleErr)
-			}
-			// Runtime ordering after lifecycle: seal admission, cancel handlers, close
-			// outbound owners, wait for uncertainty cleanup, then close storage.
-			drained := drain.seal()
-			cancelRequests()
-			_ = app.Config.Close()
-			providers.CloseConnections()
-			credentials.CloseConnections()
-			select {
-			case <-drained:
-			case <-time.After(6 * time.Second):
-				t.Fatal("cleanup did not drain")
 			}
 			refreshErr := <-refreshDone
 			if !forced && refreshErr != nil {
