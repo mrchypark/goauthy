@@ -362,6 +362,23 @@ func TestSnapshot112Storage(t *testing.T) {
 		t.Fatal(err)
 	}
 	exportNS := time.Since(begin).Nanoseconds()
+	// Export-only mode prepares immutable synthetic inputs for fresh-process
+	// phase measurements. Fixture creation is outside all restore timings.
+	if dest := os.Getenv("GOAUTHY_SNAPSHOT112_BUNDLE"); dest != "" {
+		if err := os.MkdirAll(dest, 0700); err != nil {
+			t.Fatal(err)
+		}
+		metadata, err := json.Marshal(map[string]any{"key": key.String(), "session": session.Token, "other": other.Token, "tokens": tokens, "shape": shape})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, data := range map[string][]byte{"bundle.age": archive.Bytes(), "metadata.json": metadata} {
+			if err := os.WriteFile(filepath.Join(dest, name), data, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return
+	}
 	begin = time.Now()
 	extracted, err := backup.Extract(bytes.NewReader(archive.Bytes()), []age.Identity{key}, root, limits)
 	if err != nil {
@@ -479,5 +496,34 @@ func TestSnapshot112LegacyRecord(t *testing.T) {
 		if _, err := server.store.decodeRequest(t.Context(), invalid, nil); err == nil {
 			t.Fatal("invalid record accepted")
 		}
+	}
+}
+
+// Replay handling needs the original request identity even on invalidation.
+func TestSnapshot112InvalidatedCodeRetainsRequest(t *testing.T) {
+	t.Parallel()
+	server := oauthTestServer(t, oauthTestDB(t), randomSecret(t))
+	code := issueCode(t, server, strings.Repeat("v", 43))
+	signature := server.authorizeCodes.AuthorizeCodeSignature(t.Context(), code)
+	before, err := server.store.GetAuthorizeCodeSession(t.Context(), signature, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := server.store.BeginTX(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.store.InvalidateAuthorizeCodeSession(tx, signature); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.store.Commit(tx); err != nil {
+		t.Fatal(err)
+	}
+	after, err := server.store.GetAuthorizeCodeSession(t.Context(), signature, nil)
+	if !errors.Is(err, fosite.ErrInvalidatedAuthorizeCode) || after == nil {
+		t.Fatalf("request=%v error=%v", after, err)
+	}
+	if after.GetID() != before.GetID() || after.GetClient().GetID() != before.GetClient().GetID() || after.GetRequestForm().Get("redirect_uri") != testRedirectURI {
+		t.Fatal("invalidated request binding changed")
 	}
 }
