@@ -14,7 +14,8 @@ import (
 	"time"
 )
 
-const expiry65CheckpointHistory = "fresh open; Rhiza archive checkpoints excluded by 1h/512MiB policy with case <=60s and disk <=256MiB; default SQLite PASSIVE checkpoints remain uncontrolled (1s worker)"
+const expiry65SQLiteCheckpointTreatment = "uncontrolled default 1s SQLite PASSIVE worker; included in wall/process CPU/WAL observations; phase/history unaligned across seed states"
+const expiry65CheckpointHistory = "fresh open; Rhiza archive checkpoints excluded by 1h/512MiB policy with case <=60s and disk <=256MiB; " + expiry65SQLiteCheckpointTreatment
 
 // outcome.json is mutable finalization status, excluded from SHA256SUMS.
 // Missing, pending, failed, or unreadable status must never certify completion.
@@ -132,7 +133,7 @@ func TestExpiry65Finalization(t *testing.T) {
 }
 
 func TestExpiry65CheckpointMetadata(t *testing.T) {
-	for _, required := range []string{"Rhiza archive checkpoints excluded", "SQLite PASSIVE checkpoints remain uncontrolled", "1s worker"} {
+	for _, required := range []string{"Rhiza archive checkpoints excluded", "uncontrolled default 1s SQLite PASSIVE worker", "included in wall/process CPU/WAL observations", "phase/history unaligned"} {
 		if !strings.Contains(expiry65CheckpointHistory, required) {
 			t.Fatalf("missing %q: %s", required, expiry65CheckpointHistory)
 		}

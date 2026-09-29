@@ -43,6 +43,19 @@ Locally verified source boundaries:
   startup and requires shared storage. Three independent standalone databases
   would not meet exact-three acceptance.
 
+### Exact-three qualification readiness
+
+This harness cannot exercise that topology: it opens one local Rhiza database
+and hosts the login, RBAC and provider handlers in one test process. Starting
+it three times would measure three isolated databases. Exact-three therefore
+remains **blocked**, pending an approved conditional-write store and a
+Rhiza-supported three-member runtime. When those exist, the reusable pieces are
+the frozen workload manifest, arrival schedule, real handler flows and
+correctness/performance oracles; a separate tagged setup adapter must start the
+real members against the shared store. Its first preflight must prove cross-
+member conditional refresh claims and identity/session behavior before any
+load phase. No exact-three run or infrastructure probe was performed here.
+
 The composition deliberately omits unrelated runtime startup workers and some
 outer middleware; it is not an actual `run()` process test. The signing-key
 loader uses a generated fixed test signing key. Setup seeds credentials using
@@ -231,6 +244,21 @@ Each primary uses a fresh process and fresh temporary storage; N is 1, 2 or 3:
   /tmp/goauthy113.test -test.run '^TestSaaSIsolation113Measurement$' -test.v -test.timeout=125s
 jq -f docs/measurements/saas-isolation-113/summarize.jq /tmp/runN.json
 ```
+
+The retained three-run summaries can be checked without starting the harness or
+repeating a load campaign:
+
+```sh
+jq -f docs/measurements/saas-isolation-113/qualify.jq docs/measurements/saas-isolation-113/results.json
+# Run the filter's focused positive and malformed-evidence checks:
+sh docs/measurements/saas-isolation-113/qualify-test.sh
+```
+
+This rejects missing/extra runs, incomplete protected-route samples, correctness
+or resource violations, repeated mutations and undrained pools. The retained
+packet qualifies standalone correctness, while performance remains
+inconclusive because run 2 breached the mixed healthy API threshold. It does
+not qualify exact-three topology.
 
 [raw-evidence.tar.gz](raw-evidence.tar.gz) contains all four raw run JSON files,
 logs/time records, source/binary hashes, provenance and focused check logs.

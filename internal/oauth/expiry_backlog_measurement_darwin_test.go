@@ -100,7 +100,7 @@ func TestExpiry65Campaign(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256(source)
-	manifest := map[string]any{"base": "5769e91f366fc4e047b4f666efa18711b5580fa0", "source_sha256": hex.EncodeToString(hash[:]), "go": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "gomaxprocs": runtime.GOMAXPROCS(0), "operations": expiry65Operations, "states": expiry65States, "repetitions": 3, "bundles": 1000, "maximum_cases": 45, "maximum_timed_operations": 90, "aggregate_seconds": 600, "case_seconds": 60, "disk_limit_bytes": 256 << 20, "disk_stop_bytes": 240 << 20, "checkpoint_interval": "1h", "checkpoint_tail_bytes": 512 << 20, "object_gc_interval": 0, "durability": "before_ack", "client_credentials": "bootstrap machine; ClientCredentialsMapSub=false; stored claims revision=1", "followup": "distinct input, after read-only validation; not independent", "wire": "unmeasured single-node", "started_utc": started.UTC()}
+	manifest := map[string]any{"base": "5769e91f366fc4e047b4f666efa18711b5580fa0", "source_sha256": hex.EncodeToString(hash[:]), "go": runtime.Version(), "os": runtime.GOOS, "arch": runtime.GOARCH, "gomaxprocs": runtime.GOMAXPROCS(0), "operations": expiry65Operations, "states": expiry65States, "repetitions": 3, "bundles": 1000, "maximum_cases": 45, "maximum_timed_operations": 90, "aggregate_seconds": 600, "case_seconds": 60, "disk_limit_bytes": 256 << 20, "disk_stop_bytes": 240 << 20, "checkpoint_interval": "1h", "checkpoint_tail_bytes": 512 << 20, "sqlite_checkpoint_treatment": expiry65SQLiteCheckpointTreatment, "object_gc_interval": 0, "durability": "before_ack", "client_credentials": "bootstrap machine; ClientCredentialsMapSub=false; stored claims revision=1", "followup": "distinct input, after read-only validation; not independent", "wire": "unmeasured single-node", "started_utc": started.UTC()}
 	reducer, err := os.ReadFile("expiry_backlog_report_darwin_test.go")
 	if err != nil {
 		t.Fatal(err)
@@ -532,6 +532,56 @@ func expiry65Affected(op string) []string {
 	}
 }
 
+func (f *expiry65Fixture) assertSeedExpiryState(op, state string, bundles int) {
+	f.t.Helper()
+	want := bundles
+	if state == "empty" {
+		want = 0
+	}
+	now := time.Now().UnixMilli()
+	for _, table := range expiry65Affected(op) {
+		if table == "browser_upstream_session_bindings" {
+			continue // Binding rows follow the session expiry and have no expiry column.
+		}
+		checkExpiry := func(expiry int64) {
+			f.t.Helper()
+			if state == "live" && expiry <= now || state == "expired" && expiry > now {
+				f.t.Fatalf("%s %s seed in %s has unexpected expiry %d at %d", state, op, table, expiry, now)
+			}
+		}
+		if table == "oauth_token_requests" {
+			rows := f.query(`SELECT request_json FROM oauth_token_requests WHERE signature LIKE 'expiry65-seed-%' ORDER BY signature`)
+			if len(rows) != want {
+				f.t.Fatalf("%s %s seeds in %s=%d, want %d", state, op, table, len(rows), want)
+			}
+			for _, row := range rows {
+				var request requestRecord
+				if err := json.Unmarshal([]byte(row[0].(string)), &request); err != nil {
+					f.t.Fatal(err)
+				}
+				if len(request.ExpiresAt) == 0 {
+					f.t.Fatalf("seed request in %s has no expiry", table)
+				}
+				for _, expiry := range request.ExpiresAt {
+					checkExpiry(expiry)
+				}
+			}
+		} else {
+			key := "signature"
+			if table == "browser_sessions" || table == "browser_authorization_interactions" {
+				key = "token_digest"
+			}
+			rows := f.query("SELECT expires_at_unix_ms FROM " + table + " WHERE " + key + " LIKE 'expiry65-seed-%' ORDER BY " + key)
+			if len(rows) != want {
+				f.t.Fatalf("%s %s seeds in %s=%d, want %d", state, op, table, len(rows), want)
+			}
+			for _, row := range rows {
+				checkExpiry(row[0].(int64))
+			}
+		}
+	}
+}
+
 func TestExpiry65Case(t *testing.T) {
 	which := os.Getenv("GOAUTHY_EXPIRY65_CASE")
 	if which == "" {
@@ -552,7 +602,9 @@ func TestExpiry65Case(t *testing.T) {
 // Two-bundle correctness smoke checks are not primary samples. No load matrix.
 func TestExpiry65FixtureShapes(t *testing.T) {
 	for _, op := range expiry65Operations {
-		t.Run(op, func(t *testing.T) { runExpiry65Case(t, op, "expired", 2, t.TempDir()) })
+		for _, state := range expiry65States {
+			t.Run(op+"/"+state, func(t *testing.T) { runExpiry65Case(t, op, state, 2, t.TempDir()) })
+		}
 	}
 }
 
@@ -583,6 +635,7 @@ func runExpiry65Case(t *testing.T, op, state string, bundles int, root string) {
 	baseline := f.state()
 	f.seed(op, state, bundles)
 	before := f.state()
+	f.assertSeedExpiryState(op, state, bundles)
 	for table, b := range baseline {
 		want := 0
 		if state != "empty" && slices.Contains(expiry65Affected(op), table) {
@@ -592,7 +645,7 @@ func runExpiry65Case(t *testing.T, op, state string, bundles int, root string) {
 			t.Fatalf("seed oracle table=%s", table)
 		}
 	}
-	expiry65JSON(t, "case", map[string]any{"operation": op, "state": state, "backlog_bundles": map[bool]int{true: 0, false: bundles}[state == "empty"], "before": before, "checkpoint_history": expiry65CheckpointHistory})
+	expiry65JSON(t, "case", map[string]any{"operation": op, "state": state, "backlog_bundles": map[bool]int{true: 0, false: bundles}[state == "empty"], "before": before, "checkpoint_history": expiry65CheckpointHistory, "sqlite_checkpoint_treatment": expiry65SQLiteCheckpointTreatment})
 	f.observe("before")
 	expiry65JSON(t, "empty_bracket", expiry65Measure("empty", func() {}))
 	for i := range 2 {
@@ -674,8 +727,11 @@ func runExpiry65Case(t *testing.T, op, state string, bundles int, root string) {
 			if after[table].Rows != want || after[table].SeedRows != seed || after[table].SentinelSHA256 != before[table].SentinelSHA256 {
 				t.Fatalf("after %d table=%s rows=%d want=%d seed=%d want=%d or sentinel changed", i, table, after[table].Rows, want, after[table].SeedRows, seed)
 			}
-			if seed > 0 && after[table].SeedSHA256 != before[table].SeedSHA256 {
+			if state == "live" && after[table].SeedSHA256 != before[table].SeedSHA256 {
 				t.Fatal("live seed fields changed")
+			}
+			if state == "empty" && after[table].SeedRows != 0 || state == "expired" && after[table].SeedRows != 0 {
+				t.Fatalf("%s control seed cardinality in %s=%d, want 0", state, table, after[table].SeedRows)
 			}
 		}
 		expiry65JSON(t, fmt.Sprintf("validated_%d", i), after)
