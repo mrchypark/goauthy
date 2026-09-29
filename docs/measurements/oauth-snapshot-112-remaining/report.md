@@ -46,8 +46,9 @@ datagram or total-wire byte count. It requires a nonempty interval, decodable
 packets, and zero kernel drops; setup errors fail closed. Run it on one real
 voter interface while issuing the bounded OAuth workload, filter to one peer,
 and retain only the aggregate output. `sh capture-ip-traffic_test.sh` exercises
-signal cleanup and decoder failure with mocks. The result excludes Ethernet
-framing and is not a cluster-wide multiplier.
+timestamped one/multiple-packet summaries, singular/plural stats, signal cleanup,
+and decoder failure with mocks. The result excludes Ethernet framing and is not
+a cluster-wide multiplier.
 The current `TestSnapshot112Storage` fixture opens one local voter, so it cannot
 itself produce peer packets. A one-second loopback readiness attempt failed:
 the host's BPF devices are root-only. Capture and peer traffic remain unvalidated

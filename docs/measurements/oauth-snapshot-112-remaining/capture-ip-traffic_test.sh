@@ -8,7 +8,10 @@ mkdir "$root/bin" "$root/state"
 cat >"$root/bin/tcpdump" <<'MOCK'
 #!/bin/sh
 if [ "${1-}" = -r ]; then
-	printf 'IP (tos 0x0, ttl 64, id 1, offset 0, flags [none], proto UDP (17), length 100) 127.0.0.1.1 > 127.0.0.1.2: UDP, length 72\n'
+	printf '12:34:56.123456 IP (tos 0x0, ttl 64, id 1, offset 0, flags [none], proto UDP (17), length 100) 127.0.0.1.1 > 127.0.0.1.2: UDP, length 72\n'
+	if [ "${MOCK_MULTI-}" = 1 ]; then
+		printf '12:34:56.123789 IP (tos 0x0, ttl 64, id 2, offset 0, flags [none], proto UDP (17), length 120) 127.0.0.1.1 > 127.0.0.1.2: UDP, length 92\n'
+	fi
 	[ "${MOCK_DECODE_FAIL-}" != 1 ] || exit 23
 	exit 0
 fi
@@ -16,7 +19,7 @@ while [ "$#" -gt 0 ]; do
 	if [ "$1" = -w ]; then shift; : >"$1"; fi
 	shift
 done
-trap 'sleep 1; touch "$MOCK_STATE/stopped"; exit 0' INT TERM
+trap 'count=${MOCK_CAPTURE_COUNT:-1}; word=packets; [ "$count" -eq 1 ] && word=packet; printf "%s %s captured\n0 packets dropped by kernel\n" "$count" "$word" >&2; sleep 1; touch "$MOCK_STATE/stopped"; exit 0' INT TERM
 touch "$MOCK_STATE/started"
 while :; do sleep 1; done
 MOCK
@@ -47,8 +50,20 @@ if find "$root" -type d -name 'oauth112-wire.*' | grep . >/dev/null; then
 	exit 1
 fi
 
+run_success() {
+	count=$1
+	multi=$2
+	MOCK_CAPTURE_COUNT="$count" MOCK_MULTI="$multi" "$script_dir/capture-ip-traffic.sh" lo0 127.0.0.1 65000 1 >"$root/success.out"
+	grep -q "^captured_ipv4_udp_packets=$count$" "$root/success.out"
+	if [ "$count" -eq 1 ]; then bytes=100; else bytes=220; fi
+	grep -q "^udp_port_matched_ipv4_bytes=$bytes$" "$root/success.out"
+	grep -q '^tcpdump_packets_dropped=0$' "$root/success.out"
+}
+run_success 1 0
+run_success 2 1
+
 export MOCK_DECODE_FAIL=1
-if "$script_dir/capture-ip-traffic.sh" lo0 127.0.0.1 65000 1 >"$root/decode.out" 2>"$root/decode.err"; then
+if MOCK_CAPTURE_COUNT=1 MOCK_MULTI=0 "$script_dir/capture-ip-traffic.sh" lo0 127.0.0.1 65000 1 >"$root/decode.out" 2>"$root/decode.err"; then
 	printf 'decoder failure was masked\n' >&2
 	exit 1
 fi
@@ -57,4 +72,4 @@ grep -q 'capture decode failed' "$root/decode.err" || {
 	exit 1
 }
 [ ! -s "$root/decode.out" ] || { printf 'decoder failure emitted a summary\n' >&2; exit 1; }
-printf 'capture signal and decoder failure checks passed\n'
+printf 'capture success, signal, and decoder checks passed\n'

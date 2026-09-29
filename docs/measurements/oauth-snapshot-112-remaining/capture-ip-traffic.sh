@@ -68,10 +68,18 @@ if ! tcpdump -r "$pcap" -n -q -v >"$tmp/decoded" 2>"$tmp/decode.log"; then
 	exit 1
 fi
 awk '
-/^IP / && match($0, /length [0-9]+/) {
-  n = substr($0, RSTART + 7, RLENGTH - 7)
-  packets++
-  bytes += n
+{
+  line = $0
+  if (substr(line, 1, 3) != "IP ") {
+    pos = index(line, " IP ")
+    if (!pos) next
+    line = substr(line, pos + 1)
+  }
+  if (substr(line, 1, 3) == "IP " && match(line, /length [0-9]+/)) {
+    n = substr(line, RSTART + 7, RLENGTH - 7)
+    packets++
+    bytes += n
+  }
 }
 END {
   if (packets == 0) exit 1
@@ -81,8 +89,8 @@ END {
 	exit 1
 }
 awk '
-/packets captured/ { captured = $1 }
-/packets dropped by kernel/ { dropped = $1; seen = 1 }
+$3 == "captured" && ($2 == "packet" || $2 == "packets") { captured = $1 }
+$3 == "dropped" && $4 == "by" && $5 == "kernel" && ($2 == "packet" || $2 == "packets") { dropped = $1; seen = 1 }
 END {
   if (captured == "" || !seen) exit 1
   printf "tcpdump_packets_captured=%s\ntcpdump_packets_dropped=%s\n", captured, dropped
