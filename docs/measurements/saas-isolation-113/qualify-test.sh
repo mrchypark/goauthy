@@ -19,5 +19,7 @@ reject 'del(.[2])'
 reject '.[0].violations = ["mutation"]'
 reject '.[0].final_pools[0].Leases = 1'
 reject '.[0].groups |= map(if .phase == "mixed" and .route == "oauth-cancel" then .outcomes = [] else . end)'
+reject '.[0].groups |= map(if .phase == "mixed" and .route == "oauth-cancel" then .outcomes = [{outcome: "success", n: 16}] else . end)'
+reject '.[0].protected_comparisons |= map(. + {pass: true, p95_ms: 999999, p99_ms: 999999})'
 
 printf 'retained evidence qualification passed; invalid evidence mutations rejected\n'
