@@ -1,7 +1,8 @@
 # Rhiza runtime profiles
 
-Production supports two explicit Rhiza `v0.12.0` modes. `standalone` uses one
-embedded member and a single data directory. Both `standalone` and the legacy
+Production supports two explicit Rhiza modes, currently pinned to `v0.12.3` in
+`go.mod`. `standalone` uses one embedded member and a single data directory.
+Both `standalone` and the legacy
 `dev` profile reject peer and voter/admin-token inputs. `standalone` now also
 accepts an optional S3 bucket and prefix with fixed `before-ack` durability,
 using the same object-store validation as cluster mode; partial configuration
@@ -17,9 +18,11 @@ contains distinct voter tokens for each member and a separate
 `GOAUTHY_RHIZA_ADMIN_TOKEN`; `GOAUTHY_RHIZA_PEER_TOKEN` is retained only as a
 legacy admin-token alias. Source validation and static Kubernetes configuration
 are verified. The exact-three base HA gate passed on the historical Rhiza `v0.10.0`
-baseline. The fresh v0.12.0 full profile also passes pod replacement, quorum-loss
-readiness 503, restoration and rolling restart; [verification details](../../docs/status.md)
-separate this result from untested profiles and mixed-version upgrades.
+baseline. The current Rhiza `v0.12.3` full-profile Kind gate also passes pod
+replacement, quorum-loss readiness 503, restoration and rolling restart
+([feature ledger](../../docs/features.md)). Kind evidence does not qualify a
+pinned production image or the separate standalone and exact-three release
+profiles; mixed-version upgrades remain unqualified.
 
 ## Local Kubernetes profile
 
