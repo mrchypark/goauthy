@@ -1,0 +1,37 @@
+{
+  "aggregate_seconds": 600,
+  "arch": "arm64",
+  "base": "5769e91f366fc4e047b4f666efa18711b5580fa0",
+  "bundles": 1000,
+  "case_seconds": 60,
+  "checkpoint_interval": "1h",
+  "checkpoint_tail_bytes": 536870912,
+  "client_credentials": "bootstrap machine; ClientCredentialsMapSub=false; stored claims revision=1",
+  "disk_limit_bytes": 268435456,
+  "disk_stop_bytes": 251658240,
+  "durability": "before_ack",
+  "followup": "distinct input, after read-only validation; not independent",
+  "go": "go1.27.0",
+  "gomaxprocs": 4,
+  "maximum_cases": 45,
+  "maximum_timed_operations": 90,
+  "object_gc_interval": 0,
+  "operations": [
+    "session",
+    "interaction",
+    "code",
+    "redemption",
+    "client_credentials"
+  ],
+  "os": "darwin",
+  "reducer_source_sha256": "f81d7c28898a6a2375165396f0a54f8796211c9d03f2443c04b3777a32c4c85d",
+  "repetitions": 3,
+  "source_sha256": "c114ead923e1ba73975c2dc8e5b0ac68789b55b240872a47b04912fe490c51d2",
+  "started_utc": "2026-09-28T21:52:36.741485Z",
+  "states": [
+    "empty",
+    "live",
+    "expired"
+  ],
+  "wire": "unmeasured single-node"
+}

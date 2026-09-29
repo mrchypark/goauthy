@@ -1,0 +1,21 @@
+{
+  "primary_runtime_completed_cases": 45,
+  "primary_timed_operations": 90,
+  "primary_raw_evidence_replaced": false,
+  "acceptance_complete": false,
+  "stop_decision": "No replacement campaign or production changes; return qualified evidence for independent and Pro review.",
+  "findings": [
+    {
+      "kind": "measurement_oracle",
+      "affected_cases": 45,
+      "detail": "Interaction sentinel lookup hashed the encoded token instead of decoded canonical bytes and compared zero-row hashes. Exact sentinel field preservation is unproven; fixture DBs were already removed.",
+      "current_source_fix": "Reuse browser.CanonicalTokenDigest; require exactly one row for every sentinel lookup.",
+      "validation": "Focused normal/race pass; restoring wrong digest via valid Go overlay fails before timing. No replacement primary samples."
+    },
+    {
+      "kind": "measurement_confound",
+      "detail": "Archive checkpoint policy/history was controlled, but the pinned materializer runs one-second SQLite PASSIVE checkpoints without a public Config switch. That background phase was not aligned across seed histories.",
+      "scope": "Observed wall/process-CPU/WAL deltas include this work; no isolated deletion cost or worker benefit established."
+    }
+  ]
+}
