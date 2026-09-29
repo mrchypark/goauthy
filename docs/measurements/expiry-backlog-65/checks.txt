@@ -29,9 +29,11 @@ The exact live interaction sentinel fields therefore remain unproven for the
 primary dataset. The other table sentinels have nonempty-row hashes.
 
 Original raw/SHA256SUMS: all 49 entries verified.
-Current source differs from measured-harness.go.txt only by canonical sentinel
-lookup and mandatory exactly-one-row validation; the measured source's hash
-matches raw/manifest.json. Reducer source hash matches the manifest.
+The measured source hash matches raw/manifest.json. Current source additionally
+contains the canonical sentinel lookup, mandatory exactly-one-row validation,
+empty/live/expired two-bundle controls, and checkpoint/finalization metadata;
+these changes do not rewrite historical artifacts. Reducer source hash matches
+the historical manifest.
 No private-key blocks, credential-valued token fields, Authorization bearer
 headers, cookie headers or fixture client-secret value found in retained logs.
 
@@ -59,3 +61,13 @@ All 49 original raw SHA256SUMS entries verified unchanged; measured source hash
 remains c114ead923e1ba73975c2dc8e5b0ac68789b55b240872a47b04912fe490c51d2.
 An initial vet invocation from raw/ used a repo-relative package path and failed
 to locate it; the repository-root invocation above completed successfully.
+
+Acceptance-control follow-up (current source only; no primary campaign):
+GOMAXPROCS=4 go test -tags=integration ./internal/oauth -run '^TestExpiry65(FixtureShapes|Finalization|CheckpointMetadata)$' -count=1 -timeout=180s
+PASS, 46.894s. FixtureShapes now runs all five operations against two-bundle
+empty/live/expired controls (15 cases), verifies stored expiry state and exact
+seed cardinality, preserves live seed hashes and sentinels, and checks empty
+controls stay empty. Finalization and checkpoint metadata checks passed.
+The first development run found that the new request check counted expiry
+fields instead of rows; that assertion was corrected before the passing run.
+No race, vet, full suite, or measurement campaign was run.

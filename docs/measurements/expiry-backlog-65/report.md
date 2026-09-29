@@ -215,13 +215,18 @@ Current source uses the public canonical helper and requires **exactly one row
 for every sentinel lookup**. A valid Go overlay restoring the old digest
 calculation fails before timing with `sentinel lookup
 browser_authorization_interactions returned 0 rows, want exactly one` (exit 1,
-not a compile/SQL error). Only two-bundle correctness checks were rerun after
-the correction. The original campaign's evidence was not rewritten or replaced.
+not a compile/SQL error). The current two-bundle controls cover all five
+operations with empty, live, and expired inputs. They check that empty inputs
+remain empty, live seed expiries are actually in the future and their fields
+and cardinality survive both calls, and expired seed rows are actually past
+expiry and removed with exact table cardinalities. These checks improve the
+current acceptance harness; they do not recover or replace historical samples.
 
 [Measured source](measured-harness.go.txt) has SHA256
 `c114ead923e1ba73975c2dc8e5b0ac68789b55b240872a47b04912fe490c51d2`, matching
 `raw/manifest.json`; current harness source intentionally differs by the oracle
-correction and the subsequent untimed finalization/metadata corrections below.
+correction, the empty/live controls, and the subsequent untimed
+finalization/metadata corrections below.
 The reducer SHA256 is
 `f81d7c28898a6a2375165396f0a54f8796211c9d03f2443c04b3777a32c4c85d`.
 All 49 original [raw hashes](raw/SHA256SUMS) verified. No keys, cookies, token
@@ -238,8 +243,13 @@ write reports that gate result and does not certify its own elapsed time.
 Isolated filesystem tests force checksum-write failure and deadline crossings
 before and after pending-status publication, with successful and prior-failure
 controls; they open no database.
-Current checkpoint metadata separately identifies excluded Rhiza archive
-checkpoints and uncontrolled default one-second SQLite PASSIVE checkpoints.
+Current harness manifests and case records separately identify excluded Rhiza
+archive checkpoints and the uncontrolled default one-second SQLite PASSIVE
+worker. They explicitly mark this worker as included in wall, process-CPU, and
+WAL observations, with its phase/history unaligned across seed states. The
+historical manifest is unchanged and did not record that inclusion; this
+current-source metadata does not make the historical checkpoint treatment
+controlled.
 The current manifest also hashes the separate finalization helper source.
 These are current-source corrections, not new measurements. Historical raw
 logs, outcome, hashes, manifest and measured source remain unchanged. Neither
