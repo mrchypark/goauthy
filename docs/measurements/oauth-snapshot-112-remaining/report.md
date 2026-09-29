@@ -22,10 +22,10 @@ No service was started, installed, deployed, or probed with credentials.
 Pinned Rhiza v0.12.3 `pkg/node/node.go:61-70` rejects filesystem (including an
 implicit directory) for multiple members, and `:203-204` requires archive CAS.
 Its public `rhiza.Config` has no transport injection hook. `/usr/sbin/tcpdump`
-exists; tshark is absent. Capture permission, peer filter/direction, loss,
-loopback duplication and offload accounting were **not validated** after the
-object-store blocker. The wire branch stopped before a three-voter harness or
-packet capture. No qlog, object-store or JSON multiplier stands in for wire bytes.
+exists; tshark is absent. At that earlier check capture permission, peer
+filter/direction, loss, loopback duplication and offload accounting were not
+validated. The wire branch stopped before a three-voter harness or packet
+capture. No qlog, object-store or JSON multiplier stands in for wire bytes.
 
 ### Readiness follow-up (2026-09-29)
 
@@ -39,16 +39,20 @@ conditional shared-store gate therefore remains unverified.
 `capture-ip-traffic.sh INTERFACE PEER_IPV4 PEER_PORT SECONDS` is the opt-in path
 for an already-running multi-voter workload. It captures IPv4 UDP packets with a
 96-byte snap length in a private temporary directory, reports packet count and
-summed IP datagram lengths, then removes the capture on every exit. It requires
-a nonempty interval, decodable packets, and zero kernel drops; setup errors fail
-closed. Run it on one real voter interface while issuing the bounded OAuth
-workload, filter to one peer, and retain only the aggregate output. The result is
-captured IPv4 datagram bytes, not Ethernet framing or a cluster-wide multiplier.
+summed IPv4 lengths for packets matched by the UDP port filter, then removes the
+capture on every exit. Non-initial IPv4 fragments have no UDP port header and
+are excluded by that filter; this is a port-matched packet subtotal, not a full
+datagram or total-wire byte count. It requires a nonempty interval, decodable
+packets, and zero kernel drops; setup errors fail closed. Run it on one real
+voter interface while issuing the bounded OAuth workload, filter to one peer,
+and retain only the aggregate output. `sh capture-ip-traffic_test.sh` exercises
+signal cleanup and decoder failure with mocks. The result excludes Ethernet
+framing and is not a cluster-wide multiplier.
 The current `TestSnapshot112Storage` fixture opens one local voter, so it cannot
 itself produce peer packets. A one-second loopback readiness attempt failed:
-the host's BPF devices are root-only. Capture permission and peer traffic remain
-unvalidated; the task stays blocked until an approved conditional shared store
-and a real multi-voter OAuth run are available.
+the host's BPF devices are root-only. Capture and peer traffic remain unvalidated
+in the permitted context; the task stays blocked until an approved conditional
+shared store and a real multi-voter OAuth run are available.
 
 ## Clean restore method
 
