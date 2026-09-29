@@ -64,6 +64,37 @@ func TestRhizaConfigFromEnvCluster(t *testing.T) {
 	}
 }
 
+func TestRhizaConfigFromEnvKeepsObjectStoreGCDisabled(t *testing.T) {
+	t.Parallel()
+	dev := map[string]string{
+		"GOAUTHY_RHIZA_PROFILE": RhizaProfileDev, "GOAUTHY_CLUSTER_ID": "local", "GOAUTHY_NODE_ID": "node-0", "GOAUTHY_DATA_DIR": "./data",
+	}
+	standalone := clusterEnv()
+	standalone["GOAUTHY_RHIZA_PROFILE"] = RhizaProfileStandalone
+	standalone["GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE"] = "true"
+	for _, name := range []string{"GOAUTHY_RHIZA_PEER_ADDR", "GOAUTHY_RHIZA_MEMBERS", "GOAUTHY_RHIZA_ADMIN_TOKEN"} {
+		delete(standalone, name)
+	}
+	for _, test := range []struct {
+		name string
+		env  map[string]string
+	}{
+		{name: "dev", env: dev},
+		{name: "durable standalone", env: standalone},
+		{name: "cluster", env: clusterEnv()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config, err := RhizaConfigFromEnv(envMap(test.env))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if config.ObjStoreGCInterval != 0 || config.ObjStoreGCGracePeriod != 0 {
+				t.Fatalf("object-store GC must remain disabled: interval=%s grace=%s", config.ObjStoreGCInterval, config.ObjStoreGCGracePeriod)
+			}
+		})
+	}
+}
+
 func TestRhizaConfigFromEnvDurableStandalone(t *testing.T) {
 	t.Parallel()
 	env := clusterEnv()

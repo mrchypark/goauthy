@@ -27,6 +27,28 @@ GoAuthy's `internal/storage/config.go` already fixes object-store durability to
 before-ack. Default Kubernetes profiles additionally require object storage so
 missing configuration cannot silently select standalone local-only persistence.
 
+## Periodic object-store GC readiness (blocked)
+
+GoAuthy keeps Rhiza's periodic object-store GC disabled: the config adapter
+rejects GC interval and grace-period environment variables, and supported
+profiles leave both fields zero. Existing export/restore GC checks exercise
+paired recovery pins; they do not qualify the node's periodic GC loop.
+
+Issue [#105](https://github.com/mrchypark/goauthy/issues/105) remains blocked on
+the recovery contract. Production pins Rhiza v0.12.3; its cold-start recovery
+does not publish the archive/checkpoint pins used by live catch-up. Rhiza v0.18.0
+source inspection found a startup finalization race window, and that upgrade
+also changes physical SQL/WAL formats and voter identities, including startup
+failure when a registered voter's local WAL is lost. Fresh-state tests do not
+qualify migration or recovery of existing namespaces. These are source-derived
+compatibility findings, not a demonstrated data-loss event.
+
+Keep the dependency pin unchanged and GC disabled until a released upstream
+fix and explicit migration/recovery contract are available, followed by
+exact-three recovery and periodic-GC qualification. Do not use object TTL or
+bypass voter registration as a substitute; preserve existing installations and
+namespaces.
+
 ## Deployment and evidence
 
 GoAuthy data uses disk-backed `emptyDir`; secret volumes remain independent.
