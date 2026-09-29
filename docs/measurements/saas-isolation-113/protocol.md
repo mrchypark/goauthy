@@ -6,6 +6,17 @@ by the previously established lack of a permitted shared conditional-write
 object store. No infrastructure probe/redeployment is part of this tranche.
 #113 remains open; these thresholds are not production SLOs.
 
+The exact-three topology is not runnable with this fixture. It opens one local
+Rhiza database and creates its HTTP servers inside a single test process; three
+copies would create three independent databases, not three application members
+sharing conditional writes. Once an approved store and a Rhiza-supported
+three-member runtime are available, reuse this manifest, arrival schedule,
+handler-level flow oracles and offline comparisons through a separate tagged
+setup adapter that starts the real members against that store. First verify
+shared conditional refresh claims and identity/session behavior across members.
+Do not count three standalone runs as topology coverage or derive a production
+budget from this manifest.
+
 One excluded pilot completed in 93.72 seconds. Then exactly three fresh
 non-race/non-coverage test executable processes use the adjacent manifest.
 Each has a 125-second test deadline, bounding pilot plus primary process budgets
