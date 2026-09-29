@@ -1,4 +1,6 @@
 def require($ok; $message): if $ok then . else error($message) end;
+def nonnegative_integer: type == "number" and isfinite and . >= 0 and floor == .;
+def positive_integer: type == "number" and isfinite and . > 0 and floor == .;
 def expected_outcomes($phase; $route; $n):
   if $phase == "baseline" or $phase == "recovery"
     or $route == "iam" or $route == "api-healthy" or $route == "oauth-healthy" then
@@ -56,9 +58,12 @@ def limit($value; $factor; $offset): [($value * $factor), ($value + $offset)] | 
     and .mutations.bindings == 108
     and .mutations.total == 108
     and .mutations.max_per_old_version == 1
-    and .resources.sample_count > 0
+    and (.resources.sample_count | positive_integer)
+    and (.resources.max_rss_bytes | nonnegative_integer)
     and .resources.max_rss_bytes <= 314474496
+    and (.resources.sampled_heap_peak_bytes | nonnegative_integer)
     and .resources.sampled_heap_peak_bytes <= 124526000
+    and (.resources.sampled_goroutine_peak | nonnegative_integer)
     and .resources.sampled_goroutine_peak <= 390
     and (.final_pools | length) == 2
     and all(.final_pools[]; .Leases == 0 and .Dials == 0 and .Connections == 0)
