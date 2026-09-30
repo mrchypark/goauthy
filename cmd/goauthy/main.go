@@ -1562,21 +1562,27 @@ func mountAccountRoutes(mux *http.ServeMux, deleteUser, selfDelete http.HandlerF
 func deviceSessionSubject(store *browser.Store, issuer string, requireMFA ...bool) device.Subject {
 	cookieName, err := browser.CookieName(issuer)
 	if err != nil {
-		return func(*http.Request) (string, bool, bool) { return "", false, false }
+		return func(*http.Request) (device.AuthenticatedSubject, bool) { return device.AuthenticatedSubject{}, false }
 	}
-	return func(r *http.Request) (string, bool, bool) {
+	return func(r *http.Request) (device.AuthenticatedSubject, bool) {
 		cookie, err := r.Cookie(cookieName)
 		if err != nil || cookie.Value == "" {
-			return "", false, false
+			return device.AuthenticatedSubject{}, false
 		}
-		session, err := store.LoadSessionReadOnlyForPeer(r.Context(), cookie.Value, browser.PeerIPFromContext(r.Context()))
+		peerIP := browser.PeerIPFromContext(r.Context())
+		session, err := store.LoadSessionReadOnlyForPeer(r.Context(), cookie.Value, peerIP)
 		if err != nil || session.Subject == "" {
-			return "", false, false
+			return device.AuthenticatedSubject{}, false
 		}
 		if len(requireMFA) != 0 && requireMFA[0] && session.AuthenticationMethod != "mfa" {
-			return "", false, false
+			return device.AuthenticatedSubject{}, false
 		}
-		return session.Subject, session.AuthenticationMethod == "mfa", true
+		return device.AuthenticatedSubject{
+			Session: session,
+			SessionGuard: func() (string, []any) {
+				return store.SessionAuthorizationGuard(session, peerIP)
+			},
+		}, true
 	}
 }
 

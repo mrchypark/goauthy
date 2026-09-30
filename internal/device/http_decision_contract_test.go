@@ -14,16 +14,26 @@ import (
 	"github.com/mrchypark/goauthy/internal/identity"
 )
 
-// The device decision contract is fenced by grant state and grant expiry, not
-// by the browser session that started the flow, so these tests drive one
-// handler with more than one authenticated approver identity. headerSubject
-// takes the approver from a test header and defaults to the identity that the
-// shared verificationCSRF helper reviews with.
-func headerSubject(r *http.Request) (string, bool, bool) {
+// The originating session does not own the grant decision. Another live,
+// authenticated approver session may decide it. headerSubject models those
+// independent approver identities for the handler contract tests.
+func headerSubject(r *http.Request) (AuthenticatedSubject, bool) {
+	subject := "user-1"
 	if subject := r.Header.Get("X-Test-Subject"); subject != "" {
-		return subject, false, true
+		return testApprover(subject, false), true
 	}
-	return "user-1", false, true
+	return testApprover(subject, false), true
+}
+
+func testApprover(subject string, mfa bool) AuthenticatedSubject {
+	authMethod := "pwd"
+	if mfa {
+		authMethod = "mfa"
+	}
+	return AuthenticatedSubject{
+		Session:      browser.Session{ID: "test-session-" + subject, Subject: subject, AuthenticationMethod: authMethod},
+		SessionGuard: func() (string, []any) { return "1=1", nil },
+	}
 }
 
 func decisionForm(grant Grant, cookie *http.Cookie, csrf, action, subject, peer string) *http.Request {
@@ -133,11 +143,10 @@ func TestDeviceDecisionContractDenyRecordsNoSubject(t *testing.T) {
 	}
 }
 
-// Device approval currently uses the subject returned by the successful
-// browser-session read even when that session is revoked before the decision
-// write. Keep this interposition explicit while the desired commit-time
-// session-fencing policy remains open.
-func TestDeviceDecisionContractRevokedAfterSessionAuthentication(t *testing.T) {
+// Revocation after authentication but before persistence fences both decision
+// kinds. The grant starter is not the approver, so this guard binds only the
+// session that authenticated the current decision request.
+func TestDeviceDecisionRejectsSessionRevokedBeforePersistence(t *testing.T) {
 	ctx, store, db := testStore(t)
 	identities, err := identity.NewStore(db)
 	if err != nil {
@@ -151,69 +160,79 @@ func TestDeviceDecisionContractRevokedAfterSessionAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := browserStore.CreateSession(ctx, "device-session-actor", "pwd", time.Now().UTC().Add(time.Hour), "192.0.2.80")
-	if err != nil {
-		t.Fatal(err)
-	}
 	cookieName, err := browser.CookieName("https://id.example.test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	authenticated := make(chan struct{})
-	continueDecision := make(chan struct{})
-	var release sync.Once
-	defer release.Do(func() { close(continueDecision) })
-	subject := func(r *http.Request) (string, bool, bool) {
-		cookie, err := r.Cookie(cookieName)
-		if err != nil {
-			return "", false, false
-		}
-		loaded, err := browserStore.LoadSessionReadOnlyForPeer(r.Context(), cookie.Value, browser.PeerIPFromContext(r.Context()))
-		if err != nil || loaded.Subject == "" {
-			return "", false, false
-		}
-		if r.Method == http.MethodPost {
-			close(authenticated)
-			<-continueDecision
-		}
-		return loaded.Subject, loaded.AuthenticationMethod == "mfa", true
-	}
-	h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, subject)
-	grant, err := store.Create(ctx, "client-1", []string{"openid"}, deviceHTTPTestNow)
-	if err != nil {
-		t.Fatal(err)
-	}
-	csrfCookie, err := csrfToken()
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := decisionForm(grant, &http.Cookie{Name: h.csrfCookieName(), Value: csrfCookie}, reviewedDeviceCSRF(csrfCookie, grant.UserCode), "approve", "", "192.0.2.80:4000")
-	request.AddCookie(&http.Cookie{Name: cookieName, Value: session.Token})
-	request = request.WithContext(browser.ContextWithPeerIP(request.Context(), "192.0.2.80"))
-	response := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, request)
-		response <- w
-	}()
-	select {
-	case <-authenticated:
-	case <-time.After(5 * time.Second):
-		t.Fatal("browser-session authentication did not reach the interposition point")
-	}
-	if err := browserStore.RevokeSession(ctx, session.Token); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := browserStore.LoadSessionReadOnlyForPeer(ctx, session.Token, "192.0.2.80"); !errors.Is(err, browser.ErrRevoked) {
-		t.Fatalf("session after revoke=%v", err)
-	}
-	release.Do(func() { close(continueDecision) })
-	w := <-response
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Device approved") {
-		t.Fatalf("decision after authenticated session revoke=%d %s", w.Code, w.Body.String())
-	}
-	poll, err := store.Poll(ctx, grant.DeviceCode, "client-1", deviceHTTPTestNow)
-	if err != nil || poll.Status != StatusClaimed || poll.Subject != "device-session-actor" {
-		t.Fatalf("post-revoke poll=%+v err=%v", poll, err)
+	for _, action := range []string{"approve", "deny"} {
+		t.Run(action, func(t *testing.T) {
+			session, err := browserStore.CreateSession(ctx, "device-session-actor", "pwd", time.Now().UTC().Add(time.Hour), "192.0.2.80")
+			if err != nil {
+				t.Fatal(err)
+			}
+			authenticated := make(chan struct{})
+			continueDecision := make(chan struct{})
+			var release sync.Once
+			defer release.Do(func() { close(continueDecision) })
+			subject := func(r *http.Request) (AuthenticatedSubject, bool) {
+				cookie, err := r.Cookie(cookieName)
+				if err != nil {
+					return AuthenticatedSubject{}, false
+				}
+				peerIP := browser.PeerIPFromContext(r.Context())
+				loaded, err := browserStore.LoadSessionReadOnlyForPeer(r.Context(), cookie.Value, peerIP)
+				if err != nil || loaded.Subject == "" {
+					return AuthenticatedSubject{}, false
+				}
+				if r.Method == http.MethodPost {
+					close(authenticated)
+					<-continueDecision
+				}
+				return AuthenticatedSubject{
+					Session: loaded,
+					SessionGuard: func() (string, []any) {
+						return browserStore.SessionAuthorizationGuard(loaded, peerIP)
+					},
+				}, true
+			}
+			h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, subject)
+			grant, err := store.Create(ctx, "client-1", []string{"openid"}, deviceHTTPTestNow)
+			if err != nil {
+				t.Fatal(err)
+			}
+			csrfCookie, err := csrfToken()
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := decisionForm(grant, &http.Cookie{Name: h.csrfCookieName(), Value: csrfCookie}, reviewedDeviceCSRF(csrfCookie, grant.UserCode), action, "", "192.0.2.80:4000")
+			request.AddCookie(&http.Cookie{Name: cookieName, Value: session.Token})
+			request = request.WithContext(browser.ContextWithPeerIP(request.Context(), "192.0.2.80"))
+			response := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, request)
+				response <- w
+			}()
+			select {
+			case <-authenticated:
+			case <-time.After(5 * time.Second):
+				t.Fatal("browser-session authentication did not reach the interposition point")
+			}
+			if err := browserStore.RevokeSession(ctx, session.Token); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := browserStore.LoadSessionReadOnlyForPeer(ctx, session.Token, "192.0.2.80"); !errors.Is(err, browser.ErrRevoked) {
+				t.Fatalf("session after revoke=%v", err)
+			}
+			release.Do(func() { close(continueDecision) })
+			w := <-response
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("decision after session revoke=%d %s", w.Code, w.Body.String())
+			}
+			row, found, err := store.load(ctx, digest(grant.DeviceCode), "client-1")
+			if err != nil || !found || row.state != "pending" || row.subject != "" {
+				t.Fatalf("revoked session changed grant: row=%+v found=%v err=%v", row, found, err)
+			}
+		})
 	}
 }

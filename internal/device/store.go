@@ -158,21 +158,52 @@ func (s *Store) Approve(ctx context.Context, userCode, subject string, now time.
 
 // ApproveWithMFA accepts evidence only from the server's authenticated browser session.
 func (s *Store) ApproveWithMFA(ctx context.Context, userCode, subject string, mfa bool, now time.Time) error {
-	return s.decide(ctx, userCode, subject, "approved", mfa, now)
+	return s.decide(ctx, userCode, subject, "approved", mfa, "", nil, now)
 }
+
+// ApproveWithMFAAndSessionGuard commits approval only while the authenticating
+// browser session remains valid. The guard is built at mutation time so session
+// revocation and grant decision are ordered by the same storage write.
+func (s *Store) ApproveWithMFAAndSessionGuard(ctx context.Context, userCode, subject, sessionID string, mfa bool, guard func() (string, []any), now time.Time) error {
+	if guard == nil || sessionID == "" {
+		return ErrInvalid
+	}
+	return s.decide(ctx, userCode, subject, "approved", mfa, sessionID, guard, now)
+}
+
 func (s *Store) Deny(ctx context.Context, userCode string, now time.Time) error {
-	return s.decide(ctx, userCode, "", "denied", false, now)
+	return s.decide(ctx, userCode, "", "denied", false, "", nil, now)
 }
-func (s *Store) decide(ctx context.Context, userCode, subject, state string, mfa bool, now time.Time) error {
+
+// DenyWithSessionGuard applies the same commit-time browser-session fence to
+// denial decisions as approval decisions.
+func (s *Store) DenyWithSessionGuard(ctx context.Context, userCode, sessionID string, guard func() (string, []any), now time.Time) error {
+	if guard == nil || sessionID == "" {
+		return ErrInvalid
+	}
+	return s.decide(ctx, userCode, "", "denied", false, sessionID, guard, now)
+}
+
+func (s *Store) decide(ctx context.Context, userCode, subject, state string, mfa bool, sessionID string, sessionGuard func() (string, []any), now time.Time) error {
 	if s == nil || s.db == nil || NormalizeUserCode(userCode) == "" || (state == "approved" && subject == "") {
 		return ErrInvalid
 	}
 	d := digest(NormalizeUserCode(userCode))
 	now = now.UTC().Truncate(time.Millisecond)
-	id := "device-decide/" + d[:20] + "/" + state + fmt.Sprint(now.UnixMilli(), "/", mfa)
-	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: id, SQL: `UPDATE oauth_device_grants SET state = ?, subject = ?, decision_attempt = ?, mfa_verified = ?, claim_token_digest = NULL, claim_until_unix_ms = NULL
+	id := "device-decide/" + digest(fmt.Sprint(d, "/", state, "/", now.UnixMilli(), "/", mfa, "/", subject, "/", sessionID))
+	sql := `UPDATE oauth_device_grants SET state = ?, subject = ?, decision_attempt = ?, mfa_verified = ?, claim_token_digest = NULL, claim_until_unix_ms = NULL
 		WHERE user_code_digest = ? AND state = 'pending' AND expires_at_unix_ms > ?
- AND (? = 'denied' OR ? = 1 OR NOT EXISTS (SELECT 1 FROM managed_oauth_clients c WHERE c.id=oauth_device_grants.client_id AND c.force_mfa=1))`, Args: []any{state, nilIfEmpty(subject), id, mfa, d, now.UnixMilli(), state, mfa}})
+	 AND (? = 'denied' OR ? = 1 OR NOT EXISTS (SELECT 1 FROM managed_oauth_clients c WHERE c.id=oauth_device_grants.client_id AND c.force_mfa=1))`
+	args := []any{state, nilIfEmpty(subject), id, mfa, d, now.UnixMilli(), state, mfa}
+	if sessionGuard != nil {
+		guardSQL, guardArgs := sessionGuard()
+		if strings.TrimSpace(guardSQL) == "" {
+			return ErrInvalid
+		}
+		sql += " AND (" + guardSQL + ")"
+		args = append(args, guardArgs...)
+	}
+	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: id, SQL: sql, Args: args})
 	if err != nil {
 		if s.decisionApplied(ctx, d, state, subject, id, now) {
 			return nil
