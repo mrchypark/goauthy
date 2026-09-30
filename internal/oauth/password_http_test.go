@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -229,6 +230,17 @@ func testPasswordHTTP(t *testing.T, confidential bool) {
 	}
 	before := counts()
 	emitted := 0
+	const eventFailure = "password-event-store-private-sentinel"
+	s.SetTokenIssued(func(context.Context, string, string, string) error {
+		emitted++
+		return errors.New(eventFailure)
+	})
+	postIssueEventFailure := post(url.Values{"grant_type": {"password"}, "username": {"alice"}, "password": {"correct password"}})
+	if postIssueEventFailure.Code != http.StatusOK || !strings.Contains(postIssueEventFailure.Body.String(), `"access_token"`) || strings.Contains(postIssueEventFailure.Body.String(), eventFailure) {
+		t.Fatalf("post-issuance event failure changed password grant result: status=%d body=%s", postIssueEventFailure.Code, postIssueEventFailure.Body.String())
+	}
+	before = counts()
+	emitted = 0
 	s.SetTokenIssued(func(context.Context, string, string, string) error { emitted++; return nil })
 	s.beforeTokenIssue = func() { setMembership(false) }
 	groupRace := post(url.Values{"grant_type": {"password"}, "username": {"alice"}, "password": {"correct password"}})

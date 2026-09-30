@@ -543,8 +543,8 @@ func TestDeviceSessionSubjectRequiresAuthenticatedIssuerCookie(t *testing.T) {
 	issuer := "https://id.example.test"
 	subject := deviceSessionSubject(store, issuer)
 	request := httptest.NewRequest(http.MethodPost, "/oidc/device/verify", nil)
-	if got, _, ok := subject(request); ok || got != "" {
-		t.Fatalf("unauthenticated subject=%q ok=%t", got, ok)
+	if got, ok := subject(request); ok || got.Session.Subject != "" {
+		t.Fatalf("unauthenticated subject=%q ok=%t", got.Session.Subject, ok)
 	}
 	issued, err := store.CreateSession(context.Background(), "subject-1", "pwd", time.Now().Add(time.Hour), "")
 	if err != nil {
@@ -555,12 +555,12 @@ func TestDeviceSessionSubjectRequiresAuthenticatedIssuerCookie(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.AddCookie(&http.Cookie{Name: name, Value: issued.Token})
-	if got, mfa, ok := subject(request); !ok || mfa || got != "subject-1" {
-		t.Fatalf("authenticated subject=%q ok=%t", got, ok)
+	if got, ok := subject(request); !ok || got.Session.AuthenticationMethod != "pwd" || got.Session.Subject != "subject-1" || got.SessionGuard == nil {
+		t.Fatalf("authenticated subject=%+v ok=%t", got, ok)
 	}
 	forced := deviceSessionSubject(store, issuer, true)
-	if got, _, ok := forced(request); ok || got != "" {
-		t.Fatalf("password-only session bypassed forced MFA: subject=%q ok=%t", got, ok)
+	if got, ok := forced(request); ok || got.Session.Subject != "" {
+		t.Fatalf("password-only session bypassed forced MFA: subject=%q ok=%t", got.Session.Subject, ok)
 	}
 	mfa, err := store.CreateSession(context.Background(), "subject-1", "mfa", time.Now().Add(time.Hour), "")
 	if err != nil {
@@ -568,8 +568,8 @@ func TestDeviceSessionSubjectRequiresAuthenticatedIssuerCookie(t *testing.T) {
 	}
 	request.Header.Del("Cookie")
 	request.AddCookie(&http.Cookie{Name: name, Value: mfa.Token})
-	if got, verified, ok := forced(request); !ok || !verified || got != "subject-1" {
-		t.Fatalf("MFA session rejected: subject=%q ok=%t", got, ok)
+	if got, ok := forced(request); !ok || got.Session.AuthenticationMethod != "mfa" || got.Session.Subject != "subject-1" || got.SessionGuard == nil {
+		t.Fatalf("MFA session rejected: subject=%+v ok=%t", got, ok)
 	}
 }
 

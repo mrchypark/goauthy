@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mrchypark/goauthy/internal/browser"
 )
 
 var deviceHTTPTestNow = time.Unix(1_700_000_000, 0).UTC()
@@ -102,7 +104,7 @@ func TestDeviceVerificationCSRFSubjectApproveAndDeny(t *testing.T) {
 		t.Fatal(err)
 	}
 	noSubject := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, nil)
-	h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool, bool) { return "user-1", false, true })
+	h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, testSubject("user-1", false))
 	cookie, csrf := verificationCSRF(t, h, grant.UserCode)
 	w := httptest.NewRecorder()
 	r := formRequest(http.MethodPost, verificationPath, url.Values{"user_code": {grant.UserCode}, "csrf_token": {csrf}, "action": {"approve"}})
@@ -208,7 +210,7 @@ func TestDeviceHTTPDistributedRateLimitsUseDirectRemoteIP(t *testing.T) {
 	t.Parallel()
 	ctx, store, _ := testStore(t)
 	limits := Limits{Window: time.Minute, CreationLimit: 1, VerificationLimit: 1}
-	h, err := NewHandlerWithLimits(store, "https://id.example.test", func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool, bool) { return "user-1", false, true }, limits)
+	h, err := NewHandlerWithLimits(store, "https://id.example.test", func(*http.Request, string, []string) error { return nil }, testSubject("user-1", false), limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,6 +297,20 @@ func testDeviceHandler(t *testing.T, store *Store, authorize ClientAuthorizer, s
 	h.now = func() time.Time { return deviceHTTPTestNow }
 	return h
 }
+
+func testSubject(subject string, mfa bool) Subject {
+	authMethod := "pwd"
+	if mfa {
+		authMethod = "mfa"
+	}
+	return func(*http.Request) (AuthenticatedSubject, bool) {
+		return AuthenticatedSubject{
+			Session:      browser.Session{ID: "test-session", Subject: subject, AuthenticationMethod: authMethod},
+			SessionGuard: func() (string, []any) { return "1=1", nil },
+		}, true
+	}
+}
+
 func formRequest(method, target string, form url.Values) *http.Request {
 	r := httptest.NewRequest(method, target, strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")

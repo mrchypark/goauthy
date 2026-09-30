@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/oidc"
 )
@@ -57,9 +58,17 @@ type ClientAuthorizer func(*http.Request, string, []string) error
 
 var ErrClientAuthentication = errors.New("device client authentication failed")
 
-// Subject returns the browser-authenticated subject and verified MFA evidence. A nil callback, or a
-// callback returning ok=false, makes approval fail closed.
-type Subject func(*http.Request) (subject string, mfa bool, ok bool)
+// AuthenticatedSubject identifies the browser session that authenticated a
+// device decision. SessionGuard evaluates that same session in the persistence
+// mutation so a concurrent revocation cannot race the decision.
+type AuthenticatedSubject struct {
+	Session      browser.Session
+	SessionGuard func() (string, []any)
+}
+
+// Subject resolves the current browser-authenticated session. A nil callback,
+// missing session, or missing persistence guard fails closed.
+type Subject func(*http.Request) (AuthenticatedSubject, bool)
 
 // Limits controls the distributed, fixed-window abuse boundaries. A zero
 // value uses conservative defaults; disabling these limits is not supported.
@@ -199,11 +208,13 @@ func (h *Handler) verifyPage(w http.ResponseWriter, r *http.Request) {
 		h.redirectToDeviceLogin(w, r)
 		return
 	}
-	subject, mfa, ok := h.subject(r)
-	if !ok || !validSubject(subject) {
+	approver, ok := h.subject(r)
+	if !ok || !validApprover(approver) {
 		h.redirectToDeviceLogin(w, r)
 		return
 	}
+	subject := approver.Session.Subject
+	mfa := approver.Session.AuthenticationMethod == "mfa"
 	data := verificationPageData{CSS: h.endpoint("/auth/v1/theme/global.css"), Language: i18n.UILanguageFromRequest(r), Account: h.endpoint("/account")}
 	render := func(status int) {
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
@@ -289,21 +300,23 @@ func (h *Handler) verifyDevice(w http.ResponseWriter, r *http.Request) {
 		writeHTMLStatus(w, http.StatusForbidden, "Authentication required")
 		return
 	}
-	subject, mfa, ok := h.subject(r)
-	if !ok || !validSubject(subject) {
+	approver, ok := h.subject(r)
+	if !ok || !validApprover(approver) {
 		writeHTMLStatus(w, http.StatusForbidden, "Authentication required")
 		return
 	}
+	subject := approver.Session.Subject
+	mfa := approver.Session.AuthenticationMethod == "mfa"
 	if !h.allow(w, r, "verify/"+subject, h.limits.VerificationLimit) {
 		return
 	}
 	var decisionErr error
 	message := "Device approved"
 	if action == "deny" {
-		decisionErr = h.store.Deny(r.Context(), userCode, h.now().UTC())
+		decisionErr = h.store.DenyWithSessionGuard(r.Context(), userCode, approver.Session.ID, approver.SessionGuard, h.now().UTC())
 		message = "Device denied"
 	} else {
-		decisionErr = h.store.ApproveWithMFA(r.Context(), userCode, subject, mfa, h.now().UTC())
+		decisionErr = h.store.ApproveWithMFAAndSessionGuard(r.Context(), userCode, subject, approver.Session.ID, mfa, approver.SessionGuard, h.now().UTC())
 	}
 	if decisionErr != nil {
 		if action == "approve" && !mfa && h.reauthenticate != nil && errors.Is(decisionErr, ErrInvalid) {
@@ -331,6 +344,10 @@ func (h *Handler) verifyDevice(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Vary", "Cookie")
 	w.WriteHeader(http.StatusOK)
 	_ = verificationPage.Execute(w, data)
+}
+
+func validApprover(approver AuthenticatedSubject) bool {
+	return approver.Session.ID != "" && approver.Session.Authenticated() && validSubject(approver.Session.Subject) && approver.SessionGuard != nil
 }
 
 func parseDeviceForm(w http.ResponseWriter, r *http.Request) (string, []string, error) {

@@ -23,7 +23,7 @@ func TestDeviceVerificationUsesServerMFAEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool, bool) { return "user-1", mfa, true })
+			h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, testSubject("user-1", mfa))
 			cookie, csrf := verificationCSRF(t, h, grant.UserCode)
 			r := formRequest(http.MethodPost, verificationPath, url.Values{"user_code": {grant.UserCode}, "csrf_token": {csrf}, "action": {"approve"}})
 			r.AddCookie(cookie)
@@ -49,7 +49,7 @@ func TestDeviceMFAReauthenticationDoesNotApprove(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, func(*http.Request) (string, bool, bool) { return "user-1", false, true })
+			h := testDeviceHandler(t, store, func(*http.Request, string, []string) error { return nil }, testSubject("user-1", false))
 			called := 0
 			h.SetReauthentication(func(w http.ResponseWriter, r *http.Request, code string) {
 				called++
