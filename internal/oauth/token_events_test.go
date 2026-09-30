@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/mrchypark/goauthy/internal/device"
+	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/rhiza"
 	"net/http"
 	"net/http/httptest"
@@ -52,43 +53,73 @@ func TestTokenIssuedGrantSelection(t *testing.T) {
 func TestTokenIssuedFailureHTTP(t *testing.T) {
 	t.Parallel()
 	db := oauthTestDB(t)
-	s, err := NewServer(t.Context(), db, randomSecret(t), testClientID, testClientSecret, testRedirectURI)
+	s, err := NewServerWithOIDC(t.Context(), db, randomSecret(t), testClientID, testClientSecret, testRedirectURI, []string{exchangeResource}, OIDCConfig{
+		Issuer:         oidcTestIssuer,
+		LoadSigningKey: func(context.Context) (oidc.SigningKey, error) { return oidcTestKey(t), nil },
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	code := issueExchangeCode(t, s)
+	exchangeCode := issueExchangeCode(t, s)
+	exchangeSource := decodeToken(t, postToken(s, url.Values{"grant_type": {"authorization_code"}, "code": {exchangeCode}, "redirect_uri": {testRedirectURI}, "code_verifier": {strings.Repeat("x", 43)}})).AccessToken
 	calls := 0
+	expectedFlow := ""
+	expectedCount := int64(0)
 	const privateError = "event-store-private-sentinel"
 	s.SetTokenIssued(func(ctx context.Context, flow, clientID, subject string) error {
 		calls++
-		if flow != "client_credentials" || clientID != testClientID || subject != "" {
-			t.Fatal("unexpected machine metadata")
+		if clientID != testClientID || flow != expectedFlow {
+			t.Fatalf("unexpected event metadata flow=%q client=%q", flow, clientID)
 		}
 		rows, err := db.Query(ctx, rhiza.QueryRequest{SQL: "SELECT COUNT(*) FROM oauth_access_tokens", Consistency: rhiza.ConsistencyLinearizable})
-		if err != nil || len(rows.Rows) != 1 || rows.Rows[0][0] != int64(1) {
+		count, ok := int64(0), false
+		if err == nil && len(rows.Rows) == 1 && len(rows.Rows[0]) == 1 {
+			count, ok = rows.Rows[0][0].(int64)
+		}
+		if !ok || count != expectedCount {
 			t.Fatal("event callback ran before token persistence")
+		}
+		if flow == "client_credentials" && subject != "" || flow != "client_credentials" && subject != "user-1" {
+			t.Fatalf("unexpected event metadata flow=%q subject=%q", flow, subject)
 		}
 		return errors.New(privateError)
 	})
-	for _, valid := range []bool{false, true} {
-		req := httptest.NewRequest(http.MethodPost, "/oidc/token", strings.NewReader("grant_type=client_credentials&scope=goauthy.read"))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		secret := "invalid-secret"
-		if valid {
-			secret = testClientSecret
-		}
-		req.SetBasicAuth(testClientID, secret)
-		response := httptest.NewRecorder()
-		s.TokenHandler().ServeHTTP(response, req)
-		want, wantCalls := http.StatusUnauthorized, 0
-		if valid {
-			want, wantCalls = http.StatusInternalServerError, 1
-		}
-		if response.Code != want || calls != wantCalls || strings.Contains(response.Body.String(), privateError) || strings.Contains(response.Body.String(), "access_token") {
-			t.Fatalf("status=%d calls=%d", response.Code, calls)
-		}
-		if valid && !strings.Contains(response.Body.String(), "server_error") {
-			t.Fatal("missing server_error")
-		}
+	invalid := httptest.NewRequest(http.MethodPost, "/oidc/token", strings.NewReader("grant_type=client_credentials&scope=goauthy.read"))
+	invalid.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	invalid.SetBasicAuth(testClientID, "invalid-secret")
+	denied := httptest.NewRecorder()
+	s.TokenHandler().ServeHTTP(denied, invalid)
+	if denied.Code != http.StatusUnauthorized || calls != 0 {
+		t.Fatalf("invalid credentials status=%d calls=%d", denied.Code, calls)
+	}
+	for _, tc := range []struct {
+		name, flow string
+		form       url.Values
+	}{
+		{"client_credentials", "client_credentials", url.Values{"grant_type": {"client_credentials"}, "scope": {"goauthy.read"}}},
+		{"authorization_code", "authorization_code", url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {testRedirectURI}, "code_verifier": {strings.Repeat("x", 43)}}},
+		{"token_exchange", TokenExchangeGrantType, url.Values{"grant_type": {TokenExchangeGrantType}, "subject_token": {exchangeSource}, "subject_token_type": {accessTokenType}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			expectedFlow = tc.flow
+			rows, err := db.Query(t.Context(), rhiza.QueryRequest{SQL: "SELECT COUNT(*) FROM oauth_access_tokens", Consistency: rhiza.ConsistencyLinearizable})
+			if err != nil || len(rows.Rows) != 1 {
+				t.Fatalf("access token count rows=%#v err=%v", rows.Rows, err)
+			}
+			count, ok := rows.Rows[0][0].(int64)
+			if !ok {
+				t.Fatalf("access token count=%#v", rows.Rows[0][0])
+			}
+			expectedCount = count + 1
+			response := postToken(s, tc.form)
+			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"access_token"`) || strings.Contains(response.Body.String(), privateError) || strings.Contains(response.Body.String(), "server_error") {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+	if calls != 3 {
+		t.Fatalf("event sink calls=%d, want one for each successful grant", calls)
 	}
 }
 

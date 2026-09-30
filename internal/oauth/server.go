@@ -792,8 +792,6 @@ func (s *Server) TokenHandler() http.Handler {
 		}
 		if err := s.emitTokenIssued(r.Context(), r.PostForm.Get("grant_type"), request.GetClient().GetID(), request.GetSession().GetSubject()); err != nil {
 			slog.Error("OAuth token-issued event failed")
-			s.writeTokenError(r.Context(), sw, request, fosite.ErrServerError)
-			return
 		}
 		if r.PostForm.Get("grant_type") == "password" && s.passwordLoginObserver != nil {
 			if err := s.passwordLoginObserver(sw, r, request.GetSession().GetSubject()); err != nil {

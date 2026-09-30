@@ -200,14 +200,20 @@ Raw tokens, client secrets and passwords are not supplied to the event sink.
 
 Events use the existing Rhiza event table and notification polling. Event
 persistence occurs after token persistence, matching the pinned event enqueue
-ordering: an event error returns token-endpoint server_error for non-Device
-grants even though token persistence may already have completed. Device logs
-the event failure and returns its token. This is not an atomic event/token
-transaction or an exactly-once HTTP-delivery guarantee.
+ordering. If persistence fails, the endpoint logs a generic error and still
+returns the successfully issued token for every emitting grant. The log omits
+the sink error, request, credentials, and token. Token issuance/storage errors
+remain failures; this policy applies only after issuance commits. Event and token
+storage are not atomic, and this does not guarantee exactly-once HTTP delivery.
 
 Machine CC/exchange generation on/off and user authorization-code/refresh
 selection pass standalone E2E. Current cross-Pod, notification and failure-path
 qualification is tracked in [status](status.md); full event parity remains open.
+
+For delegated token exchange, actor logout revokes the actor's own token and
+prevents a later exchange using it. A target token already issued with that
+actor remains active until its own expiry (or its own revocation); the actor
+reference is attribution and does not create a live revocation dependency.
 
 ### Password grant dependency: pinned contract still unimplemented
 

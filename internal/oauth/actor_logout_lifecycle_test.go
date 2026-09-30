@@ -132,4 +132,25 @@ func TestExchangedAccessTokenLifecycleAfterActorForcedLogout(t *testing.T) {
 	if actorAfter.Active || !targetAfter.Active || targetAfter.Subject != "logout-owner" || targetAfter.Actor["sub"] != "logout-actor" {
 		t.Fatalf("after actor logout: actor_active=%t target_active=%t target_sub=%q target_act=%#v", actorAfter.Active, targetAfter.Active, targetAfter.Subject, targetAfter.Actor)
 	}
+	countTokens := func() int64 {
+		t.Helper()
+		rows, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(*) FROM oauth_access_tokens`, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil || len(rows.Rows) != 1 {
+			t.Fatalf("access token count rows=%#v err=%v", rows.Rows, err)
+		}
+		count, ok := rows.Rows[0][0].(int64)
+		if !ok {
+			t.Fatalf("access token count=%#v", rows.Rows[0][0])
+		}
+		return count
+	}
+	before := countTokens()
+	req := httptest.NewRequest(http.MethodPost, "/oidc/token", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(clientID, clientSecret)
+	rejected := httptest.NewRecorder()
+	server.TokenHandler().ServeHTTP(rejected, req)
+	if rejected.Code == http.StatusOK || countTokens() != before {
+		t.Fatalf("revoked actor created a new delegated token: status=%d", rejected.Code)
+	}
 }
