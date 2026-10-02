@@ -193,7 +193,27 @@ sampler_pid=
 [ "$sampler_status" -eq 0 ] || { echo "resource sampler exited unexpectedly: status=$sampler_status" >&2; job_status=1; }
 [ -s "$sample_output" ] || { echo 'resource sample file is missing or empty' >&2; job_status=1; }
 if [ -s "$sample_output" ]; then
-	jq -s -e 'length>0 and all(.[]; (.pod|type)=="string" and (.container=="goauthy" or .container=="sidecarfixture")) and ([.[]|.pod+"/"+.container]|unique|sort)==["goauthy-0/goauthy","goauthy-0/sidecarfixture","goauthy-1/goauthy","goauthy-1/sidecarfixture","goauthy-2/goauthy","goauthy-2/sidecarfixture"]' "$sample_output" >/dev/null || { echo 'resource samples are invalid or missing expected container identities' >&2; job_status=1; }
+	jq -s -e '
+		def valid_counter: type=="number" and isfinite and .>=0 and floor==. and .<=9007199254740991;
+		def expected: ["goauthy-0/goauthy","goauthy-0/sidecarfixture","goauthy-1/goauthy","goauthy-1/sidecarfixture","goauthy-2/goauthy","goauthy-2/sidecarfixture"];
+		length>0 and
+		all(.[];
+			(.hostTimestampUTC|type)=="string" and (.hostTimestampUTC|length)>0 and
+			.namespace=="goauthy" and
+			(.pod as $pod | (["goauthy-0","goauthy-1","goauthy-2"]|index($pod)) != null) and
+			(.container=="goauthy" or .container=="sidecarfixture") and
+			(.containerID|type)=="string" and (.containerID|length)>0 and
+			(.cpuUsageCoreNanoSeconds|valid_counter) and
+			(.memoryWorkingSetBytes|valid_counter) and
+			(.unavailable|type)=="array" and
+			([.unavailable[]|select(.!="rss-not-exposed")]|length)==0 and
+			(if .memoryRSSBytes==null then (.unavailable|index("rss-not-exposed"))!=null else (.memoryRSSBytes|valid_counter) and (.unavailable|index("rss-not-exposed"))==null end)
+		) and
+		(group_by(.hostTimestampUTC)|all(.[];
+			length==6 and ([.[]|.pod+"/"+.container]|unique|sort)==expected and
+			([.[]|.containerID]|unique|length)==6
+		))
+	' "$sample_output" >/dev/null || { echo 'resource samples contain unavailable/invalid counters or an incomplete six-container timestamp batch' >&2; job_status=1; }
 fi
 
 for index in 0 1 2; do

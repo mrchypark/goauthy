@@ -19,6 +19,15 @@ set +C
 trap 'exit 0' HUP INT TERM
 
 projection='
+  def counter:
+    (if type == "object" then (.value // null) else . end) as $raw
+    | if ($raw|type) == "string" and ($raw|test("^(0|[1-9][0-9]*)$")) then
+        ($raw|tonumber) as $number
+        | if ($number|isfinite) and $number >= 0 and ($number|floor) == $number and $number <= 9007199254740991 then $number else null end
+      elif ($raw|type) == "number" then
+        $raw as $number
+        | if ($number|isfinite) and $number >= 0 and ($number|floor) == $number and $number <= 9007199254740991 then $number else null end
+      else null end;
   ["goauthy-0", "goauthy-1", "goauthy-2"][] as $pod
   | ["goauthy", "sidecarfixture"][] as $container
   | ([.stats[]? | select(
@@ -28,22 +37,25 @@ projection='
     )]) as $matches
   | ($matches[0] // {}) as $s
   | ($s.memory.rssBytes // $s.memory.rss_bytes) as $rss
+  | ($s.cpu.usageCoreNanoSeconds | counter) as $cpu
+  | ($s.memory.workingSetBytes | counter) as $working
+  | ($rss | counter) as $rss_bytes
   | {
       hostTimestampUTC: $timestamp,
       namespace: $namespace,
       pod: $pod,
       container: $container,
       containerID: (if ($s.attributes.id | type) == "string" then $s.attributes.id else null end),
-      cpuUsageCoreNanoSeconds: (if ($s.cpu.usageCoreNanoSeconds | type) == "number" then $s.cpu.usageCoreNanoSeconds else null end),
-      memoryWorkingSetBytes: (if ($s.memory.workingSetBytes | type) == "number" then $s.memory.workingSetBytes else null end),
-      memoryRSSBytes: (if ($rss | type) == "number" then $rss else null end),
+      cpuUsageCoreNanoSeconds: $cpu,
+      memoryWorkingSetBytes: $working,
+      memoryRSSBytes: $rss_bytes,
       unavailable: (
         (if $sample_ok then [] else ["cri-stats-command-failed"] end) +
         (if ($matches | length) == 0 then ["container-not-reported"] elif ($matches | length) > 1 then ["duplicate-container-rows"] else [] end) +
         (if ($matches | length) == 1 and ($s.attributes.id | type) != "string" then ["container-id-unavailable"] else [] end) +
-        (if ($matches | length) == 1 and ($s.cpu.usageCoreNanoSeconds | type) != "number" then ["cpu-counter-unavailable"] else [] end) +
-        (if ($matches | length) == 1 and ($s.memory.workingSetBytes | type) != "number" then ["working-set-unavailable"] else [] end) +
-        (if ($matches | length) == 1 and ($rss | type) != "number" then ["rss-not-exposed"] else [] end)
+        (if ($matches | length) == 1 and $cpu == null then ["cpu-counter-unavailable"] else [] end) +
+        (if ($matches | length) == 1 and $working == null then ["working-set-unavailable"] else [] end) +
+        (if ($matches | length) == 1 and $rss_bytes == null then (if $rss == null then ["rss-not-exposed"] else ["rss-counter-unavailable"] end) else [] end)
       )
     }
 '
