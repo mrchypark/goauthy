@@ -35,19 +35,39 @@ profiles leave both fields zero. Existing export/restore GC checks exercise
 paired recovery pins; they do not qualify the node's periodic GC loop.
 
 Issue [#105](https://github.com/mrchypark/goauthy/issues/105) remains blocked on
-the recovery contract. Production pins Rhiza v0.12.3; its cold-start recovery
-does not publish the archive/checkpoint pins used by live catch-up. Rhiza v0.18.0
-source inspection found a startup finalization race window, and that upgrade
-also changes physical SQL/WAL formats and voter identities, including startup
-failure when a registered voter's local WAL is lost. Fresh-state tests do not
-qualify migration or recovery of existing namespaces. These are source-derived
-compatibility findings, not a demonstrated data-loss event.
+a released recovery and migration contract. As checked on 2026-10-02, GoAuthy
+still pins Rhiza v0.12.3. The latest
+[released Rhiza version is v0.18.0](https://github.com/mrchypark/rhiza/releases/tag/v0.18.0)
+(source commit
+[`ff38548`](https://github.com/mrchypark/rhiza/tree/ff38548cd9561f27dd474a1151f0c6dd5da79b9b)).
+In that release, startup pins the selected checkpoint root but closes its
+recovery guard before publishing the checkpoint
+([source](https://github.com/mrchypark/rhiza/blob/ff38548cd9561f27dd474a1151f0c6dd5da79b9b/pkg/node/node.go#L538-L553),
+[finalization](https://github.com/mrchypark/rhiza/blob/ff38548cd9561f27dd474a1151f0c6dd5da79b9b/pkg/node/node.go#L613-L620));
+the released source therefore does not establish that recovery evidence stays
+protected through finalization. Its `EnrollExistingVoter` API requires a
+pre-registration WAL and explicitly does not restore missing voting state
+([source](https://github.com/mrchypark/rhiza/blob/ff38548cd9561f27dd474a1151f0c6dd5da79b9b/pkg/node/node.go#L140-L143)).
+The release also changes LatticeDB's checkpoint/WAL format and warns that older
+versions cannot directly open it, requiring pre-upgrade backups and verified
+restoration ([release notes](https://github.com/mrchypark/rhiza/releases/tag/v0.18.0)).
+
+Rhiza `main` at
+[`3d095eb`](https://github.com/mrchypark/rhiza/commit/3d095eb2ee93118d6991704ab79754b3a7c3e32b)
+contains later recovery work, including
+[Local WAL reclamation](https://github.com/mrchypark/rhiza/commit/e67a67b191adc89ea92374fbc4b86a64ded3de19)
+and [learner checkpoint-adoption/GC-floor hardening](https://github.com/mrchypark/rhiza/commit/9d40786e49b7fe24db47c1441b1a8ab11ae6eebc),
+but these commits are not part of a released candidate and do not qualify
+GoAuthy's existing three-voter namespace for migration or GC. These are
+source-derived compatibility gaps, not a demonstrated data-loss event.
 
 Keep the dependency pin unchanged and GC disabled until a released upstream
-fix and explicit migration/recovery contract are available, followed by
-exact-three recovery and periodic-GC qualification. Do not use object TTL or
-bypass voter registration as a substitute; preserve existing installations and
-namespaces.
+contract protects cold-start recovery evidence through finalization, supports
+recovery when a registered voter's local WAL is missing, and documents
+migration/restore compatibility for existing data. Then qualify recovery with
+exactly three voters and run the periodic-GC gate before enabling GC. Do not use
+object TTL or bypass voter registration as a substitute; preserve existing
+installations and namespaces.
 
 ## Deployment and evidence
 
