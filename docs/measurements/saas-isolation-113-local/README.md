@@ -42,6 +42,14 @@ The three GoAuthy process logs recorded `init_session` failures classified as `w
 
 Run 17 used GoAuthy source `9b1e651db623847f8d2f96c60e4979555775e228` and image manifest `sha256:0bad7026b25db2af40f6449d6863301138254e9e79ddbe1312fc6b66f2f68d51`. One serial and three concurrent GET probes from a single curl pod returned HTTP 200, with no error-stage log. This differs from the paired workload's three driver IPs and does not exercise password submission or SaaS calls. The owned Kind cluster was cleaned up, but the helper exited 1 after its success echo and before final metadata capture. This records only the four observed responses; it is not a completed paired workload, root-cause resolution, or SLO result.
 
+## Run 18: helper metadata parser failure
+
+Both native ARM64 helper builds completed: fixture manifest `sha256:c6658bf2655b3d334e3e5460dd02c29439684bf32272b875e54ba6d0328c599e` with archive config `sha256:01b02180c7d88d106b0a13babfa5c8a7e07e8cca72ffbb3afcb4b07adff01686`, and driver manifest `sha256:54d9e9d78c2d80803bf861afb699ad40b40eedb8e6cfc9c732b0cc0d3eb8d847` with archive config `sha256:b4fb3ffffa3fab51be3d4bc8c6ff9b4bc221e4cb8ae96727a21913a515956d94`. The actual BuildKit metadata included the manifest digest and OCI descriptor, but no top-level config digest. The runner expected the absent config field and stopped before applying the final diagnostic overlay or starting drivers and the sampler. Versity had bootstrapped successfully. The wrapper deleted its owned cluster and restored the Kind node's inotify limit to 128. No IAM or SaaS workload ran, so Run 18 is not a measurement result.
+
+## Run 19: diagnostic started, qualification failed
+
+Run 19 used the `55e8fb9` runner and unchanged GoAuthy source/Dockerfile, with the corrected native helper archive pins. The three GoAuthy members reached Ready with ARM64 runtimes, and the indexed three-driver Job started. Its bounded wait ended with all three diagnostic driver-record gates failed; the resource gate also failed because counters were unavailable/invalid or the six-container batch was incomplete, and the aggregate fixture/drain gate failed. An early snapshot showed index 0 failed while indexes 1 and 2 were still running; observed GoAuthy restart counts were 1/2/1. Cleanup deleted the owned cluster and restored inotify to 128 at 14:01:31Z. This does not establish a completed IAM/SaaS workload, a SaaS cause, or a capacity/SLO result.
+
 ## Resource sample validity
 
 All 1,110 retained Run 15 resource rows contained null CPU and memory counters because the old sampler did not normalize CRI counter wrappers. Those samples do not qualify resource usage, capacity, or an SLO. The corrected projection, resource gate, and helper settings have focused regression checks; no later paired campaign is claimed. Run 17 also lacks final helper metadata because cleanup exited after the success echo; neither observation is replaced by an inferred pass.

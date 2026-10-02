@@ -61,12 +61,36 @@ printf '%s\n' "$runner_source_head" >"$ISOLATION113_EVIDENCE_DIR/helper-source-h
 
 docker buildx build --load --metadata-file "$ISOLATION113_EVIDENCE_DIR/fixture-build-metadata.json" -f deploy/e2e-saas-isolation-113/Dockerfile --target fixture -t "$fixture_image" .
 docker buildx build --load --metadata-file "$ISOLATION113_EVIDENCE_DIR/driver-build-metadata.json" -f deploy/e2e-saas-isolation-113/Dockerfile --target driver -t "$driver_image" .
-fixture_manifest_digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$ISOLATION113_EVIDENCE_DIR/fixture-build-metadata.json")
+fixture_manifest_digest=$(jq -er '
+	."containerimage.digest" as $digest
+	| ."containerimage.descriptor" as $descriptor
+	| select(($digest|type)=="string" and ($digest|test("^sha256:[0-9a-f]{64}$")))
+	| select($descriptor.mediaType=="application/vnd.oci.image.manifest.v1+json" and $descriptor.digest==$digest)
+	| select(($descriptor.platform.os|type)=="string" and ($descriptor.platform.architecture|type)=="string")
+	| $digest
+' "$ISOLATION113_EVIDENCE_DIR/fixture-build-metadata.json")
 fixture_loaded_digest=$(docker image inspect --format '{{.Id}}' "$fixture_image")
-fixture_config_digest=$(jq -er '."containerimage.config.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$ISOLATION113_EVIDENCE_DIR/fixture-build-metadata.json")
-driver_manifest_digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$ISOLATION113_EVIDENCE_DIR/driver-build-metadata.json")
+fixture_config_blob=$(docker image save "$fixture_image" | tar -xOf - manifest.json | jq -er '.[0].Config | select(type=="string" and test("^blobs/sha256/[0-9a-f]{64}$"))')
+fixture_config_digest=sha256:${fixture_config_blob##*/}
+if jq -e 'has("containerimage.config.digest")' "$ISOLATION113_EVIDENCE_DIR/fixture-build-metadata.json" >/dev/null; then
+	fixture_metadata_config_digest=$(jq -er '."containerimage.config.digest" | select(type=="string" and test("^sha256:[0-9a-f]{64}$"))' "$ISOLATION113_EVIDENCE_DIR/fixture-build-metadata.json")
+	[ "$fixture_metadata_config_digest" = "$fixture_config_digest" ] || { echo 'fixture BuildKit config digest differs from the saved image archive' >&2; exit 1; }
+fi
+driver_manifest_digest=$(jq -er '
+	."containerimage.digest" as $digest
+	| ."containerimage.descriptor" as $descriptor
+	| select(($digest|type)=="string" and ($digest|test("^sha256:[0-9a-f]{64}$")))
+	| select($descriptor.mediaType=="application/vnd.oci.image.manifest.v1+json" and $descriptor.digest==$digest)
+	| select(($descriptor.platform.os|type)=="string" and ($descriptor.platform.architecture|type)=="string")
+	| $digest
+' "$ISOLATION113_EVIDENCE_DIR/driver-build-metadata.json")
 driver_loaded_digest=$(docker image inspect --format '{{.Id}}' "$driver_image")
-driver_config_digest=$(jq -er '."containerimage.config.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$ISOLATION113_EVIDENCE_DIR/driver-build-metadata.json")
+driver_config_blob=$(docker image save "$driver_image" | tar -xOf - manifest.json | jq -er '.[0].Config | select(type=="string" and test("^blobs/sha256/[0-9a-f]{64}$"))')
+driver_config_digest=sha256:${driver_config_blob##*/}
+if jq -e 'has("containerimage.config.digest")' "$ISOLATION113_EVIDENCE_DIR/driver-build-metadata.json" >/dev/null; then
+	driver_metadata_config_digest=$(jq -er '."containerimage.config.digest" | select(type=="string" and test("^sha256:[0-9a-f]{64}$"))' "$ISOLATION113_EVIDENCE_DIR/driver-build-metadata.json")
+	[ "$driver_metadata_config_digest" = "$driver_config_digest" ] || { echo 'driver BuildKit config digest differs from the saved image archive' >&2; exit 1; }
+fi
 [ "$fixture_loaded_digest" = "$fixture_manifest_digest" ] || [ "$fixture_loaded_digest" = "$fixture_config_digest" ] || { echo 'fixture loaded image ID matches neither BuildKit digest' >&2; exit 1; }
 [ "$driver_loaded_digest" = "$driver_manifest_digest" ] || [ "$driver_loaded_digest" = "$driver_config_digest" ] || { echo 'driver loaded image ID matches neither BuildKit digest' >&2; exit 1; }
 jq -n \
