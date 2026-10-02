@@ -1,9 +1,11 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
@@ -11,6 +13,50 @@ import (
 
 	"github.com/mrchypark/rhiza"
 )
+
+func TestExecuteRecoveryDiagnosticSeparatesStageAndSanitizesErrors(t *testing.T) {
+	const privateMarker = "private-request-id-and-sql"
+	var output bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&output, nil))
+	originalErr := errors.Join(rhiza.ErrCommitUnknown, rhiza.ErrQuorumUnavailable, errors.New(privateMarker))
+	statusErr := errors.Join(rhiza.ErrNotReady, context.DeadlineExceeded, errors.New(privateMarker))
+	logger.Error("Rhiza mutation recovery failed", executeRecoveryFailureLogAttrs("request_status", originalErr, statusErr)...)
+	requestStatusLog := output.String()
+	for _, field := range []string{
+		"stage=request_status",
+		"original_commit_unknown=true",
+		"original_quorum_unavailable=true",
+		"original_durability_unavailable=false",
+		"reconciliation_node_not_ready=true",
+		"reconciliation_deadline=true",
+		"reconciliation_durability_unavailable=false",
+	} {
+		if !strings.Contains(requestStatusLog, field) {
+			t.Errorf("request-status diagnostic missing %q: %s", field, requestStatusLog)
+		}
+	}
+	if strings.Contains(requestStatusLog, privateMarker) {
+		t.Fatalf("request-status diagnostic exposed private error text: %s", requestStatusLog)
+	}
+
+	output.Reset()
+	replayErr := errors.Join(rhiza.ErrDurabilityUnavailable, errors.New(privateMarker))
+	logger.Error("Rhiza mutation recovery failed", executeRecoveryFailureLogAttrs("same_request_replay", originalErr, replayErr)...)
+	replayLog := output.String()
+	for _, field := range []string{
+		"stage=same_request_replay",
+		"original_commit_unknown=true",
+		"reconciliation_durability_unavailable=true",
+		"reconciliation_quorum_unavailable=false",
+	} {
+		if !strings.Contains(replayLog, field) {
+			t.Errorf("same-request-replay diagnostic missing %q: %s", field, replayLog)
+		}
+	}
+	if strings.Contains(replayLog, privateMarker) {
+		t.Fatalf("same-request-replay diagnostic exposed private error text: %s", replayLog)
+	}
+}
 
 func TestMigrateIsIdempotentAndReady(t *testing.T) {
 	t.Parallel()
