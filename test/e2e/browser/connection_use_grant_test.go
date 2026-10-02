@@ -366,7 +366,9 @@ func runIsolation113Diagnostic(t *testing.T, primary, secondary, user, password,
 
 func isolation113InvokeClient(t *testing.T) *http.Client {
 	t.Helper()
-	return noRedirectClient(t, nil)
+	client := noRedirectClient(t, nil)
+	client.Timeout = 25 * time.Second
+	return client
 }
 
 func TestIsolation113InvokeClientDoesNotSendBrowserCookies(t *testing.T) {
@@ -385,6 +387,9 @@ func TestIsolation113InvokeClientDoesNotSendBrowserCookies(t *testing.T) {
 	defer server.Close()
 
 	client := isolation113InvokeClient(t)
+	if client.Timeout != 25*time.Second || client.Jar != nil {
+		t.Fatalf("invoke client timeout=%s cookie_jar=%t", client.Timeout, client.Jar != nil)
+	}
 	ownerResponse, err := client.Get(server.URL + "/owner")
 	if err != nil {
 		t.Fatalf("owner setup request failed: %v", err)

@@ -6,7 +6,8 @@ metadata:
 spec:
   completions: 3
   parallelism: 3
-  backoffLimit: 0
+  completionMode: Indexed
+  backoffLimitPerIndex: 0
   template:
     metadata:
       labels:
