@@ -1,0 +1,45 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: goauthy-isolation113-fixture-egress
+  namespace: goauthy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: goauthy
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 8.8.8.8/32
+      ports:
+        - protocol: TCP
+          port: 443
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: isolation113-driver-egress
+  namespace: goauthy
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: isolation113-driver
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: goauthy
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

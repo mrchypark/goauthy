@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"github.com/mrchypark/rhiza"
@@ -3076,8 +3077,10 @@ func Execute(ctx context.Context, db *rhiza.DB, request rhiza.ExecuteRequest) (r
 		if !errors.Is(err, rhiza.ErrCommitUnknown) {
 			return response, err
 		}
+		callerErrAfterExecute := ctx.Err()
 		status, statusErr := db.RequestStatus(ctx, rhiza.RequestStatusRequest{Kind: "sql", RequestID: request.RequestID})
 		if statusErr != nil {
+			logExecuteRecoveryFailure("request_status", err, statusErr, callerErrAfterExecute)
 			return response, errors.Join(err, statusErr)
 		}
 		switch status.State {
@@ -3090,6 +3093,7 @@ func Execute(ctx context.Context, db *rhiza.DB, request rhiza.ExecuteRequest) (r
 			// exact request to confirm its fingerprint and configured ACK durability.
 			recovered, retryErr := db.Execute(ctx, request)
 			if retryErr != nil {
+				logExecuteRecoveryFailure("same_request_replay", err, retryErr, callerErrAfterExecute)
 				return response, errors.Join(err, retryErr)
 			}
 			return validateReceipt(request.RequestID, recovered)
@@ -3102,6 +3106,30 @@ func Execute(ctx context.Context, db *rhiza.DB, request rhiza.ExecuteRequest) (r
 		}
 	}
 	panic("unreachable")
+}
+
+func logExecuteRecoveryFailure(stage string, originalErr, reconciliationErr, callerErrAfterExecute error) {
+	slog.Default().Error("Rhiza mutation recovery failed", executeRecoveryFailureLogAttrs(stage, originalErr, reconciliationErr, callerErrAfterExecute)...)
+}
+
+func executeRecoveryFailureLogAttrs(stage string, originalErr, reconciliationErr, callerErrAfterExecute error) []any {
+	return []any{
+		"stage", stage,
+		"caller_canceled_after_execute", errors.Is(callerErrAfterExecute, context.Canceled),
+		"caller_deadline_after_execute", errors.Is(callerErrAfterExecute, context.DeadlineExceeded),
+		"original_commit_unknown", errors.Is(originalErr, rhiza.ErrCommitUnknown),
+		"original_node_not_ready", errors.Is(originalErr, rhiza.ErrNotReady),
+		"original_quorum_unavailable", errors.Is(originalErr, rhiza.ErrQuorumUnavailable),
+		"original_durability_unavailable", errors.Is(originalErr, rhiza.ErrDurabilityUnavailable),
+		"original_deadline", errors.Is(originalErr, context.DeadlineExceeded),
+		"original_canceled", errors.Is(originalErr, context.Canceled),
+		"reconciliation_commit_unknown", errors.Is(reconciliationErr, rhiza.ErrCommitUnknown),
+		"reconciliation_node_not_ready", errors.Is(reconciliationErr, rhiza.ErrNotReady),
+		"reconciliation_quorum_unavailable", errors.Is(reconciliationErr, rhiza.ErrQuorumUnavailable),
+		"reconciliation_durability_unavailable", errors.Is(reconciliationErr, rhiza.ErrDurabilityUnavailable),
+		"reconciliation_deadline", errors.Is(reconciliationErr, context.DeadlineExceeded),
+		"reconciliation_canceled", errors.Is(reconciliationErr, context.Canceled),
+	}
 }
 
 func validateReceipt(requestID string, response rhiza.ExecuteResponse) (rhiza.ExecuteResponse, error) {

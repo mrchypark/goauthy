@@ -8,8 +8,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"net/netip"
@@ -30,6 +32,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/recovery"
 	"github.com/mrchypark/goauthy/internal/security"
 	"github.com/mrchypark/goauthy/internal/tracing"
+	"github.com/mrchypark/rhiza"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -206,6 +209,25 @@ func (h *Handler) resolveThemeURL(ctx context.Context, clientID string) (string,
 		clientID = "rauthy"
 	}
 	return h.themeURLResolver(ctx, clientID)
+}
+
+func authorizeStoreErrorClass(err error) string {
+	switch {
+	case errors.Is(err, rhiza.ErrCommitUnknown):
+		return "write_outcome_unknown"
+	case errors.Is(err, rhiza.ErrNotReady):
+		return "node_not_ready"
+	case errors.Is(err, rhiza.ErrQuorumUnavailable):
+		return "quorum_unavailable"
+	case errors.Is(err, rhiza.ErrDurabilityUnavailable):
+		return "ack_durability_unavailable"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "unknown"
+	}
 }
 
 // EnableFedCM opts this handler into issuing the separate cross-site session
@@ -392,6 +414,7 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	themeURL, err := h.resolveThemeURL(r.Context(), request.ClientID)
 	if err != nil {
+		slog.Error("authorize request failed", "operation", "theme_lookup", "error_class", authorizeStoreErrorClass(err), "error_type", fmt.Sprintf("%T", err))
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
@@ -407,12 +430,14 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 		}
 		session, err = h.browser.CreateInitSession(r.Context(), h.now().Add(interactionLifetime), peerIP)
 		if err != nil {
+			slog.Error("authorize request failed", "operation", "init_session", "error_class", authorizeStoreErrorClass(err), "error_type", fmt.Sprintf("%T", err))
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 			return
 		}
 	}
 	interaction, err := h.browser.CreateAuthorizationInteraction(r.Context(), session.Token, request.RequestID, []byte(r.URL.RequestURI()), h.now().Add(interactionLifetime))
 	if err != nil {
+		slog.Error("authorize request failed", "operation", "authorization_interaction", "error_class", authorizeStoreErrorClass(err), "error_type", fmt.Sprintf("%T", err))
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}

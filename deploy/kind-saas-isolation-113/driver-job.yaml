@@ -1,0 +1,82 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: isolation113-driver
+  namespace: goauthy
+spec:
+  completions: 3
+  parallelism: 3
+  completionMode: Indexed
+  backoffLimitPerIndex: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: isolation113-driver
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: driver
+          image: goauthy-saas-isolation-driver:e2e
+          imagePullPolicy: Never
+          args: ["-test.run=^TestConnectionUseGrantLive$", "-test.timeout=240s", "-test.v"]
+          env:
+            - name: GOAUTHY_E2E_URL
+              value: http://goauthy-client.goauthy.svc.cluster.local:8080
+            - name: GOAUTHY_E2E_SECONDARY_URL
+              value: http://goauthy-client.goauthy.svc.cluster.local:8080
+            - name: GOAUTHY_E2E_BROWSER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: isolation113-driver
+                  key: username
+            - name: GOAUTHY_E2E_BROWSER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: isolation113-driver
+                  key: password
+            - name: GOAUTHY_E2E_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: isolation113-driver
+                  key: client-secret
+            - name: GOAUTHY_E2E_USE_GRANTS
+              value: "1"
+            - name: GOAUTHY_E2E_GRANT_INVOKE
+              value: "1"
+            - name: GOAUTHY_E2E_ISOLATION113_FIXTURE_URL
+              value: https://api-key-fixture.e2e.test/healthy
+            - name: GOAUTHY_E2E_ISOLATION113_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: isolation113-token
+                  key: token
+            - name: GOAUTHY_E2E_ISOLATION113_START_UNIX_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: isolation113-run
+                  key: start-unix-ms
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

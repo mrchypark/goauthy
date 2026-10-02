@@ -1,0 +1,47 @@
+# Local SaaS isolation diagnostic
+
+This opt-in diagnostic compares IAM login traffic with API-key connector calls under controlled provider conditions in a disposable local Kind profile. The caller-owned cluster must have Versity ready and the baseline GoAuthy StatefulSet at zero replicas. The runner applies the selected final overlay and starts the three GoAuthy members once from that cold profile. This is a bounded local diagnostic for issue #113, not a complete capacity or SLO qualification.
+
+The runner is `scripts/e2e-kind-saas-isolation-113.sh`. It requires an explicitly selected Kind cluster, an immutable GoAuthy image reference, the reviewed source SHA, local synthetic bootstrap credentials, and a new absolute evidence directory outside the checkout. It refuses an existing evidence directory and verifies the baseline StatefulSet has zero replicas and the exact candidate image, then requires all three overlaid GoAuthy pods to be ready on that image digest. Before driver start, it also requires HTTP 200 from the authorize endpoint on each pod using the driver's service Host. It rebuilds the fixture and browser-test driver images from the clean committed checkout on each run, reusing the local build cache, and records source, build, and runtime image pins. Metrics polling has bounded request and retry timeouts. The runner stops its sampler and port-forwards; the caller-owned wrapper creates and deletes only its own Kind cluster.
+
+The selected GoAuthy image is a trace-instrumented candidate. Its trace-only additions log fixed operation/error-class/type fields at three authorize 503 branches, plus fixed stage, sentinel, and caller-context flags when request-status lookup or same-request replay fails after `ErrCommitUnknown`. These diagnostics do not change authentication policy, retries, connection-use guards, SSRF checks, or TLS verification. Each GoAuthy pod receives a colocated HTTPS fixture sidecar. A pod-local loopback alias maps `api-key-fixture.e2e.test` to `8.8.8.8`, and the fixture CA is added to the candidate image's system roots. The overlay declares a NetworkPolicy for fixture egress, but default Kind kindnet does not enforce NetworkPolicy; egress enforcement is therefore unverified. This diagnostic requires no Cilium installation and makes no claim of network-none or general system-egress isolation. The address mapping is a lab-only routing technique, not evidence about a public SaaS provider. Fixture credentials and TLS material are synthetic and generated for the run.
+
+The driver sends HTTP requests to GoAuthy through the in-cluster service while GoAuthy retains the base loopback-advertised issuer (`http://127.0.0.1:18080`). This is local diagnostic wiring only; it does not qualify a publicly reachable issuer or production TLS deployment.
+
+The disposable diagnostic namespace temporarily sets Pod Security Admission `enforce=privileged` because the root init container needs only `NET_ADMIN` to add the pod-local alias and `CHOWN` to make the copied fixture token owner-readable. This is a fixture-only namespace exception in the owned local Kind cluster; it must not be applied to a shared or production namespace. The GoAuthy and fixture containers retain their explicit restricted security contexts. The outer wrapper owns cluster cleanup; the runner does not delete clusters.
+
+The existing browser test provisions the API-key connection through GoAuthy's public HTTP endpoints. Three concurrent driver pods retain distinct pod IPs. Each runs a 16-second IAM-only baseline, a 16-second mixed phase, and a 12-second recovery phase. The mixed phase invokes the API-key connection against healthy, slow-header, slow-body, and HTTP-failure routes while IAM logins continue. These URLs use standard HTTPS port 443 because GoAuthy's canonical connector policy rejects explicit ports; a closed-port dial-failure route is therefore excluded from this initial diagnostic. The fixture reports per-route request counts; a separate sampler records per-container GoAuthy and fixture CPU counters and memory working set/RSS where the runtime exposes them. The runner stores pod image pins, driver output, fixture counters, and one-second samples in the caller-selected evidence directory, and fails if driver logs, six expected container sample identities, or valid fixture metrics are missing.
+
+Example invocation (use synthetic local credentials and a fresh evidence path):
+
+```sh
+KIND_CLUSTER=owned-three-member \
+GOAUTHY_IMAGE='goauthy@sha256:<candidate-digest>' \
+GOAUTHY_CANDIDATE_SOURCE='<reviewed-source-sha>' \
+GOAUTHY_E2E_BROWSER_PASSWORD='<synthetic-password>' \
+GOAUTHY_E2E_CLIENT_SECRET='<synthetic-client-secret>' \
+ISOLATION113_EVIDENCE_DIR='/absolute/task-state/saas-isolation-113-run' \
+./scripts/e2e-kind-saas-isolation-113.sh
+```
+
+The profile has three logical GoAuthy members on one Kind node; it does not establish multi-host failure tolerance. Versity is a local fixture. This diagnostic covers the selected IAM/API-key interference paths only: it does not qualify all OAuth routes, conditional refresh behavior, the complete frozen binding set, production provider behavior, a capacity target, or an SLO. The synthetic browser credentials, provider key, and provider responses do not represent real users or services.
+
+## Run 13: invalid diagnostic
+
+Run 13 used GoAuthy source `f1c0a0e0fd886796a0947b8061dbf798284fa4dd`, image `docker.io/library/goauthy@sha256:93e54a0c3e6c5fccaab3f3d5e79d06cbad2b3fc9f666656c6b81bc979b4a0441`, driver image manifest `sha256:182267e2d4db32e811003818247eba982f6b392cdaa2abbd1f3a8a8fde8ad23e` / runtime image `sha256:faa929bcc4feb2e8b237d1aeb14c3fb56937be422e3a615b9bf8678bc9170904`, fixture runtime image `sha256:2dd2a5d05a66210266e60cf385f3b38284825c37e7803a5757f7d2c24ce32469`, and Versity `versity/versitygw:v1.8.0` / runtime image `sha256:af4171a01d97dd9d0f3c792352802a190024abe44248574181702dab5f75b88a`.
+
+The scheduled driver recorded 47 successful IAM logins out of 48; one login returned 403. Every measured API-key invoke returned 401 before reaching the fixture, whose route counters remained zero. The cause of the invokes was a harness bug: the measurement reused the owner browser's cookie-jar client, while the production invoke guard correctly rejects requests carrying cookies. The runner's evidence gates rejected the run. The harness now uses a dedicated cookie-free client, with a local regression that first seeds a synthetic owner cookie and verifies the bearer invoke sends no cookie. A safe fixed-body category was also added for future 403 diagnostics; Run 13 did not retain enough information to identify the exact login guard.
+
+## Run 15: invalid and truncated diagnostic
+
+Run 15 reached the fixture: its counters recorded 30 requests, all completed with zero active at collection: 15 healthy, 6 slow-header, 6 slow-body, and 3 failure-route requests. The measured client still had its inherited 10-second timeout, however, so the approximately 10-second slow-route calls were truncated; they do not establish completion of the fixture's 20-second responses or validate a 25-second client bound. One IAM request returned 403 (`invalid_login_request` in the safe category); the rest of the captured driver logs were insufficient to establish the intended IAM denominator, and one of three driver logs was lost when the Job's global `backoffLimit: 0` caused the controller to cancel a peer driver after another pod failed.
+
+The three GoAuthy process logs recorded `init_session` failures classified as `write_outcome_unknown` (`*errors.joinError`) and corresponding authorize 503 responses, including during baseline before API-key traffic. The retained evidence does not identify whether Rhiza failed while checking request status or replaying the exact mutation, and it does not establish an underlying quorum, durability, or storage cause. These observations are not attributed to SaaS interference, GC, or data loss. The harness now gives only the API-key invoke client a 25-second timeout and uses an Indexed Job with zero retries per index so one failed driver does not cancel its peers; IAM clients retain their existing 10-second bound. Run 15 is invalid for the paired diagnostic, and no capacity or SLO result is established.
+
+## Run 17: root diagnostic only
+
+Run 17 used GoAuthy source `9b1e651db623847f8d2f96c60e4979555775e228` and image manifest `sha256:0bad7026b25db2af40f6449d6863301138254e9e79ddbe1312fc6b66f2f68d51`. One serial and three concurrent GET probes from a single curl pod returned HTTP 200, with no error-stage log. This differs from the paired workload's three driver IPs and does not exercise password submission or SaaS calls. The owned Kind cluster was cleaned up, but the helper exited 1 after its success echo and before final metadata capture. This records only the four observed responses; it is not a completed paired workload, root-cause resolution, or SLO result.
+
+## Resource sample validity
+
+All 1,110 retained Run 15 resource rows contained null CPU and memory counters because the old sampler did not normalize CRI counter wrappers. Those samples do not qualify resource usage, capacity, or an SLO. The corrected projection, resource gate, and helper settings have focused regression checks; no later paired campaign is claimed. Run 17 also lacks final helper metadata because cleanup exited after the success echo; neither observation is replaced by an inferred pass.

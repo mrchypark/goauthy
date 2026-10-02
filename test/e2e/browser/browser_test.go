@@ -1957,6 +1957,11 @@ func loginForAuthorizationURLWithLocation(t *testing.T, client *http.Client, aut
 	t.Helper()
 	response, initCookie := passwordLoginResponse(t, client, authorizeURL, primary, secondary, username, password)
 	if response.StatusCode != http.StatusFound && response.StatusCode != http.StatusSeeOther {
+		if response.StatusCode == http.StatusForbidden {
+			body, _ := io.ReadAll(io.LimitReader(response.Body, 256))
+			response.Body.Close()
+			t.Fatalf("login status=403, want redirect, category=%s", safeLogin403Category(body))
+		}
 		response.Body.Close()
 		t.Fatalf("login status = %d, want redirect", response.StatusCode)
 	}
@@ -1972,6 +1977,13 @@ func loginForAuthorizationURLWithLocation(t *testing.T, client *http.Client, aut
 		t.Fatalf("login redirect is not a valid callback: %q", location)
 	}
 	return callback.Query().Get("code"), authCookie, location
+}
+
+func safeLogin403Category(body []byte) string {
+	if string(body) == "Invalid login request\n" {
+		return "invalid_login_request"
+	}
+	return "unclassified_403"
 }
 
 func authorizeWithCookie(t *testing.T, client *http.Client, baseURL, redirectURI, challenge, state, nonce string) string {
