@@ -32,6 +32,30 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
+func TestAuthorizeStoreErrorClassUsesFixedWrappedClassifications(t *testing.T) {
+	const privateMarker = "private-storage-detail-should-not-escape"
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"commit unknown takes priority", errors.Join(fmt.Errorf("%s: %w", privateMarker, rhiza.ErrCommitUnknown), rhiza.ErrNotReady), "write_outcome_unknown"},
+		{"not ready", fmt.Errorf("wrapped: %w", rhiza.ErrNotReady), "node_not_ready"},
+		{"quorum unavailable", fmt.Errorf("wrapped: %w", rhiza.ErrQuorumUnavailable), "quorum_unavailable"},
+		{"durability unavailable", fmt.Errorf("wrapped: %w", rhiza.ErrDurabilityUnavailable), "ack_durability_unavailable"},
+		{"deadline", fmt.Errorf("wrapped: %w", context.DeadlineExceeded), "deadline"},
+		{"canceled", fmt.Errorf("wrapped: %w", context.Canceled), "canceled"},
+		{"unknown error", errors.New(privateMarker), "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := authorizeStoreErrorClass(tc.err)
+			if got != tc.want || strings.Contains(got, privateMarker) {
+				t.Fatalf("classification=%q want=%q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoginCompletesAuthorizationAndRotatesSession(t *testing.T) {
 	t.Parallel()
 	h := testHandler(t)
