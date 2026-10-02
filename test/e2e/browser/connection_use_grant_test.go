@@ -1,17 +1,23 @@
 package browser
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	browsersession "github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/saas"
 )
 
 const useGrantResource = "https://goauthy.connections.local.test"
@@ -33,7 +39,26 @@ func TestConnectionUseGrantLive(t *testing.T) {
 	if os.Getenv("GOAUTHY_E2E_RAW_AUTHORIZATION") == "1" {
 		prefix = ""
 	}
-	providerBody := `{"id":"` + connectorID + `","name":"Use grant provider","kind":"api_key","enabled":true,"callback_uri":"","scopes":[],"connector":{"id":"` + connectorID + `","header":"Authorization","prefix":"` + prefix + `","operations":[{"id":"account","url":"https://api.example.com/account","response_fields":{"id":"string"}}]}}`
+	apiURL := "https://api.example.com/account"
+	apiKeyValue := "e2e-bound-api-key"
+	var apiOperations any = []map[string]any{{"id": "account", "url": apiURL, "response_fields": map[string]string{"id": "string"}}}
+	if fixtureURL := os.Getenv("GOAUTHY_E2E_ISOLATION113_FIXTURE_URL"); fixtureURL != "" {
+		operations, err := isolation113FixtureOperations(connectorID, prefix, fixtureURL)
+		if err != nil {
+			t.Fatalf("invalid isolation fixture operation definition: %v", err)
+		}
+		apiOperations = operations
+		apiKeyValue = os.Getenv("GOAUTHY_E2E_ISOLATION113_API_KEY")
+		if apiKeyValue == "" {
+			t.Fatal("GOAUTHY_E2E_ISOLATION113_API_KEY is required with the local fixture")
+		}
+	}
+	providerConfig := map[string]any{"id": connectorID, "name": "Use grant provider", "kind": "api_key", "enabled": true, "callback_uri": "", "scopes": []string{}, "connector": map[string]any{"id": connectorID, "header": "Authorization", "prefix": prefix, "operations": apiOperations}}
+	providerJSON, err := json.Marshal(providerConfig)
+	if err != nil {
+		t.Fatal("encode API-key provider configuration")
+	}
+	providerBody := string(providerJSON)
 	if os.Getenv("GOAUTHY_E2E_CONDUCTOR_DELIVERY_PROJECT_DIR") != "" {
 		if prefix != "" {
 			t.Fatal("Conductor delivery fixture requires raw Authorization")
@@ -93,7 +118,11 @@ func TestConnectionUseGrantLive(t *testing.T) {
 	if anonymousConnector.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("anonymous connector status=%d", anonymousConnector.StatusCode)
 	}
-	bound := do(t, client, http.MethodPut, connectionBase+"/api-key", strings.NewReader(`{"api_key":"e2e-bound-api-key","version":0,"connector_digest":"`+connectorDoc.Digest+`"}`), headers)
+	boundBody, err := json.Marshal(map[string]any{"api_key": apiKeyValue, "version": 0, "connector_digest": connectorDoc.Digest})
+	if err != nil {
+		t.Fatal("encode API key binding")
+	}
+	bound := do(t, client, http.MethodPut, connectionBase+"/api-key", bytes.NewReader(boundBody), headers)
 	bound.Body.Close()
 	if bound.StatusCode != http.StatusOK {
 		t.Fatalf("bound API key status=%d", bound.StatusCode)
@@ -160,6 +189,9 @@ func TestConnectionUseGrantLive(t *testing.T) {
 		assertGrantInvokeStatus(t, primary, grantDoc.ID, "", `{"operation":"account"}`, http.StatusUnauthorized)
 		wrongAudience := issueGrantInvokeToken(t, client, primary, managedID, "")
 		assertGrantInvokeStatus(t, primary, grantDoc.ID, wrongAudience, `{"operation":"account"}`, http.StatusUnauthorized)
+		if os.Getenv("GOAUTHY_E2E_ISOLATION113_FIXTURE_URL") != "" {
+			runIsolation113Diagnostic(t, primary, secondary, user, password, grantDoc.ID, invokeToken)
+		}
 	}
 	list := do(t, client, http.MethodGet, connectionBase+"/grants", nil, headers)
 	var grants []map[string]any
@@ -249,6 +281,167 @@ func TestConnectionUseGrantLive(t *testing.T) {
 	if managedDelete.StatusCode != http.StatusNoContent {
 		t.Fatalf("consumer cleanup status=%d", managedDelete.StatusCode)
 	}
+}
+
+func isolation113FixtureOperations(connectorID, prefix, fixtureURL string) ([]saas.APIKeyOperationConfig, error) {
+	u, err := url.Parse(fixtureURL)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.Port() != "" || u.User != nil || u.Path != "/healthy" || u.RawQuery != "" || u.Fragment != "" {
+		return nil, errors.New("fixture URL must be portless HTTPS ending in /healthy")
+	}
+	apiBase := "https://" + u.Hostname()
+	operations := []saas.APIKeyOperationConfig{
+		{ID: "account", URL: apiBase + "/healthy", ResponseFields: map[string]string{"ok": "boolean"}},
+		{ID: "slow-headers", URL: apiBase + "/slow-headers", ResponseFields: map[string]string{"ok": "boolean"}},
+		{ID: "slow-body", URL: apiBase + "/slow-body", ResponseFields: map[string]string{"ok": "boolean"}},
+		{ID: "failure", URL: apiBase + "/fail", ResponseFields: map[string]string{"ok": "boolean"}},
+	}
+	if _, err := saas.NewAPIKeyConnector(saas.APIKeyConnectorConfig{ID: connectorID, Header: "Authorization", Prefix: prefix, Operations: operations}); err != nil {
+		return nil, err
+	}
+	return operations, nil
+}
+
+func runIsolation113Diagnostic(t *testing.T, primary, secondary, user, password, grant, token string) {
+	t.Helper()
+	invokeClient := isolation113InvokeClient(t)
+	const phase = 16 * time.Second
+	raw := os.Getenv("GOAUTHY_E2E_ISOLATION113_START_UNIX_MS")
+	ms, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || ms <= time.Now().Add(time.Second).UnixMilli() {
+		t.Fatal("GOAUTHY_E2E_ISOLATION113_START_UNIX_MS must be a future Unix millisecond timestamp")
+	}
+	start := time.UnixMilli(ms)
+	if wait := time.Until(start); wait > 0 {
+		time.Sleep(wait)
+	}
+	var calls sync.WaitGroup
+	phaseRun := func(name string, offset, duration time.Duration, routes []string) {
+		begin := start.Add(offset)
+		end := begin.Add(duration)
+		for due := begin; due.Before(end); due = due.Add(3 * time.Second) {
+			scheduledAt := due
+			phaseName := name
+			verifier := pkceVerifier(t)
+			challenge := pkceChallenge(verifier)
+			state := "isolation113-" + phaseName + "-" + strconv.FormatInt(scheduledAt.UnixNano(), 10)
+			if wait := time.Until(due); wait > 0 {
+				time.Sleep(wait)
+			}
+			requests := []func(){func() {
+				t.Run(phaseName+"-iam-"+strconv.FormatInt(scheduledAt.UnixNano(), 10), func(t *testing.T) {
+					requestStart := time.Now()
+					outcome := "failed"
+					defer func() {
+						t.Logf("isolation113 phase=%s route=iam outcome=%s scheduled_unix_ms=%d start_lag_ms=%.3f completion_latency_ms=%.3f", phaseName, outcome, scheduledAt.UnixMilli(), float64(requestStart.Sub(scheduledAt))/float64(time.Millisecond), float64(time.Since(requestStart))/float64(time.Millisecond))
+					}()
+					_, _ = loginForCode(t, newBrowserClient(t), primary, secondary, defaultRedirectURI, challenge, user, password, state)
+					outcome = "success"
+				})
+			}}
+			if len(routes) > 0 {
+				operation := routes[int(scheduledAt.Sub(begin)/(3*time.Second))%len(routes)]
+				requests = append(requests, func() {
+					t.Run(phaseName+"-api-key-"+operation+"-"+strconv.FormatInt(scheduledAt.UnixNano(), 10), func(t *testing.T) {
+						requestStart := time.Now()
+						elapsed, status, err := invokeGrantMeasured(invokeClient, primary, grant, token, `{"operation":"`+operation+`"}`)
+						outcome := "success"
+						if err != nil {
+							outcome = "transport-error"
+						} else if status != http.StatusOK {
+							outcome = "http-error"
+						}
+						t.Logf("isolation113 phase=%s route=api-key operation=%s outcome=%s status=%d start_lag_ms=%.3f completion_latency_ms=%.3f", phaseName, operation, outcome, status, float64(requestStart.Sub(scheduledAt))/float64(time.Millisecond), float64(elapsed)/float64(time.Millisecond))
+					})
+				})
+			}
+			launchIsolation113Tick(&calls, requests...)
+		}
+	}
+	phaseRun("baseline", 0, phase, nil)
+	phaseRun("mixed", phase, phase, []string{"slow-headers", "slow-body", "failure", "account"})
+	phaseRun("recovery", 2*phase, 12*time.Second, []string{"account"})
+	// Drain all scheduled IAM and provider requests before test cleanup.
+	calls.Wait()
+}
+
+func isolation113InvokeClient(t *testing.T) *http.Client {
+	t.Helper()
+	return noRedirectClient(t, nil)
+}
+
+func TestIsolation113InvokeClientDoesNotSendBrowserCookies(t *testing.T) {
+	var invokeCookie string
+	var gotBearer bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/owner" {
+			http.SetCookie(w, &http.Cookie{Name: "owner-session", Value: "synthetic", Path: "/"})
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		invokeCookie = r.Header.Get("Cookie")
+		gotBearer = r.Header.Get("Authorization") == "Bearer synthetic-token"
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := isolation113InvokeClient(t)
+	ownerResponse, err := client.Get(server.URL + "/owner")
+	if err != nil {
+		t.Fatalf("owner setup request failed: %v", err)
+	}
+	ownerResponse.Body.Close()
+	if ownerResponse.StatusCode != http.StatusNoContent {
+		t.Fatalf("owner setup status=%d", ownerResponse.StatusCode)
+	}
+	_, status, err := invokeGrantMeasured(client, server.URL, "grant", "synthetic-token", `{"operation":"account"}`)
+	if err != nil || status != http.StatusOK || invokeCookie != "" || !gotBearer {
+		t.Fatalf("invoke status=%d err=%v cookie_sent=%t bearer_sent=%t", status, err, invokeCookie != "", gotBearer)
+	}
+}
+
+func TestSafeLogin403CategoryDoesNotExposeResponseBody(t *testing.T) {
+	const privateMarker = "private-login-detail-should-not-escape"
+	for _, tc := range []struct {
+		body string
+		want string
+	}{
+		{"Invalid login request\n", "invalid_login_request"},
+		{privateMarker, "unclassified_403"},
+	} {
+		got := safeLogin403Category([]byte(tc.body))
+		if got != tc.want || strings.Contains(got, privateMarker) {
+			t.Fatalf("category=%q want=%q", got, tc.want)
+		}
+	}
+}
+
+func launchIsolation113Tick(calls *sync.WaitGroup, requests ...func()) {
+	for _, request := range requests {
+		calls.Add(1)
+		go func(request func()) {
+			defer calls.Done()
+			request()
+		}(request)
+	}
+}
+
+func invokeGrantMeasured(client *http.Client, base, grant, token, body string) (time.Duration, int, error) {
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/auth/v1/connection-grants/"+url.PathEscape(grant)+"/invoke", strings.NewReader(body))
+	if err != nil {
+		return time.Since(start), 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	r, err := client.Do(req)
+	if err != nil {
+		return time.Since(start), 0, err
+	}
+	defer r.Body.Close()
+	_, readErr := io.Copy(io.Discard, io.LimitReader(r.Body, 16<<10))
+	return time.Since(start), r.StatusCode, readErr
 }
 
 func mustGrantList(t *testing.T, client *http.Client, base string, headers map[string]string) []byte {

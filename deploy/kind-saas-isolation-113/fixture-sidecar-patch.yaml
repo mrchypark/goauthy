@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  template:
+    spec:
+      hostAliases:
+        - ip: 8.8.8.8
+          hostnames: [api-key-fixture.e2e.test]
+      initContainers:
+        - name: fixture-loopback-address
+          image: goauthy-saas-isolation-fixture:e2e
+          imagePullPolicy: Never
+          command: ["/bin/sh", "-ec"]
+          args:
+            - >-
+              /sbin/ip addr replace 8.8.8.8/32 dev lo;
+              cp /run/fixture-token-source/token /run/fixture-token-private/token;
+              chmod 0400 /run/fixture-token-private/token;
+              chown 65532:65532 /run/fixture-token-private/token
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "NET_ADMIN"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: isolation113-token-source
+              mountPath: /run/fixture-token-source
+              readOnly: true
+            - name: isolation113-token-private
+              mountPath: /run/fixture-token-private
+      containers:
+        - name: goauthy
+          env:
+            - name: SSL_CERT_FILE
+              value: /run/isolation113-ca/ca-certificates.crt
+            - name: GOAUTHY_BOOTSTRAP_ALLOWED_RESOURCES
+              value: '["https://api.example.test/v1","https://goauthy.connections.local.test"]'
+            - name: GOAUTHY_CONNECTIONS_RESOURCE
+              value: https://goauthy.connections.local.test
+          volumeMounts:
+            - name: isolation113-ca
+              mountPath: /run/isolation113-ca
+              readOnly: true
+        - name: sidecarfixture
+          image: goauthy-saas-isolation-fixture:e2e
+          imagePullPolicy: Never
+          args: ["-addr=:443", "-cert=/run/fixture-tls/tls.crt", "-key=/run/fixture-tls/tls.key", "-token-file=/run/fixture-token/token"]
+          ports:
+            - name: api-fixture
+              containerPort: 443
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_BIND_SERVICE"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          startupProbe:
+            tcpSocket:
+              port: api-fixture
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: api-fixture
+            periodSeconds: 2
+          livenessProbe:
+            tcpSocket:
+              port: api-fixture
+            periodSeconds: 10
+          volumeMounts:
+            - name: isolation113-fixture-tls
+              mountPath: /run/fixture-tls
+              readOnly: true
+            - name: isolation113-token-private
+              mountPath: /run/fixture-token
+              readOnly: true
+      volumes:
+        - name: isolation113-ca
+          configMap:
+            name: isolation113-ca
+        - name: isolation113-fixture-tls
+          secret:
+            secretName: isolation113-fixture-tls
+            defaultMode: 0440
+        - name: isolation113-token-source
+          secret:
+            secretName: isolation113-token
+            defaultMode: 0400
+        - name: isolation113-token-private
+          emptyDir:
+            medium: Memory
