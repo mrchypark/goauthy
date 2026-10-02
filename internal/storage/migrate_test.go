@@ -20,10 +20,12 @@ func TestExecuteRecoveryDiagnosticSeparatesStageAndSanitizesErrors(t *testing.T)
 	logger := slog.New(slog.NewTextHandler(&output, nil))
 	originalErr := errors.Join(rhiza.ErrCommitUnknown, rhiza.ErrQuorumUnavailable, errors.New(privateMarker))
 	statusErr := errors.Join(rhiza.ErrNotReady, context.DeadlineExceeded, errors.New(privateMarker))
-	logger.Error("Rhiza mutation recovery failed", executeRecoveryFailureLogAttrs("request_status", originalErr, statusErr)...)
+	logger.Error("Rhiza mutation recovery failed", executeRecoveryFailureLogAttrs("request_status", originalErr, statusErr, context.Canceled)...)
 	requestStatusLog := output.String()
 	for _, field := range []string{
 		"stage=request_status",
+		"caller_canceled_after_execute=true",
+		"caller_deadline_after_execute=false",
 		"original_commit_unknown=true",
 		"original_quorum_unavailable=true",
 		"original_durability_unavailable=false",
@@ -41,10 +43,12 @@ func TestExecuteRecoveryDiagnosticSeparatesStageAndSanitizesErrors(t *testing.T)
 
 	output.Reset()
 	replayErr := errors.Join(rhiza.ErrDurabilityUnavailable, errors.New(privateMarker))
-	logger.Error("Rhiza mutation recovery failed", executeRecoveryFailureLogAttrs("same_request_replay", originalErr, replayErr)...)
+	logger.Error("Rhiza mutation recovery failed", executeRecoveryFailureLogAttrs("same_request_replay", originalErr, replayErr, context.DeadlineExceeded)...)
 	replayLog := output.String()
 	for _, field := range []string{
 		"stage=same_request_replay",
+		"caller_canceled_after_execute=false",
+		"caller_deadline_after_execute=true",
 		"original_commit_unknown=true",
 		"reconciliation_durability_unavailable=true",
 		"reconciliation_quorum_unavailable=false",

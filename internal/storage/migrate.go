@@ -3077,9 +3077,10 @@ func Execute(ctx context.Context, db *rhiza.DB, request rhiza.ExecuteRequest) (r
 		if !errors.Is(err, rhiza.ErrCommitUnknown) {
 			return response, err
 		}
+		callerErrAfterExecute := ctx.Err()
 		status, statusErr := db.RequestStatus(ctx, rhiza.RequestStatusRequest{Kind: "sql", RequestID: request.RequestID})
 		if statusErr != nil {
-			logExecuteRecoveryFailure("request_status", err, statusErr)
+			logExecuteRecoveryFailure("request_status", err, statusErr, callerErrAfterExecute)
 			return response, errors.Join(err, statusErr)
 		}
 		switch status.State {
@@ -3092,7 +3093,7 @@ func Execute(ctx context.Context, db *rhiza.DB, request rhiza.ExecuteRequest) (r
 			// exact request to confirm its fingerprint and configured ACK durability.
 			recovered, retryErr := db.Execute(ctx, request)
 			if retryErr != nil {
-				logExecuteRecoveryFailure("same_request_replay", err, retryErr)
+				logExecuteRecoveryFailure("same_request_replay", err, retryErr, callerErrAfterExecute)
 				return response, errors.Join(err, retryErr)
 			}
 			return validateReceipt(request.RequestID, recovered)
@@ -3107,13 +3108,15 @@ func Execute(ctx context.Context, db *rhiza.DB, request rhiza.ExecuteRequest) (r
 	panic("unreachable")
 }
 
-func logExecuteRecoveryFailure(stage string, originalErr, reconciliationErr error) {
-	slog.Default().Error("Rhiza mutation recovery failed", executeRecoveryFailureLogAttrs(stage, originalErr, reconciliationErr)...)
+func logExecuteRecoveryFailure(stage string, originalErr, reconciliationErr, callerErrAfterExecute error) {
+	slog.Default().Error("Rhiza mutation recovery failed", executeRecoveryFailureLogAttrs(stage, originalErr, reconciliationErr, callerErrAfterExecute)...)
 }
 
-func executeRecoveryFailureLogAttrs(stage string, originalErr, reconciliationErr error) []any {
+func executeRecoveryFailureLogAttrs(stage string, originalErr, reconciliationErr, callerErrAfterExecute error) []any {
 	return []any{
 		"stage", stage,
+		"caller_canceled_after_execute", errors.Is(callerErrAfterExecute, context.Canceled),
+		"caller_deadline_after_execute", errors.Is(callerErrAfterExecute, context.DeadlineExceeded),
 		"original_commit_unknown", errors.Is(originalErr, rhiza.ErrCommitUnknown),
 		"original_node_not_ready", errors.Is(originalErr, rhiza.ErrNotReady),
 		"original_quorum_unavailable", errors.Is(originalErr, rhiza.ErrQuorumUnavailable),
