@@ -40,8 +40,8 @@ The three GoAuthy process logs recorded `init_session` failures classified as `w
 
 ## Run 17: root diagnostic only
 
-Four GET probes to the authorize endpoint returned HTTP 200, with no error-stage log. The owned Kind cluster was cleaned up, but the helper exited 1 after its success echo and before final metadata capture. This records only the four observed responses; it is not a completed paired workload, root-cause resolution, or SLO result.
+Run 17 used GoAuthy source `9b1e651db623847f8d2f96c60e4979555775e228` and image manifest `sha256:0bad7026b25db2af40f6449d6863301138254e9e79ddbe1312fc6b66f2f68d51`. One serial and three concurrent GET probes from a single curl pod returned HTTP 200, with no error-stage log. This differs from the paired workload's three driver IPs and does not exercise password submission or SaaS calls. The owned Kind cluster was cleaned up, but the helper exited 1 after its success echo and before final metadata capture. This records only the four observed responses; it is not a completed paired workload, root-cause resolution, or SLO result.
 
 ## Resource sample validity
 
-A retained resource collection contained null CPU and memory values for every sampled container. Those samples do not qualify resource usage, capacity, or an SLO. Run 17 also lacks final helper metadata because cleanup exited after the success echo; neither observation is replaced by an inferred pass.
+All 1,110 retained Run 15 resource rows contained null CPU and memory counters because the old sampler did not normalize CRI counter wrappers. Those samples do not qualify resource usage, capacity, or an SLO. The corrected projection, resource gate, and helper settings have focused regression checks; no later paired campaign is claimed. Run 17 also lacks final helper metadata because cleanup exited after the success echo; neither observation is replaced by an inferred pass.
