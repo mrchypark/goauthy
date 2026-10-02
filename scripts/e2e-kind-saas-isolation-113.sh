@@ -31,15 +31,19 @@ docker image inspect "$GOAUTHY_IMAGE" >/dev/null
 candidate_manifest_digest=${GOAUTHY_IMAGE##*@}
 candidate_config_blob=$(docker image save "$GOAUTHY_IMAGE" | tar -xOf - manifest.json | jq -er '.[0].Config | select(test("^blobs/sha256/[0-9a-f]{64}$"))')
 candidate_config_digest=sha256:${candidate_config_blob##*/}
+runner_source_head=$(git rev-parse --verify HEAD)
+[ -z "$(git status --porcelain --untracked-files=all)" ] || { echo 'helper images require a clean committed checkout' >&2; exit 1; }
 for port in 18443 18444 18445; do
 	! nc -z 127.0.0.1 "$port" >/dev/null 2>&1 || { echo "metrics port already in use: $port" >&2; exit 1; }
 done
-docker image inspect "$fixture_image" >/dev/null 2>&1 || docker buildx build --load -f deploy/e2e-saas-isolation-113/Dockerfile --target fixture -t "$fixture_image" .
-docker image inspect "$driver_image" >/dev/null 2>&1 || docker buildx build --load -f deploy/e2e-saas-isolation-113/Dockerfile --target driver -t "$driver_image" .
 
 temp_dir=$(mktemp -d)
 chmod 700 "$temp_dir"
 image_container=
+fixture_manifest_digest=
+fixture_config_digest=
+driver_manifest_digest=
+driver_config_digest=
 cleanup() {
 	status=$?
 	trap - 0 1 2 15
@@ -53,6 +57,42 @@ trap cleanup 0 1 2 15
 
 umask 077
 mkdir -p "$ISOLATION113_EVIDENCE_DIR"
+printf '%s\n' "$runner_source_head" >"$ISOLATION113_EVIDENCE_DIR/helper-source-head.txt"
+
+docker buildx build --load --metadata-file "$ISOLATION113_EVIDENCE_DIR/fixture-build-metadata.json" -f deploy/e2e-saas-isolation-113/Dockerfile --target fixture -t "$fixture_image" .
+docker buildx build --load --metadata-file "$ISOLATION113_EVIDENCE_DIR/driver-build-metadata.json" -f deploy/e2e-saas-isolation-113/Dockerfile --target driver -t "$driver_image" .
+fixture_manifest_digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$ISOLATION113_EVIDENCE_DIR/fixture-build-metadata.json")
+fixture_config_digest=$(docker image inspect --format '{{.Id}}' "$fixture_image")
+fixture_metadata_config_digest=$(jq -er '."containerimage.config.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$ISOLATION113_EVIDENCE_DIR/fixture-build-metadata.json")
+driver_manifest_digest=$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$ISOLATION113_EVIDENCE_DIR/driver-build-metadata.json")
+driver_config_digest=$(docker image inspect --format '{{.Id}}' "$driver_image")
+driver_metadata_config_digest=$(jq -er '."containerimage.config.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "$ISOLATION113_EVIDENCE_DIR/driver-build-metadata.json")
+[ "$fixture_config_digest" = "$fixture_metadata_config_digest" ] || { echo 'fixture build config digest does not match the loaded image' >&2; exit 1; }
+[ "$driver_config_digest" = "$driver_metadata_config_digest" ] || { echo 'driver build config digest does not match the loaded image' >&2; exit 1; }
+jq -n \
+	--arg source_head "$runner_source_head" \
+	--arg fixture_ref "$fixture_image" --arg fixture_manifest "$fixture_manifest_digest" --arg fixture_config "$fixture_config_digest" \
+	--arg driver_ref "$driver_image" --arg driver_manifest "$driver_manifest_digest" --arg driver_config "$driver_config_digest" \
+	'{source_head:$source_head,fixture:{image_ref:$fixture_ref,manifest_digest:$fixture_manifest,config_digest:$fixture_config},driver:{image_ref:$driver_ref,manifest_digest:$driver_manifest,config_digest:$driver_config}}' \
+	>"$ISOLATION113_EVIDENCE_DIR/helper-image-pins.json"
+
+record_container_pins() {
+	container_name=$1
+	image_ref=$2
+	manifest_digest=$3
+	config_digest=$4
+	expected_count=$5
+	jq -ce --arg container "$container_name" --arg ref "$image_ref" --arg manifest "$manifest_digest" --arg config "$config_digest" --argjson count "$expected_count" '
+		def runtime_digest:
+			sub("^(containerd|docker-pullable)://"; "")
+			| if contains("@sha256:") then sub("^.*@"; "") else . end;
+		[.items[] as $pod
+		 | $pod.status.containerStatuses[]?
+		 | select(.name==$container) as $status
+		 | {pod:$pod.metadata.name,image:([$pod.spec.containers[]|select(.name==$container)|.image][0]),imageID:$status.imageID}] as $pins
+		| if length==$count and all($pins[]; .image==$ref and ((.imageID|runtime_digest)==$manifest or (.imageID|runtime_digest)==$config))
+		  then $pins else error("helper image runtime pin mismatch") end'
+}
 
 assert_candidate_pods() {
 	printf '%s\n' "$1" | awk -v expected_config="$candidate_config_digest" -v expected_manifest="$candidate_manifest_digest" -v expected_ref="$GOAUTHY_IMAGE" '
@@ -107,6 +147,8 @@ kubectl --context "$context" -n "$namespace" get statefulset goauthy -o json | j
 ' >/dev/null || { echo 'GoAuthy connection-use resource profile is not configured or does not preserve allowed resources' >&2; exit 1; }
 kubectl --context "$context" -n "$namespace" rollout status statefulset/goauthy --timeout=240s
 kubectl --context "$context" -n "$namespace" wait --for=condition=Ready pod/goauthy-0 pod/goauthy-1 pod/goauthy-2 --timeout=180s
+kubectl --context "$context" -n "$namespace" get pods -l app.kubernetes.io/name=goauthy -o json |
+	record_container_pins sidecarfixture "$fixture_image" "$fixture_manifest_digest" "$fixture_config_digest" 3 >"$ISOLATION113_EVIDENCE_DIR/fixture-runtime-image-pins.json"
 authorize_url='http://127.0.0.1:18443/oidc/authorize?client_id=goauthy-dev&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A5555%2Fcallback&scope=goauthy.read%20offline_access&state=isolation113-functional-readiness&code_challenge=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&code_challenge_method=S256'
 readiness_deadline=$(( $(date +%s) + 60 ))
 readiness_evidence=$ISOLATION113_EVIDENCE_DIR/authorize-readiness.tsv
@@ -160,6 +202,11 @@ fi
 driver_pods=$(kubectl --context "$context" -n "$namespace" get pods -l job-name=isolation113-driver -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
 driver_pod_count=$(printf '%s\n' "$driver_pods" | awk 'NF {n++} END {print n+0}')
 [ "$driver_pod_count" -eq 3 ] || { echo "expected logs from three driver pods, found $driver_pod_count" >&2; job_status=1; }
+if ! kubectl --context "$context" -n "$namespace" get pods -l job-name=isolation113-driver -o json |
+	record_container_pins driver "$driver_image" "$driver_manifest_digest" "$driver_config_digest" 3 >"$ISOLATION113_EVIDENCE_DIR/driver-runtime-image-pins.json"; then
+	echo 'driver runtime image pins are missing or differ from the native build' >&2
+	job_status=1
+fi
 : >"$ISOLATION113_EVIDENCE_DIR/driver.log"
 for pod in $driver_pods; do
 	driver_log="$ISOLATION113_EVIDENCE_DIR/driver-$pod.log"
@@ -222,8 +269,8 @@ for index in 0 1 2; do
 	forward_pid=$!
 	metrics_ok=false
 	metrics_drained=false
-	for _ in $(seq 1 50); do
-		if curl --silent --show-error --fail --cacert "$temp_dir/ca.crt" --resolve "$fixture_host:$port:127.0.0.1" "https://$fixture_host:$port/metrics" >"$ISOLATION113_EVIDENCE_DIR/fixture-metrics-$index.json" 2>/dev/null && jq -e '. as $metrics | type=="object" and (["healthy","slow-headers","slow-body","fail"]|all(.[];. as $route|($metrics[$route]|type=="object" and ((.started|type)=="number") and ((.active|type)=="number") and ((.completed|type)=="number"))))' "$ISOLATION113_EVIDENCE_DIR/fixture-metrics-$index.json" >/dev/null 2>&1; then
+	for _ in $(seq 1 10); do
+		if curl --silent --show-error --fail --connect-timeout 1 --max-time 2 --cacert "$temp_dir/ca.crt" --resolve "$fixture_host:$port:127.0.0.1" "https://$fixture_host:$port/metrics" >"$ISOLATION113_EVIDENCE_DIR/fixture-metrics-$index.json" 2>/dev/null && jq -e '. as $metrics | type=="object" and (["healthy","slow-headers","slow-body","fail"]|all(.[];. as $route|($metrics[$route]|type=="object" and ((.started|type)=="number") and ((.active|type)=="number") and ((.completed|type)=="number"))))' "$ISOLATION113_EVIDENCE_DIR/fixture-metrics-$index.json" >/dev/null 2>&1; then
 			metrics_ok=true
 			if jq -e 'all(.[]; .active == 0 and .completed == .started)' "$ISOLATION113_EVIDENCE_DIR/fixture-metrics-$index.json" >/dev/null 2>&1; then metrics_drained=true; break; fi
 		fi
