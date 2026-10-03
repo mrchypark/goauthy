@@ -230,6 +230,14 @@ func authorizeStoreErrorClass(err error) string {
 	}
 }
 
+func logPasswordLoginRejection(reason string, err error) {
+	attrs := []any{"operation", "password_login", "reason", reason}
+	if err != nil {
+		attrs = append(attrs, "error_class", authorizeStoreErrorClass(err), "error_type", fmt.Sprintf("%T", err))
+	}
+	slog.Info("password login rejected", attrs...)
+}
+
 // EnableFedCM opts this handler into issuing the separate cross-site session
 // cookie after successful authentication. It is HTTPS-only by browser policy.
 func (h *Handler) EnableFedCM(enabled bool) error {
@@ -546,6 +554,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if crossSite(r.Header.Values("Sec-Fetch-Site")) {
+		logPasswordLoginRejection("cross_site", nil)
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
@@ -559,7 +568,13 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request, form loginForm) {
 	session, sessionToken, ok := h.session(r)
-	if !ok || session.Authenticated() {
+	if !ok {
+		logPasswordLoginRejection("session_missing_or_invalid", nil)
+		http.Error(w, "Invalid login request", http.StatusForbidden)
+		return
+	}
+	if session.Authenticated() {
+		logPasswordLoginRejection("session_already_authenticated", nil)
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
@@ -571,16 +586,19 @@ func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request, form log
 	// A force-MFA client must never receive a password-only session or code.
 	interaction, err := h.browser.LoadAuthorizationInteractionReadOnly(r.Context(), sessionToken, form.interaction)
 	if err != nil {
+		logPasswordLoginRejection("interaction_load_failed", err)
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
 	target, err := h.resolveAuthenticationRequest(r, interaction.Payload)
 	request := target.policy
 	if err != nil {
+		logPasswordLoginRejection("authentication_request_invalid", err)
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
 	if !target.acceptsSubject(auth.Subject) {
+		logPasswordLoginRejection("subject_policy_rejected", nil)
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
