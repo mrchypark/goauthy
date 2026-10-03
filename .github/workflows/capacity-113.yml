@@ -1,0 +1,157 @@
+name: Capacity 113 calibration
+
+# Manual-only calibration entry for issue #113. It provisions a disposable
+# single-node local Kind greenfield profile (three logical GoAuthy members
+# plus a local Versity object store) and runs the existing
+# scripts/e2e-kind-saas-isolation-113.sh diagnostic against a pinned
+# immutable candidate image. It performs no release, deploy, package write,
+# or foreign write, does not close the issue automatically, and never runs
+# on push, schedule, or pull_request_target.
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_image:
+        description: Immutable GoAuthy image reference (name@sha256:...)
+        required: true
+        type: string
+        default: ghcr.io/mrchypark/goauthy@sha256:21c941913d6ae6333d59fa5da4dfc4d61ab2ecafa0eb9299ade01815d486c499
+      candidate_source:
+        description: Reviewed GoAuthy source SHA (40 lowercase hex)
+        required: true
+        type: string
+        default: 944895a2b10b50275d6691e6b07d692414454f01
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capacity-113-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  capacity-113:
+    name: Local Kind isolation calibration
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Validate dispatch inputs
+        env:
+          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
+          CANDIDATE_SOURCE: ${{ inputs.candidate_source }}
+        run: |
+          set -eu
+          printf '%s' "$CANDIDATE_IMAGE" | grep -Eq '^ghcr\.io/mrchypark/goauthy@sha256:[0-9a-f]{64}$' ||
+            { echo "candidate_image must be ghcr.io/mrchypark/goauthy@sha256:<64 lowercase hex>" >&2; exit 1; }
+          printf '%s' "$CANDIDATE_SOURCE" | grep -Eq '^[0-9a-f]{40}$' ||
+            { echo "candidate_source must be a 40-character lowercase hex SHA" >&2; exit 1; }
+          echo "dispatch inputs validated"
+
+      - name: Free disk space
+        run: |
+          set -eu
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo docker image prune -af || true
+          df -h /
+
+      - name: Install pinned kind and kubectl (SHA256 verified)
+        run: |
+          set -eu
+          kind_url="https://github.com/kubernetes-sigs/kind/releases/download/v0.31.0/kind-linux-amd64"
+          kind_sha="eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa"
+          kubectl_url="https://dl.k8s.io/release/v1.35.3/bin/linux/amd64/kubectl"
+          kubectl_sha="fd31c7d7129260e608f6faf92d5984c3267ad0b5ead3bced2fe125686e286ad6"
+          curl -fsSL "$kind_url" -o /tmp/kind
+          printf '%s  /tmp/kind\n' "$kind_sha" | sha256sum -c -
+          install -m 0755 /tmp/kind /usr/local/bin/kind
+          curl -fsSL "$kubectl_url" -o /tmp/kubectl
+          printf '%s  /tmp/kubectl\n' "$kubectl_sha" | sha256sum -c -
+          install -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+          rm -f /tmp/kind /tmp/kubectl
+          kind version
+          kubectl version --client
+
+      - name: Install pinned kustomize (SHA256 verified) and ensure netcat
+        run: |
+          set -eu
+          kustomize_archive=/tmp/kustomize.tar.gz
+          kustomize_sha="3669470b454d865c8184d6bce78df05e977c9aea31c30df3c669317d43bcc7a7"
+          curl -sSfL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" -o "$kustomize_archive"
+          printf '%s  %s\n' "$kustomize_sha" "$kustomize_archive" | sha256sum -c -
+          tar -xzf "$kustomize_archive" -C /usr/local/bin kustomize
+          rm -f "$kustomize_archive"
+          command -v nc >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq netcat-openbsd; }
+
+      - name: Verify required tools
+        run: |
+          set -eu
+          for tool in docker kind kubectl kustomize openssl go curl nc tar jq timeout awk sha256sum; do
+            command -v "$tool" >/dev/null 2>&1 || { echo "missing required tool: $tool" >&2; exit 1; }
+          done
+          kind version
+          kubectl version --client
+          kustomize version
+          go version
+          awk --version | head -n 1
+
+      - name: Log in to GHCR (read-only)
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+      - name: Run capacity 113 calibration
+        env:
+          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
+          CANDIDATE_SOURCE: ${{ inputs.candidate_source }}
+        run: |
+          set -eu
+          evidence_dir="$RUNNER_TEMP/capacity-113-evidence"
+          results_dir="$RUNNER_TEMP/capacity-113-results"
+          mkdir -p "$results_dir"
+          GOAUTHY_IMAGE="$CANDIDATE_IMAGE" \
+          GOAUTHY_CANDIDATE_SOURCE="$CANDIDATE_SOURCE" \
+            ./scripts/run-capacity-113-ci.sh "$evidence_dir" "$results_dir"
+
+      - name: Publish calibration summary
+        if: always()
+        env:
+          RESULTS_DIR: ${{ runner.temp }}/capacity-113-results
+        run: |
+          set -eu
+          if [ -f "$RESULTS_DIR/report.md" ]; then
+            cat "$RESULTS_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "no calibration report was produced" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload safe aggregate evidence
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: capacity-113-safe-aggregate
+          path: |
+            ${{ runner.temp }}/capacity-113-results/criterion.json
+            ${{ runner.temp }}/capacity-113-results/resource-summary.json
+            ${{ runner.temp }}/capacity-113-results/pins.json
+            ${{ runner.temp }}/capacity-113-results/runner-environment.json
+            ${{ runner.temp }}/capacity-113-results/report.md
+          if-no-files-found: warn
+          retention-days: 14

@@ -37,6 +37,15 @@ jobs:
       - name: deploy/ied-qualification
         run: ./deploy/ied-qualification/test.sh
 
+      # Cheap offline oracle checks for the issue #113 isolation summarizer
+      # and its CI report aggregation. They never provision Kind, build
+      # images, dispatch, or run a performance campaign.
+      - name: Offline isolation summarizer oracle tests
+        run: |
+          command -v jq >/dev/null 2>&1 || { echo "jq is required for the offline oracle tests" >&2; exit 1; }
+          ./scripts/test-e2e-kind-saas-isolation-113-summarize.sh
+          ./scripts/test-run-capacity-113-ci-summarize.sh
+
   vet-session-policy:
     name: Vet & session-policy
     runs-on: ubuntu-latest
