@@ -38,16 +38,34 @@ func (h *Handler) InvokeConnectionGrant(w http.ResponseWriter, r *http.Request) 
 		h.methodNotAllowed(w)
 		return
 	}
-	if r.URL.RawQuery != "" || r.URL.ForceQuery || h.crossSite(r) || len(r.Header.Values("Cookie")) != 0 {
+	if r.URL.RawQuery != "" || r.URL.ForceQuery {
+		slog.Error("connection use request rejected", "stage", "request_query")
+		h.genericUnauthorized(w)
+		return
+	}
+	if h.crossSite(r) {
+		slog.Error("connection use request rejected", "stage", "cross_site")
+		h.genericUnauthorized(w)
+		return
+	}
+	if len(r.Header.Values("Cookie")) != 0 {
+		slog.Error("connection use request rejected", "stage", "cookie_header")
 		h.genericUnauthorized(w)
 		return
 	}
 	if len(r.Header.Values("Authorization")) != 1 {
+		slog.Error("connection use request rejected", "stage", "authorization_header_count")
 		h.genericUnauthorized(w)
 		return
 	}
 	owner, consumer, authority, err := h.connectionUseAuthorizer(r)
-	if err != nil || authority == nil {
+	if err != nil {
+		slog.Error("connection use request rejected", "stage", "resource_authorization", "error_class", connectionUseErrorClass(err))
+		h.genericUnauthorized(w)
+		return
+	}
+	if authority == nil {
+		slog.Error("connection use request rejected", "stage", "authorizer_contract")
 		h.genericUnauthorized(w)
 		return
 	}

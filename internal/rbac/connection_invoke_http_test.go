@@ -3,6 +3,7 @@ package rbac
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/mrchypark/goauthy/internal/saas"
+	"github.com/mrchypark/rhiza"
 )
 
 func TestBindConnectionUseAuthorizerRejectsNil(t *testing.T) {
@@ -52,6 +54,64 @@ func TestConnectionUseFailureLogRedactsDetailsAndPreservesStatus(t *testing.T) {
 		if w.Code != tc.want {
 			t.Errorf("error response status=%d want=%d", w.Code, tc.want)
 		}
+	}
+}
+
+func TestInvokeConnectionGrantAuthorizationFailureIsRedactedAndUnauthorized(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	h, store, _, _ := membershipHTTPFixture(t)
+	if err := h.BindSaaSCredentials(oauthCredentialHTTPStore(t, store)); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.BindConnectionUseResource("https://resource.example.test"); err != nil {
+		t.Fatal(err)
+	}
+	const secret = "private-auth-storage-detail"
+	if err := h.BindConnectionUseAuthorizer(func(*http.Request) (string, string, func() (string, []any), error) {
+		return "", "", nil, fmt.Errorf("%s: %w", secret, rhiza.ErrDurabilityUnavailable)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/auth/v1/connection-grants/grant/invoke", strings.NewReader(`{"operation":"read"}`))
+	request.SetPathValue("grant_id", "grant")
+	request.Header.Set("Authorization", "Bearer synthetic")
+	response := httptest.NewRecorder()
+	h.InvokeConnectionGrant(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d want=%d", response.Code, http.StatusUnauthorized)
+	}
+	if got := output.String(); !strings.Contains(got, "stage=resource_authorization") || !strings.Contains(got, "error_class=durability_unavailable") || strings.Contains(got, secret) {
+		t.Fatalf("unexpected authorization diagnostic: %s", got)
+	}
+
+	output.Reset()
+	if err := h.BindConnectionUseAuthorizer(func(*http.Request) (string, string, func() (string, []any), error) {
+		return "owner", "consumer", nil, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest(http.MethodPost, "/auth/v1/connection-grants/grant/invoke", strings.NewReader(`{"operation":"read"}`))
+	request.SetPathValue("grant_id", "grant")
+	request.Header.Set("Authorization", "Bearer synthetic")
+	response = httptest.NewRecorder()
+	h.InvokeConnectionGrant(response, request)
+	if response.Code != http.StatusUnauthorized || !strings.Contains(output.String(), "stage=authorizer_contract") {
+		t.Fatalf("contract denial status=%d diagnostics=%s", response.Code, output.String())
+	}
+
+	output.Reset()
+	request = httptest.NewRequest(http.MethodPost, "/auth/v1/connection-grants/grant/invoke", strings.NewReader(`{"operation":"read"}`))
+	request.SetPathValue("grant_id", "grant")
+	request.Header.Set("Authorization", "Bearer synthetic")
+	request.Header.Set("Cookie", secret)
+	response = httptest.NewRecorder()
+	h.InvokeConnectionGrant(response, request)
+	if response.Code != http.StatusUnauthorized || !strings.Contains(output.String(), "stage=cookie_header") || strings.Contains(output.String(), secret) {
+		t.Fatalf("pre-grant denial status=%d diagnostics=%s", response.Code, output.String())
 	}
 }
 

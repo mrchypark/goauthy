@@ -1,11 +1,14 @@
 package oauth
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/mrchypark/goauthy/internal/clients"
+	"github.com/mrchypark/rhiza"
 	"github.com/ory/fosite"
 )
 
@@ -21,10 +24,40 @@ func (s *Server) AuthorizeUserResource(r *http.Request, requiredScope, requiredA
 // AuthorizeConnectionUse validates a human bearer token for a connection use
 // operation and returns the authenticated subject, client, and SQL guard.
 func (s *Server) AuthorizeConnectionUse(r *http.Request, requiredAudience string) (string, string, func() (string, []any), error) {
-	if r == nil || len(r.Header.Values("Cookie")) != 0 {
+	if r == nil {
+		logConnectionUseAuthorizationFailure("request", nil)
+		return "", "", nil, ErrResourceAuthorization
+	}
+	if len(r.Header.Values("Cookie")) != 0 {
+		logConnectionUseAuthorizationFailure("cookie_header", nil)
 		return "", "", nil, ErrResourceAuthorization
 	}
 	return s.authorizeResource(r, "goauthy.connections.use", requiredAudience, true)
+}
+
+func logConnectionUseAuthorizationFailure(stage string, err error) {
+	slog.Error("connection use authorization rejected", "stage", stage, "error_class", resourceAuthorizationErrorClass(err))
+}
+
+func resourceAuthorizationErrorClass(err error) string {
+	switch {
+	case err == nil:
+		return "rejected"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, rhiza.ErrCommitUnknown):
+		return "commit_unknown"
+	case errors.Is(err, rhiza.ErrNotReady):
+		return "node_not_ready"
+	case errors.Is(err, rhiza.ErrQuorumUnavailable):
+		return "quorum_unavailable"
+	case errors.Is(err, rhiza.ErrDurabilityUnavailable):
+		return "durability_unavailable"
+	default:
+		return "unknown"
+	}
 }
 
 // AuthorizeConnectionHandoff validates a human bearer token for a connection
@@ -37,44 +70,56 @@ func (s *Server) AuthorizeConnectionHandoff(r *http.Request, requiredAudience st
 }
 
 func (s *Server) authorizeResource(r *http.Request, requiredScope, requiredAudience string, connectionUse bool) (string, string, func() (string, []any), error) {
-	if s == nil || s.store == nil || s.accessTokens == nil || r == nil || requiredAudience == "" || (!connectionUse && !resourceScopeAllowed(requiredScope)) || (connectionUse && requiredScope != "goauthy.connections.use") {
+	reject := func(stage string, cause error) (string, string, func() (string, []any), error) {
+		if connectionUse {
+			logConnectionUseAuthorizationFailure(stage, cause)
+		}
 		return "", "", nil, ErrResourceAuthorization
+	}
+	if s == nil || s.store == nil || s.accessTokens == nil || r == nil || requiredAudience == "" || (!connectionUse && !resourceScopeAllowed(requiredScope)) || (connectionUse && requiredScope != "goauthy.connections.use") {
+		return reject("configuration", nil)
 	}
 	scheme, raw, ok := authorizationToken(r)
 	if !ok || !sameAuthorizationScheme(scheme, "Bearer") {
-		return "", "", nil, ErrResourceAuthorization
+		return reject("bearer_header", nil)
 	}
 	signature := s.accessTokens.AccessTokenSignature(r.Context(), raw)
 	if signature == "" {
-		return "", "", nil, ErrResourceAuthorization
+		return reject("token_signature", nil)
 	}
 	request, err := s.store.GetAccessTokenSession(r.Context(), signature, &fosite.DefaultSession{})
-	if err != nil || s.accessTokens.ValidateAccessToken(r.Context(), request, raw) != nil {
-		return "", "", nil, ErrResourceAuthorization
+	if err != nil {
+		return reject("token_session_lookup", err)
+	}
+	if err := s.accessTokens.ValidateAccessToken(r.Context(), request, raw); err != nil {
+		return reject("token_validation", err)
 	}
 	audiences, audienceErr := accessResourceAudiences(request)
 	if audienceErr != nil || request.GetSession() == nil || request.GetSession().GetSubject() == "" || sessionDPoPJKT(request.GetSession()) != "" || request.GetGrantedScopes().Has(requiredScope) == false || !containsAccessAudience(audiences, requiredAudience) {
-		return "", "", nil, ErrResourceAuthorization
+		return reject("token_claims", audienceErr)
 	}
 	grantType := request.GetRequestForm().Get("grant_type")
 	if grantType == "client_credentials" || grantType == TokenExchangeGrantType {
-		return "", "", nil, ErrResourceAuthorization
+		return reject("grant_type", nil)
 	}
 	if session, ok := request.GetSession().(*fosite.DefaultSession); !ok || session.Extra != nil && session.Extra["act"] != nil {
-		return "", "", nil, ErrResourceAuthorization
+		return reject("actor_claim", nil)
 	}
 	if err := s.store.validateTokenAccounts(r.Context(), request); err != nil {
-		return "", "", nil, ErrResourceAuthorization
+		return reject("token_accounts", err)
 	}
 	clientID, subject := request.GetClient().GetID(), request.GetSession().GetSubject()
 	policy, policySet, err := s.clientGroupPolicy(r.Context(), clientID)
 	if err != nil {
-		return "", "", nil, ErrResourceAuthorization
+		return reject("client_group_policy", err)
 	}
 	if policySet && policy.Prefix != "" {
 		principal, principalErr := s.currentPrincipal(r.Context(), subject)
-		if principalErr != nil || enforceClientGroupPolicy(principal, policy) != nil {
-			return "", "", nil, ErrResourceAuthorization
+		if principalErr != nil {
+			return reject("current_principal", principalErr)
+		}
+		if enforceClientGroupPolicy(principal, policy) != nil {
+			return reject("client_group_membership", nil)
 		}
 	}
 	managed, managedOK := request.GetClient().(*clients.Client)
