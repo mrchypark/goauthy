@@ -20,17 +20,31 @@ awk '
 [ -s "$temp_dir/gate.jq" ] || { echo 'could not extract runner resource gate' >&2; exit 1; }
 
 jq -cn '
+	def id($n): "a00" + ($n|tostring);
 	["goauthy-0","goauthy-1","goauthy-2"] as $pods |
 	["goauthy","sidecarfixture"] as $containers |
 	{stats:[
-		$pods[] as $pod | $containers[] as $container |
-		{attributes:{id:($pod+"/"+$container),labels:{
+		$pods|to_entries[] as $p | $containers|to_entries[] as $c |
+		(($p.key*2)+$c.key+1) as $n |
+		{attributes:{id:id($n),labels:{
 			"io.kubernetes.pod.namespace":"goauthy",
-			"io.kubernetes.pod.name":$pod,
-			"io.kubernetes.container.name":$container}},
+			"io.kubernetes.pod.name":$p.value,
+			"io.kubernetes.container.name":$c.value}},
 		cpu:{usageCoreNanoSeconds:{value:"12345"}},
 		memory:{workingSetBytes:{value:"67890"}}}
 	]}' >"$temp_dir/cri.json"
+jq -cn '
+	def id($n): "a00" + ($n|tostring);
+	["goauthy-0","goauthy-1","goauthy-2"] as $pods |
+	["goauthy","sidecarfixture"] as $containers |
+	{items:[
+		$pods|to_entries[] as $p |
+		{metadata:{name:$p.value},status:{containerStatuses:[
+			$containers|to_entries[] as $c |
+			(($p.key*2)+$c.key+1) as $n |
+			{name:$c.value,state:{running:{}},containerID:("containerd://"+id($n))}
+		]}}
+	]}' >"$temp_dir/pods.json"
 
 cat >"$temp_dir/bin/docker" <<'EOF'
 #!/bin/sh
@@ -44,15 +58,27 @@ case "$*" in
 esac
 EOF
 chmod +x "$temp_dir/bin/docker"
+cat >"$temp_dir/bin/kubectl" <<'EOF'
+#!/bin/sh
+case "$*" in
+	*" get pods "*) cat "$KUBE_FIXTURE" ;;
+	*) exit 2 ;;
+esac
+EOF
+chmod +x "$temp_dir/bin/kubectl"
 PATH="$temp_dir/bin:$PATH"
 export PATH
 CRI_FIXTURE=$temp_dir/cri.json
-export CRI_FIXTURE
+KUBE_FIXTURE=$temp_dir/pods.json
+export CRI_FIXTURE KUBE_FIXTURE
 
 run_case() {
 	name=$1 expected=$2 mode=$3
 	case $mode in
 		valid) cp "$temp_dir/cri.json" "$temp_dir/input.json" ;;
+		restart-mismatch) jq '.stats += [(.stats[] | select(.attributes.labels["io.kubernetes.pod.name"]=="goauthy-0" and .attributes.labels["io.kubernetes.container.name"]=="goauthy") | .attributes.id="deadbeef")]' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
+		duplicate-active) jq '.stats += [.stats[] | select(.attributes.labels["io.kubernetes.pod.name"]=="goauthy-0" and .attributes.labels["io.kubernetes.container.name"]=="goauthy")]' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
+		mismatch-only) jq '(.stats[] | select(.attributes.labels["io.kubernetes.pod.name"]=="goauthy-0" and .attributes.labels["io.kubernetes.container.name"]=="goauthy").attributes.id)="deadbeef"' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
 		missing) jq 'del(.stats[0].cpu.usageCoreNanoSeconds)' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
 		null) jq '.stats[0].cpu.usageCoreNanoSeconds.value=null' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
 		wrong) jq '.stats[0].memory.workingSetBytes.value="not-a-counter"' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
@@ -79,6 +105,12 @@ run_case() {
 
 run_case wrapped-counters 0 valid
 jq -s -e 'length==6 and all(.[]; .memoryRSSBytes==null and (.unavailable|index("rss-not-exposed"))!=null)' "$temp_dir/wrapped-counters.jsonl" >/dev/null
+run_case restart-id-mismatch 0 restart-mismatch
+jq -s -e 'length==6 and ([.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .containerID=="a001" and .currentContainerID=="containerd://a001" and (.candidateContainerIDs|index("deadbeef"))!=null and ([.unavailable[]|select(.!="rss-not-exposed")]|length)==0)' "$temp_dir/restart-id-mismatch.jsonl" >/dev/null
+run_case duplicate-active-id 1 duplicate-active
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .containerID==null and (.unavailable|index("duplicate-container-rows"))!=null' "$temp_dir/duplicate-active-id.jsonl" >/dev/null
+run_case current-id-mismatch 1 mismatch-only
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .containerID==null and (.unavailable|index("current-container-id-not-reported"))!=null' "$temp_dir/current-id-mismatch.jsonl" >/dev/null
 run_case missing-required-counter 1 missing
 run_case null-required-counter 1 null
 run_case wrong-type-counter 1 wrong
