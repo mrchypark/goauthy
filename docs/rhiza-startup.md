@@ -15,7 +15,10 @@ configuration failure. Once startup is complete, the normal close path remains
 active for graceful shutdown, so this guard does not alter ordinary lifecycle
 cleanup.
 
-The greenfield candidate retains this guard. The existing GoAuthy test verifies
-the guard, not data integrity after an early close and cold reopen. No
-end-to-end greenfield qualification is claimed yet. See [the no-PVC recovery
-and upgrade contract](no-pvc-dr.md).
+The GoAuthy startup-close regression test verifies this guard. One fresh local
+diagnostic with three logical GoAuthy members on one Kind node and a Versity
+fixture completed its scheduled IAM/API and drain checks on first startup
+without GoAuthy restarts. See the [Run 25 evidence](measurements/saas-isolation-113-local/README.md).
+This does not test data integrity after an early close and cold reopen, physical
+host failure tolerance, production qualification, or existing-data migration.
+See [the no-PVC recovery and upgrade contract](no-pvc-dr.md).
