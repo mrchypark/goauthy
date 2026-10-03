@@ -179,7 +179,7 @@ expect_fail "duplicate observation" "$dupobs"
 excessapi=$tmp/excessapi
 mkcase "$excessapi" 100 110 90
 f=$excessapi/driver-isolation113-driver-goauthy-0-0-test.log
-rg -m1 'operation=slow-headers' "$f" >>"$f"
+awk '/operation=slow-headers/ {print; exit}' "$f" >>"$f"
 expect_status "excess duplicated API count" "$excessapi" "fail" "pass" "fail"
 
 # Legitimate same-valued distinct API observations remain accepted.
