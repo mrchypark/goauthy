@@ -331,13 +331,14 @@ func (s *Service) FinishModificationProof(ctx context.Context, subject, sessionD
 }
 
 func mfaFinishStatements(ceremonyDigest, proofDigest, purpose, subject, sessionDigest, attempt, credentialID, credentialJSON string, signCount, old, version int64, now, proofExpiry time.Time) []rhiza.SQLStatement {
+	one := int64(1)
 	return []rhiza.SQLStatement{
 		{SQL: `DELETE FROM identity_webauthn_service_proof_purposes WHERE code_digest IN (SELECT code_digest FROM identity_webauthn_mfa_proofs WHERE expires_at_unix_ms <= ? ORDER BY expires_at_unix_ms LIMIT 64)`, Args: []any{now.UnixMilli()}},
 		{SQL: `DELETE FROM identity_webauthn_mfa_proofs WHERE code_digest IN (SELECT code_digest FROM identity_webauthn_mfa_proofs WHERE expires_at_unix_ms <= ? ORDER BY expires_at_unix_ms LIMIT 64)`, Args: []any{now.UnixMilli()}},
-		{SQL: `UPDATE identity_webauthn_mfa_ceremonies SET consumed_attempt=?,consumed_at_unix_ms=? WHERE code_digest=? AND subject=? AND session_digest=? AND consumed_attempt IS NULL AND expires_at_unix_ms>? AND EXISTS (SELECT 1 FROM identity_webauthn_service_ceremony_purposes WHERE code_digest=? AND purpose=?) AND EXISTS (SELECT 1 FROM identity_webauthn_credentials WHERE credential_id=? AND subject=? AND sign_count=? AND credential_version=?) AND NOT EXISTS (SELECT 1 FROM identity_webauthn_mfa_proofs WHERE code_digest=?)`, Args: []any{attempt, now.UnixMilli(), ceremonyDigest, subject, sessionDigest, now.UnixMilli(), ceremonyDigest, purpose, credentialID, subject, old, version, proofDigest}},
-		{SQL: `UPDATE identity_webauthn_credentials SET credential_json=?,sign_count=?,credential_version=credential_version+1,last_used_at_unix_ms=? WHERE credential_id=? AND subject=? AND sign_count=? AND credential_version=? AND changes()=1 AND EXISTS (SELECT 1 FROM identity_webauthn_mfa_ceremonies WHERE code_digest=? AND consumed_attempt=?)`, Args: []any{credentialJSON, signCount, now.UnixMilli(), credentialID, subject, old, version, ceremonyDigest, attempt}},
-		{SQL: `INSERT INTO identity_webauthn_mfa_proofs (code_digest,subject,session_digest,expires_at_unix_ms) SELECT ?,?,?,? WHERE changes()=1 AND EXISTS (SELECT 1 FROM identity_webauthn_mfa_ceremonies WHERE code_digest=? AND consumed_attempt=?)`, Args: []any{proofDigest, subject, sessionDigest, proofExpiry.UnixMilli(), ceremonyDigest, attempt}},
-		{SQL: `INSERT INTO identity_webauthn_service_proof_purposes (code_digest,purpose) SELECT ?,? WHERE changes()=1 AND EXISTS (SELECT 1 FROM identity_webauthn_mfa_proofs WHERE code_digest=?)`, Args: []any{proofDigest, purpose, proofDigest}},
+		{SQL: `UPDATE identity_webauthn_mfa_ceremonies SET consumed_attempt=?,consumed_at_unix_ms=? WHERE code_digest=? AND subject=? AND session_digest=? AND consumed_attempt IS NULL AND expires_at_unix_ms>? AND EXISTS (SELECT 1 FROM identity_webauthn_service_ceremony_purposes WHERE code_digest=? AND purpose=?) AND EXISTS (SELECT 1 FROM identity_webauthn_credentials WHERE credential_id=? AND subject=? AND sign_count=? AND credential_version=?) AND NOT EXISTS (SELECT 1 FROM identity_webauthn_mfa_proofs WHERE code_digest=?)`, Args: []any{attempt, now.UnixMilli(), ceremonyDigest, subject, sessionDigest, now.UnixMilli(), ceremonyDigest, purpose, credentialID, subject, old, version, proofDigest}, ExpectedRowsAffected: &one},
+		{SQL: `UPDATE identity_webauthn_credentials SET credential_json=?,sign_count=?,credential_version=credential_version+1,last_used_at_unix_ms=? WHERE credential_id=? AND subject=? AND sign_count=? AND credential_version=? AND EXISTS (SELECT 1 FROM identity_webauthn_mfa_ceremonies WHERE code_digest=? AND consumed_attempt=?)`, Args: []any{credentialJSON, signCount, now.UnixMilli(), credentialID, subject, old, version, ceremonyDigest, attempt}, ExpectedRowsAffected: &one},
+		{SQL: `INSERT INTO identity_webauthn_mfa_proofs (code_digest,subject,session_digest,expires_at_unix_ms) SELECT ?,?,?,? WHERE EXISTS (SELECT 1 FROM identity_webauthn_mfa_ceremonies WHERE code_digest=? AND consumed_attempt=?)`, Args: []any{proofDigest, subject, sessionDigest, proofExpiry.UnixMilli(), ceremonyDigest, attempt}, ExpectedRowsAffected: &one},
+		{SQL: `INSERT INTO identity_webauthn_service_proof_purposes (code_digest,purpose) SELECT ?,? WHERE EXISTS (SELECT 1 FROM identity_webauthn_mfa_proofs WHERE code_digest=?)`, Args: []any{proofDigest, purpose, proofDigest}, ExpectedRowsAffected: &one},
 	}
 }
 
@@ -429,6 +430,7 @@ func (s *Service) FinishPasskeyRegistration(ctx context.Context, subject, name, 
 // authentication remains truthful; it is a valid enrollment session but is
 // never relabeled as MFA.
 func registrationFinishStatements(ceremonyDigest, attempt, subject, name, sessionDigest, credentialID, credentialJSON string, signCount, userVerified int64, now time.Time, sessionIdleTimeout time.Duration) []rhiza.SQLStatement {
+	one := int64(1)
 	nowMS := now.UTC().Truncate(time.Millisecond).UnixMilli()
 	idleCutoff := now.UTC().Add(-sessionIdleTimeout).UnixMilli()
 	return []rhiza.SQLStatement{
@@ -441,50 +443,45 @@ func registrationFinishStatements(ceremonyDigest, attempt, subject, name, sessio
 				  AND session_digest=? AND consumed_attempt IS NULL AND expires_at_unix_ms>?)
 			  AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0)
 			  AND NOT EXISTS (SELECT 1 FROM identity_webauthn_credentials WHERE credential_id=? OR (subject=? AND name=?))`,
-			Args: []any{userVerified, sessionDigest, subject, nowMS, idleCutoff, ceremonyDigest, subject, name, sessionDigest, nowMS, subject, credentialID, subject, name}},
+			Args: []any{userVerified, sessionDigest, subject, nowMS, idleCutoff, ceremonyDigest, subject, name, sessionDigest, nowMS, subject, credentialID, subject, name}, ExpectedRowsAffected: &one},
 		{SQL: `UPDATE identity_webauthn_ceremonies
 			SET consumed_attempt=?,consumed_at_unix_ms=?
 			WHERE code_digest=? AND purpose='register' AND subject=? AND passkey_name=?
 			  AND session_digest=? AND consumed_attempt IS NULL AND expires_at_unix_ms>?
-			  AND changes()=1
 			  AND EXISTS (SELECT 1 FROM browser_sessions
 				WHERE token_digest=? AND subject=? AND auth_method IN ('pwd','webauthn','mfa','external')
 				  AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms>? AND last_seen_at_unix_ms>?)
 			  AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0)`,
-			Args: []any{attempt, nowMS, ceremonyDigest, subject, name, sessionDigest, nowMS, sessionDigest, subject, nowMS, idleCutoff, subject}},
+			Args: []any{attempt, nowMS, ceremonyDigest, subject, name, sessionDigest, nowMS, sessionDigest, subject, nowMS, idleCutoff, subject}, ExpectedRowsAffected: &one},
 		{SQL: `INSERT INTO identity_webauthn_credentials
 			(credential_id,subject,name,credential_json,sign_count,user_verified,registered_at_unix_ms,last_used_at_unix_ms)
-			SELECT ?,?,?,?,?,?,?,?
-			WHERE changes()=1
-			  AND EXISTS (SELECT 1 FROM identity_webauthn_ceremonies
+			SELECT ?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM identity_webauthn_ceremonies
 				WHERE code_digest=? AND consumed_attempt=? AND subject=? AND session_digest=?)
 			  AND EXISTS (SELECT 1 FROM browser_sessions
 				WHERE token_digest=? AND subject=? AND auth_method IN ('pwd','webauthn','mfa','external')
 				  AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms>? AND last_seen_at_unix_ms>?)
 			  AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0)`,
-			Args: []any{credentialID, subject, name, credentialJSON, signCount, userVerified, nowMS, nowMS, ceremonyDigest, attempt, subject, sessionDigest, sessionDigest, subject, nowMS, idleCutoff, subject}},
+			Args: []any{credentialID, subject, name, credentialJSON, signCount, userVerified, nowMS, nowMS, ceremonyDigest, attempt, subject, sessionDigest, sessionDigest, subject, nowMS, idleCutoff, subject}, ExpectedRowsAffected: &one},
 	}
 }
 
 func passkeyRegistrationFinishStatements(ceremonyDigest, attempt, subject, name, credentialID, credentialJSON string, signCount, userVerified int64, now time.Time) []rhiza.SQLStatement {
+	one := int64(1)
 	nowMS := now.UTC().Truncate(time.Millisecond).UnixMilli()
 	return []rhiza.SQLStatement{
 		{SQL: `UPDATE identity_webauthn_ceremonies
 			SET consumed_attempt=?,consumed_at_unix_ms=?
 			WHERE code_digest=? AND purpose='register' AND subject=? AND passkey_name=?
 			  AND consumed_attempt IS NULL AND expires_at_unix_ms>?
-			  AND changes()=1
 			  AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0)
 			  AND NOT EXISTS (SELECT 1 FROM identity_webauthn_credentials WHERE credential_id=? OR (subject=? AND name=?))`,
-			Args: []any{attempt, nowMS, ceremonyDigest, subject, name, nowMS, subject, credentialID, subject, name}},
+			Args: []any{attempt, nowMS, ceremonyDigest, subject, name, nowMS, subject, credentialID, subject, name}, ExpectedRowsAffected: &one},
 		{SQL: `INSERT INTO identity_webauthn_credentials
 			(credential_id,subject,name,credential_json,sign_count,user_verified,registered_at_unix_ms,last_used_at_unix_ms)
-			SELECT ?,?,?,?,?,?,?,?
-			WHERE changes()=1
-			  AND EXISTS (SELECT 1 FROM identity_webauthn_ceremonies
+			SELECT ?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM identity_webauthn_ceremonies
 				WHERE code_digest=? AND consumed_attempt=? AND subject=?)
 			  AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0)`,
-			Args: []any{credentialID, subject, name, credentialJSON, signCount, userVerified, nowMS, nowMS, ceremonyDigest, attempt, subject, subject}},
+			Args: []any{credentialID, subject, name, credentialJSON, signCount, userVerified, nowMS, nowMS, ceremonyDigest, attempt, subject, subject}, ExpectedRowsAffected: &one},
 	}
 }
 
@@ -536,9 +533,10 @@ func (s *Service) FinishLogin(ctx context.Context, sessionDigest, code string, r
 }
 
 func loginFinishStatements(ceremonyDigest, purpose, subject, sessionDigest, attempt, credentialID, credentialJSON string, signCount, old, version int64, now time.Time) []rhiza.SQLStatement {
+	one := int64(1)
 	return []rhiza.SQLStatement{
-		{SQL: `UPDATE identity_webauthn_ceremonies SET consumed_attempt=?,consumed_at_unix_ms=? WHERE code_digest=? AND purpose=? AND subject=? AND session_digest=? AND consumed_attempt IS NULL AND expires_at_unix_ms>? AND EXISTS (SELECT 1 FROM identity_webauthn_credentials WHERE credential_id=? AND subject=? AND sign_count=? AND credential_version=?)`, Args: []any{attempt, now.UnixMilli(), ceremonyDigest, purpose, subject, sessionDigest, now.UnixMilli(), credentialID, subject, old, version}},
-		{SQL: `UPDATE identity_webauthn_credentials SET credential_json=?,sign_count=?,credential_version=credential_version+1,last_used_at_unix_ms=? WHERE credential_id=? AND subject=? AND sign_count=? AND credential_version=? AND changes()=1 AND EXISTS (SELECT 1 FROM identity_webauthn_ceremonies WHERE code_digest=? AND consumed_attempt=?)`, Args: []any{credentialJSON, signCount, now.UnixMilli(), credentialID, subject, old, version, ceremonyDigest, attempt}},
+		{SQL: `UPDATE identity_webauthn_ceremonies SET consumed_attempt=?,consumed_at_unix_ms=? WHERE code_digest=? AND purpose=? AND subject=? AND session_digest=? AND consumed_attempt IS NULL AND expires_at_unix_ms>? AND EXISTS (SELECT 1 FROM identity_webauthn_credentials WHERE credential_id=? AND subject=? AND sign_count=? AND credential_version=?)`, Args: []any{attempt, now.UnixMilli(), ceremonyDigest, purpose, subject, sessionDigest, now.UnixMilli(), credentialID, subject, old, version}, ExpectedRowsAffected: &one},
+		{SQL: `UPDATE identity_webauthn_credentials SET credential_json=?,sign_count=?,credential_version=credential_version+1,last_used_at_unix_ms=? WHERE credential_id=? AND subject=? AND sign_count=? AND credential_version=? AND EXISTS (SELECT 1 FROM identity_webauthn_ceremonies WHERE code_digest=? AND consumed_attempt=?)`, Args: []any{credentialJSON, signCount, now.UnixMilli(), credentialID, subject, old, version, ceremonyDigest, attempt}, ExpectedRowsAffected: &one},
 	}
 }
 
@@ -735,13 +733,14 @@ func (s *Service) ExchangeModificationProof(ctx context.Context, subject, sessio
 }
 
 func modificationProofExchangeStatements(proofDigest, tokenDigest, subject, sessionDigest, attempt string, now, exp time.Time) []rhiza.SQLStatement {
+	one := int64(1)
 	return []rhiza.SQLStatement{
 		{SQL: `DELETE FROM identity_webauthn_mfa_proofs WHERE code_digest IN (SELECT code_digest FROM identity_webauthn_mfa_proofs WHERE expires_at_unix_ms <= ? ORDER BY expires_at_unix_ms LIMIT 64)`, Args: []any{now.UnixMilli()}},
 		{SQL: `DELETE FROM identity_mfa_mod_token_factors WHERE token_digest IN (SELECT token_digest FROM identity_mfa_mod_tokens WHERE expires_at_unix_ms <= ? ORDER BY expires_at_unix_ms LIMIT 64)`, Args: []any{now.UnixMilli()}},
 		{SQL: `DELETE FROM identity_mfa_mod_tokens WHERE token_digest IN (SELECT token_digest FROM identity_mfa_mod_tokens WHERE expires_at_unix_ms <= ? ORDER BY expires_at_unix_ms LIMIT 64)`, Args: []any{now.UnixMilli()}},
-		{SQL: `UPDATE identity_webauthn_mfa_proofs SET consumed_attempt=?,consumed_at_unix_ms=? WHERE code_digest=? AND subject=? AND session_digest=? AND consumed_attempt IS NULL AND expires_at_unix_ms>? AND EXISTS (SELECT 1 FROM identity_webauthn_service_proof_purposes WHERE code_digest=? AND purpose=?) AND EXISTS (SELECT 1 FROM identity_webauthn_credentials WHERE subject=?) AND NOT EXISTS (SELECT 1 FROM identity_mfa_mod_tokens WHERE token_digest=?)`, Args: []any{attempt, now.UnixMilli(), proofDigest, subject, sessionDigest, now.UnixMilli(), proofDigest, modificationPurpose, subject, tokenDigest}},
-		{SQL: `INSERT INTO identity_mfa_mod_tokens (token_digest,subject,session_digest,expires_at_unix_ms) SELECT ?,?,?,? WHERE changes()=1 AND EXISTS (SELECT 1 FROM identity_webauthn_mfa_proofs WHERE code_digest=? AND consumed_attempt=?) AND EXISTS (SELECT 1 FROM identity_webauthn_credentials WHERE subject=?)`, Args: []any{tokenDigest, subject, sessionDigest, exp.UnixMilli(), proofDigest, attempt, subject}},
-		{SQL: `INSERT INTO identity_mfa_mod_token_factors (token_digest,proof_kind) SELECT ?,'webauthn' WHERE changes()=1 AND EXISTS (SELECT 1 FROM identity_mfa_mod_tokens WHERE token_digest=?)`, Args: []any{tokenDigest, tokenDigest}},
+		{SQL: `UPDATE identity_webauthn_mfa_proofs SET consumed_attempt=?,consumed_at_unix_ms=? WHERE code_digest=? AND subject=? AND session_digest=? AND consumed_attempt IS NULL AND expires_at_unix_ms>? AND EXISTS (SELECT 1 FROM identity_webauthn_service_proof_purposes WHERE code_digest=? AND purpose=?) AND EXISTS (SELECT 1 FROM identity_webauthn_credentials WHERE subject=?) AND NOT EXISTS (SELECT 1 FROM identity_mfa_mod_tokens WHERE token_digest=?)`, Args: []any{attempt, now.UnixMilli(), proofDigest, subject, sessionDigest, now.UnixMilli(), proofDigest, modificationPurpose, subject, tokenDigest}, ExpectedRowsAffected: &one},
+		{SQL: `INSERT INTO identity_mfa_mod_tokens (token_digest,subject,session_digest,expires_at_unix_ms) SELECT ?,?,?,? WHERE EXISTS (SELECT 1 FROM identity_webauthn_mfa_proofs WHERE code_digest=? AND consumed_attempt=?) AND EXISTS (SELECT 1 FROM identity_webauthn_credentials WHERE subject=?)`, Args: []any{tokenDigest, subject, sessionDigest, exp.UnixMilli(), proofDigest, attempt, subject}, ExpectedRowsAffected: &one},
+		{SQL: `INSERT INTO identity_mfa_mod_token_factors (token_digest,proof_kind) SELECT ?,'webauthn' WHERE EXISTS (SELECT 1 FROM identity_mfa_mod_tokens WHERE token_digest=?)`, Args: []any{tokenDigest, tokenDigest}, ExpectedRowsAffected: &one},
 	}
 }
 func (s *Service) ConsumeModificationToken(ctx context.Context, subject, sessionDigest, raw string) error {

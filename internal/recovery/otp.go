@@ -97,23 +97,26 @@ func (s *OTPService) GenerateOTP(ctx context.Context, subject string) (string, e
 	}
 	codeHash := sha256.Sum256([]byte(code))
 	codeDigest := base64.RawURLEncoding.EncodeToString(codeHash[:])
+	one := int64(1)
 
-	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
+	res, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID: recoveryMutationID("otp-issue", subjectDigest, codeDigest, strconv.FormatInt(now.Unix(), 10)),
 		Statements: []rhiza.SQLStatement{
 			{SQL: `DELETE FROM identity_email_otp WHERE expires_at_unix_ms <= ?`, Args: []any{now.UnixMilli()}},
 			{SQL: `DELETE FROM identity_email_otp_rate_limits WHERE window_start_unix_seconds < ?`, Args: []any{windowStart}},
 			{SQL: `INSERT INTO identity_email_otp (code_digest,subject,expires_at_unix_ms,consumed_attempt,consumed_at_unix_ms) SELECT ?,?,?,NULL,NULL
 				WHERE (? = '' OR COALESCE((SELECT CASE WHEN window_start_unix_seconds = ? THEN count ELSE 0 END FROM identity_email_otp_rate_limits WHERE subject_digest = ?), 0) < ?)`,
-				Args: []any{codeDigest, subject, expires, subjectDigest, windowStart, subjectDigest, int64(otpRateLimit)}},
+				Args: []any{codeDigest, subject, expires, subjectDigest, windowStart, subjectDigest, int64(otpRateLimit)}, ExpectedRowsAffected: &one},
 			{SQL: `INSERT INTO identity_email_otp_rate_limits (subject_digest,window_start_unix_seconds,count) SELECT ?,?,1
-				WHERE changes() = 1
 				ON CONFLICT(subject_digest, window_start_unix_seconds) DO UPDATE SET
 				count = identity_email_otp_rate_limits.count + 1`,
 				Args: []any{subjectDigest, windowStart}},
 		},
 	})
 	if err != nil {
+		if res.Status == rhiza.MutationRejected && res.ErrorCode == rhiza.MutationErrorCodePreconditionFailed {
+			return "", ErrOTPRateLimited
+		}
 		return "", err
 	}
 	if !s.otpIssued(ctx, codeDigest, subject, expires) {

@@ -19,6 +19,10 @@ import (
 // used; callers own both buckets. Any error means no success may be declared,
 // including cleanup errors after remote publication (which cannot be rolled back).
 func Create(ctx context.Context, source, destination objstore.Bucket, sourcePrefix, clusterID, catalogPrefix string, recipients []age.Recipient, key ed25519.PrivateKey, workParent string, limits Limits) (_ CatalogEntry, err error) {
+	return createWithExporter(ctx, source, destination, sourcePrefix, clusterID, catalogPrefix, recipients, key, workParent, limits, Export)
+}
+
+func createWithExporter(ctx context.Context, source, destination objstore.Bucket, sourcePrefix, clusterID, catalogPrefix string, recipients []age.Recipient, key ed25519.PrivateKey, workParent string, limits Limits, export func(context.Context, objstore.Bucket, string, string, io.Writer, []age.Recipient, string, Limits) (SnapshotManifest, error)) (_ CatalogEntry, err error) {
 	if source == nil || !restorePrefix(sourcePrefix, clusterID) || len(recipients) == 0 || workParent == "" {
 		return CatalogEntry{}, errors.New("invalid backup creation configuration")
 	}
@@ -40,14 +44,14 @@ func Create(ctx context.Context, source, destination objstore.Bucket, sourcePref
 		if _, err = file.Seek(0, io.SeekStart); err != nil {
 			return CatalogEntry{}, err
 		}
-		_, err = Export(ctx, source, sourcePrefix, clusterID, file, recipients, workParent, limits)
+		_, err = export(ctx, source, sourcePrefix, clusterID, file, recipients, workParent, limits)
 		if err == nil {
 			break
 		}
 		// Rhiza rejects a moving head or maintenance lock during snapshot acquisition.
 		// Retry only these exact native failures, before any remote publication;
 		// joined cleanup failures and other integrity/transport errors fail closed.
-		if attempt == 5 || (err.Error() != "shared archive head changed during chain load" && err.Error() != recovery.ErrArchiveBusy.Error() && err.Error() != checkpoint.ErrPublisherBusy.Error()) {
+		if attempt == 5 || (err.Error() != "shared archive head changed during chain load" && err.Error() != "shared archive state changed too often" && err.Error() != recovery.ErrArchiveBusy.Error() && err.Error() != checkpoint.ErrPublisherBusy.Error()) {
 			return CatalogEntry{}, err
 		}
 		timer := time.NewTimer((100 * time.Millisecond) << attempt)

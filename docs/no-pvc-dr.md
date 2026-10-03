@@ -1,12 +1,13 @@
 # No-PVC and object-store DR contract
 
-The project default is no GoAuthy PVC. Rhiza v0.12.3 uses a disposable local
-`DataDir` (`emptyDir` in Kubernetes) and shared object storage with fixed
-`before-ack` durability. Master keys, issuer, cluster ID, node/member identities
-and object-store namespace must be restored independently and remain consistent.
-A local-directory backup is not the default DR mechanism.
+The project default is no GoAuthy PVC. The greenfield candidate uses Rhiza
+v0.18.0 with a fresh local `DataDir` (`emptyDir` in Kubernetes), an unused
+cluster ID, and an unused object-store namespace. Object-store durability stays
+fixed at `before-ack`, and periodic GC stays disabled. Master keys, issuer, and
+node/member identities must be configured consistently. A local-directory
+backup is not the default DR mechanism.
 
-## Verified Rhiza contract
+## Historical Rhiza v0.12.3 contract
 
 Pinned source: [Rhiza node](https://github.com/mrchypark/rhiza/blob/v0.12.3/pkg/node/node.go),
 [request acknowledgement](https://github.com/mrchypark/rhiza/blob/v0.12.3/pkg/network/server.go),
@@ -27,6 +28,9 @@ GoAuthy's `internal/storage/config.go` already fixes object-store durability to
 before-ack. Default Kubernetes profiles additionally require object storage so
 missing configuration cannot silently select standalone local-only persistence.
 
+Existing-data migration is out of scope and unsupported; this greenfield
+candidate is not production-qualified.
+
 ## Periodic object-store GC readiness (blocked)
 
 GoAuthy keeps Rhiza's periodic object-store GC disabled: the config adapter
@@ -34,9 +38,10 @@ rejects GC interval and grace-period environment variables, and supported
 profiles leave both fields zero. Existing export/restore GC checks exercise
 paired recovery pins; they do not qualify the node's periodic GC loop.
 
-Issue [#105](https://github.com/mrchypark/goauthy/issues/105) remains blocked on
-a released recovery and migration contract. As checked on 2026-10-02, GoAuthy
-still pins Rhiza v0.12.3. The latest
+Issue [#105](https://github.com/mrchypark/goauthy/issues/105) remains open:
+the greenfield candidate and this source review do not qualify periodic GC.
+The 2026-10-02 review below concerns the v0.12.3 deployment and remains
+historical. The latest
 [released Rhiza version is v0.18.0](https://github.com/mrchypark/rhiza/releases/tag/v0.18.0)
 (source commit
 [`ff38548`](https://github.com/mrchypark/rhiza/tree/ff38548cd9561f27dd474a1151f0c6dd5da79b9b)).
@@ -45,12 +50,7 @@ recovery guard before publishing the checkpoint
 ([source](https://github.com/mrchypark/rhiza/blob/ff38548cd9561f27dd474a1151f0c6dd5da79b9b/pkg/node/node.go#L538-L553),
 [finalization](https://github.com/mrchypark/rhiza/blob/ff38548cd9561f27dd474a1151f0c6dd5da79b9b/pkg/node/node.go#L613-L620));
 the released source therefore does not establish that recovery evidence stays
-protected through finalization. Its `EnrollExistingVoter` API requires a
-pre-registration WAL and explicitly does not restore missing voting state
-([source](https://github.com/mrchypark/rhiza/blob/ff38548cd9561f27dd474a1151f0c6dd5da79b9b/pkg/node/node.go#L140-L143)).
-The release also changes LatticeDB's checkpoint/WAL format and warns that older
-versions cannot directly open it, requiring pre-upgrade backups and verified
-restoration ([release notes](https://github.com/mrchypark/rhiza/releases/tag/v0.18.0)).
+protected through finalization.
 
 Rhiza `main` at
 [`3d095eb`](https://github.com/mrchypark/rhiza/commit/3d095eb2ee93118d6991704ab79754b3a7c3e32b)
@@ -58,16 +58,11 @@ contains later recovery work, including
 [Local WAL reclamation](https://github.com/mrchypark/rhiza/commit/e67a67b191adc89ea92374fbc4b86a64ded3de19)
 and [learner checkpoint-adoption/GC-floor hardening](https://github.com/mrchypark/rhiza/commit/9d40786e49b7fe24db47c1441b1a8ab11ae6eebc),
 but these commits are not part of a released candidate and do not qualify
-GoAuthy's existing three-voter namespace for migration or GC. These are
-source-derived compatibility gaps, not a demonstrated data-loss event.
+periodic GC. These are source-derived compatibility gaps, not a demonstrated
+data-loss event.
 
-Keep the dependency pin unchanged and GC disabled until a released upstream
-contract protects cold-start recovery evidence through finalization, supports
-recovery when a registered voter's local WAL is missing, and documents
-migration/restore compatibility for existing data. Then qualify recovery with
-exactly three voters and run the periodic-GC gate before enabling GC. Do not use
-object TTL or bypass voter registration as a substitute; preserve existing
-installations and namespaces.
+Keep GC disabled until the periodic-GC gate passes. This document does not set
+an operational SLO or claim production qualification.
 
 ## Deployment and evidence
 

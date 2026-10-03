@@ -59,7 +59,7 @@ func TestRhizaConfigFromEnvCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(config.Members) != 3 || config.Members[0].ID != "goauthy-0" || config.Members[0].Token != "voter-0" || config.AdminToken != "admin-token" || config.ObjStoreDurability != rhiza.ObjectStoreDurabilityBeforeAck || config.ObjStoreProvider != "s3" || config.CheckpointInterval != time.Second {
+	if len(config.Members) != 3 || config.Members[0].ID != "goauthy-0" || config.Members[0].PublicKey != rhiza.PeerPublicKey("prod", "goauthy-0", "voter-0") || config.PeerToken != "voter-1" || config.AdminToken != "admin-token" || config.ObjStoreDurability != rhiza.ObjectStoreDurabilityBeforeAck || config.ObjStoreProvider != "s3" || config.CheckpointInterval != time.Second {
 		t.Fatalf("unexpected cluster config: %#v", config)
 	}
 }
@@ -272,16 +272,16 @@ func TestRhizaConfigFromEnvRejectsUnsupportedClusterObjectStoreSettings(t *testi
 	}
 }
 
-func TestRhizaOpenRejectsMissingVoterTokenAfterParse(t *testing.T) {
+func TestRhizaOpenRejectsMissingLocalPeerToken(t *testing.T) {
 	t.Parallel()
 	config, err := RhizaConfigFromEnv(envMap(clusterEnv()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	config.Members[1].Token = ""
+	config.PeerToken = ""
 	config.DataDir = t.TempDir()
 	if _, err := rhiza.Open(context.Background(), config); err == nil {
-		t.Fatal("rhiza.Open accepted a missing voter token")
+		t.Fatal("rhiza.Open accepted a missing local peer token")
 	}
 }
 

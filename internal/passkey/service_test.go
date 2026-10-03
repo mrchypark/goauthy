@@ -129,18 +129,18 @@ func seedRegistrationState(t *testing.T, db *rhiza.DB, now time.Time, sessionSub
 	return sessionDigest, ceremonyDigest
 }
 
-func registrationFinishForTest(t *testing.T, db *rhiza.DB, now time.Time, subject, sessionDigest, ceremonyDigest, credentialID, attempt string) int64 {
-	return registrationFinishForTestWithUV(t, db, now, subject, sessionDigest, ceremonyDigest, credentialID, attempt, 1)
-}
-
 func registrationFinishForTestWithUV(t *testing.T, db *rhiza.DB, now time.Time, subject, sessionDigest, ceremonyDigest, credentialID, attempt string, userVerified int64) int64 {
 	t.Helper()
-	statements := registrationFinishStatements(ceremonyDigest, attempt, subject, "new-key", sessionDigest, credentialID, "sealed-credential", 0, userVerified, now, browser.DefaultIdleTimeout)
-	response, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "reg-" + attempt, Statements: statements})
+	response, err := registrationFinishForTestResult(db, now, subject, sessionDigest, ceremonyDigest, credentialID, attempt, userVerified)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return response.RowsAffected
+}
+
+func registrationFinishForTestResult(db *rhiza.DB, now time.Time, subject, sessionDigest, ceremonyDigest, credentialID, attempt string, userVerified int64) (rhiza.ExecuteResponse, error) {
+	statements := registrationFinishStatements(ceremonyDigest, attempt, subject, "new-key", sessionDigest, credentialID, "sealed-credential", 0, userVerified, now, browser.DefaultIdleTimeout)
+	return storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "reg-" + attempt, Statements: statements})
 }
 
 func TestRegistrationFinishDoesNotUpgradeSessionForNonUVCredential(t *testing.T) {
@@ -155,6 +155,48 @@ func TestRegistrationFinishDoesNotUpgradeSessionForNonUVCredential(t *testing.T)
 	}
 }
 
+func TestRegistrationFinishStoresRegisteredAndLastUsedTimestamps(t *testing.T) {
+	_, db, now := newTestService(t)
+	ctx := context.Background()
+	sessionDigest, ceremonyDigest := seedRegistrationState(t, db, now, "bound-subject", "bound-subject", "pwd", now.Add(time.Hour), now, nil)
+
+	const sessionlessSubject = "sessionless-subject"
+	sessionlessSessionDigest, sessionlessCeremonyDigest := digestForTest('s'), digestForTest('t')
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "sessionless-registration-seed", Statements: []rhiza.SQLStatement{
+		{SQL: `INSERT INTO identity_users (subject,username,password_phc,disabled) VALUES (?,?,?,0)`, Args: []any{sessionlessSubject, sessionlessSubject, "phc"}},
+		{SQL: `INSERT INTO identity_webauthn_ceremonies (code_digest,purpose,subject,session_digest,passkey_name,session_json,expires_at_unix_ms) VALUES (?,'register',?,?,?,?,?)`, Args: []any{sessionlessCeremonyDigest, sessionlessSubject, sessionlessSessionDigest, "new-key", "sealed", now.Add(time.Minute).UnixMilli()}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	registeredAt := now.UTC().Truncate(time.Millisecond).UnixMilli()
+	for _, tc := range []struct {
+		name, subject, sessionDigest, ceremonyDigest, credentialID string
+		sessionBound                                               bool
+	}{
+		{name: "session-bound", subject: "bound-subject", sessionDigest: sessionDigest, ceremonyDigest: ceremonyDigest, credentialID: "bound-credential", sessionBound: true},
+		{name: "sessionless", subject: sessionlessSubject, sessionDigest: sessionlessSessionDigest, ceremonyDigest: sessionlessCeremonyDigest, credentialID: "sessionless-credential"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			attempt := strings.Repeat("a", 22)
+			var statements []rhiza.SQLStatement
+			if tc.sessionBound {
+				statements = registrationFinishStatements(tc.ceremonyDigest, attempt, tc.subject, "new-key", tc.sessionDigest, tc.credentialID, "sealed-credential", 0, 1, now, browser.DefaultIdleTimeout)
+			} else {
+				statements = passkeyRegistrationFinishStatements(tc.ceremonyDigest, attempt, tc.subject, "new-key", tc.credentialID, "sealed-credential", 0, 1, now)
+			}
+			response, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "registration-timestamps-" + tc.name, Statements: statements})
+			if err != nil || response.Status != rhiza.MutationCommitted {
+				t.Fatalf("registration receipt=%+v err=%v", response, err)
+			}
+			q, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT registered_at_unix_ms,last_used_at_unix_ms FROM identity_webauthn_credentials WHERE credential_id=?`, Args: []any{tc.credentialID}, Consistency: rhiza.ConsistencyLinearizable})
+			if err != nil || len(q.Rows) != 1 || q.Rows[0][0] != registeredAt || q.Rows[0][1] != registeredAt {
+				t.Fatalf("credential timestamps=%v err=%v, want %d for both fields", q.Rows, err, registeredAt)
+			}
+		})
+	}
+}
+
 func TestRegistrationFinishDisableInterpositionLeavesStateUnchanged(t *testing.T) {
 	_, db, now := newTestService(t)
 	ctx := context.Background()
@@ -162,8 +204,9 @@ func TestRegistrationFinishDisableInterpositionLeavesStateUnchanged(t *testing.T
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "registration-disable-interposition", SQL: `UPDATE identity_users SET disabled=1 WHERE subject=?`, Args: []any{"subject"}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := registrationFinishForTest(t, db, now, "subject", sessionDigest, ceremonyDigest, "disabled-credential", strings.Repeat("d", 22)); got != 0 {
-		t.Fatalf("disabled registration rows affected=%d, want 0", got)
+	result, err := registrationFinishForTestResult(db, now, "subject", sessionDigest, ceremonyDigest, "disabled-credential", strings.Repeat("d", 22), 1)
+	if err == nil || result.Status != rhiza.MutationRejected || result.ErrorCode != rhiza.MutationErrorCodePreconditionFailed || result.RowsAffected != 0 {
+		t.Fatalf("disabled registration receipt=%+v err=%v, want precondition rejection with no rows", result, err)
 	}
 	q, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT auth_method FROM browser_sessions WHERE token_digest=?`, Args: []any{sessionDigest}, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil || len(q.Rows) != 1 || q.Rows[0][0] != "pwd" {
@@ -186,8 +229,9 @@ func TestRegistrationFinishCredentialInterpositionLeavesStateUnchanged(t *testin
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "registration-credential-interposition", SQL: `INSERT INTO identity_webauthn_credentials (credential_id,subject,name,credential_json,sign_count,user_verified,registered_at_unix_ms,last_used_at_unix_ms) VALUES (?,?,?,?,?,?,?,?)`, Args: []any{"existing-registration", "subject", "new-key", "existing", int64(0), int64(1), now.UnixMilli(), now.UnixMilli()}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := registrationFinishForTest(t, db, now, "subject", sessionDigest, ceremonyDigest, "new-registration", strings.Repeat("d", 22)); got != 0 {
-		t.Fatalf("duplicate registration rows affected=%d, want 0", got)
+	result, err := registrationFinishForTestResult(db, now, "subject", sessionDigest, ceremonyDigest, "new-registration", strings.Repeat("d", 22), 1)
+	if err == nil || result.Status != rhiza.MutationRejected || result.ErrorCode != rhiza.MutationErrorCodePreconditionFailed || result.RowsAffected != 0 {
+		t.Fatalf("duplicate registration receipt=%+v err=%v, want precondition rejection with no rows", result, err)
 	}
 	q, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT auth_method FROM browser_sessions WHERE token_digest=?`, Args: []any{sessionDigest}, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil || len(q.Rows) != 1 || q.Rows[0][0] != "pwd" {
@@ -222,8 +266,13 @@ func TestRegistrationFinishUpgradesOnlyTheBoundActiveSession(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, db, _ := newTestService(t)
 			sessionDigest, ceremonyDigest := seedRegistrationState(t, db, now, tc.matchSubject, "subject", tc.method, tc.expires, tc.lastSeen, tc.revoked)
-			if got := registrationFinishForTest(t, db, now, "subject", sessionDigest, ceremonyDigest, "credential-"+tc.name, strings.Repeat("a", 22)); got != tc.wantRows {
-				t.Fatalf("rows affected=%d, want %d", got, tc.wantRows)
+			result, finishErr := registrationFinishForTestResult(db, now, "subject", sessionDigest, ceremonyDigest, "credential-"+tc.name, strings.Repeat("a", 22), 1)
+			if tc.wantRows == 0 {
+				if finishErr == nil || result.Status != rhiza.MutationRejected || result.ErrorCode != rhiza.MutationErrorCodePreconditionFailed || result.RowsAffected != 0 {
+					t.Fatalf("finish receipt=%+v err=%v, want precondition rejection with no rows", result, finishErr)
+				}
+			} else if finishErr != nil || result.Status != rhiza.MutationCommitted || result.RowsAffected != tc.wantRows {
+				t.Fatalf("finish receipt=%+v err=%v, want committed rows=%d", result, finishErr, tc.wantRows)
 			}
 			q, err := db.Query(context.Background(), rhiza.QueryRequest{SQL: `SELECT auth_method FROM browser_sessions WHERE token_digest=?`, Args: []any{sessionDigest}, Consistency: rhiza.ConsistencyLinearizable})
 			if err != nil || len(q.Rows) != 1 || q.Rows[0][0] != tc.wantMethod {
@@ -247,22 +296,33 @@ func TestRegistrationFinishReplayHasOneAtomicWinner(t *testing.T) {
 	now := time.Date(2026, 8, 31, 1, 2, 3, 0, time.UTC)
 	sessionDigest, ceremonyDigest := seedRegistrationState(t, db, now, "subject", "subject", "pwd", now.Add(time.Hour), now, nil)
 	start := make(chan struct{})
-	results := make(chan int64, 2)
+	type result struct {
+		response rhiza.ExecuteResponse
+		err      error
+	}
+	results := make(chan result, 2)
 	for i := range 2 {
 		go func(i int) {
 			<-start
-			results <- registrationFinishForTest(t, db, now, "subject", sessionDigest, ceremonyDigest, "credential-replay-"+string(rune('a'+i)), strings.Repeat(string(rune('a'+i)), 22))
+			response, err := registrationFinishForTestResult(db, now, "subject", sessionDigest, ceremonyDigest, "credential-replay-"+string(rune('a'+i)), strings.Repeat(string(rune('a'+i)), 22), 1)
+			results <- result{response: response, err: err}
 		}(i)
 	}
 	close(start)
 	winners := 0
+	rejected := 0
 	for range 2 {
-		if <-results == 3 {
+		result := <-results
+		if result.err == nil && result.response.Status == rhiza.MutationCommitted && result.response.RowsAffected == 3 {
 			winners++
+		} else if result.err == nil || result.response.Status != rhiza.MutationRejected || result.response.ErrorCode != rhiza.MutationErrorCodePreconditionFailed || result.response.RowsAffected != 0 {
+			t.Errorf("replay receipt=%+v err=%v, want precondition-rejected loser", result.response, result.err)
+		} else {
+			rejected++
 		}
 	}
-	if winners != 1 {
-		t.Fatalf("registration winners=%d, want 1", winners)
+	if winners != 1 || rejected != 1 {
+		t.Fatalf("registration winners=%d rejected=%d, want one each", winners, rejected)
 	}
 	q, err := db.Query(context.Background(), rhiza.QueryRequest{SQL: `SELECT COUNT(*) FROM identity_webauthn_credentials WHERE subject=?`, Args: []any{"subject"}, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil || len(q.Rows) != 1 || q.Rows[0][0] != int64(1) {
@@ -287,11 +347,8 @@ func TestLoginFinishCredentialInterpositionLeavesCeremonyUnconsumed(t *testing.T
 	}
 	statements := loginFinishStatements(ceremonyDigest, loginPurpose, subject, sessionDigest, strings.Repeat("a", 22), credentialID, "updated", 1, 0, 0, now)
 	res, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "login-interposition-finish", Statements: statements})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.RowsAffected != 0 {
-		t.Fatalf("interposed login rows affected=%d, want 0", res.RowsAffected)
+	if err == nil || res.Status != rhiza.MutationRejected || res.ErrorCode != rhiza.MutationErrorCodePreconditionFailed || res.RowsAffected != 0 {
+		t.Fatalf("interposed login receipt=%+v err=%v, want precondition rejection with no rows", res, err)
 	}
 	q, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT consumed_attempt FROM identity_webauthn_ceremonies WHERE code_digest=?`, Args: []any{ceremonyDigest}, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil || len(q.Rows) != 1 || q.Rows[0][0] != nil {
@@ -758,21 +815,37 @@ func TestModificationProofCASLoserCannotCreateProof(t *testing.T) {
 	}
 
 	start := make(chan struct{})
-	results := make(chan error, len(ceremonies))
+	type result struct {
+		response rhiza.ExecuteResponse
+		err      error
+	}
+	results := make(chan result, len(ceremonies))
 	const credentialJSON = "credential-update"
 	const signCount int64 = 1
 	for i, ceremonyDigest := range ceremonies {
 		go func(i int, ceremonyDigest string) {
 			<-start
-			_, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "mfa-finish-cas-" + ceremonyDigest, Statements: mfaFinishStatements(ceremonyDigest, digestForTest(byte('c'+i)), modificationPurpose, "subject", session, strings.Repeat(string(rune('a'+i)), 22), credentialID, credentialJSON, signCount, 0, 0, now, now.Add(defaultMfaCodeTTL))})
-			results <- err
+			response, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "mfa-finish-cas-" + ceremonyDigest, Statements: mfaFinishStatements(ceremonyDigest, digestForTest(byte('c'+i)), modificationPurpose, "subject", session, strings.Repeat(string(rune('a'+i)), 22), credentialID, credentialJSON, signCount, 0, 0, now, now.Add(defaultMfaCodeTTL))})
+			results <- result{response: response, err: err}
 		}(i, ceremonyDigest)
 	}
 	close(start)
+	committed, rejected := 0, 0
 	for range ceremonies {
-		if err := <-results; err != nil {
-			t.Fatal(err)
+		result := <-results
+		if result.err != nil {
+			if result.response.Status != rhiza.MutationRejected || result.response.ErrorCode != rhiza.MutationErrorCodePreconditionFailed || result.response.RowsAffected != 0 {
+				t.Errorf("CAS receipt=%+v err=%v, want precondition-rejected loser", result.response, result.err)
+			}
+			rejected++
+		} else if result.response.Status == rhiza.MutationCommitted {
+			committed++
+		} else {
+			t.Errorf("CAS receipt=%+v without error, want committed winner", result.response)
 		}
+	}
+	if committed != 1 || rejected != 1 {
+		t.Fatalf("CAS committed=%d rejected=%d, want one each", committed, rejected)
 	}
 
 	q, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT code_digest FROM identity_webauthn_mfa_proofs WHERE subject=?`, Args: []any{"subject"}, Consistency: rhiza.ConsistencyLinearizable})
@@ -800,11 +873,8 @@ func TestModificationProofCredentialInterpositionLeavesCeremonyUnconsumed(t *tes
 	}
 	statements := mfaFinishStatements(ceremonyDigest, proofDigest, modificationPurpose, "subject", session, strings.Repeat("e", 22), credentialID, "updated", 1, 0, 0, now, now.Add(defaultMfaCodeTTL))
 	res, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "mfa-interposition-finish", Statements: statements})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.RowsAffected != 0 {
-		t.Fatalf("interposed MFA finish rows affected=%d, want 0", res.RowsAffected)
+	if err == nil || res.Status != rhiza.MutationRejected || res.ErrorCode != rhiza.MutationErrorCodePreconditionFailed || res.RowsAffected != 0 {
+		t.Fatalf("interposed MFA finish receipt=%+v err=%v, want precondition rejection with no rows", res, err)
 	}
 	q, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT consumed_attempt FROM identity_webauthn_mfa_ceremonies WHERE code_digest=?`, Args: []any{ceremonyDigest}, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil || len(q.Rows) != 1 || q.Rows[0][0] != nil {
@@ -831,11 +901,8 @@ func TestModificationProofExchangeCredentialInterpositionLeavesProofUnconsumed(t
 	}
 	statements := modificationProofExchangeStatements(proofDigest, tokenDigest, "subject", session, strings.Repeat("g", 22), now, now.Add(modificationTTL))
 	res, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "mfa-exchange-interposition", Statements: statements})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.RowsAffected != 0 {
-		t.Fatalf("interposed MFA exchange rows affected=%d, want 0", res.RowsAffected)
+	if err == nil || res.Status != rhiza.MutationRejected || res.ErrorCode != rhiza.MutationErrorCodePreconditionFailed || res.RowsAffected != 0 {
+		t.Fatalf("interposed MFA exchange receipt=%+v err=%v, want precondition rejection with no rows", res, err)
 	}
 	q, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT consumed_attempt FROM identity_webauthn_mfa_proofs WHERE code_digest=?`, Args: []any{proofDigest}, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil || len(q.Rows) != 1 || q.Rows[0][0] != nil {

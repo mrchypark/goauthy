@@ -62,7 +62,7 @@ func FailureMessage(err error) string {
 		return "catalog integrity validation failed"
 	case "backup completion watermark changed", "invalid backup completion watermark":
 		return "backup completion watermark validation failed"
-	case "shared archive head changed during chain load":
+	case "shared archive head changed during chain load", "shared archive state changed too often":
 		return "source archive changed during snapshot acquisition"
 	case "shared archive head regressed or changed recovery base":
 		return "source archive recovery boundary changed"
