@@ -1377,28 +1377,38 @@ func migrateSchemaV54(ctx context.Context, db *rhiza.DB) error {
 }
 
 func migrateSchemaV53(ctx context.Context, db *rhiza.DB) error {
-	result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT 1 FROM goauthy_schema_migrations WHERE version = ?`, Args: []any{int64(53)}, Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil || len(result.Rows) != 0 {
-		return err
-	}
-	table, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'dynamic_oauth_clients'`, Consistency: rhiza.ConsistencyLinearizable})
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT
+		EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version = 53),
+		EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'dynamic_oauth_clients'),
+		EXISTS(SELECT 1 FROM pragma_table_info('dynamic_oauth_clients') WHERE name = 'software_statement')`, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil {
 		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 3 {
+		return errors.New("invalid schema 53 inspection")
+	}
+	marked, markerOK := state.Rows[0][0].(int64)
+	table, tableOK := state.Rows[0][1].(int64)
+	column, columnOK := state.Rows[0][2].(int64)
+	if !markerOK || !tableOK || !columnOK || (marked != 0 && marked != 1) || (table != 0 && table != 1) || (column != 0 && column != 1) {
+		return errors.New("invalid schema 53 inspection flags")
+	}
+	if marked == 1 {
+		return nil
 	}
 	// Some migration fixtures intentionally contain only the tables needed by
 	// the migration under test. The dynamic-client table is created by v9 in a
 	// complete database; preserve those fixtures by recording v53 when it is
 	// absent rather than attempting an ALTER TABLE against a missing object.
-	if len(table.Rows) == 0 {
+	if table == 0 {
+		if column != 0 {
+			return errors.New("invalid schema 53 inspection")
+		}
 		_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v53", SQL: `INSERT OR IGNORE INTO goauthy_schema_migrations (version) VALUES (?)`, Args: []any{int64(53)}})
 		return err
 	}
-	column, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT 1 FROM pragma_table_info('dynamic_oauth_clients') WHERE name = 'software_statement'`, Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil {
-		return err
-	}
 	statements := make([]rhiza.SQLStatement, 0, 2)
-	if len(column.Rows) == 0 {
+	if column == 0 {
 		statements = append(statements, rhiza.SQLStatement{SQL: `ALTER TABLE dynamic_oauth_clients ADD COLUMN software_statement TEXT CHECK (software_statement IS NULL OR (length(software_statement) BETWEEN 1 AND 12288))`})
 	}
 	statements = append(statements, rhiza.SQLStatement{SQL: `INSERT OR IGNORE INTO goauthy_schema_migrations (version) VALUES (?)`, Args: []any{int64(53)}})
@@ -1585,16 +1595,25 @@ func schemaV51Request(requestID string) rhiza.ExecuteRequest {
 }
 
 func migrateSchemaV50(ctx context.Context, db *rhiza.DB) error {
-	result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT 1 FROM goauthy_schema_migrations WHERE version = ?`, Args: []any{int64(50)}, Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil || len(result.Rows) != 0 {
-		return err
-	}
-	column, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT 1 FROM pragma_table_info('master_key_retirement_members') WHERE name = 'attestation_sequence'`, Consistency: rhiza.ConsistencyLinearizable})
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT
+		EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version = 50),
+		EXISTS(SELECT 1 FROM pragma_table_info('master_key_retirement_members') WHERE name = 'attestation_sequence')`, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil {
 		return err
 	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 2 {
+		return errors.New("invalid schema 50 inspection")
+	}
+	marked, markerOK := state.Rows[0][0].(int64)
+	column, columnOK := state.Rows[0][1].(int64)
+	if !markerOK || !columnOK || (marked != 0 && marked != 1) || (column != 0 && column != 1) {
+		return errors.New("invalid schema 50 inspection flags")
+	}
+	if marked == 1 {
+		return nil
+	}
 	statements := make([]rhiza.SQLStatement, 0, 4)
-	if len(column.Rows) == 0 {
+	if column == 0 {
 		statements = append(statements, rhiza.SQLStatement{SQL: `ALTER TABLE master_key_retirement_members ADD COLUMN attestation_sequence INTEGER NOT NULL DEFAULT 0 CHECK (attestation_sequence >= 0)`})
 	}
 	// v48 did not persist a sequence. One is the only safe deterministic
