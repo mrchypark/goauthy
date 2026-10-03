@@ -1,11 +1,16 @@
 package rbac
 
 import (
+	"bytes"
+	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/mrchypark/goauthy/internal/saas"
 )
 
 func TestBindConnectionUseAuthorizerRejectsNil(t *testing.T) {
@@ -19,6 +24,34 @@ func TestBindConnectionUseAuthorizerRejectsNil(t *testing.T) {
 		return "", "", nil, nil
 	}); err == nil {
 		t.Fatal("nil handler accepted")
+	}
+}
+
+func TestConnectionUseFailureLogRedactsDetailsAndPreservesStatus(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	const secret = "synthetic-private-error-detail"
+	logConnectionUseFailure("credential_preflight", errors.New(secret))
+	if strings.Contains(output.String(), secret) || !strings.Contains(output.String(), "stage=credential_preflight") || !strings.Contains(output.String(), "error_class=unknown") {
+		t.Fatalf("unsafe or incomplete diagnostic: %s", output.String())
+	}
+
+	var h Handler
+	for _, tc := range []struct {
+		err  error
+		want int
+	}{
+		{saas.ErrAPIKeyRequest, http.StatusBadGateway},
+		{errors.New(secret), http.StatusServiceUnavailable},
+	} {
+		w := httptest.NewRecorder()
+		h.writeInvokeError(w, tc.err)
+		if w.Code != tc.want {
+			t.Errorf("error response status=%d want=%d", w.Code, tc.want)
+		}
 	}
 }
 

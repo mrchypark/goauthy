@@ -1,14 +1,31 @@
 package saas
 
 import (
+	"bytes"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
+
+func TestAPIKeyCallFailureLogRedactsDetails(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	const secret = "synthetic-private-storage-detail"
+	logAPIKeyCallFailure("credential_preflight", errors.New(secret))
+	if strings.Contains(output.String(), secret) || !strings.Contains(output.String(), "stage=credential_preflight") || !strings.Contains(output.String(), "error_class=unknown") {
+		t.Fatalf("unsafe or incomplete diagnostic: %s", output.String())
+	}
+}
 
 func TestCallAPIKeyEncryptedStoreToTLSProvider(t *testing.T) {
 	t.Parallel()

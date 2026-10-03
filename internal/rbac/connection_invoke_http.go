@@ -1,13 +1,17 @@
 package rbac
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/mrchypark/goauthy/internal/saas"
+	"github.com/mrchypark/rhiza"
 )
 
 // BindConnectionUseAuthorizer wires the OAuth resource-server adapter used by
@@ -25,6 +29,7 @@ func (h *Handler) BindConnectionUseAuthorizer(authorizer func(*http.Request) (st
 func (h *Handler) InvokeConnectionGrant(w http.ResponseWriter, r *http.Request) {
 	h.securityHeaders(w)
 	if h.saasCredentials == nil || h.connectionUseAuthorizer == nil || h.connectionUseResource == "" {
+		slog.Error("connection use unavailable", "stage", "handler_configuration")
 		h.unavailable(w)
 		return
 	}
@@ -61,6 +66,7 @@ func (h *Handler) InvokeConnectionGrant(w http.ResponseWriter, r *http.Request) 
 	}
 	grant, guard, err := h.saasCredentials.AuthorizeUseGrant(r.Context(), owner, consumer, grantID, h.connectionUseResource, "proxy", authority)
 	if err != nil {
+		logConnectionUseFailure("authorize_use_grant", err)
 		h.writeInvokeError(w, err)
 		return
 	}
@@ -70,6 +76,7 @@ func (h *Handler) InvokeConnectionGrant(w http.ResponseWriter, r *http.Request) 
 	}
 	connector, err := h.saasCredentials.APIKeyConnector(r.Context(), grant.Owner, grant.CollectionID, grant.ConnectionID, guard)
 	if err != nil {
+		logConnectionUseFailure("connector_lookup", err)
 		h.writeInvokeError(w, err)
 		return
 	}
@@ -95,6 +102,39 @@ func (h *Handler) InvokeConnectionGrant(w http.ResponseWriter, r *http.Request) 
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(result)
+}
+
+func logConnectionUseFailure(stage string, err error) {
+	slog.Error("connection use failed", "stage", stage, "error_class", connectionUseErrorClass(err), "error_type", fmt.Sprintf("%T", err))
+}
+
+func connectionUseErrorClass(err error) string {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, rhiza.ErrCommitUnknown):
+		return "commit_unknown"
+	case errors.Is(err, rhiza.ErrNotReady):
+		return "node_not_ready"
+	case errors.Is(err, rhiza.ErrQuorumUnavailable):
+		return "quorum_unavailable"
+	case errors.Is(err, rhiza.ErrDurabilityUnavailable):
+		return "durability_unavailable"
+	case errors.Is(err, saas.ErrAPIKeyRequest):
+		return "provider_request"
+	case errors.Is(err, saas.ErrUseGrantConflict), errors.Is(err, saas.ErrCredentialConflict):
+		return "conflict"
+	case errors.Is(err, saas.ErrUseGrantNotFound), errors.Is(err, saas.ErrCredentialNotFound):
+		return "not_found"
+	case errors.Is(err, saas.ErrCredentialUnauthorized):
+		return "unauthorized"
+	case errors.Is(err, saas.ErrUseGrantInvalid):
+		return "invalid"
+	default:
+		return "unknown"
+	}
 }
 
 func validInvokeConnectorID(s string) bool {

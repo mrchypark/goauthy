@@ -1043,26 +1043,23 @@ func migrateSchemaV61(ctx context.Context, db *rhiza.DB) error {
 		EXISTS(SELECT 1 FROM pragma_table_info('oidc_user_clients') WHERE name='logout_uri'),
 		EXISTS(SELECT 1 FROM pragma_table_info('oidc_user_clients') WHERE name='allow_private'),
 		EXISTS(SELECT 1 FROM pragma_table_info('oidc_user_clients') WHERE name='allow_http'),
-		EXISTS(SELECT 1 FROM pragma_table_info('oidc_user_clients') WHERE name='created_at_unix_ms')`, Consistency: rhiza.ConsistencyLinearizable})
+		EXISTS(SELECT 1 FROM pragma_table_info('oidc_user_clients') WHERE name='created_at_unix_ms'),
+		(SELECT COUNT(*) FROM pragma_table_info('oidc_backchannel_deliveries')),
+		(SELECT COUNT(*) FROM pragma_table_info('oidc_user_clients'))`, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil {
 		return err
 	}
-	if len(state.Rows) != 1 || len(state.Rows[0]) != 12 {
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 14 {
 		return errors.New("invalid schema 61 inspection")
 	}
-	counts, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT
-		(SELECT COUNT(*) FROM pragma_table_info('oidc_backchannel_deliveries')),
-		(SELECT COUNT(*) FROM pragma_table_info('oidc_user_clients'))`, Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil || len(counts.Rows) != 1 || len(counts.Rows[0]) != 2 {
-		return errors.New("invalid schema 61 column inspection")
-	}
-	deliveryColumns, deliveryOK := counts.Rows[0][0].(int64)
-	userColumns, userOK := counts.Rows[0][1].(int64)
+	deliveryColumns, deliveryOK := state.Rows[0][12].(int64)
+	userColumns, userOK := state.Rows[0][13].(int64)
 	if !deliveryOK || !userOK {
 		return errors.New("invalid schema 61 column count")
 	}
 	flags := make([]bool, 12)
-	for i, raw := range state.Rows[0] {
+	for i := range flags {
+		raw := state.Rows[0][i]
 		n, ok := raw.(int64)
 		if !ok || (n != 0 && n != 1) {
 			return fmt.Errorf("schema 61 inspection flag has type/value %T/%v", raw, raw)
