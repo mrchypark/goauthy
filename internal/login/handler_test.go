@@ -1,6 +1,7 @@
 package login
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -53,6 +55,41 @@ func TestAuthorizeStoreErrorClassUsesFixedWrappedClassifications(t *testing.T) {
 				t.Fatalf("classification=%q want=%q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestPasswordLoginRejectionLogsOnlyFixedDiagnostics(t *testing.T) {
+	const privateMarker = "private-cookie-and-storage-detail"
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	h := testHandler(t)
+	r := httptest.NewRequest(http.MethodPost, "/auth/v1/login", nil)
+	r.Header.Set("Sec-Fetch-Site", "cross-site")
+	r.AddCookie(&http.Cookie{Name: "session", Value: privateMarker})
+	w := httptest.NewRecorder()
+	h.Login(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("cross-site login status=%d want=%d", w.Code, http.StatusForbidden)
+	}
+
+	logPasswordLoginRejection("interaction_load_failed", fmt.Errorf("%s: %w", privateMarker, rhiza.ErrDurabilityUnavailable))
+	got := logs.String()
+	for _, want := range []string{
+		"operation=password_login",
+		"reason=cross_site",
+		"reason=interaction_load_failed",
+		"error_class=ack_durability_unavailable",
+		"error_type=*fmt.wrapError",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("diagnostic log missing %q", want)
+		}
+	}
+	if strings.Contains(got, privateMarker) {
+		t.Fatal("diagnostic log exposed cookie or storage error detail")
 	}
 }
 

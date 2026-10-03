@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 # Run inside the task-state-owned cluster wrapper; that wrapper provisions and
 # removes the cluster on success or failure.
@@ -19,8 +20,55 @@ fixture_token=goauthy-isolation113-synthetic-key
 context=kind-$KIND_CLUSTER
 sampler_pid=
 forward_pid=
+failure_capture_done=false
+runner_completed=false
 
-for tool in docker kind kubectl kustomize openssl go curl nc tar jq; do
+capture_failure_state() {
+	[ "$failure_capture_done" = true ] && return 0
+	failure_capture_done=true
+	capture_dir=$ISOLATION113_EVIDENCE_DIR/failure-capture
+	mkdir -p "$capture_dir" || return 0
+	chmod 700 "$capture_dir" || return 0
+	{
+		printf 'captured_at_utc=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+		printf 'cluster=%s\nnamespace=%s\n' "$KIND_CLUSTER" "$namespace"
+	} >"$capture_dir/capture-status.txt" 2>/dev/null || return 0
+	capture_one() {
+		capture_name=$1
+		shift
+		case $capture_name in
+			cri-*)
+				if timeout --signal=TERM --kill-after=1s 8s "$@" >"$capture_dir/$capture_name" 2>"$capture_dir/$capture_name.stderr"; then capture_rc=0; else capture_rc=$?; fi
+				;;
+			*)
+				if "$@" >"$capture_dir/$capture_name" 2>"$capture_dir/$capture_name.stderr"; then capture_rc=0; else capture_rc=$?; fi
+				;;
+		esac
+		printf '%s_exit=%s\n' "$capture_name" "$capture_rc" >>"$capture_dir/capture-status.txt" 2>/dev/null || true
+	}
+	capture_one pods.json kubectl --request-timeout=5s --context "$context" -n "$namespace" get pods -o json
+	capture_one jobs.json kubectl --request-timeout=5s --context "$context" -n "$namespace" get jobs -o json
+	capture_one events.json kubectl --request-timeout=5s --context "$context" -n "$namespace" get events --sort-by=.metadata.creationTimestamp -o json
+	# One raw CRI snapshot on failure; the live sampler already tracks current IDs.
+	capture_one cri-stats-all.json docker exec "${KIND_CLUSTER}-control-plane" crictl stats --all -o json
+	capture_one cri-containers-all.json docker exec "${KIND_CLUSTER}-control-plane" crictl ps --all -o json
+	for index in 0 1 2; do
+		capture_one "goauthy-$index-current.log" kubectl --request-timeout=5s --context "$context" -n "$namespace" logs "pod/goauthy-$index" -c goauthy --timestamps
+		capture_one "goauthy-$index-previous.log" kubectl --request-timeout=5s --context "$context" -n "$namespace" logs "pod/goauthy-$index" -c goauthy --previous --timestamps
+	done
+	capture_one versity-current.log kubectl --request-timeout=5s --context "$context" -n "$namespace" logs pod/versity-0 -c versity --timestamps
+	capture_one versity-previous.log kubectl --request-timeout=5s --context "$context" -n "$namespace" logs pod/versity-0 -c versity --previous --timestamps
+	if ! jq -se 'length == 3 and all(.[]; (.items | type) == "array")' "$capture_dir/pods.json" "$capture_dir/jobs.json" "$capture_dir/events.json" >/dev/null 2>&1 ||
+		! jq -e '.stats | type == "array"' "$capture_dir/cri-stats-all.json" >/dev/null 2>&1 ||
+		! jq -e '.containers | type == "array"' "$capture_dir/cri-containers-all.json" >/dev/null 2>&1; then
+		echo 'capture_json_validation=failed' >>"$capture_dir/capture-status.txt" 2>/dev/null || true
+	else
+		echo 'capture_json_validation=passed' >>"$capture_dir/capture-status.txt" 2>/dev/null || true
+	fi
+	chmod 600 "$capture_dir"/* 2>/dev/null || true
+}
+
+for tool in docker kind kubectl kustomize openssl go curl nc tar jq timeout; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "missing required tool: $tool" >&2; exit 1; }
 done
 case "$ISOLATION113_EVIDENCE_DIR" in /*) ;; *) echo 'ISOLATION113_EVIDENCE_DIR must be absolute' >&2; exit 1;; esac
@@ -47,6 +95,7 @@ driver_config_digest=
 cleanup() {
 	status=$?
 	trap - 0 1 2 15
+	if [ "$runner_completed" != true ] && [ "$failure_capture_done" != true ]; then capture_failure_state || true; fi
 	[ -z "$sampler_pid" ] || { kill -TERM "$sampler_pid" >/dev/null 2>&1 || true; wait "$sampler_pid" 2>/dev/null || true; }
 	[ -z "$forward_pid" ] || { kill -TERM "$forward_pid" >/dev/null 2>&1 || true; wait "$forward_pid" 2>/dev/null || true; }
 	[ -z "$image_container" ] || docker rm "$image_container" >/dev/null 2>&1 || true
@@ -55,7 +104,6 @@ cleanup() {
 }
 trap cleanup 0 1 2 15
 
-umask 077
 mkdir -p "$ISOLATION113_EVIDENCE_DIR"
 printf '%s\n' "$runner_source_head" >"$ISOLATION113_EVIDENCE_DIR/helper-source-head.txt"
 
@@ -209,11 +257,7 @@ done
 sampler_pid=$!
 job_status=0
 kubectl --context "$context" -n "$namespace" wait --for=condition=complete job/isolation113-driver --timeout=220s || job_status=$?
-if [ "$job_status" -ne 0 ]; then
-	for index in 0 1 2; do
-		kubectl --context "$context" -n "$namespace" logs "pod/goauthy-$index" -c goauthy >"$ISOLATION113_EVIDENCE_DIR/goauthy-$index.log" 2>&1 || echo "failed to collect GoAuthy app log: goauthy-$index" >&2
-	done
-fi
+if [ "$job_status" -ne 0 ]; then capture_failure_state; fi
 driver_pods=$(kubectl --context "$context" -n "$namespace" get pods -l job-name=isolation113-driver -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
 driver_pod_count=$(printf '%s\n' "$driver_pods" | awk 'NF {n++} END {print n+0}')
 [ "$driver_pod_count" -eq 3 ] || { echo "expected logs from three driver pods, found $driver_pod_count" >&2; job_status=1; }
@@ -243,7 +287,7 @@ validate_driver_log() {
 		END {exit !(iam["baseline"]==6&&iam["mixed"]==6&&iam["recovery"]==4&&api["mixed","slow-headers"]==2&&api["mixed","slow-body"]==2&&api["mixed","failure"]==1&&api["mixed","account"]==1&&api["recovery","account"]==4&&ok["mixed"]==1&&ok["recovery"]==4)}' "$1"
 }
 for pod in $driver_pods; do
-	validate_driver_log "$ISOLATION113_EVIDENCE_DIR/driver-$pod.log" || { echo "driver diagnostic evidence invalid: $pod" >&2; job_status=1; }
+	validate_driver_log "$ISOLATION113_EVIDENCE_DIR/driver-$pod.log" || { echo "driver diagnostic evidence invalid: $pod" >&2; job_status=1; capture_failure_state; }
 done
 sampler_status=0
 if kill -TERM "$sampler_pid" >/dev/null 2>&1; then
@@ -303,4 +347,8 @@ echo "candidate_source=$GOAUTHY_CANDIDATE_SOURCE"
 echo "container_samples=$sample_output"
 echo "driver_log=$ISOLATION113_EVIDENCE_DIR/driver.log"
 echo "fixture_metrics=$ISOLATION113_EVIDENCE_DIR/fixture-metrics-{0,1,2}.json"
-[ "$job_status" -eq 0 ] || exit "$job_status"
+if [ "$job_status" -ne 0 ]; then
+	capture_failure_state || true
+	exit "$job_status"
+fi
+runner_completed=true
