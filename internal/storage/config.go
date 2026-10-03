@@ -102,7 +102,8 @@ var s3OnlyObjectStoreEnv = []string{
 // object storage with a bucket and prefix; partial settings fail closed.
 // Dev remains local-only. The cluster profile additionally
 // requires GOAUTHY_RHIZA_PEER_ADDR, GOAUTHY_RHIZA_MEMBERS (a three-element
-// JSON array of rhiza.Member with distinct voter tokens), and
+// JSON array with distinct voter tokens, from which public member keys and
+// this process's peer token are derived), and
 // GOAUTHY_RHIZA_ADMIN_TOKEN (GOAUTHY_RHIZA_PEER_TOKEN is the legacy alias),
 // GOAUTHY_RHIZA_OBJECT_STORE_BUCKET, and GOAUTHY_RHIZA_OBJECT_STORE_PREFIX.
 // S3 is the default object-store provider. GCS uses Application Default
@@ -151,10 +152,6 @@ func RhizaConfigFromEnv(getenv func(string) string) (rhiza.Config, error) {
 	if err := validateAddress(peerAddr); err != nil {
 		return rhiza.Config{}, fmt.Errorf("GOAUTHY_RHIZA_PEER_ADDR: %w", err)
 	}
-	members, err := parseMembers(getenv("GOAUTHY_RHIZA_MEMBERS"), nodeID)
-	if err != nil {
-		return rhiza.Config{}, err
-	}
 	adminToken, legacyToken := getenv("GOAUTHY_RHIZA_ADMIN_TOKEN"), getenv("GOAUTHY_RHIZA_PEER_TOKEN")
 	if adminToken != "" && legacyToken != "" {
 		return rhiza.Config{}, fmt.Errorf("GOAUTHY_RHIZA_ADMIN_TOKEN and legacy GOAUTHY_RHIZA_PEER_TOKEN must not both be set")
@@ -165,13 +162,13 @@ func RhizaConfigFromEnv(getenv func(string) string) (rhiza.Config, error) {
 	if adminToken == "" {
 		return rhiza.Config{}, fmt.Errorf("GOAUTHY_RHIZA_ADMIN_TOKEN is required for the cluster profile")
 	}
-	for _, member := range members {
-		if member.Token == adminToken {
-			return rhiza.Config{}, fmt.Errorf("GOAUTHY_RHIZA_ADMIN_TOKEN must differ from voter token for %s", member.ID)
-		}
+	members, peerToken, err := parseMembers(getenv("GOAUTHY_RHIZA_MEMBERS"), clusterID, nodeID, adminToken)
+	if err != nil {
+		return rhiza.Config{}, err
 	}
 	config.PeerAddr = peerAddr
 	config.AdminToken = adminToken
+	config.PeerToken = peerToken
 	config.Members = members
 	return withObjectStore(config, getenv)
 }
@@ -255,52 +252,71 @@ func parseCheckpointInterval(raw string) (time.Duration, error) {
 	return interval, nil
 }
 
-func parseMembers(raw, nodeID string) ([]rhiza.Member, error) {
-	var members []rhiza.Member
-	if err := json.Unmarshal([]byte(raw), &members); err != nil || len(members) != 3 {
-		return nil, fmt.Errorf("GOAUTHY_RHIZA_MEMBERS must be a JSON array with exactly three members")
+func parseMembers(raw, clusterID, nodeID, adminToken string) ([]rhiza.Member, string, error) {
+	var inputs []struct {
+		ID          rhiza.NodeID `json:"node_id"`
+		URL         string       `json:"url"`
+		PeerURL     string       `json:"peer_url"`
+		LogURL      string       `json:"log_url"`
+		WALIdentity string       `json:"wal_identity"`
+		Token       string       `json:"token"`
 	}
-	seen := make(map[string]struct{}, len(members))
-	seenURLs := make(map[string]struct{}, len(members))
-	seenTokens := make(map[string]struct{}, len(members))
+	if err := json.Unmarshal([]byte(raw), &inputs); err != nil || len(inputs) != 3 {
+		return nil, "", fmt.Errorf("GOAUTHY_RHIZA_MEMBERS must be a JSON array with exactly three members")
+	}
+	members := make([]rhiza.Member, 0, len(inputs))
+	seen := make(map[string]struct{}, len(inputs))
+	seenURLs := make(map[string]struct{}, len(inputs))
+	seenTokens := make(map[string]struct{}, len(inputs))
 	local := false
-	for i, member := range members {
-		id := string(member.ID)
+	var peerToken string
+	for i, input := range inputs {
+		id := string(input.ID)
 		if id == "" {
-			return nil, fmt.Errorf("GOAUTHY_RHIZA_MEMBERS[%d] has an empty node_id", i)
+			return nil, "", fmt.Errorf("GOAUTHY_RHIZA_MEMBERS[%d] has an empty node_id", i)
 		}
 		if _, ok := seen[id]; ok {
-			return nil, fmt.Errorf("GOAUTHY_RHIZA_MEMBERS has duplicate node_id %q", id)
+			return nil, "", fmt.Errorf("GOAUTHY_RHIZA_MEMBERS has duplicate node_id %q", id)
 		}
 		seen[id] = struct{}{}
 		local = local || id == nodeID
-		if member.Token == "" {
-			return nil, fmt.Errorf("GOAUTHY_RHIZA_MEMBERS[%d] has an empty voter token", i)
+		if input.Token == "" {
+			return nil, "", fmt.Errorf("GOAUTHY_RHIZA_MEMBERS[%d] has an empty voter token", i)
 		}
-		if _, ok := seenTokens[member.Token]; ok {
-			return nil, fmt.Errorf("GOAUTHY_RHIZA_MEMBERS has duplicate voter token")
+		if input.Token == adminToken {
+			return nil, "", fmt.Errorf("GOAUTHY_RHIZA_ADMIN_TOKEN must differ from voter token for %s", id)
 		}
-		seenTokens[member.Token] = struct{}{}
-		if err := validatePeerURL(member.PeerURL); err != nil {
-			return nil, fmt.Errorf("GOAUTHY_RHIZA_MEMBERS[%d].peer_url: %w", i, err)
+		if _, ok := seenTokens[input.Token]; ok {
+			return nil, "", fmt.Errorf("GOAUTHY_RHIZA_MEMBERS has duplicate voter token")
+		}
+		seenTokens[input.Token] = struct{}{}
+		if err := validatePeerURL(input.PeerURL); err != nil {
+			return nil, "", fmt.Errorf("GOAUTHY_RHIZA_MEMBERS[%d].peer_url: %w", i, err)
 		}
 		for _, endpoint := range []struct {
 			name  string
 			value string
-		}{{"peer_url", member.PeerURL}, {"url", member.URL}, {"log_url", member.LogURL}} {
+		}{{"peer_url", input.PeerURL}, {"url", input.URL}, {"log_url", input.LogURL}} {
 			if endpoint.value == "" {
 				continue
 			}
 			if _, ok := seenURLs[endpoint.value]; ok {
-				return nil, fmt.Errorf("GOAUTHY_RHIZA_MEMBERS has duplicate %s %q", endpoint.name, endpoint.value)
+				return nil, "", fmt.Errorf("GOAUTHY_RHIZA_MEMBERS has duplicate %s %q", endpoint.name, endpoint.value)
 			}
 			seenURLs[endpoint.value] = struct{}{}
 		}
+		members = append(members, rhiza.Member{
+			ID: input.ID, URL: input.URL, PeerURL: input.PeerURL, LogURL: input.LogURL,
+			PublicKey: rhiza.PeerPublicKey(clusterID, id, input.Token), WALIdentity: input.WALIdentity,
+		})
+		if id == nodeID {
+			peerToken = input.Token
+		}
 	}
 	if !local {
-		return nil, fmt.Errorf("GOAUTHY_NODE_ID %q is not a cluster member", nodeID)
+		return nil, "", fmt.Errorf("GOAUTHY_NODE_ID %q is not a cluster member", nodeID)
 	}
-	return members, nil
+	return members, peerToken, nil
 }
 
 func validateAddress(address string) error {

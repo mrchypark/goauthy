@@ -65,12 +65,16 @@ func TestCreateMovingArchiveHeadExhaustsBeforePublication(t *testing.T) {
 	key, identity := createRetryKeys(t)
 	work := t.TempDir()
 	started := time.Now()
-	entry, err := Create(ctx, fault, destination, sourcePrefix, "cluster", "catalog", []age.Recipient{identity.Recipient()}, key, work, createRetryLimits)
-	if err == nil || entry.ID != "" || err.Error() != "shared archive head changed during chain load" {
+	snapshotAttempts := 0
+	entry, err := createWithExporter(ctx, fault, destination, sourcePrefix, "cluster", "catalog", []age.Recipient{identity.Recipient()}, key, work, createRetryLimits, func(ctx context.Context, source objstore.Bucket, sourcePrefix, clusterID string, dst io.Writer, recipients []age.Recipient, workParent string, limits Limits) (SnapshotManifest, error) {
+		snapshotAttempts++
+		return Export(ctx, source, sourcePrefix, clusterID, dst, recipients, workParent, limits)
+	})
+	if err == nil || entry.ID != "" || err.Error() != "shared archive state changed too often" {
 		t.Fatalf("entry=%+v err=%v", entry, err)
 	}
-	if fault.mutations() != 6 || destination.uploads != 0 || time.Since(started) < 3*time.Second {
-		t.Fatalf("head mutations=%d uploads=%d elapsed=%v", fault.mutations(), destination.uploads, time.Since(started))
+	if snapshotAttempts != 6 || fault.mutations() == 0 || destination.uploads != 0 || time.Since(started) < 3*time.Second {
+		t.Fatalf("snapshot attempts=%d head mutations=%d uploads=%d elapsed=%v", snapshotAttempts, fault.mutations(), destination.uploads, time.Since(started))
 	}
 	createRetryScratchEmpty(t, work)
 }
@@ -88,9 +92,13 @@ func TestCreateMovingArchiveHeadCancellationStopsRetryWait(t *testing.T) {
 		cancel()
 	}()
 	started := time.Now()
-	_, err := Create(ctx, fault, destination, sourcePrefix, "cluster", "catalog", []age.Recipient{identity.Recipient()}, key, work, createRetryLimits)
-	if !errors.Is(err, context.Canceled) || fault.mutations() != 1 || time.Since(started) >= 2*time.Second || destination.uploads != 0 {
-		t.Fatalf("err=%v mutations=%d elapsed=%v uploads=%d", err, fault.mutations(), time.Since(started), destination.uploads)
+	snapshotAttempts := 0
+	_, err := createWithExporter(ctx, fault, destination, sourcePrefix, "cluster", "catalog", []age.Recipient{identity.Recipient()}, key, work, createRetryLimits, func(ctx context.Context, source objstore.Bucket, sourcePrefix, clusterID string, dst io.Writer, recipients []age.Recipient, workParent string, limits Limits) (SnapshotManifest, error) {
+		snapshotAttempts++
+		return Export(ctx, source, sourcePrefix, clusterID, dst, recipients, workParent, limits)
+	})
+	if !errors.Is(err, context.Canceled) || snapshotAttempts != 1 || fault.mutations() == 0 || time.Since(started) >= 2*time.Second || destination.uploads != 0 {
+		t.Fatalf("err=%v snapshot attempts=%d mutations=%d elapsed=%v uploads=%d", err, snapshotAttempts, fault.mutations(), time.Since(started), destination.uploads)
 	}
 	createRetryScratchEmpty(t, work)
 }

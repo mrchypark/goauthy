@@ -33,11 +33,19 @@ func TestMigrationV61BackchannelSubjectsPreservesRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := migrateSchemaV61(ctx, db); err != nil {
-		t.Fatal(err)
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			<-start
+			errs <- migrateSchemaV61(ctx, db)
+		}()
 	}
-	if err := migrateSchemaV61(ctx, db); err != nil {
-		t.Fatal(err)
+	close(start)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent schema 61 migration: %v", err)
+		}
 	}
 	rows, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT event_id,client_id,sid,subject,logout_uri,allow_private,allow_http,attempts,next_attempt_at_unix_ms,lease_token,lease_until_unix_ms,delivered_at_unix_ms,failed_at_unix_ms,last_error,created_at_unix_ms FROM oidc_backchannel_deliveries ORDER BY event_id`, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil || len(rows.Rows) != 4 || rows.Rows[0][2] != "sid-c" || rows.Rows[0][11] != int64(32) || rows.Rows[1][12] != int64(42) || rows.Rows[2][9] != "token" || rows.Rows[3][2] != "sid-a" {

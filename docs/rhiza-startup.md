@@ -1,8 +1,10 @@
 # Rhiza startup close guard
 
-GoAuthy uses `github.com/mrchypark/rhiza v0.12.3` for its embedded replicated
-database. During startup, `cmd/goauthy` waits up to 30 seconds for
-`DB.Ready()` before running migrations or starting the HTTP server.
+The greenfield candidate uses `github.com/mrchypark/rhiza v0.18.0` and
+LatticeDB v0.10.0 with a fresh `DataDir`, unused cluster ID, and unused
+object-store namespace. Existing-data migration is out of scope and unsupported.
+During startup, `cmd/goauthy` waits up to 30 seconds for `DB.Ready()` before
+running GoAuthy's application migrations or starting the HTTP server.
 
 The startup defer intentionally does not call `DB.Close()` until all startup
 initialization has succeeded and the server lifecycle is about to begin. This
@@ -13,10 +15,10 @@ configuration failure. Once startup is complete, the normal close path remains
 active for graceful shutdown, so this guard does not alter ordinary lifecycle
 cleanup.
 
-The v0.12.3 upgrade retains this guard: Rhiza's public close implementation and
-node shutdown ordering are unchanged from v0.12.0. The LatticeDB v0.6.0 upgrade
-does not establish that the early-startup-close hazard is fixed. The existing
-GoAuthy test verifies the guard, not data integrity after an early close and
-cold reopen. The guard is deliberately narrow; it does
-not claim to repair an already damaged checkpoint or replace Rhiza upgrades and
-recovery testing.
+The GoAuthy startup-close regression test verifies this guard. One fresh local
+diagnostic with three logical GoAuthy members on one Kind node and a Versity
+fixture completed its scheduled IAM/API and drain checks on first startup
+without GoAuthy restarts. See the [Run 25 evidence](measurements/saas-isolation-113-local/README.md).
+This does not test data integrity after an early close and cold reopen, physical
+host failure tolerance, production qualification, or existing-data migration.
+See [the no-PVC recovery and upgrade contract](no-pvc-dr.md).

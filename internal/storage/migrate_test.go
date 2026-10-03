@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -2735,6 +2736,104 @@ func TestMigrationV50UpgradesMarkedV48RetirementRows(t *testing.T) {
 	marker, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT version FROM goauthy_schema_migrations WHERE version=50`, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil || len(marker.Rows) != 1 {
 		t.Fatalf("v50 marker=%#v err=%v", marker.Rows, err)
+	}
+}
+
+func TestMigrationV50ConcurrentCallersPreserveAttestationState(t *testing.T) {
+	ctx := context.Background()
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v50-concurrent", DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "v50-concurrent-fixture", Statements: []rhiza.SQLStatement{
+		{SQL: `CREATE TABLE goauthy_schema_migrations (version INTEGER PRIMARY KEY) STRICT`},
+		{SQL: `CREATE TABLE master_key_retirement_members (epoch INTEGER NOT NULL, boot_id TEXT NOT NULL, attestation_state TEXT NOT NULL)`},
+		{SQL: `INSERT INTO master_key_retirement_members VALUES (1,'boot-attested','attested'),(1,'boot-pending','pending')`},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	const callers = 8
+	start := make(chan struct{})
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- migrateSchemaV50(ctx, db)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent v50 migration: %v", err)
+		}
+	}
+	rows, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT attestation_state,attestation_sequence FROM master_key_retirement_members ORDER BY attestation_state`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(rows.Rows) != 2 || rows.Rows[0][0] != "attested" || rows.Rows[0][1] != int64(1) || rows.Rows[1][0] != "pending" || rows.Rows[1][1] != int64(0) {
+		t.Fatalf("v50 attestation rows=%#v err=%v", rows.Rows, err)
+	}
+}
+
+func TestMigrationV53ConcurrentCallers(t *testing.T) {
+	ctx := context.Background()
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v53-concurrent", DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "v53-concurrent-fixture", Statements: []rhiza.SQLStatement{
+		{SQL: `CREATE TABLE goauthy_schema_migrations (version INTEGER PRIMARY KEY) STRICT`},
+		{SQL: `CREATE TABLE dynamic_oauth_clients (client_id TEXT PRIMARY KEY) STRICT`},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	const callers = 8
+	start := make(chan struct{})
+	errs := make(chan error, callers)
+	var wg sync.WaitGroup
+	for range callers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- migrateSchemaV53(ctx, db)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent v53 migration: %v", err)
+		}
+	}
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=53), EXISTS(SELECT 1 FROM pragma_table_info('dynamic_oauth_clients') WHERE name='software_statement')`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(state.Rows) != 1 || len(state.Rows[0]) != 2 || state.Rows[0][0] != int64(1) || state.Rows[0][1] != int64(1) {
+		t.Fatalf("v53 state=%#v err=%v", state.Rows, err)
+	}
+}
+
+func TestMigrationV53MarksFixtureWithoutDynamicClientTable(t *testing.T) {
+	ctx := context.Background()
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "v53-fixture-no-dynamic-table", DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "v53-fixture-no-dynamic-table", SQL: `CREATE TABLE goauthy_schema_migrations (version INTEGER PRIMARY KEY) STRICT`}); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateSchemaV53(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=53), EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='dynamic_oauth_clients')`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(state.Rows) != 1 || len(state.Rows[0]) != 2 || state.Rows[0][0] != int64(1) || state.Rows[0][1] != int64(0) {
+		t.Fatalf("v53 fixture state=%#v err=%v", state.Rows, err)
 	}
 }
 

@@ -94,7 +94,8 @@ func (p *ProofOfWork) issue(ctx context.Context, peer string, difficulty uint8, 
 	if peer != "" {
 		peerDigest = challengeDigest("pow-issue/" + peer)
 	}
-	_, err := storage.Execute(ctx, p.db, rhiza.ExecuteRequest{
+	one := int64(1)
+	res, err := storage.Execute(ctx, p.db, rhiza.ExecuteRequest{
 		RequestID: recoveryMutationID("pow-issue", stored, peerDigest, strconv.FormatInt(expires, 10)),
 		Statements: []rhiza.SQLStatement{
 			// Delete the complete expired set before counting. A partial cleanup
@@ -107,16 +108,18 @@ func (p *ProofOfWork) issue(ctx context.Context, peer string, difficulty uint8, 
 				SELECT ?, ?, NULL, NULL
 				WHERE (SELECT COUNT(*) FROM identity_password_reset_pow_challenges WHERE expires_at_unix_seconds >= ?) < ?
 				  AND (? = '' OR COALESCE((SELECT CASE WHEN window_start_unix_seconds = ? THEN count ELSE 0 END FROM identity_password_reset_pow_issuance_limits WHERE peer_digest = ?), 0) < ?)
-				  AND (? = '' OR (SELECT COUNT(*) FROM identity_password_reset_pow_issuance_limits) < ? OR EXISTS (SELECT 1 FROM identity_password_reset_pow_issuance_limits WHERE peer_digest = ?))`, Args: []any{stored, expires, now.Unix(), int64(proofActiveLimit), peerDigest, windowStart, peerDigest, int64(proofIssueLimit), peerDigest, int64(proofIssuePeers), peerDigest}},
-			// changes() is the immediately preceding conditional challenge insert;
-			// therefore a rejected capacity/quota check consumes no peer slot.
+				  AND (? = '' OR (SELECT COUNT(*) FROM identity_password_reset_pow_issuance_limits) < ? OR EXISTS (SELECT 1 FROM identity_password_reset_pow_issuance_limits WHERE peer_digest = ?))`, Args: []any{stored, expires, now.Unix(), int64(proofActiveLimit), peerDigest, windowStart, peerDigest, int64(proofIssueLimit), peerDigest, int64(proofIssuePeers), peerDigest}, ExpectedRowsAffected: &one},
 			{SQL: `INSERT INTO identity_password_reset_pow_issuance_limits (peer_digest,window_start_unix_seconds,count)
-				SELECT ?, ?, 1 WHERE changes() = 1 AND ? != ''
+				SELECT ?, ?, 1 WHERE ? != ''
 				ON CONFLICT(peer_digest) DO UPDATE SET window_start_unix_seconds = excluded.window_start_unix_seconds,
-				count = CASE WHEN identity_password_reset_pow_issuance_limits.window_start_unix_seconds = excluded.window_start_unix_seconds THEN identity_password_reset_pow_issuance_limits.count + 1 ELSE 1 END`, Args: []any{peerDigest, windowStart, peerDigest}},
+				count = CASE WHEN identity_password_reset_pow_issuance_limits.window_start_unix_seconds = excluded.window_start_unix_seconds THEN identity_password_reset_pow_issuance_limits.count + 1 ELSE 1 END`,
+				Args: []any{peerDigest, windowStart, peerDigest}},
 		},
 	})
 	if err != nil {
+		if res.Status == rhiza.MutationRejected && res.ErrorCode == rhiza.MutationErrorCodePreconditionFailed {
+			return "", ErrProofIssueLimited
+		}
 		return "", err
 	}
 	if !p.unconsumed(ctx, stored, expires, now.Unix()) {

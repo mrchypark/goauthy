@@ -1,6 +1,11 @@
 package oauth
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -92,5 +97,44 @@ func TestAuthorizeConnectionUseRejectsNonUseAndAmbiguousCredentials(t *testing.T
 	var unavailable *Server
 	if owner, consumer, authority, err := unavailable.AuthorizeConnectionUse(httptest.NewRequest(http.MethodPost, "/use", nil), resourceAuthorizationAudience); err == nil || owner != "" || consumer != "" || authority != nil {
 		t.Fatal("unavailable server returned authority")
+	}
+}
+
+func TestConnectionUseAuthorizationDiagnosticsAreFixedAndRedacted(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	const secret = "private-token-and-storage-detail"
+	r := httptest.NewRequest(http.MethodPost, "/use", nil)
+	r.Header.Set("Authorization", "Bearer "+secret)
+	r.AddCookie(&http.Cookie{Name: "session", Value: secret})
+	s := &Server{}
+	_, _, authority, err := s.AuthorizeConnectionUse(r, resourceAuthorizationAudience)
+	if err != ErrResourceAuthorization || authority != nil {
+		t.Fatalf("denial changed: authority=%v err=%v", authority != nil, err)
+	}
+	if got := output.String(); !strings.Contains(got, "stage=cookie_header") || !strings.Contains(got, "error_class=rejected") || strings.Contains(got, secret) {
+		t.Fatalf("unexpected authorization diagnostic: %s", got)
+	}
+
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{fmt.Errorf("%s: %w", secret, rhiza.ErrDurabilityUnavailable), "durability_unavailable"},
+		{fmt.Errorf("%s: %w", secret, rhiza.ErrQuorumUnavailable), "quorum_unavailable"},
+		{fmt.Errorf("%s: %w", secret, context.DeadlineExceeded), "deadline"},
+		{errors.New(secret), "unknown"},
+	} {
+		if got := resourceAuthorizationErrorClass(tc.err); got != tc.want {
+			t.Errorf("error class=%q want=%q", got, tc.want)
+		}
+	}
+	output.Reset()
+	logConnectionUseAuthorizationFailure("token_session_lookup", fmt.Errorf("%s: %w", secret, rhiza.ErrDurabilityUnavailable))
+	if got := output.String(); !strings.Contains(got, "stage=token_session_lookup") || !strings.Contains(got, "error_class=durability_unavailable") || strings.Contains(got, secret) {
+		t.Fatalf("unsafe or incomplete typed diagnostic: %s", got)
 	}
 }

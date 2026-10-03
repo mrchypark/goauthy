@@ -29,3 +29,9 @@ func TestFailureMessageDatabaseErrorsDoNotExposeCauses(t *testing.T) {
 		})
 	}
 }
+
+func TestFailureMessageMovingArchiveHead(t *testing.T) {
+	if got := FailureMessage(errors.New("shared archive state changed too often")); got != "source archive changed during snapshot acquisition" {
+		t.Fatalf("got %q", got)
+	}
+}

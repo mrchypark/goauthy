@@ -366,13 +366,56 @@ func objectTreeSHA256(t *testing.T, root string) map[string]string {
 func assertObjectTreeSHA256(t *testing.T, root string, want map[string]string) {
 	t.Helper()
 	got := objectTreeSHA256(t, root)
-	if len(got) != len(want) {
-		t.Fatalf("object-store fixture changed during interrupted recovery: got=%v want=%v", got, want)
-	}
-	for key, value := range got {
-		if want[key] != value {
-			t.Fatalf("object-store fixture changed during interrupted recovery: got=%v want=%v", got, want)
+	for key, value := range want {
+		if isRecoveryCoordinationObject(key, interruptedRecoveryObjectPrefix) {
+			continue
 		}
+		if got[key] != value {
+			t.Fatalf("object-store data changed during interrupted recovery: object=%q", key)
+		}
+	}
+	for key := range got {
+		if _, existed := want[key]; existed || isRecoveryCoordinationObject(key, interruptedRecoveryObjectPrefix) {
+			continue
+		}
+		t.Fatalf("unexpected object-store data during interrupted recovery: object=%q", key)
+	}
+}
+
+const interruptedRecoveryObjectPrefix = "ternal-auth/ternal-auth-test"
+
+func isRecoveryCoordinationObject(key, fixturePrefix string) bool {
+	key, ok := strings.CutPrefix(key, fixturePrefix+"/")
+	if !ok {
+		return false
+	}
+	return key == "archive/GC_LOCK" ||
+		strings.HasPrefix(key, "archive/recovery-pins/") ||
+		strings.HasPrefix(key, "checkpoint/recovery-pins/") ||
+		key == "checkpoint/PUBLISHER"
+}
+
+func TestIsRecoveryCoordinationObject(t *testing.T) {
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{"ternal-auth/ternal-auth-test/archive/GC_LOCK", true},
+		{"ternal-auth/ternal-auth-test/archive/recovery-pins/owner", true},
+		{"ternal-auth/ternal-auth-test/checkpoint/recovery-pins/owner", true},
+		{"ternal-auth/ternal-auth-test/checkpoint/PUBLISHER", true},
+		{"ternal-auth/ternal-auth-test/checkpoint/CURRENT", false},
+		{"ternal-auth/ternal-auth-test/checkpoint/roots/1", false},
+		{"ternal-auth/ternal-auth-test/checkpoint/blocks/sha256", false},
+		{"other-prefix/ternal-auth-test/checkpoint/PUBLISHER", false},
+		{"checkpoint/PUBLISHER", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			if got := isRecoveryCoordinationObject(tt.key, interruptedRecoveryObjectPrefix); got != tt.want {
+				t.Fatalf("isRecoveryCoordinationObject(%q) = %t, want %t", tt.key, got, tt.want)
+			}
+		})
 	}
 }
 

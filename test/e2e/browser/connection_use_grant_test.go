@@ -351,6 +351,9 @@ func runIsolation113Diagnostic(t *testing.T, primary, secondary, user, password,
 							outcome = "http-error"
 						}
 						t.Logf("isolation113 phase=%s route=api-key operation=%s outcome=%s status=%d start_lag_ms=%.3f completion_latency_ms=%.3f", phaseName, operation, outcome, status, float64(requestStart.Sub(scheduledAt))/float64(time.Millisecond), float64(elapsed)/float64(time.Millisecond))
+						if failure := isolation113StatusFailure(operation, status, err); failure != "" {
+							t.Errorf("scheduled API-key request %s", failure)
+						}
 					})
 				})
 			}
@@ -362,6 +365,41 @@ func runIsolation113Diagnostic(t *testing.T, primary, secondary, user, password,
 	phaseRun("recovery", 2*phase, 12*time.Second, []string{"account"})
 	// Drain all scheduled IAM and provider requests before test cleanup.
 	calls.Wait()
+}
+
+func isolation113StatusFailure(operation string, status int, requestErr error) string {
+	if requestErr != nil {
+		return "transport_error"
+	}
+	want := http.StatusBadGateway
+	if operation == "account" {
+		want = http.StatusOK
+	}
+	if status != want {
+		return "unexpected_status"
+	}
+	return ""
+}
+
+func TestIsolation113ScheduledAPIKeyStatusExpectations(t *testing.T) {
+	for _, tc := range []struct {
+		operation string
+		status    int
+		want      string
+	}{
+		{"account", http.StatusOK, ""},
+		{"account", http.StatusServiceUnavailable, "unexpected_status"},
+		{"failure", http.StatusBadGateway, ""},
+		{"slow-headers", http.StatusBadGateway, ""},
+		{"slow-body", http.StatusServiceUnavailable, "unexpected_status"},
+	} {
+		if got := isolation113StatusFailure(tc.operation, tc.status, nil); got != tc.want {
+			t.Errorf("operation=%s status=%d failure=%q want=%q", tc.operation, tc.status, got, tc.want)
+		}
+	}
+	if got := isolation113StatusFailure("account", http.StatusOK, errors.New("private transport detail")); got != "transport_error" {
+		t.Fatalf("transport failure classification=%q", got)
+	}
 }
 
 func isolation113InvokeClient(t *testing.T) *http.Client {
