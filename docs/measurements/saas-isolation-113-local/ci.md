@@ -148,19 +148,30 @@ an artifact action.
 Client tooling is pinned and hash-verified before install (SHA256 checked with
 `sha256sum`, not runner-image implicit tools):
 
-- `kind` v0.31.0 linux/amd64, SHA256
-  `eb244cbafcc157dff60cf68693c14c9a75c4e6e6fedaf9cd71c58117cb93e3fa`.
+- `kind` v0.32.0 linux/amd64, SHA256
+  `50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54`.
 - `kubectl` v1.35.3 linux/amd64, SHA256
   `fd31c7d7129260e608f6faf92d5984c3267ad0b5ead3bced2fe125686e286ad6`.
 - `kustomize` v5.4.3 archive, SHA256
   `3669470b454d865c8184d6bce78df05e977c9aea31c30df3c669317d43bcc7a7`, verified
   before extraction.
 
-The wrapper additionally fails closed if the installed `kind` is not `v0.31.0`
+The wrapper additionally fails closed if the installed `kind` is not `v0.32.0`
 or `kubectl` is not `v1.35.3`, and it requires `awk` and `sha256sum` as
 prerequisites. The Kind node image stays at `v1.36.1`; the client minor skew
 (1.35.x client, 1.36.x node) is supported and introduces no new topology. The
 job has a bounded `timeout-minutes: 150`.
+
+Compatibility requirement: the pinned node image `v1.36.1` uses containerd
+config version 4, which the older pinned client could not load. The first live
+capacity run (`37163776231`, head `9a`) failed at `kind load` with
+`ERROR: unknown containerd config version: 4`, before any workload or aggregate
+result. `kind` v0.32.0 adds containerd config v4 support and defaults to the
+same `v1.36.1` node image already pinned here, so the client is bumped to
+v0.32.0 while the node image pin is unchanged (see the
+[kind v0.32.0 release notes](https://github.com/kubernetes-sigs/kind/releases/tag/v0.32.0)).
+This is a client compatibility fix only; it is not an IAM causal fix, SLO, GC
+claim, or measured pass.
 
 ## Offline tests
 
@@ -185,5 +196,6 @@ removed, bypassed, or path-filtered.
   OAuth routes, conditional refresh, production provider behavior, capacity, or
   an SLO.
 - Calibration and reporting only; the workflow does not close issue #113.
-- The CI workflow has not been live-verified: no dispatch, Kind cluster,
-  image build or pull, or performance campaign was run while preparing it.
+- The live capacity run is not completed: the actual first dispatch
+  `37163776231` reached Kind cluster setup and candidate pull, then failed at
+  `kind load` before any workload or aggregate result.

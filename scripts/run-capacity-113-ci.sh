@@ -289,7 +289,7 @@ for tool in docker kind kubectl kustomize openssl go curl nc tar jq timeout awk 
 done
 
 kind_version=$(kind version 2>/dev/null || true)
-case "$kind_version" in "kind v0.31.0 "*) ;; *) fail "unexpected kind version: $kind_version" ;; esac
+case "$kind_version" in "kind v0.32.0 "*) ;; *) fail "unexpected kind version: $kind_version" ;; esac
 kubectl_client_version=$(kubectl version --client 2>/dev/null || true)
 case "$kubectl_client_version" in *"v1.35.3"*) ;; *) fail "unexpected kubectl version: $kubectl_client_version" ;; esac
 
