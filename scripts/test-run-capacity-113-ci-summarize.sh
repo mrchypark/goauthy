@@ -280,7 +280,7 @@ missing_startup=$tmp/missing-startup
 mkdir -p "$missing_startup"
 results=$(new_results)
 "$wrapper" --summarize "$missing_startup" "$results" >/dev/null 2>"$tmp/err" || true
-if jq -e '.startup.available == false and .startup.complete == false and .startup.observed == false and (.startup.pods | length) == 0' "$results/resource-summary.json" >/dev/null 2>&1; then
+if jq -e '.startup.available == false and .startup.reason == "capture-missing" and .startup.complete == false and .startup.observed == false and (.startup.pods | length) == 0' "$results/resource-summary.json" >/dev/null 2>&1; then
 	ok "startup missing source"
 else
 	bad "startup missing source (expected honest unavailable)"
@@ -291,10 +291,91 @@ mkdir -p "$malformed_startup/failure-capture"
 printf 'not json' >"$malformed_startup/failure-capture/pods.json"
 results=$(new_results)
 "$wrapper" --summarize "$malformed_startup" "$results" >/dev/null 2>"$tmp/err" || true
-if jq -e '.startup.available == false and .startup.complete == false and .startup.observed == false' "$results/resource-summary.json" >/dev/null 2>&1; then
+if jq -e '.startup.available == false and .startup.reason == "capture-invalid" and .startup.complete == false and .startup.observed == false' "$results/resource-summary.json" >/dev/null 2>&1; then
 	ok "startup malformed source"
 else
 	bad "startup malformed source (expected honest unavailable)"
+fi
+
+projerr_startup=$tmp/projerr-startup
+mkdir -p "$projerr_startup/failure-capture"
+printf '{"items":[1,2,3]}' >"$projerr_startup/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$projerr_startup" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.available == false and .startup.reason == "projection-error" and .startup.complete == false and .startup.observed == false' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup projection error"
+else
+	bad "startup projection error (expected projection-error reason)"
+fi
+
+# Valid JSON but not a PodList/List array shape -> capture-invalid.
+for shape in '{}' '{"items":null}' '{"items":"notanarray"}'; do
+	shape_startup=$tmp/shape-startup
+	rm -rf "$shape_startup"
+	mkdir -p "$shape_startup/failure-capture"
+	printf '%s' "$shape" >"$shape_startup/failure-capture/pods.json"
+	results=$(new_results)
+	"$wrapper" --summarize "$shape_startup" "$results" >/dev/null 2>"$tmp/err" || true
+	if jq -e '.startup.available == false and .startup.reason == "capture-invalid"' "$results/resource-summary.json" >/dev/null 2>&1; then
+		ok "startup non-list shape"
+	else
+		bad "startup non-list shape (expected capture-invalid)"
+	fi
+done
+
+# capture-status pods.json_exit signal (null-or-0..255 integer, no passthrough).
+exit_case=$tmp/exit-case
+mkdir -p "$exit_case/failure-capture"
+jq -nc '{kind:"PodList",items:[{metadata:{name:"goauthy-0",namespace:"goauthy"},spec:{containers:[{name:"goauthy"}]}}]}' >"$exit_case/failure-capture/pods.json"
+printf 'pods.json_exit=1\n' >"$exit_case/failure-capture/capture-status.txt"
+results=$(new_results)
+"$wrapper" --summarize "$exit_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.pods_json_exit == 1 and .startup.available == true' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup pods.json_exit known"
+else
+	bad "startup pods.json_exit known (expected 1)"
+fi
+printf 'pods.json_exit=0\n' >"$exit_case/failure-capture/capture-status.txt"
+results=$(new_results)
+"$wrapper" --summarize "$exit_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.pods_json_exit == 0' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup pods.json_exit zero"
+else
+	bad "startup pods.json_exit zero (expected 0)"
+fi
+rm -f "$exit_case/failure-capture/capture-status.txt"
+results=$(new_results)
+"$wrapper" --summarize "$exit_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.pods_json_exit == null' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup pods.json_exit absent null"
+else
+	bad "startup pods.json_exit absent null"
+fi
+printf 'pods.json_exit=secret-token-value\npods.json_exit=2\n' >"$exit_case/failure-capture/capture-status.txt"
+results=$(new_results)
+"$wrapper" --summarize "$exit_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.pods_json_exit == null' "$results/resource-summary.json" >/dev/null 2>&1 &&
+	! grep -q 'secret-token-value' "$results/resource-summary.json"; then
+	ok "startup pods.json_exit malformed duplicate"
+else
+	bad "startup pods.json_exit malformed duplicate (leak or wrong value)"
+fi
+printf 'pods.json_exit=999\n' >"$exit_case/failure-capture/capture-status.txt"
+results=$(new_results)
+"$wrapper" --summarize "$exit_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.pods_json_exit == null' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup pods.json_exit out of range"
+else
+	bad "startup pods.json_exit out of range (expected null)"
+fi
+printf 'pods.json_exit=1=secret\n' >"$exit_case/failure-capture/capture-status.txt"
+results=$(new_results)
+"$wrapper" --summarize "$exit_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.pods_json_exit == null' "$results/resource-summary.json" >/dev/null 2>&1 &&
+	! grep -q 'secret' "$results/resource-summary.json"; then
+	ok "startup pods.json_exit extra equals"
+else
+	bad "startup pods.json_exit extra equals (expected null)"
 fi
 
 echo "passed=$pass failed=$fail" >&2

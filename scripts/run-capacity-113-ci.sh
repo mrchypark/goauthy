@@ -78,7 +78,7 @@ startup_project_jq='
 		};
 	. as $pods |
 	(($pods | type) == "object") as $is_obj |
-	(if $is_obj then ($pods.items // null) != null else false end) as $valid |
+	(if $is_obj then (($pods.items | type) == "array") else false end) as $valid |
 	(if $valid then
 		($pods.items | map(select((.metadata.name // "") | test("^goauthy-[0-9]+$")) | select(.metadata.namespace == "goauthy")))
 	else [] end) as $gp |
@@ -96,6 +96,8 @@ startup_project_jq='
 	] as $pods_out |
 	{
 		source: "failure-capture/pods.json",
+		reason: null,
+		pods_json_exit: $pods_exit,
 		available: $valid,
 		complete: (([$pods_out[].index] | sort | unique) == [0, 1, 2] and ($pods_out | length) == 3),
 		observed: ([$pods_out[].containers[]] | length) > 0,
@@ -105,11 +107,35 @@ startup_project_jq='
 
 startup_summary() {
 	pods=$evidence_dir/failure-capture/pods.json
-	if [ -f "$pods" ] && jq -e . "$pods" >/dev/null 2>&1; then
-		jq "$startup_project_jq" "$pods" 2>/dev/null ||
-			jq -n '{source:"failure-capture/pods.json",available:false,complete:false,observed:false,pods:[]}'
+	status_file=$evidence_dir/failure-capture/capture-status.txt
+	pods_exit=$(awk -F= '
+		BEGIN { v = "" }
+		$1 == "pods.json_exit" { n++; if (NF == 2) v = $2; else v = "" }
+		END { if (n == 1 && v ~ /^[0-9]+$/ && v + 0 <= 255) print v + 0 }
+	' "$status_file" 2>/dev/null || true)
+	case "$pods_exit" in
+		''|*[!0-9]*) pods_exit=null ;;
+	esac
+	unavailable() {
+		jq -n --arg reason "$1" --argjson pods_exit "$pods_exit" '{
+			source:"failure-capture/pods.json",
+			available:false,
+			reason:$reason,
+			pods_json_exit:$pods_exit,
+			complete:false,
+			observed:false,
+			pods:[]
+		}'
+	}
+	if [ ! -f "$pods" ]; then
+		unavailable "capture-missing"
+	elif ! jq -e . "$pods" >/dev/null 2>&1; then
+		unavailable "capture-invalid"
+	elif ! jq -e 'type == "object" and (.items | type) == "array"' "$pods" >/dev/null 2>&1; then
+		unavailable "capture-invalid"
 	else
-		jq -n '{source:"failure-capture/pods.json",available:false,complete:false,observed:false,pods:[]}'
+		jq --argjson pods_exit "$pods_exit" "$startup_project_jq" "$pods" 2>/dev/null ||
+			unavailable "projection-error"
 	fi
 }
 
