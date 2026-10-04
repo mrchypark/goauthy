@@ -698,58 +698,116 @@ if [ "$GOAUTHY_LOCAL_BUILD" = 1 ]; then
 	[ "sha256:${saved_config_blob##*/}" = "$candidate_config_id" ] ||
 		fail 'source-build saved archive config digest differs from the image config id'
 fi
+# Source-build node reference helpers. `ctr images inspect` prints a human
+# tree, not JSON, so the target manifest is read from the documented
+# `ctr images ls` columns (REF TYPE DIGEST ...) by exact REF match. Only strict
+# sha256 digests are ever printed; any other value becomes a sentinel.
+node_ls_digest() {
+	_rows=$(docker exec "$node" ctr --namespace k8s.io images ls 2>/dev/null |
+		awk -v ref="$1" '$1 == ref && $3 ~ /^sha256:[0-9a-f]{64}$/ { print $3 }')
+	[ "$(printf '%s\n' "$_rows" | awk 'NF {n++} END {print n+0}')" -eq 1 ] || return 1
+	printf '%s' "$_rows"
+}
+
+node_cri_config() {
+	_cfg=$(docker exec "$node" crictl inspecti -o json "$1" 2>/dev/null | jq -r '.status.id // ""' 2>/dev/null) || return 1
+	[ -n "$_cfg" ] || return 1
+	printf '%s' "$_cfg"
+}
+
+sanitize_digest() {
+	if printf '%s' "$1" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+		printf '%s' "$1"
+	else
+		printf 'invalid'
+	fi
+}
+
 if [ "$GOAUTHY_LOCAL_BUILD" = 1 ]; then
 	# Import the exact OCI layout archive, preserving the content-addressed
-	# manifest digest, then attach the canonical runtime reference to that
-	# imported manifest and verify both the manifest and config before the
-	# driver starts.
+	# manifest digest.
 	kind load image-archive "$candidate_oci" --name "$KIND_CLUSTER" ||
 		fail 'failed to import the source-build OCI archive into the Kind node'
-	if docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null; then
-		# The canonical reference already resolves. Accept it only when its
-		# current content is exactly the imported manifest and config; never
-		# silently repoint an unexpected target.
-		jq -e --arg config "$candidate_config_id" --arg manifest "$candidate_manifest_digest" '
-			(.status.id // "") == $config
-			and ([(.status.repoDigests // [])[] | sub("^.*@"; "")] | index($manifest) != null)
-		' "$temp_dir/cri-image.json" >/dev/null ||
-			fail 'source-build candidate canonical reference resolves to unexpected content in the Kind node'
-	else
-		# Several registered names for the same target digest are equivalent
-		# aliases of one payload, not different content. Verify every alias
-		# resolves to the same built config, then choose deterministically: a
-		# canonical repo@sha256 name if present, else a mapped name; never a
-		# bare digest and never --force.
-		imported_names=$(docker exec "$node" ctr --namespace k8s.io images ls 2>/dev/null |
-			awk -v manifest="$candidate_manifest_digest" '$3 == manifest { print $1 }' | sort)
-		[ -n "$imported_names" ] || fail 'source-build candidate manifest digest is not registered in the Kind node image store'
-		for alias in $imported_names; do
-			docker exec "$node" crictl inspecti -o json "$alias" >"$temp_dir/imported-image.json" 2>/dev/null ||
-				fail 'source-build imported candidate alias is not inspectable in the Kind node CRI'
-			alias_config=$(jq -r '.status.id // ""' "$temp_dir/imported-image.json")
-			[ "$alias_config" = "$candidate_config_id" ] ||
-				fail 'source-build imported candidate alias config digest does not match the built OCI config digest'
-		done
-		imported_name=
-		for alias in $imported_names; do
-			case "$alias" in
-				*@sha256:*) imported_name=$alias; break ;;
+	# Resolve the actual registered containerd name(s) by target manifest digest
+	# from the documented `ctr images ls` columns.
+	imported_names=$(docker exec "$node" ctr --namespace k8s.io images ls 2>/dev/null |
+		awk -v manifest="$candidate_manifest_digest" '$3 == manifest { print $1 }' | sort)
+	[ -n "$imported_names" ] ||
+		fail "source-build candidate manifest $candidate_manifest_digest is not registered in the Kind node image store"
+	# Deterministic non-bare source name: prefer a canonical repo@sha256 name,
+	# else a mapped name. Never a bare digest.
+	imported_name=
+	for name in $imported_names; do
+		case "$name" in
+			*@sha256:*) imported_name=$name; break ;;
+		esac
+	done
+	if [ -z "$imported_name" ]; then
+		for name in $imported_names; do
+			case "$name" in
+				sha256:*) continue ;;
+				*) imported_name=$name; break ;;
 			esac
 		done
-		if [ -z "$imported_name" ]; then
-			for alias in $imported_names; do
-				case "$alias" in
-					sha256:*) continue ;;
-					*) imported_name=$alias; break ;;
-				esac
-			done
-		fi
-		[ -n "$imported_name" ] || fail 'source-build candidate has no non-bare registered image name in the Kind node'
-		docker exec "$node" ctr --namespace k8s.io images tag "$imported_name" "$GOAUTHY_IMAGE" >/dev/null ||
-			fail 'failed to attach the canonical source-build candidate reference in the Kind node'
-		docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null ||
-			fail 'source-build candidate canonical reference does not resolve in the Kind node CRI'
 	fi
+	[ -n "$imported_name" ] ||
+		fail 'source-build candidate has no non-bare registered image name in the Kind node'
+	imported_target=$(node_ls_digest "$imported_name") ||
+		fail 'source-build imported candidate registered name is not uniquely resolvable in the Kind node image store'
+	[ "$imported_target" = "$candidate_manifest_digest" ] ||
+		fail "source-build imported candidate target manifest $(sanitize_digest "$imported_target") differs from $candidate_manifest_digest"
+	imported_config=$(node_cri_config "$imported_name") || imported_config=
+	[ "$imported_config" = "$candidate_config_id" ] ||
+		fail "source-build imported candidate config $(sanitize_digest "$imported_config") differs from $candidate_config_id"
+	# Ensure the fully-qualified digest alias exists so CRI repoDigests carries
+	# the actual manifest for the final runtime proof. Attach only when absent;
+	# never --force.
+	candidate_repo=${GOAUTHY_IMAGE%%:*}
+	case "$candidate_repo" in
+		*/*) ;;
+		*) candidate_repo="docker.io/library/$candidate_repo" ;;
+	esac
+	candidate_alias="$candidate_repo@$candidate_manifest_digest"
+	alias_target=$(node_ls_digest "$candidate_alias") || alias_target=
+	if [ -n "$alias_target" ]; then
+		[ "$alias_target" = "$candidate_manifest_digest" ] ||
+			fail "source-build digest alias $candidate_alias target manifest $(sanitize_digest "$alias_target") differs from $candidate_manifest_digest"
+		alias_config=$(node_cri_config "$candidate_alias") || alias_config=
+		[ "$alias_config" = "$candidate_config_id" ] ||
+			fail "source-build digest alias $candidate_alias config $(sanitize_digest "$alias_config") differs from $candidate_config_id"
+	else
+		docker exec "$node" ctr --namespace k8s.io images tag "$imported_name" "$candidate_alias" >/dev/null ||
+			fail "failed to attach the source-build digest alias $candidate_alias in the Kind node"
+	fi
+	# Canonical runtime reference, using the normalized registered name.
+	canonical_name="docker.io/library/$GOAUTHY_IMAGE"
+	canonical_target=$(node_ls_digest "$canonical_name") || canonical_target=
+	if [ -n "$canonical_target" ]; then
+		[ "$canonical_target" = "$candidate_manifest_digest" ] ||
+			fail "source-build canonical reference $canonical_name target manifest $(sanitize_digest "$canonical_target") differs from $candidate_manifest_digest"
+		canonical_config=$(node_cri_config "$GOAUTHY_IMAGE") || canonical_config=
+		[ "$canonical_config" = "$candidate_config_id" ] ||
+			fail "source-build canonical reference $canonical_name config $(sanitize_digest "$canonical_config") differs from $candidate_config_id"
+	else
+		docker exec "$node" ctr --namespace k8s.io images tag "$imported_name" "$canonical_name" >/dev/null ||
+			fail 'failed to attach the canonical source-build candidate reference in the Kind node'
+	fi
+	# The newly attached digest alias must propagate into CRI repoDigests for
+	# the final strict runtime proof. Poll briefly for propagation only; target
+	# and config mismatches already failed above and are never retried.
+	cri_propagated=false
+	cri_attempt=0
+	while [ "$cri_attempt" -lt 10 ]; do
+		if docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null &&
+			jq -e --arg manifest "$candidate_manifest_digest" '[(.status.repoDigests // [])[] | sub("^.*@"; "")] | index($manifest) != null' "$temp_dir/cri-image.json" >/dev/null 2>&1; then
+			cri_propagated=true
+			break
+		fi
+		cri_attempt=$((cri_attempt + 1))
+		sleep 0.5
+	done
+	[ "$cri_propagated" = true ] ||
+		fail "source-build canonical reference $canonical_name CRI repoDigests does not carry manifest $candidate_manifest_digest after alias attachment"
 else
 	# The sixth run failed with the app container ErrImageNeverPull. The importer
 	# mechanism is inferred, not directly observed: Kind's docker-save importer may

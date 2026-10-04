@@ -191,6 +191,15 @@ jq -e --arg config "$fixture_config" --arg d8 "$d8" '
 MOCK_CRI_STATUS_ID=$fixture_config MOCK_CRI_REPO_DIGESTS='[]' \
   node_image_pin_snapshot goauthy-saas-isolation-fixture:e2e "$fixture_config" "$tmp/snapshot-empty.json"
 jq -e --arg config "$fixture_config" '.config_digest == $config and .runtime_digests == []' "$tmp/snapshot-empty.json" >/dev/null
+# Source-build digest alias: a fully-qualified repo@digest repoDigest must be
+# stripped to the bare manifest and satisfy the strict manifest binding.
+m6=sha256:$(printf '%064d' 6)
+c3=sha256:$(printf '%064d' 3)
+MOCK_CRI_STATUS_ID=$c3 \
+  MOCK_CRI_REPO_DIGESTS="[\"docker.io/library/goauthy@$m6\"]" \
+  node_image_pin_snapshot goauthy:ci-test-cluster "$c3" "$tmp/snapshot-alias.json"
+jq -e --arg m "$m6" '.runtime_digests == [$m]' "$tmp/snapshot-alias.json" >/dev/null
+assert_candidate_manifest_binding "$tmp/snapshot-alias.json" "$m6" || { echo 'manifest binding rejected a digest-alias runtime pin' >&2; exit 1; }
 set +e
 MOCK_CRI_STATUS_ID="sha256:$(printf '%064d' 9)" MOCK_CRI_REPO_DIGESTS='[]' \
   node_image_pin_snapshot goauthy-saas-isolation-fixture:e2e "$fixture_config" "$tmp/snapshot-wrong-config.json" 2>/dev/null

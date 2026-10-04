@@ -549,11 +549,28 @@ incompatibility in the wrapper fails fast without provisioning Kind.
     criteria are unchanged; issue #113 stays OPEN with #105 GC disabled,
     resource/SLO unapproved, and three logical members on one physical CI
     node.
+16. [Run 37197516289](https://github.com/mrchypark/goauthy/actions/runs/37197516289),
+    source `8091ca1112c1e579fd4f4b1864cd864f027b2fd5`, job `111422331261`,
+    FAILED before any workload after 4m50. The dual Docker/OCI exporters built
+    successfully and emitted the same actual image manifest
+    `sha256:d7bb1bedecc78c5540126a58b054aca575c70f04faa770483cee2ead199a33fe`
+    and config
+    `sha256:f16b142ca15538a846b65dff70d5a531d287455dd32d36b0be57cbe1368e7aa4`.
+    The host load and the host config/archive identity checks passed their
+    control flow. The failure was the canonical Kind CRI reference proof
+    observing unexpected content; the exact predicate cause is unobservable
+    and no raw CRI diagnostic was retained, so a config mismatch or absent CRI
+    `repoDigests` is not asserted as proven. No workload, IAM, API-key, or
+    resource observations and no safe artifacts were produced; no performance
+    PASS/FAIL or cleanup claim is made. Entry 15 is retained. Criteria are
+    unchanged; issue #113 stays OPEN with #105 GC disabled, resource/SLO
+    unapproved, and three logical members on one physical CI node.
 
 ## Forthcoming source-build measurement mode
 
-Run 15 was the first attempt in this mode and failed before the workload at
-candidate ingestion (see entry 15), so the mode is not yet proven. A
+Runs 15 and 16 were the first attempts in this mode and failed before the
+workload (candidate ingestion and Kind CRI reference proof respectively; see
+entries 15 and 16), so the mode is not yet proven. A
 source-build run mode builds the candidate inside the workflow from a clean
 `candidate_source` commit on the branch workflow ref (`local_build=true`)
 instead of pulling a prebuilt immutable image. The image is ephemeral: it is
