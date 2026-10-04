@@ -61,12 +61,20 @@ startup_project_jq='
 				else "unknown" end)
 			else "unknown" end)
 		else "unknown" end;
+	def exit_code($c):
+		($c | type) as $ty |
+		if $ty == "number" and ($c | isfinite) and ($c | floor) == $c and $c >= 0 and $c <= 255 then $c else null end;
+	def signal_num($c):
+		($c | type) as $ty |
+		if $ty == "number" and ($c | isfinite) and ($c | floor) == $c and $c >= 0 and $c <= 64 then $c else null end;
 	def container_view($idx; $statuses; $c):
 		([$statuses[] | select(.name == $c.name)][0]) as $st |
 		($st.ready // false) as $ready |
 		($st.state // {}) as $state |
 		($state.waiting // null) as $waiting |
 		($state.terminated // null) as $terminated |
+		($st.lastState // {}) as $lastState |
+		($lastState.terminated // null) as $lastTerminated |
 		{
 			index: $idx,
 			name: known_name($c.name),
@@ -74,7 +82,10 @@ startup_project_jq='
 			ready: ($ready == true),
 			restart_bucket: restart_bucket($st.restartCount // null),
 			waiting: (if $waiting != null then reason_enum($waiting.reason) else null end),
-			terminated: (if $terminated != null then reason_enum($terminated.reason) else null end)
+			terminated: (if $terminated != null then reason_enum($terminated.reason) else null end),
+			last_terminated: (if $lastTerminated != null then reason_enum($lastTerminated.reason) else null end),
+			last_exit_code: (if $lastTerminated != null then exit_code($lastTerminated.exitCode) else null end),
+			last_signal: (if $lastTerminated != null then signal_num($lastTerminated.signal) else null end)
 		};
 	. as $pods |
 	(($pods | type) == "object") as $is_obj |
@@ -379,6 +390,29 @@ summarize_results() {
 		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
 		fail 'failed to add authentication-stage diagnostics to the resource summary'
 
+	# Optional startup fatal summary. It is added only when the privacy-safe
+	# summarizer validates the bounded per-pod current/previous anchored fatal
+	# records; otherwise a fixed-reason unavailable marker is recorded. Only the
+	# three fixed capture reasons may enter the public safe JSON. This append
+	# never touches the mandatory resource series, the resource availability
+	# marker, or the overall criterion gates.
+	startup_fatal_summary=$("$root/scripts/summarize-saas-isolation-113-startup-fatal.sh" "$evidence_dir" 2>/dev/null || true)
+	if ! printf '%s' "$startup_fatal_summary" | jq -e '.available == true' >/dev/null 2>&1; then
+		startup_fatal_reason=$(printf '%s' "$startup_fatal_summary" | jq -r '
+			if .reason == "capture-invalid" then "capture-invalid"
+			elif .reason == "capture-incomplete" then "capture-incomplete"
+			else "capture-missing" end
+		' 2>/dev/null || true)
+		case "$startup_fatal_reason" in
+			capture-invalid|capture-incomplete|capture-missing) ;;
+			*) startup_fatal_reason=capture-missing ;;
+		esac
+		startup_fatal_summary=$(jq -n --arg reason "$startup_fatal_reason" '{schema_version: 1, available: false, reason: $reason}')
+	fi
+	jq --argjson sf "$startup_fatal_summary" '. + {startup_fatal: $sf}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
+		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
+		fail 'failed to add startup fatal diagnostics to the resource summary'
+
 	json_or_null() {
 		if [ -s "$1" ] && jq -e . "$1" >/dev/null 2>&1; then
 			cat "$1"
@@ -527,6 +561,12 @@ summarize_results() {
 		echo
 		echo '```json'
 		jq '.auth_stage' "$results_dir/resource-summary.json" 2>/dev/null || true
+		echo '```'
+		echo
+		echo '## Startup fatal diagnostics (anchored native records)'
+		echo
+		echo '```json'
+		jq '.startup_fatal' "$results_dir/resource-summary.json" 2>/dev/null || true
 		echo '```'
 		echo
 		echo '## Runner environment'

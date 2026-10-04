@@ -369,6 +369,86 @@ for shape in '{}' '{"items":null}' '{"items":"notanarray"}'; do
 	fi
 done
 
+# lastState.terminated projection: OOMKilled previous preserved while current Waiting CrashLoop.
+laststate_case=$tmp/laststate-startup
+mkdir -p "$laststate_case/failure-capture"
+jq -nc '{
+	kind: "PodList",
+	items: [
+		{metadata: {name: "goauthy-0", namespace: "goauthy"},
+		 spec: {containers: [{name: "goauthy"}]},
+		 status: {phase: "Pending",
+		       containerStatuses: [{name: "goauthy", ready: false, restartCount: 2,
+		                         state: {waiting: {reason: "CrashLoopBackOff"}},
+		                         lastState: {terminated: {reason: "OOMKilled", exitCode: 137, signal: 9}}}]}}
+	]
+}' >"$laststate_case/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$laststate_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.startup.available == true
+	and ([.startup.pods[].containers[] | select(.name == "app" and .waiting == "CrashLoopBackOff" and .last_terminated == "OOMKilled" and .last_exit_code == 137 and .last_signal == 9)] | length) == 1
+' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup lastState OOMKilled preserved"
+else
+	bad "startup lastState OOMKilled preserved (unexpected view)"
+	jq -c '.startup' "$results/resource-summary.json" >&2 || true
+fi
+
+# lastState arbitrary reason canary -> other (never the raw private reason).
+lastreason_case=$tmp/lastreason-startup
+mkdir -p "$lastreason_case/failure-capture"
+last_reason_canary='PRIVATE_LAST_REASON_CANARY_7d2e'
+jq -nc --arg r "$last_reason_canary" '{
+	kind: "PodList",
+	items: [
+		{metadata: {name: "goauthy-0", namespace: "goauthy"},
+		 spec: {containers: [{name: "goauthy"}]},
+		 status: {phase: "Running",
+		       containerStatuses: [{name: "goauthy", ready: false, restartCount: 0,
+		                         state: {running: {}},
+		                         lastState: {terminated: {reason: $r, exitCode: 1}}}]}}
+	]
+}' >"$lastreason_case/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$lastreason_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.startup.available == true
+	and ([.startup.pods[].containers[] | select(.name == "app" and .last_terminated == "other" and .last_exit_code == 1)] | length) == 1
+' "$results/resource-summary.json" >/dev/null 2>&1 &&
+	! grep -q "$last_reason_canary" "$results/resource-summary.json"; then
+	ok "startup lastState arbitrary reason canary -> other"
+else
+	bad "startup lastState arbitrary reason canary -> other (leak or wrong value)"
+	jq -c '.startup' "$results/resource-summary.json" >&2 || true
+fi
+
+# lastState malformed exit code / signal -> null (no passthrough).
+lastmalformed_case=$tmp/lastmalformed-startup
+mkdir -p "$lastmalformed_case/failure-capture"
+jq -nc '{
+	kind: "PodList",
+	items: [
+		{metadata: {name: "goauthy-0", namespace: "goauthy"},
+		 spec: {containers: [{name: "goauthy"}]},
+		 status: {phase: "Running",
+		       containerStatuses: [{name: "goauthy", ready: false, restartCount: 0,
+		                         state: {running: {}},
+		                         lastState: {terminated: {reason: "Error", exitCode: 999, signal: "abc"}}}]}}
+	]
+}' >"$lastmalformed_case/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$lastmalformed_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.startup.available == true
+	and ([.startup.pods[].containers[] | select(.name == "app" and .last_terminated == "Error" and .last_exit_code == null and .last_signal == null)] | length) == 1
+' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup lastState malformed codes -> null"
+else
+	bad "startup lastState malformed codes -> null (unexpected view)"
+	jq -c '.startup' "$results/resource-summary.json" >&2 || true
+fi
+
 # capture-status pods.json_exit signal (null-or-0..255 integer, no passthrough).
 exit_case=$tmp/exit-case
 mkdir -p "$exit_case/failure-capture"
