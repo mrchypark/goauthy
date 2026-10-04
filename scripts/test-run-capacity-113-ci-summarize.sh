@@ -152,5 +152,47 @@ else
 	fi
 fi
 
+# Baseline multi-document transform regression (offline; no kubectl/Kind).
+eval "$(sed -n "/^baseline_normalize_jq=/,/^'\$/p;/^baseline_patch_jq=/,/^'\$/p;/^baseline_validate_jq=/,/^'\$/p" "$wrapper")"
+bt_img="ghcr.io/mrchypark/goauthy@sha256:21c941913d6ae6333d59fa5da4dfc4d61ab2ecafa0eb9299ade01815d486c499"
+bt_ss='{"apiVersion":"apps/v1","kind":"StatefulSet","metadata":{"name":"goauthy","namespace":"goauthy"},"spec":{"replicas":3,"template":{"spec":{"containers":[{"name":"goauthy","image":"old@sha256:aaa"}]}}}}'
+bt_cm='{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cm","namespace":"goauthy"},"data":{"k":"v"}}'
+bt_svc='{"apiVersion":"v1","kind":"Service","metadata":{"name":"svc","namespace":"goauthy"},"spec":{"ports":[{"port":80}]}}'
+bt_ns='{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"goauthy"}}'
+bt_run() {
+	raw=$1
+	jq -s "$baseline_normalize_jq" "$raw" >"$tmp/bt-list.json" &&
+	jq --arg image "$bt_img" "$baseline_patch_jq" "$tmp/bt-list.json" >"$tmp/bt-patched.json" &&
+	jq -e --arg image "$bt_img" "$baseline_validate_jq" "$tmp/bt-patched.json" >/dev/null
+}
+bt_case=$tmp/bt
+mkdir -p "$bt_case"
+printf '%s\n' "$bt_ss" "$bt_cm" "$bt_svc" "$bt_ns" >"$bt_case/valid.json"
+if bt_run "$bt_case/valid.json"; then
+	if jq -e --arg img "$bt_img" '
+		([.items[] | select(.kind == "StatefulSet" and .metadata.name == "goauthy")] | length) == 1
+		and ([.items[] | select(.kind == "StatefulSet" and .metadata.name == "goauthy" and .spec.replicas == 0)] | length) == 1
+		and ([.items[] | select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.containers[] | select(.name == "goauthy" and .image == $img)] | length) == 1
+		and ([.items[] | select(.kind == "ConfigMap" and .metadata.name == "cm")] | length) == 1
+		and ([.items[] | select(.kind == "Service" and .metadata.name == "svc")] | length) == 1
+		and ([.items[] | select(.kind == "Namespace" and .metadata.name == "goauthy")] | length) == 1
+	' "$tmp/bt-patched.json" >/dev/null; then
+		ok "baseline transform valid"
+	else
+		bad "baseline transform valid (unexpected patch)"
+	fi
+else
+	bad "baseline transform valid (expected pass)"
+fi
+
+printf '%s\n' "$bt_cm" "$bt_svc" "$bt_ns" >"$bt_case/missing.json"
+if bt_run "$bt_case/missing.json"; then bad "baseline missing target (expected reject)"; else ok "baseline missing target"; fi
+
+printf '%s\n' "$bt_ss" "$bt_ss" "$bt_cm" "$bt_svc" "$bt_ns" >"$bt_case/dup.json"
+if bt_run "$bt_case/dup.json"; then bad "baseline duplicate target (expected reject)"; else ok "baseline duplicate target"; fi
+
+printf 'not json' >"$bt_case/malformed.json"
+if bt_run "$bt_case/malformed.json"; then bad "baseline malformed source (expected reject)"; else ok "baseline malformed source"; fi
+
 echo "passed=$pass failed=$fail" >&2
 [ "$fail" -eq 0 ]

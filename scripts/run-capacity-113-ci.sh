@@ -371,22 +371,30 @@ kubectl --context "$context" -n goauthy create secret generic goauthy-secrets \
 	--from-literal=versity-root-password="$versity_password" \
 	--dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
 
-kustomize build "$root/deploy/k8s" >"$temp_dir/baseline.yaml"
-kubectl create --dry-run=client -o json -f "$temp_dir/baseline.yaml" >"$temp_dir/baseline.json"
-jq --arg image "$GOAUTHY_IMAGE" '
+baseline_normalize_jq='
+	[.[] | if .kind == "List" then (.items // []) else [.] end] | flatten | {kind:"List",apiVersion:"v1",items:.}
+'
+baseline_patch_jq='
 	.items |= map(
 		if .kind == "StatefulSet" and .metadata.name == "goauthy" and .metadata.namespace == "goauthy"
 		then
 			.spec.replicas = 0
 			| (.spec.template.spec.containers[] | select(.name == "goauthy") | .image) = $image
 		else . end)
-' "$temp_dir/baseline.json" >"$temp_dir/baseline-patched.json"
-jq -e --arg image "$GOAUTHY_IMAGE" '
+'
+baseline_validate_jq='
 	([.items[] | select(.kind == "StatefulSet" and .metadata.name == "goauthy")] | length) == 1
 	and ([.items[] | select(.kind == "StatefulSet" and .metadata.name == "goauthy" and .spec.replicas == 0)] | length) == 1
 	and ([.items[] | select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.containers[] | select(.name == "goauthy" and .image == $image)] | length) == 1
 	and ([.items[] | select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.containers[] | select(.image == $image)] | length) == 1
-' "$temp_dir/baseline-patched.json" >/dev/null ||
+'
+
+kustomize build "$root/deploy/k8s" >"$temp_dir/baseline.yaml"
+kubectl --context "$context" create --dry-run=client -o json -f "$temp_dir/baseline.yaml" >"$temp_dir/baseline-raw.json" ||
+	fail 'kubectl dry-run baseline render failed'
+jq -s "$baseline_normalize_jq" "$temp_dir/baseline-raw.json" >"$temp_dir/baseline.json"
+jq --arg image "$GOAUTHY_IMAGE" "$baseline_patch_jq" "$temp_dir/baseline.json" >"$temp_dir/baseline-patched.json"
+jq -e --arg image "$GOAUTHY_IMAGE" "$baseline_validate_jq" "$temp_dir/baseline-patched.json" >/dev/null ||
 	fail 'rendered baseline must select exactly one GoAuthy StatefulSet at zero replicas with the immutable candidate image'
 kubectl --context "$context" apply -f "$temp_dir/baseline-patched.json" >/dev/null
 kubectl --context "$context" -n goauthy rollout status statefulset/versity --timeout=240s

@@ -196,6 +196,10 @@ removed, bypassed, or path-filtered.
   OAuth routes, conditional refresh, production provider behavior, capacity, or
   an SLO.
 - Calibration and reporting only; the workflow does not close issue #113.
-- The live capacity run is not completed: the actual first dispatch
-  `37163776231` reached Kind cluster setup and candidate pull, then failed at
-  `kind load` before any workload or aggregate result.
+- The live capacity run is not completed. The first dispatch `37163776231`
+  (head `9a`) reached Kind cluster setup and candidate pull, then failed at
+  `kind load` (`ERROR: unknown containerd config version: 4`) before any
+  workload or aggregate result. After the client bump, the second dispatch
+  `37164764400` passed `kind load` but failed in the wrapper baseline transform
+  (`jq: Cannot iterate over null` on the multi-document `baseline.json`, exit 5),
+  again before any workload or aggregate result.
