@@ -145,6 +145,24 @@ jq '.items[0].spec.containers[0].image="wrong:e2e"' "$tmp/pods.json" >"$tmp/wron
 if jq -e $pin_args -f "$repo/scripts/e2e-kind-saas-isolation-runtime-pins.jq" "$tmp/wrong-spec.json" >/dev/null 2>&1; then echo 'runtime pin predicate accepted a wrong pod image reference' >&2; exit 1; fi
 jq 'del(.items[2])' "$tmp/pods.json" >"$tmp/wrong-count.json"
 if jq -e $pin_args -f "$repo/scripts/e2e-kind-saas-isolation-runtime-pins.jq" "$tmp/wrong-count.json" >/dev/null 2>&1; then echo 'runtime pin predicate accepted the wrong pod count' >&2; exit 1; fi
+set +e
+diag=$(jq $pin_args -f "$repo/scripts/e2e-kind-saas-isolation-runtime-pins.jq" "$tmp/wrong-id.json" 2>&1 >/dev/null)
+diag_status=$?
+set -e
+[ "$diag_status" -ne 0 ] || { echo 'mismatch diagnostics did not fail' >&2; exit 1; }
+printf '%s\n' "$diag" | grep -F 'observed_count=3' >/dev/null || { echo 'mismatch diagnostics omit the observed count' >&2; exit 1; }
+printf '%s\n' "$diag" | grep -F 'ref_matches=[true,true,true]' >/dev/null || { echo 'mismatch diagnostics omit the ref_matches booleans' >&2; exit 1; }
+printf '%s\n' "$diag" | grep -F 'sha256:0000000000000000000000000000000000000000000000000000000000000009' >/dev/null || { echo 'mismatch diagnostics omit the observed wrong digest' >&2; exit 1; }
+printf '%s\n' "$diag" | grep -F 'sha256:0000000000000000000000000000000000000000000000000000000000000004' >/dev/null || { echo 'mismatch diagnostics omit a valid observed digest' >&2; exit 1; }
+private_string='goauthy-isolation113-private-canary-string'
+jq --arg ps "$private_string" '.items[0].spec.containers[0].image=("registry.example.test/"+$ps+":e2e") | .items[0].status.containerStatuses[0].imageID=("containerd://"+$ps)' "$tmp/pods.json" >"$tmp/canary.json"
+set +e
+canary_err=$(jq $pin_args -f "$repo/scripts/e2e-kind-saas-isolation-runtime-pins.jq" "$tmp/canary.json" 2>&1 >/dev/null)
+canary_status=$?
+set -e
+[ "$canary_status" -ne 0 ] || { echo 'canary mismatch was not rejected' >&2; exit 1; }
+printf '%s\n' "$canary_err" | grep -F "$private_string" >/dev/null && { echo 'mismatch diagnostics leaked a raw private string' >&2; exit 1; }
+printf '%s\n' "$canary_err" | grep -F 'sha256:0000000000000000000000000000000000000000000000000000000000000004' >/dev/null || { echo 'mismatch diagnostics omit a valid observed digest' >&2; exit 1; }
 
 set +e
 run_runner bad-load MOCK_BAD_LOADED=fixture
