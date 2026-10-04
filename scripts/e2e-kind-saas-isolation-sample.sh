@@ -8,7 +8,7 @@ cluster=$1 namespace=$2 output=$3
 case $cluster in ''|*[!a-z0-9-]*) fail 'invalid Kind cluster name';; esac
 case $namespace in ''|*[!a-z0-9.-]*|.*|*.|*..*) fail 'invalid namespace';; esac
 [ -n "$output" ] || usage
-for tool in docker jq date sleep kubectl; do command -v "$tool" >/dev/null 2>&1 || fail "required tool missing: $tool"; done
+for tool in docker jq mktemp date sleep kubectl; do command -v "$tool" >/dev/null 2>&1 || fail "required tool missing: $tool"; done
 node="${cluster}-control-plane"
 docker inspect "$node" >/dev/null 2>&1 || fail "Kind node container missing: $node"
 docker exec "$node" crictl version >/dev/null 2>&1 || fail 'crictl unavailable in Kind node'
@@ -16,6 +16,9 @@ umask 077
 set -C
 : >"$output" || fail 'output file must be a new writable path'
 set +C
+pod_status_dir=$(mktemp -d "${TMPDIR:-/tmp}/goauthy-pod-status.XXXXXX") || fail 'could not create private pod-status directory'
+pod_status_file="$pod_status_dir/pod-status.json"
+trap 'rm -rf "$pod_status_dir"' 0
 trap 'exit 0' HUP INT TERM
 
 projection='
@@ -30,7 +33,7 @@ projection='
       else null end;
   ["goauthy-0", "goauthy-1", "goauthy-2"][] as $pod
   | ["goauthy", "sidecarfixture"][] as $container
-  | ([$pod_status.items[]? | select(.metadata.name == $pod) | .status.containerStatuses[]? | select(
+  | ([$pod_status[0].items[]? | select(.metadata.name == $pod) | .status.containerStatuses[]? | select(
       .name == $container and .state.running != null and
       (.containerID | type) == "string" and (.containerID | test("^containerd://[0-9a-f]+$"))
     ) | .containerID]) as $current_ids
@@ -86,6 +89,10 @@ while :; do
 		stats='{"stats":[]}'
 		sample_ok=false
 	fi
-	printf '%s\n' "$stats" | jq -c --arg timestamp "$timestamp" --arg namespace "$namespace" --argjson pod_status "$pod_status" --argjson pod_status_ok "$pod_status_ok" --argjson sample_ok "$sample_ok" "$projection" >>"$output"
+	printf '%s\n' "$pod_status" >"$pod_status_file"
+	if ! jq -s -e 'length == 1 and (.[0]|type) == "object" and (.[0].items|type) == "array"' "$pod_status_file" >/dev/null 2>&1; then
+		fail 'pod status must be one JSON object with an items array'
+	fi
+	printf '%s\n' "$stats" | jq -c --arg timestamp "$timestamp" --arg namespace "$namespace" --slurpfile pod_status "$pod_status_file" --argjson pod_status_ok "$pod_status_ok" --argjson sample_ok "$sample_ok" "$projection" >>"$output"
 	sleep 1
 done
