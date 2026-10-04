@@ -18,7 +18,12 @@ func TestRunReportsFailureAndContinues(t *testing.T) {
 	failure := errors.New("test backup failed")
 	calls, reports := 0, 0
 	var prior time.Time
-	err = schedule.Run(ctx, db, "dispatch", time.UTC, time.Second, 2*time.Second, func(context.Context) error {
+	// Lease renewal and the production attempt deadline are exercised separately
+	// in lease_test.go and TestRunDeadlineCancelsJobAndStops. Use a lease well
+	// beyond the parent bound so no renewal fires here, and let the parent
+	// bound the attempt. This isolates dispatch reporting from lease renewal
+	// and a separate short attempt deadline.
+	err = schedule.Run(ctx, db, "dispatch", time.UTC, 30*time.Second, 10*time.Second, func(context.Context) error {
 		calls++
 		if calls == 1 {
 			return failure
