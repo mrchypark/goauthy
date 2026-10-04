@@ -281,9 +281,9 @@ if $fixture_indices != [0, 1, 2] then error("fixture metrics must cover indices 
     timeout_n: $stage_timeout_n,
     coverage: $stage_coverage,
     attempt_coverage: $attempt_stage_coverage,
-    complete: ($stage_coverage | all(.stage_observations > 0 or .iam_attempts == 0))
+    complete: (($stage_coverage | all(.stage_observations > 0 or .iam_attempts == 0))
               and ($attempt_stage_coverage | all(.stage_n > 0))
-              and ($unmatched_stages == 0),
+              and ($unmatched_stages == 0)),
     attempt_complete: ($attempt_stage_coverage | all(.stage_n > 0)),
     note: "per-HTTP-leg stage observations; missing stage evidence is reported as missing, never as zero"
   },
