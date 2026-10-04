@@ -122,7 +122,7 @@ require (
 	github.com/minio/minio-go/v7 v7.0.95 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
-	github.com/mrchypark/latticedb-go v0.10.0 // indirect
+	github.com/mrchypark/latticedb-go v0.11.1 // indirect
 	github.com/ncruces/go-sqlite3 v0.35.3 // indirect
 	github.com/ncruces/go-sqlite3-wasm/v3 v3.2.35304 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
