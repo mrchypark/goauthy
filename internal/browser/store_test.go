@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1091,19 +1092,29 @@ func assertNoPasswordReplacement(t *testing.T, s *Store, ctx context.Context, su
 	}
 }
 
-func TestCreatePasswordSessionRollsBackOnGuardFailure(t *testing.T) {
+func TestCreatePasswordSessionRejectsMalformedToken(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", "invalid-token"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("expected ErrNotFound for invalid old token, got %v", err)
+		t.Fatalf("expected ErrNotFound for malformed old token, got %v", err)
 	}
-	row, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(*) FROM browser_sessions WHERE subject='user-1'`, Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil || len(row.Rows) != 1 {
-		t.Fatalf("session count read: %v", err)
+	assertNoPasswordReplacement(t, s, ctx, "user-1")
+}
+
+func TestCreatePasswordSessionRollsBackOnGuardFailure(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	// A valid canonical 32-byte base64url token that is not stored: the token
+	// decodes, but the old-init revoke guard matches zero rows, so the guarded
+	// transaction must reject and leave no replacement or bookkeeping.
+	unused := strings.Repeat("A", 43)
+	if _, err := CanonicalTokenDigest(unused); err != nil {
+		t.Fatalf("fixture token must be canonical: %v", err)
 	}
-	if count := row.Rows[0][0].(int64); count != 0 {
-		t.Fatalf("expected rollback (no new session), got %d", count)
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", unused); err == nil {
+		t.Fatal("expected rejection for unstored canonical token")
 	}
+	assertNoPasswordReplacement(t, s, ctx, "user-1")
 }
 
 func TestCheckPeerIPLegacyEmptySession(t *testing.T) {

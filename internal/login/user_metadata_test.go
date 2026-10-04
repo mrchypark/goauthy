@@ -61,20 +61,61 @@ func TestLoginMetadataFailurePreservesOldSessionAndPublishesNoCookie(t *testing.
 		t.Fatalf("authorize status=%d", page.Code)
 	}
 	old := page.Result().Cookies()[0]
+	// Bind the rotation to the persisted init session's actual resolved peer so
+	// the rejection is attributable to the metadata trigger, not the peer guard.
+	initSession, err := h.browser.LoadSessionReadOnly(ctx, old.Value)
+	if err != nil || initSession.PeerIP == "" {
+		t.Fatalf("init session peer=%q err=%v", initSession.PeerIP, err)
+	}
+	const seedFailedAt = int64(1_700_000_000_000)
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "login-metadata-seed", SQL: `UPDATE identity_users SET failed_login_attempts=2, last_failed_login_at_unix_ms=? WHERE subject='user-1'`, Args: []any{seedFailedAt}}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "login-metadata-reject-update", SQL: `CREATE TRIGGER login_metadata_reject BEFORE UPDATE OF last_login_at_unix_ms ON identity_users BEGIN SELECT RAISE(ABORT, 'metadata fixture failure'); END`}); err != nil {
 		t.Fatal(err)
 	}
 	response := httptest.NewRecorder()
-	if _, err := h.rotateBrowserSession(response, httptest.NewRequest(http.MethodPost, "/", nil), old.Value, "user-1", "pwd", ""); err == nil {
+	if _, err := h.rotateBrowserSession(response, httptest.NewRequest(http.MethodPost, "/", nil), old.Value, "user-1", "pwd", initSession.PeerIP); err == nil {
 		t.Fatal("metadata failure accepted")
 	}
 	if response.Header().Get("Set-Cookie") != "" {
 		t.Fatal("failed transition published a cookie")
 	}
+	// Failure leaves exact metadata unchanged and the old init usable/unrevoked.
 	assertLoginMetadata(t, db, nil)
+	assertFailureMetadata(t, db, 2, seedFailedAt)
 	rows, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT subject, revoked_at_unix_ms IS NULL FROM browser_sessions ORDER BY subject`, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil || len(rows.Rows) != 1 || rows.Rows[0][0] != "" || rows.Rows[0][1] != int64(1) {
 		t.Fatalf("atomic rollback session state=%v err=%v", rows.Rows, err)
+	}
+	// Positive control: dropping the owned trigger and repeating the SAME token
+	// and peer succeeds, proving the negative failure was trigger-specific.
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "login-metadata-drop-trigger", SQL: `DROP TRIGGER login_metadata_reject`}); err != nil {
+		t.Fatal(err)
+	}
+	ok := httptest.NewRecorder()
+	newSession, err := h.rotateBrowserSession(ok, httptest.NewRequest(http.MethodPost, "/", nil), old.Value, "user-1", "pwd", initSession.PeerIP)
+	if err != nil || newSession.Token == "" {
+		t.Fatalf("positive control rotation err=%v", err)
+	}
+	if ok.Header().Get("Set-Cookie") == "" {
+		t.Fatal("positive control published no cookie")
+	}
+	rows, err = db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT subject, revoked_at_unix_ms IS NULL FROM browser_sessions ORDER BY subject`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(rows.Rows) != 2 || rows.Rows[0][0] != "" || rows.Rows[0][1] != int64(0) || rows.Rows[1][0] != "user-1" || rows.Rows[1][1] != int64(1) {
+		t.Fatalf("positive control session state=%v err=%v", rows.Rows, err)
+	}
+	row, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT last_login_at_unix_ms IS NOT NULL, failed_login_attempts, last_failed_login_at_unix_ms FROM identity_users WHERE subject='user-1'`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(row.Rows) != 1 || row.Rows[0][0] != int64(1) || row.Rows[0][1] != nil || row.Rows[0][2] != nil {
+		t.Fatalf("positive control metadata=%v err=%v", row.Rows, err)
+	}
+}
+
+func assertFailureMetadata(t *testing.T, db *rhiza.DB, wantAttempts, wantFailedAt int64) {
+	t.Helper()
+	rows, err := db.Query(context.Background(), rhiza.QueryRequest{SQL: `SELECT failed_login_attempts, last_failed_login_at_unix_ms FROM identity_users WHERE subject='user-1'`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(rows.Rows) != 1 || rows.Rows[0][0] != wantAttempts || rows.Rows[0][1] != wantFailedAt {
+		t.Fatalf("failure metadata=%v want=(%d,%d) err=%v", rows.Rows, wantAttempts, wantFailedAt, err)
 	}
 }
 
