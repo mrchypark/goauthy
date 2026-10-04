@@ -393,6 +393,8 @@ github.com/mrchypark/latticedb-go v0.6.0 h1:Ya6Hg9ayTzih0k/fmV+bBxCPF4VuhXS/dJND
 github.com/mrchypark/latticedb-go v0.6.0/go.mod h1:T6/C+KjAJTPDoror67Afn7OUCWHMDdKlexDPXEpL1Fg=
 github.com/mrchypark/latticedb-go v0.10.0 h1:hVbW2iTwR0A9rKybAekilzQdYYkyOjaoswA76/RZF3w=
 github.com/mrchypark/latticedb-go v0.10.0/go.mod h1:0lE7Ig+DYuVRHocNZLNlvAmIEq3xvyJQXIfh83CbHkM=
+github.com/mrchypark/latticedb-go v0.11.1 h1:dvB/aXdFElHh5/xS+JU0JcDpBI7pnZY9ap2hL5daM+U=
+github.com/mrchypark/latticedb-go v0.11.1/go.mod h1:0lE7Ig+DYuVRHocNZLNlvAmIEq3xvyJQXIfh83CbHkM=
 github.com/mrchypark/rhiza v0.12.3 h1:7MyOZtBnTtqy96OVXRJK/v+8QlJH0aDyoTgGBapZYCM=
 github.com/mrchypark/rhiza v0.12.3/go.mod h1:LCW5ZynjZGNOO/Cg6mjvtJEYKjty69+EUGUBp2CSCUU=
 github.com/mrchypark/rhiza v0.18.0 h1:tD4TNyjJBcLxCVFjgiSahxpH0S4kydTZC2Fe+6wrIz8=
