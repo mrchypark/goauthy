@@ -143,13 +143,481 @@ results=$(new_results)
 if "$wrapper" --summarize "$noanalyzer" "$results" >"$tmp/out" 2>"$tmp/err"; then
 	bad "analyzer failure (expected nonzero exit)"
 else
-	if jq -e '.overall.correctness == "fail" and .criterion_pass == false' "$results/criterion.json" >/dev/null 2>&1 &&
+	if jq -e '.overall.correctness == "fail" and .criterion_pass == false
+		and (.iam_failure_diagnostics | keys == ["anchored", "complete", "criterion", "errors", "excess", "groups", "missing", "source", "status", "unrecognized"])
+		and (.iam_failure_diagnostics | .errors == null and .anchored == null and .unrecognized == null and .excess == null and .missing == null and .complete == false and .status == "unavailable" and .source == "unavailable" and .groups == [])' "$results/criterion.json" >/dev/null 2>&1 &&
 		jq -e '.available == false' "$results/resource-summary.json" >/dev/null 2>&1 &&
 		[ -s "$results/pins.json" ] && [ -s "$results/runner-environment.json" ] && [ -s "$results/report.md" ] && [ -s "$results/resource-summary.json" ]; then
 		ok "analyzer failure"
 	else
 		bad "analyzer failure (unexpected error report)"
 	fi
+fi
+
+# Baseline multi-document transform regression (offline; no kubectl/Kind).
+eval "$(sed -n "/^baseline_normalize_jq=/,/^'\$/p;/^baseline_patch_jq=/,/^'\$/p;/^baseline_validate_jq=/,/^'\$/p" "$wrapper")"
+bt_img="ghcr.io/mrchypark/goauthy@sha256:21c941913d6ae6333d59fa5da4dfc4d61ab2ecafa0eb9299ade01815d486c499"
+bt_ss='{"apiVersion":"apps/v1","kind":"StatefulSet","metadata":{"name":"goauthy","namespace":"goauthy"},"spec":{"replicas":3,"template":{"spec":{"containers":[{"name":"goauthy","image":"old@sha256:aaa"}]}}}}'
+bt_cm='{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"cm","namespace":"goauthy"},"data":{"k":"v"}}'
+bt_svc='{"apiVersion":"v1","kind":"Service","metadata":{"name":"svc","namespace":"goauthy"},"spec":{"ports":[{"port":80}]}}'
+bt_ns='{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"goauthy"}}'
+bt_run() {
+	raw=$1
+	jq -s "$baseline_normalize_jq" "$raw" >"$tmp/bt-list.json" &&
+	jq --arg image "$bt_img" "$baseline_patch_jq" "$tmp/bt-list.json" >"$tmp/bt-patched.json" &&
+	jq -e --arg image "$bt_img" "$baseline_validate_jq" "$tmp/bt-patched.json" >/dev/null
+}
+bt_case=$tmp/bt
+mkdir -p "$bt_case"
+printf '%s\n' "$bt_ss" "$bt_cm" "$bt_svc" "$bt_ns" >"$bt_case/valid.json"
+if bt_run "$bt_case/valid.json"; then
+	if jq -e --arg img "$bt_img" '
+		([.items[] | select(.kind == "StatefulSet" and .metadata.name == "goauthy")] | length) == 1
+		and ([.items[] | select(.kind == "StatefulSet" and .metadata.name == "goauthy" and .spec.replicas == 0)] | length) == 1
+		and ([.items[] | select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.containers[] | select(.name == "goauthy" and .image == $img)] | length) == 1
+		and ([.items[] | select(.kind == "ConfigMap" and .metadata.name == "cm")] | length) == 1
+		and ([.items[] | select(.kind == "Service" and .metadata.name == "svc")] | length) == 1
+		and ([.items[] | select(.kind == "Namespace" and .metadata.name == "goauthy")] | length) == 1
+	' "$tmp/bt-patched.json" >/dev/null; then
+		ok "baseline transform valid"
+	else
+		bad "baseline transform valid (unexpected patch)"
+	fi
+else
+	bad "baseline transform valid (expected pass)"
+fi
+
+printf '%s\n' "$bt_cm" "$bt_svc" "$bt_ns" >"$bt_case/missing.json"
+if bt_run "$bt_case/missing.json"; then bad "baseline missing target (expected reject)"; else ok "baseline missing target"; fi
+
+printf '%s\n' "$bt_ss" "$bt_ss" "$bt_cm" "$bt_svc" "$bt_ns" >"$bt_case/dup.json"
+if bt_run "$bt_case/dup.json"; then bad "baseline duplicate target (expected reject)"; else ok "baseline duplicate target"; fi
+
+printf 'not json' >"$bt_case/malformed.json"
+if bt_run "$bt_case/malformed.json"; then bad "baseline malformed source (expected reject)"; else ok "baseline malformed source"; fi
+
+# Startup observability projection (offline; reuses failure-capture/pods.json).
+startup_case=$tmp/startup
+mkdir -p "$startup_case/failure-capture"
+jq -nc '{
+	kind: "PodList",
+	items: [
+		{metadata: {name: "goauthy-0", namespace: "goauthy"},
+		 spec: {initContainers: [{name: "wait-for-rhiza-bucket", image: "img", imageID: "sha256:private-img", containerID: "containerd://private-init"}],
+		       containers: [{name: "goauthy", image: "img", imageID: "sha256:private-app", containerID: "containerd://private-app"},
+		                     {name: "sidecarfixture", image: "img", imageID: "sha256:private-fx", containerID: "containerd://private-fx"},
+		                     {name: "mystery", image: "img"},
+		                     {name: "extra", image: "img"},
+		                     {name: "weird", image: "img"}]},
+		 status: {phase: "Pending", podIP: "10.0.0.9",
+		       initContainerStatuses: [
+		         {name: "wait-for-rhiza-bucket", ready: false, restartCount: 0, state: {waiting: {reason: "ErrImageNeverPull", message: "private-msg"}}}],
+		       containerStatuses: [
+		         {name: "goauthy", ready: false, restartCount: 0, state: {waiting: {reason: "ErrImageNeverPull"}}},
+		         {name: "sidecarfixture", ready: false, restartCount: 0, state: {terminated: {reason: "Completed"}}},
+		         {name: "mystery", ready: false, restartCount: 0, state: {waiting: {reason: "ImagePullBackOff", message: "private-pull"}}},
+		         {name: "extra", ready: false, restartCount: 0, state: {waiting: {reason: "CreateContainerConfigError", message: "private-cfg"}}},
+		         {name: "weird", ready: false, restartCount: 0, state: {waiting: {reason: "SomeArbitraryPrivateReason", message: "private-weird"}}}]}},
+		{metadata: {name: "goauthy-1", namespace: "goauthy"},
+		 spec: {containers: [{name: "goauthy"}]},
+		 status: {phase: "Running",
+		       containerStatuses: [{name: "goauthy", ready: false, state: {waiting: {reason: "CrashLoopBackOff"}}}]}},
+		{metadata: {name: "goauthy-9", namespace: "other"},
+		 spec: {containers: [{name: "goauthy"}]},
+		 status: {phase: "Running", containerStatuses: [{name: "goauthy", ready: true, restartCount: 0, state: {running: {}}}]}}
+	]
+}' >"$startup_case/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$startup_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.startup.available == true
+	and .startup.complete == false
+	and .startup.observed == true
+	and ([.startup.pods[].index] | sort | unique) == [0, 1]
+	and ([.startup.pods[] | select(.index == 0 and .present)] | length) == 1
+	and ([.startup.pods[] | select(.index == 2)] | length) == 0
+	and ([.startup.pods[].containers[] | select(.name == "init" and .waiting == "ErrImageNeverPull")] | length) == 1
+	and ([.startup.pods[].containers[] | select(.name == "app" and .waiting == "ErrImageNeverPull")] | length) == 1
+	and ([.startup.pods[].containers[] | select(.name == "fixture" and .terminated == "Completed")] | length) == 1
+	and ([.startup.pods[].containers[] | select(.name == "other" and .waiting == "ImagePullBackOff")] | length) == 1
+	and ([.startup.pods[].containers[] | select(.name == "other" and .waiting == "CreateContainerConfigError")] | length) == 1
+	and ([.startup.pods[].containers[] | select(.name == "other" and .waiting == "other")] | length) == 1
+	and ([.startup.pods[] | select(.index == 1) | .containers[] | select(.name == "app" and .waiting == "CrashLoopBackOff" and .restart_bucket == "unknown")] | length) == 1
+	and ([.startup.pods[].containers[] | keys[] | select(. == "imageID" or . == "containerID" or . == "podIP" or . == "message" or . == "env" or . == "url" or . == "logs" or . == "image")] | length) == 0
+' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup projection"
+else
+	bad "startup projection (unexpected view)"
+	jq -c '.startup' "$results/resource-summary.json" >&2 || true
+fi
+
+nostatus_startup=$tmp/nostatus-startup
+mkdir -p "$nostatus_startup/failure-capture"
+jq -nc '{kind:"PodList",items:[{metadata:{name:"goauthy-0",namespace:"goauthy"},spec:{containers:[{name:"goauthy"}]},status:{phase:"Pending"}},{metadata:{name:"goauthy-1",namespace:"goauthy"},spec:{containers:[{name:"goauthy"}]}}]}' >"$nostatus_startup/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$nostatus_startup" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.startup.available == true
+	and .startup.observed == true
+	and ([.startup.pods[].containers[] | select(.name == "app" and .phase == "Unknown" and .restart_bucket == "unknown")] | length) == 2
+' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup missing status retained"
+else
+	bad "startup missing status retained (capture lost)"
+	jq -c '.startup' "$results/resource-summary.json" >&2 || true
+fi
+
+dup_startup=$tmp/dup-startup
+mkdir -p "$dup_startup/failure-capture"
+jq -nc '{kind:"PodList",items:[{metadata:{name:"goauthy-0",namespace:"goauthy"},spec:{containers:[{name:"goauthy"}]}},{metadata:{name:"goauthy-0",namespace:"goauthy"},spec:{containers:[{name:"goauthy"}]}},{metadata:{name:"goauthy-1",namespace:"goauthy"},spec:{containers:[{name:"goauthy"}]}}]}' >"$dup_startup/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$dup_startup" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.available == true and .startup.complete == false' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup duplicate capture not complete"
+else
+	bad "startup duplicate capture not complete (false complete)"
+fi
+
+missing_startup=$tmp/missing-startup
+mkdir -p "$missing_startup"
+results=$(new_results)
+"$wrapper" --summarize "$missing_startup" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.available == false and .startup.reason == "capture-missing" and .startup.complete == false and .startup.observed == false and (.startup.pods | length) == 0' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup missing source"
+else
+	bad "startup missing source (expected honest unavailable)"
+fi
+
+malformed_startup=$tmp/malformed-startup
+mkdir -p "$malformed_startup/failure-capture"
+printf 'not json' >"$malformed_startup/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$malformed_startup" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.available == false and .startup.reason == "capture-invalid" and .startup.complete == false and .startup.observed == false' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup malformed source"
+else
+	bad "startup malformed source (expected honest unavailable)"
+fi
+
+projerr_startup=$tmp/projerr-startup
+mkdir -p "$projerr_startup/failure-capture"
+printf '{"items":[1,2,3]}' >"$projerr_startup/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$projerr_startup" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.available == false and .startup.reason == "projection-error" and .startup.complete == false and .startup.observed == false' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup projection error"
+else
+	bad "startup projection error (expected projection-error reason)"
+fi
+
+# Valid JSON but not a PodList/List array shape -> capture-invalid.
+for shape in '{}' '{"items":null}' '{"items":"notanarray"}'; do
+	shape_startup=$tmp/shape-startup
+	rm -rf "$shape_startup"
+	mkdir -p "$shape_startup/failure-capture"
+	printf '%s' "$shape" >"$shape_startup/failure-capture/pods.json"
+	results=$(new_results)
+	"$wrapper" --summarize "$shape_startup" "$results" >/dev/null 2>"$tmp/err" || true
+	if jq -e '.startup.available == false and .startup.reason == "capture-invalid"' "$results/resource-summary.json" >/dev/null 2>&1; then
+		ok "startup non-list shape"
+	else
+		bad "startup non-list shape (expected capture-invalid)"
+	fi
+done
+
+# capture-status pods.json_exit signal (null-or-0..255 integer, no passthrough).
+exit_case=$tmp/exit-case
+mkdir -p "$exit_case/failure-capture"
+jq -nc '{kind:"PodList",items:[{metadata:{name:"goauthy-0",namespace:"goauthy"},spec:{containers:[{name:"goauthy"}]}}]}' >"$exit_case/failure-capture/pods.json"
+printf 'pods.json_exit=1\n' >"$exit_case/failure-capture/capture-status.txt"
+results=$(new_results)
+"$wrapper" --summarize "$exit_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.pods_json_exit == 1 and .startup.available == true' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup pods.json_exit known"
+else
+	bad "startup pods.json_exit known (expected 1)"
+fi
+printf 'pods.json_exit=0\n' >"$exit_case/failure-capture/capture-status.txt"
+results=$(new_results)
+"$wrapper" --summarize "$exit_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.pods_json_exit == 0' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup pods.json_exit zero"
+else
+	bad "startup pods.json_exit zero (expected 0)"
+fi
+rm -f "$exit_case/failure-capture/capture-status.txt"
+results=$(new_results)
+"$wrapper" --summarize "$exit_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.pods_json_exit == null' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup pods.json_exit absent null"
+else
+	bad "startup pods.json_exit absent null"
+fi
+printf 'pods.json_exit=secret-token-value\npods.json_exit=2\n' >"$exit_case/failure-capture/capture-status.txt"
+results=$(new_results)
+"$wrapper" --summarize "$exit_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.pods_json_exit == null' "$results/resource-summary.json" >/dev/null 2>&1 &&
+	! grep -q 'secret-token-value' "$results/resource-summary.json"; then
+	ok "startup pods.json_exit malformed duplicate"
+else
+	bad "startup pods.json_exit malformed duplicate (leak or wrong value)"
+fi
+printf 'pods.json_exit=999\n' >"$exit_case/failure-capture/capture-status.txt"
+results=$(new_results)
+"$wrapper" --summarize "$exit_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.pods_json_exit == null' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup pods.json_exit out of range"
+else
+	bad "startup pods.json_exit out of range (expected null)"
+fi
+printf 'pods.json_exit=1=secret\n' >"$exit_case/failure-capture/capture-status.txt"
+results=$(new_results)
+"$wrapper" --summarize "$exit_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.pods_json_exit == null' "$results/resource-summary.json" >/dev/null 2>&1 &&
+	! grep -q 'secret' "$results/resource-summary.json"; then
+	ok "startup pods.json_exit extra equals"
+else
+	bad "startup pods.json_exit extra equals (expected null)"
+fi
+
+# Anchored IAM failure diagnostics (offline; the actual wrapper and the actual
+# shared analyzer run together; no browser, Kind, or Go execution).
+flip_recovery_iam() {
+	log=$1
+	awk 'BEGIN{done=0} { if(!done && /phase=recovery route=iam outcome=success/){ sub(/outcome=success/,"outcome=failed"); done=1 } print }' "$log" >"$log.tmp" && mv "$log.tmp" "$log"
+}
+flip_baseline_iam() {
+	log=$1
+	awk 'BEGIN{done=0} { if(!done && /phase=baseline route=iam outcome=success/){ sub(/outcome=success/,"outcome=failed"); done=1 } print }' "$log" >"$log.tmp" && mv "$log.tmp" "$log"
+}
+append_fatal() {
+	log=$1
+	shift
+	printf '    connection_use_grant_test.go:337: %s\n' "$*" >>"$log"
+}
+
+diag_case=$tmp/iam-diag
+mkcase "$diag_case" 100 110 90
+canary='PRIVATE_BODY_CANARY_9f3c7a'
+flip_recovery_iam "$diag_case/driver-isolation113-driver-1-abcde.log"
+flip_recovery_iam "$diag_case/driver-isolation113-driver-2-abcde.log"
+append_fatal "$diag_case/driver-isolation113-driver-1-abcde.log" "authorize status = 502, want login form: \"$canary connection_use_grant_test.go:337: session_cookie_unsafe https://private.example.test/secret?token=$canary\""
+append_fatal "$diag_case/driver-isolation113-driver-2-abcde.log" "login status=403, want redirect, category=invalid_login_request"
+results=$(new_results)
+if "$wrapper" --summarize "$diag_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "anchored IAM diagnostics (expected nonzero exit for correctness fail)"
+elif jq -e '
+	.protected.errors == 2
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.errors == 2
+	and .iam_failure_diagnostics.anchored == 2
+	and .iam_failure_diagnostics.unrecognized == 0
+	and .iam_failure_diagnostics.excess == 0
+	and .iam_failure_diagnostics.missing == 0
+	and .iam_failure_diagnostics.complete == true
+	and .iam_failure_diagnostics.status == "diagnosed"
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 1 and .error_n == 1 and .anchored_n == 1 and (.reasons | length) == 1 and .reasons[0].reason == "authorize_status" and .reasons[0].status == 502 and (.phase_error_counts == [{phase:"recovery",error_n:1}]))] | length) == 1
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 2 and .error_n == 1 and .reasons[0].reason == "login_403_invalid_request" and .reasons[0].status == 403 and (.phase_error_counts == [{phase:"recovery",error_n:1}]))] | length) == 1
+	and ([.iam_failure_diagnostics.groups[].reasons[].reason | select(. == "session_cookie_unsafe")] | length) == 0
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "anchored IAM diagnostics"
+else
+	bad "anchored IAM diagnostics (unexpected diagnostics)"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+leaked=false
+for f in "$results"/*; do
+	[ -f "$f" ] || continue
+	if grep -q "$canary" "$f" 2>/dev/null; then leaked=true; fi
+done
+if [ "$leaked" = false ]; then
+	ok "IAM diagnostics privacy"
+else
+	bad "IAM diagnostics privacy (private body or URL canary exported)"
+fi
+
+unk_case=$tmp/iam-unknown
+mkcase "$unk_case" 100 110 90
+flip_recovery_iam "$unk_case/driver-isolation113-driver-1-abcde.log"
+flip_recovery_iam "$unk_case/driver-isolation113-driver-2-abcde.log"
+append_fatal "$unk_case/driver-isolation113-driver-2-abcde.log" "some unrecognized helper failure that is not a known reason"
+results=$(new_results)
+if "$wrapper" --summarize "$unk_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "unrecognized or missing IAM diagnostics incomplete (expected nonzero exit)"
+elif jq -e '
+	.protected.errors == 2
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.errors == 2
+	and .iam_failure_diagnostics.anchored == 0
+	and .iam_failure_diagnostics.unrecognized == 1
+	and .iam_failure_diagnostics.excess == 0
+	and .iam_failure_diagnostics.missing == 2
+	and .iam_failure_diagnostics.complete == false
+	and .iam_failure_diagnostics.status == "incomplete"
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "unknown" and .status == null)] | length) == 1
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "unrecognized or missing IAM diagnostics incomplete"
+else
+	bad "unrecognized or missing IAM diagnostics incomplete"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+tp_case=$tmp/iam-transport
+mkcase "$tp_case" 100 110 90
+flip_recovery_iam "$tp_case/driver-isolation113-driver-1-abcde.log"
+flip_recovery_iam "$tp_case/driver-isolation113-driver-1-abcde.log"
+append_fatal "$tp_case/driver-isolation113-driver-1-abcde.log" 'authorize status = 504, want login form: "Get \"https://private.example.test/oidc/authorize?token=SECRET\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"'
+append_fatal "$tp_case/driver-isolation113-driver-1-abcde.log" 'Get "https://private.example.test/oidc/authorize?token=SECRET": context deadline exceeded (Client.Timeout exceeded while awaiting headers)'
+results=$(new_results)
+if "$wrapper" --summarize "$tp_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "transport and null-status IAM diagnostics (expected nonzero exit)"
+elif jq -e '
+	.protected.errors == 2
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.status == "diagnosed"
+	and .iam_failure_diagnostics.anchored == 2
+	and .iam_failure_diagnostics.unrecognized == 0
+	and .iam_failure_diagnostics.excess == 0
+	and .iam_failure_diagnostics.missing == 0
+	and .iam_failure_diagnostics.complete == true
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 1 and .error_n == 2 and .anchored_n == 2 and .complete == true)] | length) == 1
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "authorize_status" and .status == 504)] | length) == 1
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "transport_timeout" and .status == null)] | length) == 1
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "transport and null-status IAM diagnostics"
+else
+	bad "transport and null-status IAM diagnostics (unexpected diagnostics)"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+two_phase=$tmp/iam-two-phase
+mkcase "$two_phase" 100 110 90
+flip_baseline_iam "$two_phase/driver-isolation113-driver-1-abcde.log"
+flip_recovery_iam "$two_phase/driver-isolation113-driver-1-abcde.log"
+append_fatal "$two_phase/driver-isolation113-driver-1-abcde.log" "login status = 500, want redirect"
+append_fatal "$two_phase/driver-isolation113-driver-1-abcde.log" "login status = 503, want redirect"
+results=$(new_results)
+if "$wrapper" --summarize "$two_phase" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "same driver two phases (expected nonzero exit)"
+elif jq -e '
+	.protected.errors == 2
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.errors == 2
+	and .iam_failure_diagnostics.anchored == 2
+	and .iam_failure_diagnostics.unrecognized == 0
+	and .iam_failure_diagnostics.excess == 0
+	and .iam_failure_diagnostics.missing == 0
+	and .iam_failure_diagnostics.complete == true
+	and .iam_failure_diagnostics.status == "diagnosed"
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 1)] | length) == 1
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 1 and .error_n == 2 and .anchored_n == 2 and .complete == true)] | length) == 1
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 1) | .phase_error_counts[] | select(.phase == "baseline" and .error_n == 1)] | length) == 1
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 1) | .phase_error_counts[] | select(.phase == "recovery" and .error_n == 1)] | length) == 1
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 1) | .reasons[] | select(.reason == "login_status")] | length) == 2
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "same driver two phases counted once"
+else
+	bad "same driver two phases counted once (unexpected diagnostics)"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+extra=$tmp/iam-extra
+mkcase "$extra" 100 110 90
+flip_recovery_iam "$extra/driver-isolation113-driver-1-abcde.log"
+append_fatal "$extra/driver-isolation113-driver-1-abcde.log" "login status = 500, want redirect"
+append_fatal "$extra/driver-isolation113-driver-1-abcde.log" "login status = 503, want redirect"
+results=$(new_results)
+if "$wrapper" --summarize "$extra" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "extra known diagnostic incomplete (expected nonzero exit)"
+elif jq -e '
+	.protected.errors == 1
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.errors == 1
+	and .iam_failure_diagnostics.anchored == 2
+	and .iam_failure_diagnostics.unrecognized == 0
+	and .iam_failure_diagnostics.excess == 1
+	and .iam_failure_diagnostics.missing == 0
+	and .iam_failure_diagnostics.complete == false
+	and .iam_failure_diagnostics.status == "incomplete"
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "extra known diagnostic incomplete"
+else
+	bad "extra known diagnostic incomplete (unexpected diagnostics)"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+wait_case=$tmp/iam-wait
+mkcase "$wait_case" 100 110 90
+flip_recovery_iam "$wait_case/driver-isolation113-driver-1-abcde.log"
+append_fatal "$wait_case/driver-isolation113-driver-1-abcde.log" "login status = 500, want redirect"
+append_fatal "$wait_case/driver-isolation113-driver-1-abcde.log" "waiting 5 seconds for the login attempt window"
+results=$(new_results)
+if "$wrapper" --summarize "$wait_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "ordinary wait log not unknown (expected nonzero exit)"
+elif jq -e '
+	.protected.errors == 1
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.errors == 1
+	and .iam_failure_diagnostics.anchored == 1
+	and .iam_failure_diagnostics.unrecognized == 0
+	and .iam_failure_diagnostics.excess == 0
+	and .iam_failure_diagnostics.missing == 0
+	and .iam_failure_diagnostics.complete == true
+	and .iam_failure_diagnostics.status == "diagnosed"
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "ordinary wait log not unknown"
+else
+	bad "ordinary wait log not unknown (unexpected diagnostics)"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+bad_status=$tmp/iam-bad-status
+mkcase "$bad_status" 100 110 90
+flip_recovery_iam "$bad_status/driver-isolation113-driver-1-abcde.log"
+append_fatal "$bad_status/driver-isolation113-driver-1-abcde.log" "authorize status = 9999, want login form: \"private\""
+results=$(new_results)
+if "$wrapper" --summarize "$bad_status" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "malformed status unknown incomplete (expected nonzero exit)"
+elif jq -e '
+	.protected.errors == 1
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.errors == 1
+	and .iam_failure_diagnostics.anchored == 0
+	and .iam_failure_diagnostics.unrecognized == 1
+	and .iam_failure_diagnostics.excess == 0
+	and .iam_failure_diagnostics.missing == 1
+	and .iam_failure_diagnostics.complete == false
+	and .iam_failure_diagnostics.status == "incomplete"
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "unknown" and .status == null)] | length) == 1
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "malformed status unknown incomplete"
+else
+	bad "malformed status unknown incomplete (unexpected diagnostics)"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+url_case=$tmp/iam-url-marker
+mkcase "$url_case" 100 110 90
+flip_recovery_iam "$url_case/driver-isolation113-driver-1-abcde.log"
+append_fatal "$url_case/driver-isolation113-driver-1-abcde.log" 'Get "https://private.example.test/Client.Timeout?token=context deadline exceeded": EOF'
+results=$(new_results)
+if "$wrapper" --summarize "$url_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -ne 0 ] && jq -e '
+	.protected.errors == 1 and .criterion_pass == false
+	and .iam_failure_diagnostics.status == "incomplete"
+	and .iam_failure_diagnostics.anchored == 0
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "transport_timeout")] | length) == 0
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "private URL cannot classify a transport timeout"
+else
+	bad "private URL cannot classify a transport timeout"
 fi
 
 echo "passed=$pass failed=$fail" >&2

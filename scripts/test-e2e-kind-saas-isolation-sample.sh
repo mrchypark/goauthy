@@ -7,7 +7,7 @@ temp_dir=$(mktemp -d)
 trap 'rm -rf "$temp_dir"' 0 HUP INT TERM
 mkdir "$temp_dir/bin"
 
-for tool in awk date jq sh; do
+for tool in awk date jq mktemp sh stat; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "required tool missing: $tool" >&2; exit 1; }
 done
 
@@ -45,6 +45,9 @@ jq -cn '
 			{name:$c.value,state:{running:{}},containerID:("containerd://"+id($n))}
 		]}}
 	]}' >"$temp_dir/pods.json"
+jq '.items[0].metadata.annotations = {padding: ("x" * 2300000)}' "$temp_dir/pods.json" >"$temp_dir/large-pods.json"
+printf 'this is not json' >"$temp_dir/malformed.json"
+printf '{"items":[]}\n{"items":[]}\n' >"$temp_dir/multi.json"
 
 cat >"$temp_dir/bin/docker" <<'EOF'
 #!/bin/sh
@@ -74,8 +77,9 @@ export CRI_FIXTURE KUBE_FIXTURE
 
 run_case() {
 	name=$1 expected=$2 mode=$3
+	kube_fixture=$temp_dir/pods.json
 	case $mode in
-		valid) cp "$temp_dir/cri.json" "$temp_dir/input.json" ;;
+		valid|large-pods|malformed-pods|multi-pods) cp "$temp_dir/cri.json" "$temp_dir/input.json" ;;
 		restart-mismatch) jq '.stats += [(.stats[] | select(.attributes.labels["io.kubernetes.pod.name"]=="goauthy-0" and .attributes.labels["io.kubernetes.container.name"]=="goauthy") | .attributes.id="deadbeef")]' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
 		duplicate-active) jq '.stats += [.stats[] | select(.attributes.labels["io.kubernetes.pod.name"]=="goauthy-0" and .attributes.labels["io.kubernetes.container.name"]=="goauthy")]' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
 		mismatch-only) jq '(.stats[] | select(.attributes.labels["io.kubernetes.pod.name"]=="goauthy-0" and .attributes.labels["io.kubernetes.container.name"]=="goauthy").attributes.id)="deadbeef"' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
@@ -86,6 +90,13 @@ run_case() {
 		command-fail) cp "$temp_dir/cri.json" "$temp_dir/input.json" ;;
 		*) echo "unknown case: $mode" >&2; exit 2 ;;
 	esac
+	case $mode in
+		large-pods) kube_fixture=$temp_dir/large-pods.json ;;
+		malformed-pods) kube_fixture=$temp_dir/malformed.json ;;
+		multi-pods) kube_fixture=$temp_dir/multi.json ;;
+	esac
+	KUBE_FIXTURE=$kube_fixture
+	export KUBE_FIXTURE
 	CRI_FIXTURE=$temp_dir/input.json
 	export CRI_FIXTURE
 	if [ "$mode" = command-fail ]; then CRI_FAIL=1; export CRI_FAIL; else unset CRI_FAIL || :; fi
@@ -116,4 +127,101 @@ run_case null-required-counter 1 null
 run_case wrong-type-counter 1 wrong
 run_case negative-counter 1 negative
 run_case cri-command-failure 1 command-fail
+
+private_canary() {
+	canary_dir=$(mktemp -d) || return 1
+	old_tmpdir=${TMPDIR-}
+	TMPDIR=$canary_dir
+	export TMPDIR
+	KUBE_FIXTURE=$temp_dir/large-pods.json
+	export KUBE_FIXTURE
+	output=$temp_dir/private-canary.jsonl
+	"$root/scripts/e2e-kind-saas-isolation-sample.sh" fixture goauthy "$output" >/dev/null 2>&1 &
+	sampler_pid=$!
+	i=0
+	private_file=''
+	while [ "$i" -lt 50 ]; do
+		for f in "$canary_dir"/*/pod-status.json; do
+			if [ -f "$f" ]; then private_file=$f; break; fi
+		done
+		[ -n "$private_file" ] && break
+		sleep 0.1
+		i=$((i + 1))
+	done
+	if [ -z "$private_file" ]; then
+		echo 'private-canary: sampler created no private pod-status file' >&2
+		kill -TERM "$sampler_pid" 2>/dev/null || :
+		wait "$sampler_pid" 2>/dev/null || :
+		rm -rf "$canary_dir"
+		return 1
+	fi
+	if perms=$(stat -c '%a' "$private_file" 2>/dev/null); then :;
+	else perms=$(stat -f '%Lp' "$private_file" 2>/dev/null) || perms=unknown; fi
+	if [ "$perms" != 600 ]; then
+		echo "private-canary: private pod-status file mode is $perms, expected 600" >&2
+		kill -TERM "$sampler_pid" 2>/dev/null || :
+		wait "$sampler_pid" 2>/dev/null || :
+		rm -rf "$canary_dir"
+		return 1
+	fi
+	i=0
+	while [ "$i" -lt 50 ]; do
+		if jq -e 'type == "object" and (.items | type) == "array"' "$private_file" >/dev/null 2>&1; then break; fi
+		sleep 0.1
+		i=$((i + 1))
+	done
+	if [ "$i" -ge 50 ]; then
+		echo 'private-canary: private pod-status file never held a pod-status object' >&2
+		kill -TERM "$sampler_pid" 2>/dev/null || :
+		wait "$sampler_pid" 2>/dev/null || :
+		rm -rf "$canary_dir"
+		return 1
+	fi
+	i=0
+	while [ ! -s "$output" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+	if [ ! -s "$output" ]; then
+		echo 'private-canary: sampler emitted no row' >&2
+		kill -TERM "$sampler_pid" 2>/dev/null || :
+		wait "$sampler_pid" 2>/dev/null || :
+		rm -rf "$canary_dir"
+		return 1
+	fi
+	kill -TERM "$sampler_pid"
+	if wait "$sampler_pid"; then sampler_status=0; else sampler_status=$?; fi
+	if [ "$sampler_status" -ne 0 ]; then
+		echo "private-canary: sampler exited $sampler_status" >&2
+		rm -rf "$canary_dir"
+		return 1
+	fi
+	for f in "$canary_dir"/*; do
+		if [ -e "$f" ]; then
+			echo 'private-canary: owned pod-status directory was not removed on exit' >&2
+			rm -rf "$canary_dir"
+			return 1
+		fi
+	done
+	[ -s "$output" ] || { echo 'private-canary: output file was removed' >&2; rm -rf "$canary_dir"; return 1; }
+	rm -rf "$canary_dir"
+	if [ -n "$old_tmpdir" ]; then TMPDIR=$old_tmpdir; export TMPDIR; else unset TMPDIR; fi
+	jq -s -e 'length==6 and all(.[]; .memoryRSSBytes==null and (.unavailable|index("rss-not-exposed"))!=null)' "$output" >/dev/null
+	printf '%s: %s\n' 'private-canary' 'accepted'
+}
+
+run_case large-input 0 large-pods
+jq -s -e 'length==6 and all(.[]; .memoryRSSBytes==null and (.unavailable|index("rss-not-exposed"))!=null)' "$temp_dir/large-input.jsonl" >/dev/null
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .containerID=="a001" and .currentContainerID=="containerd://a001" and ([.unavailable[]|select(.!="rss-not-exposed")]|length)==0' "$temp_dir/large-input.jsonl" >/dev/null
+for mode in malformed multi; do
+	KUBE_FIXTURE=$temp_dir/$mode.json
+	export KUBE_FIXTURE
+	case_dir=$(mktemp -d "$temp_dir/reject.XXXXXX")
+	if TMPDIR=$case_dir "$root/scripts/e2e-kind-saas-isolation-sample.sh" fixture goauthy "$temp_dir/$mode-rejected.jsonl" >/dev/null 2>&1; then
+		echo "$mode: sampler accepted invalid pod JSON" >&2; exit 1
+	fi
+	[ ! -s "$temp_dir/$mode-rejected.jsonl" ] || { echo "$mode: sampler emitted rows" >&2; exit 1; }
+	for f in "$case_dir"/*; do
+		[ ! -e "$f" ] || { echo "$mode: private input survived failure" >&2; exit 1; }
+	done
+	printf '%s: rejected with private input removed\n' "$mode"
+done
+private_canary || exit 1
 echo 'sampler projection and runner resource-gate regression passed'

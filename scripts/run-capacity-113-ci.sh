@@ -30,6 +30,115 @@ fail() {
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 
+startup_project_jq='
+	def known_name($n):
+		if $n == "fixture-loopback-address" then "init"
+		elif $n == "wait-for-rhiza-bucket" then "init"
+		elif $n == "goauthy" then "app"
+		elif $n == "sidecarfixture" then "fixture"
+		else "other" end;
+	def reason_enum($r):
+		if $r == null then null
+		elif ($r == "ErrImageNeverPull" or $r == "CrashLoopBackOff" or $r == "OOMKilled" or $r == "Error" or $r == "Completed"
+			or $r == "ContainerCreating" or $r == "PodInitializing" or $r == "ErrImagePull" or $r == "ImagePullBackOff"
+			or $r == "CreateContainerConfigError" or $r == "CreateContainerError" or $r == "RunContainerError"
+			or $r == "InvalidImageName") then $r
+		else "other" end;
+	def phase_enum($s):
+		($s.running // null) as $r |
+		($s.waiting // null) as $w |
+		($s.terminated // null) as $t |
+		if $r != null then "Running"
+		elif $w != null then "Waiting"
+		elif $t != null then "Terminated"
+		else "Unknown" end;
+	def restart_bucket($c):
+		($c | type) as $ty |
+		if $ty == "number" then
+			(if ($c | isfinite) then
+				(if $c >= 0 and ($c | floor) == $c then
+					(if $c == 0 then "0" elif $c <= 2 then "1-2" elif $c <= 5 then "3-5" else "6+" end)
+				else "unknown" end)
+			else "unknown" end)
+		else "unknown" end;
+	def container_view($idx; $statuses; $c):
+		([$statuses[] | select(.name == $c.name)][0]) as $st |
+		($st.ready // false) as $ready |
+		($st.state // {}) as $state |
+		($state.waiting // null) as $waiting |
+		($state.terminated // null) as $terminated |
+		{
+			index: $idx,
+			name: known_name($c.name),
+			phase: phase_enum($state),
+			ready: ($ready == true),
+			restart_bucket: restart_bucket($st.restartCount // null),
+			waiting: (if $waiting != null then reason_enum($waiting.reason) else null end),
+			terminated: (if $terminated != null then reason_enum($terminated.reason) else null end)
+		};
+	. as $pods |
+	(($pods | type) == "object") as $is_obj |
+	(if $is_obj then (($pods.items | type) == "array") else false end) as $valid |
+	(if $valid then
+		($pods.items | map(select((.metadata.name // "") | test("^goauthy-[0-9]+$")) | select(.metadata.namespace == "goauthy")))
+	else [] end) as $gp |
+	[range(0;3) as $idx |
+		($gp[] | select(.metadata.name == ("goauthy-" + ($idx | tostring)))) as $pod |
+		{
+			index: $idx,
+			present: ($pod != null),
+			containers: (if $pod == null then []
+				else
+					([(($pod.spec.initContainers // [])[] | container_view($idx; ($pod.status.initContainerStatuses // []); .)),
+					  (($pod.spec.containers // [])[] | container_view($idx; ($pod.status.containerStatuses // []); .))] | flatten)
+				end)
+		}
+	] as $pods_out |
+	{
+		source: "failure-capture/pods.json",
+		reason: null,
+		pods_json_exit: $pods_exit,
+		available: $valid,
+		complete: (([$pods_out[].index] | sort | unique) == [0, 1, 2] and ($pods_out | length) == 3),
+		observed: (([$pods_out[].containers[]] | length) > 0),
+		pods: $pods_out
+	}
+'
+
+startup_summary() {
+	pods=$evidence_dir/failure-capture/pods.json
+	status_file=$evidence_dir/failure-capture/capture-status.txt
+	pods_exit=$(awk -F= '
+		BEGIN { v = "" }
+		$1 == "pods.json_exit" { n++; if (NF == 2) v = $2; else v = "" }
+		END { if (n == 1 && v ~ /^[0-9]+$/ && v + 0 <= 255) print v + 0 }
+	' "$status_file" 2>/dev/null || true)
+	case "$pods_exit" in
+		''|*[!0-9]*) pods_exit=null ;;
+	esac
+	unavailable() {
+		jq -n --arg reason "$1" --argjson pods_exit "$pods_exit" '{
+			source:"failure-capture/pods.json",
+			available:false,
+			reason:$reason,
+			pods_json_exit:$pods_exit,
+			complete:false,
+			observed:false,
+			pods:[]
+		}'
+	}
+	if [ ! -f "$pods" ]; then
+		unavailable "capture-missing"
+	elif ! jq -e . "$pods" >/dev/null 2>&1; then
+		unavailable "capture-invalid"
+	elif ! jq -e 'type == "object" and (.items | type) == "array"' "$pods" >/dev/null 2>&1; then
+		unavailable "capture-invalid"
+	else
+		jq --argjson pods_exit "$pods_exit" "$startup_project_jq" "$pods" 2>/dev/null ||
+			unavailable "projection-error"
+	fi
+}
+
 summarize_results() {
 	analyzer=$root/scripts/summarize-e2e-kind-saas-isolation-113.sh
 	stage_dir=$temp_dir/analyzer-stage
@@ -67,6 +176,66 @@ summarize_results() {
 		ln -s "$f" "$stage_dir/$(basename "$f")"
 	done
 
+	# Bounded diagnostic-only projection of browser t.Helper fatal records from
+	# the private staged per-driver logs. Only the exact fixed test-file anchor,
+	# a controlled reason enum, an optional 100..599 numeric status, and the
+	# per-driver index already present in the staged filename are read. Response
+	# bodies, URLs, credentials, and arbitrary error text are never classified
+	# or copied into any safe artifact. Unrecognized or missing diagnostics stay
+	# unknown; they are never treated as success or as cause proof.
+	: >"$temp_dir/iam-fatal.tsv"
+	for f in "$stage_dir"/driver-isolation113-driver-*.log; do
+		[ -f "$f" ] || continue
+		fidx=$(basename "$f" | sed -nE 's/.*goauthy-([0-9]+)-.*/\1/p')
+		[ -n "$fidx" ] || continue
+		awk -v di="$fidx" '
+			{
+				line = $0
+				if (line !~ /^[[:space:]]*connection_use_grant_test\.go:[0-9]+:/) next
+				sub(/^[[:space:]]*connection_use_grant_test\.go:[0-9]+:[[:space:]]*/, "", line)
+				if (line ~ /^isolation113 /) next
+				if (line ~ /^waiting [0-9]+ seconds for the login attempt window$/) next
+				reason = ""; status = ""
+				if (line ~ /^authorize status = [0-9]+, want login form:/) {
+					n = line; sub(/^authorize status = /, "", n); sub(/,.*/, "", n)
+					if (n ~ /^[0-9]+$/ && n + 0 >= 100 && n + 0 <= 599) { reason = "authorize_status"; status = n }
+				} else if (line ~ /^login status=403, want redirect, category=invalid_login_request$/) {
+					reason = "login_403_invalid_request"; status = "403"
+				} else if (line ~ /^login status=403, want redirect, category=unclassified_403$/) {
+					reason = "login_403_unclassified"; status = "403"
+				} else if (line ~ /^login status = [0-9]+, want redirect/) {
+					n = line; sub(/^login status = /, "", n); sub(/,.*/, "", n)
+					if (n ~ /^[0-9]+$/ && n + 0 >= 100 && n + 0 <= 599) { reason = "login_status"; status = n }
+				} else if (line ~ /^login did not rotate the browser session/) {
+					reason = "session_rotation"
+				} else if (line ~ /^login redirect is not a valid callback:/) {
+					reason = "callback_invalid"
+				} else if (line ~ /^login form has no interaction token/) {
+					reason = "interaction_missing"
+				} else if (line ~ /^unsafe browser session cookie/) {
+					reason = "session_cookie_unsafe"
+				} else if (line ~ /^authorize response did not set a browser session cookie/) {
+					reason = "session_cookie_missing"
+				} else if (line ~ /^(Get|Post) "/) {
+					n = line
+					sub(/^(Get|Post) "[^"]*":[[:space:]]*/, "", n)
+					if (n != line && n ~ /Client\.Timeout|^context deadline exceeded/) reason = "transport_timeout"
+				}
+				if (reason == "") reason = "unknown"
+				print di "\t" reason "\t" status
+			}
+		' "$f" >>"$temp_dir/iam-fatal.tsv"
+	done
+	if [ -s "$temp_dir/iam-fatal.tsv" ]; then
+		jq -R -s 'split("\n") | map(select(length > 0)) | map(split("\t")) | map({
+			driver_index: (.[0] | tonumber),
+			reason: .[1],
+			status: (if .[2] == "" then null else (.[2] | tonumber) end)
+		})' "$temp_dir/iam-fatal.tsv" >"$temp_dir/iam-fatal.json"
+	else
+		printf '[]' >"$temp_dir/iam-fatal.json"
+	fi
+
 	analyzer_status=0
 	analyzer_ok=false
 	if [ ! -x "$analyzer" ]; then
@@ -79,7 +248,7 @@ summarize_results() {
 	fi
 
 	if [ "$analyzer_ok" = true ]; then
-		jq '{
+		jq --slurpfile iam_fatal "$temp_dir/iam-fatal.json" '{
 			schema_version,
 			analyzer,
 			diagnostic_directory_basename,
@@ -90,8 +259,44 @@ summarize_results() {
 				excess: .denominators.excess,
 				unexpected_groups: .denominators.unexpected_groups
 			},
-			groups: [.groups[] | {driver_index, phase, route, operation, n, success_n, error_n, p95_ms, p99_ms}],
+			groups: [.groups[] | {driver_index, phase, route, operation, n, success_n, error_n, outcomes, statuses, p95_ms, p99_ms}],
 			protected: .protected,
+			fault_routes: .fault_routes,
+			iam_failure_diagnostics: (
+				([.protected.groups[] | select(.route == "iam" and .error_n > 0)]) as $ig |
+				([$ig[].error_n] | add // 0) as $ierr |
+				([$ig[] | .driver_index] | unique) as $drivers |
+				([$drivers[] | . as $d |
+					([$ig[] | select(.driver_index == $d)]) as $g |
+					([$g[].error_n] | add // 0) as $err |
+					([$iam_fatal[0][] | select(.driver_index == $d)]) as $f |
+					([$f[] | select(.reason != "unknown")] | length) as $known |
+					{
+						driver_index: $d,
+						error_n: $err,
+						phase_error_counts: [$g[] | {phase, error_n}],
+						anchored_n: $known,
+						unrecognized_n: (($f | length) - $known),
+						excess_n: (if $known > $err then $known - $err else 0 end),
+						missing_n: (if $err > $known then $err - $known else 0 end),
+						complete: ($err > 0 and $known == $err and (($f | length) - $known) == 0),
+						reasons: $f
+					}
+				]) as $diag |
+				([$diag[] | select(.complete | not)] | length) as $incomplete |
+				{
+					criterion: "every protected IAM error must carry an anchored connection_use_grant_test.go t.Helper diagnostic; recognized count must equal total errors exactly with no unrecognized or excess diagnostics, otherwise incomplete, never success or cause proof",
+					source: "private staged per-driver logs; anchored fixed test-file fatal prefixes only; raw fatals carry no phase attribution",
+					errors: $ierr,
+					anchored: ([$diag[].anchored_n] | add // 0),
+					unrecognized: ([$diag[].unrecognized_n] | add // 0),
+					excess: ([$diag[].excess_n] | add // 0),
+					missing: ([$diag[].missing_n] | add // 0),
+					complete: ($ierr > 0 and $incomplete == 0),
+					status: (if $ierr == 0 then "none" elif $incomplete == 0 then "diagnosed" else "incomplete" end),
+					groups: $diag
+				}
+			),
 			performance: {
 				criterion: .performance.criterion,
 				status: .performance.status,
@@ -112,6 +317,18 @@ summarize_results() {
 			analyzer: "scripts/summarize-e2e-kind-saas-isolation-113.sh",
 			diagnostic_directory_basename: "unavailable",
 			error: {reason: $reason, analyzer_status: $status},
+			iam_failure_diagnostics: {
+				criterion: "every protected IAM error must carry an anchored connection_use_grant_test.go t.Helper diagnostic; recognized count must equal total errors exactly with no unrecognized or excess diagnostics, otherwise incomplete, never success or cause proof",
+				source: "unavailable",
+				errors: null,
+				anchored: null,
+				unrecognized: null,
+				excess: null,
+				missing: null,
+				complete: false,
+				status: "unavailable",
+				groups: []
+			},
 			overall: {correctness: "fail", performance: "inconclusive", resource_ceiling: "inconclusive", status: "fail", issue_closure: false, admission: "none", reason: "analyzer unavailable; correctness fail-closed"},
 			criterion_pass: false,
 			criterion_status: "inconclusive"
@@ -125,6 +342,11 @@ summarize_results() {
 		}' >"$results_dir/resource-summary.json"
 	fi
 
+	startup=$(startup_summary) || fail 'failed to derive startup observability'
+	jq --argjson startup "$startup" '. + {startup: $startup}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
+		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
+		fail 'failed to add startup observability to the resource summary'
+
 	json_or_null() {
 		if [ -s "$1" ] && jq -e . "$1" >/dev/null 2>&1; then
 			cat "$1"
@@ -133,22 +355,29 @@ summarize_results() {
 		fi
 	}
 	helper_pins=$(json_or_null "$evidence_dir/helper-image-pins.json")
+	candidate_node_pins=$(json_or_null "$evidence_dir/candidate-node-pins.json")
 	fixture_runtime=$(json_or_null "$evidence_dir/fixture-runtime-image-pins.json")
 	driver_runtime=$(json_or_null "$evidence_dir/driver-runtime-image-pins.json")
 	helper_head=$(cat "$evidence_dir/helper-source-head.txt" 2>/dev/null || true)
-	jq -n --argjson helper "$helper_pins" --argjson fixture "$fixture_runtime" --argjson driver "$driver_runtime" \
+	jq -n --argjson helper "$helper_pins" --argjson fixture "$fixture_runtime" --argjson driver "$driver_runtime" --argjson candidate_node "$candidate_node_pins" \
 		--arg candidate_image "${GOAUTHY_IMAGE:-}" --arg candidate_source "${GOAUTHY_CANDIDATE_SOURCE:-}" \
 		--arg helper_source_head "$helper_head" '
 		def runtime_digest: sub("^(containerd|docker-pullable)://"; "") | if contains("@sha256:") then sub("^.*@"; "") else . end;
 		def runtime_pins($v): if ($v | type) == "array" then [$v[] | {image, digest: (.imageID | runtime_digest)}] else null end;
+		def node_pins($v):
+			try (if ($v | type) == "object"
+				and ($v.config_digest | test("^sha256:[0-9a-f]{64}$"))
+				and ($v.runtime_digests | type) == "array"
+				and all($v.runtime_digests[]; type == "string" and test("^sha256:[0-9a-f]{64}$"))
+			then $v | {config_digest, runtime_digests} else null end) catch null;
 		{
-			candidate: {image: $candidate_image, source: $candidate_source},
+			candidate: {image: $candidate_image, source: $candidate_source, node_pins: node_pins($candidate_node)},
 			helper_source_head: $helper_source_head,
 			helper_image_pins: (
 				if $helper == null then null else
 					{
-						fixture: ($helper.fixture | {image_ref, manifest_digest, config_digest, loaded_image_id}),
-						driver: ($helper.driver | {image_ref, manifest_digest, config_digest, loaded_image_id})
+						fixture: ($helper.fixture | {image_ref, manifest_digest, config_digest, loaded_image_id, node_pins: node_pins(.node_pins)}),
+						driver: ($helper.driver | {image_ref, manifest_digest, config_digest, loaded_image_id, node_pins: node_pins(.node_pins)})
 					}
 				end),
 			fixture_runtime_pins: runtime_pins($fixture),
@@ -166,8 +395,9 @@ summarize_results() {
 		--arg kubectl "$kubectl_version" \
 		--arg kustomize "$(kustomize version 2>/dev/null || true)" \
 		--arg awk "$(awk --version 2>/dev/null | head -n 1 || true)" \
+		--arg jq "$(jq --version 2>/dev/null || true)" \
 		--arg runner_image_os "${ImageOS:-}" --arg runner_os "${RUNNER_OS:-}" --arg runner_arch "${RUNNER_ARCH:-}" \
-		'{os:$os,kernel:$kernel,arch:$arch,cpus:$cpus,mem_total_kib:$mem_total_kib,go:$go,docker:$docker,kind:$kind,kubectl:$kubectl,kustomize:$kustomize,awk:$awk,runner_image_os:$runner_image_os,runner_os:$runner_os,runner_arch:$runner_arch}' \
+		'{os:$os,kernel:$kernel,arch:$arch,cpus:$cpus,mem_total_kib:$mem_total_kib,go:$go,docker:$docker,kind:$kind,kubectl:$kubectl,kustomize:$kustomize,awk:$awk,jq:$jq,runner_image_os:$runner_image_os,runner_os:$runner_os,runner_arch:$runner_arch}' \
 		>"$results_dir/runner-environment.json" || fail 'failed to write runner environment metadata'
 
 	if [ "$analyzer_ok" = true ]; then
@@ -208,6 +438,18 @@ summarize_results() {
 		jq '.protected' "$results_dir/criterion.json" 2>/dev/null || true
 		echo '```'
 		echo
+		echo '## IAM failure diagnostics'
+		echo
+		echo '```json'
+		jq '.iam_failure_diagnostics' "$results_dir/criterion.json" 2>/dev/null || true
+		echo '```'
+		echo
+		echo '## Fault routes'
+		echo
+		echo '```json'
+		jq '.fault_routes' "$results_dir/criterion.json" 2>/dev/null || true
+		echo '```'
+		echo
 		echo '## Denominators'
 		echo
 		echo '```json'
@@ -224,6 +466,12 @@ summarize_results() {
 		echo
 		echo '```json'
 		jq . "$results_dir/resource-summary.json" 2>/dev/null || true
+		echo '```'
+		echo
+		echo '## Startup'
+		echo
+		echo '```json'
+		jq '.startup' "$results_dir/resource-summary.json" 2>/dev/null || true
 		echo '```'
 		echo
 		echo '## Fixture'
@@ -289,7 +537,7 @@ for tool in docker kind kubectl kustomize openssl go curl nc tar jq timeout awk 
 done
 
 kind_version=$(kind version 2>/dev/null || true)
-case "$kind_version" in "kind v0.31.0 "*) ;; *) fail "unexpected kind version: $kind_version" ;; esac
+case "$kind_version" in "kind v0.32.0 "*) ;; *) fail "unexpected kind version: $kind_version" ;; esac
 kubectl_client_version=$(kubectl version --client 2>/dev/null || true)
 case "$kubectl_client_version" in *"v1.35.3"*) ;; *) fail "unexpected kubectl version: $kubectl_client_version" ;; esac
 
@@ -299,11 +547,15 @@ temp_dir=$(mktemp -d)
 chmod 700 "$temp_dir"
 created=false
 inotify_original=
+load_alias=
 
 cleanup() {
 	status=$?
 	trap - 0 1 2 15
 	cleanup_failed=false
+	if [ -n "$load_alias" ]; then
+		docker rmi "$load_alias" >/dev/null 2>&1 || cleanup_failed=true
+	fi
 	if [ "$created" = true ]; then
 		if [ -n "$inotify_original" ]; then
 			docker exec "$node" sysctl -w "fs.inotify.max_user_instances=$inotify_original" >/dev/null 2>&1 || cleanup_failed=true
@@ -341,12 +593,43 @@ docker exec "$node" sysctl -w fs.inotify.max_user_instances=512 >/dev/null 2>&1 
 docker pull "$GOAUTHY_IMAGE"
 revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$GOAUTHY_IMAGE" 2>/dev/null || true)
 [ "$revision" = "$GOAUTHY_CANDIDATE_SOURCE" ] || fail "candidate image revision label '$revision' does not match GOAUTHY_CANDIDATE_SOURCE '$GOAUTHY_CANDIDATE_SOURCE'"
-kind load docker-image "$GOAUTHY_IMAGE" --name "$KIND_CLUSTER"
+candidate_config_id=$(docker image inspect --format '{{.Id}}' "$GOAUTHY_IMAGE" 2>/dev/null || true)
+printf '%s' "$candidate_config_id" | grep -Eq '^sha256:[0-9a-f]{64}$' ||
+	fail 'candidate image config id is not a sha256 digest'
+# The sixth run failed with the app container ErrImageNeverPull. The importer
+# mechanism is inferred, not directly observed: Kind's docker-save importer may
+# not attach the original digest reference, so the canonical deployment
+# reference may not resolve. Check whether the canonical reference already
+# resolves; only attach it when absent, so a pre-registered identical image is
+# not disturbed. The config blob (config ID) is preserved; the packaging
+# manifest digest may differ from the original registry manifest and is not
+# claimed equal. The owned alias must be retained through every later host
+# candidate use and removed only once by the EXIT cleanup, because removing it
+# midrun can drop the image content the host still needs.
+proposed_alias="${GOAUTHY_IMAGE%%@*}:${KIND_CLUSTER}"
+if docker image inspect "$proposed_alias" >/dev/null 2>&1; then
+	fail "refusing to overwrite a pre-existing host image tag: $proposed_alias"
+fi
+load_alias=$proposed_alias
+docker tag "$GOAUTHY_IMAGE" "$proposed_alias"
+kind load docker-image "$proposed_alias" --name "$KIND_CLUSTER"
+if ! docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null; then
+	docker exec "$node" ctr --namespace k8s.io images tag "$proposed_alias" "$GOAUTHY_IMAGE" >/dev/null ||
+		fail 'failed to attach the canonical candidate reference in the Kind node'
+	if ! docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null; then
+		fail 'candidate canonical reference does not resolve in the Kind node CRI'
+	fi
+fi
+node_config_id=$(jq -r '.status.id // empty' "$temp_dir/cri-image.json" 2>/dev/null || true)
+[ -n "$node_config_id" ] || fail 'candidate CRI image identity is empty'
+[ "$node_config_id" = "$candidate_config_id" ] ||
+	fail 'candidate image config identity differs between the host original and the Kind node'
+printf 'candidate image loaded: config_id=%s reference=%s\n' "$candidate_config_id" "$GOAUTHY_IMAGE" >&2
 
 browser_password=$(openssl rand -hex 16)
 client_secret=$(openssl rand -hex 32)
-master_key=$(openssl rand -base64 32 | tr -d '\n')
-oauth_hmac=$(openssl rand -base64 32 | tr -d '\n')
+master_key=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '=\n')
+oauth_hmac=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '=\n')
 dcr_token=$(openssl rand -hex 16)
 rhiza_admin=$(openssl rand -hex 32)
 voter0=$(openssl rand -hex 32)
@@ -371,22 +654,30 @@ kubectl --context "$context" -n goauthy create secret generic goauthy-secrets \
 	--from-literal=versity-root-password="$versity_password" \
 	--dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
 
-kustomize build "$root/deploy/k8s" >"$temp_dir/baseline.yaml"
-kubectl create --dry-run=client -o json -f "$temp_dir/baseline.yaml" >"$temp_dir/baseline.json"
-jq --arg image "$GOAUTHY_IMAGE" '
+baseline_normalize_jq='
+	[.[] | if .kind == "List" then (.items // []) else [.] end] | flatten | {kind:"List",apiVersion:"v1",items:.}
+'
+baseline_patch_jq='
 	.items |= map(
 		if .kind == "StatefulSet" and .metadata.name == "goauthy" and .metadata.namespace == "goauthy"
 		then
 			.spec.replicas = 0
 			| (.spec.template.spec.containers[] | select(.name == "goauthy") | .image) = $image
 		else . end)
-' "$temp_dir/baseline.json" >"$temp_dir/baseline-patched.json"
-jq -e --arg image "$GOAUTHY_IMAGE" '
+'
+baseline_validate_jq='
 	([.items[] | select(.kind == "StatefulSet" and .metadata.name == "goauthy")] | length) == 1
 	and ([.items[] | select(.kind == "StatefulSet" and .metadata.name == "goauthy" and .spec.replicas == 0)] | length) == 1
 	and ([.items[] | select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.containers[] | select(.name == "goauthy" and .image == $image)] | length) == 1
 	and ([.items[] | select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.spec.containers[] | select(.image == $image)] | length) == 1
-' "$temp_dir/baseline-patched.json" >/dev/null ||
+'
+
+kustomize build "$root/deploy/k8s" >"$temp_dir/baseline.yaml"
+kubectl --context "$context" create --dry-run=client -o json -f "$temp_dir/baseline.yaml" >"$temp_dir/baseline-raw.json" ||
+	fail 'kubectl dry-run baseline render failed'
+jq -s "$baseline_normalize_jq" "$temp_dir/baseline-raw.json" >"$temp_dir/baseline.json"
+jq --arg image "$GOAUTHY_IMAGE" "$baseline_patch_jq" "$temp_dir/baseline.json" >"$temp_dir/baseline-patched.json"
+jq -e --arg image "$GOAUTHY_IMAGE" "$baseline_validate_jq" "$temp_dir/baseline-patched.json" >/dev/null ||
 	fail 'rendered baseline must select exactly one GoAuthy StatefulSet at zero replicas with the immutable candidate image'
 kubectl --context "$context" apply -f "$temp_dir/baseline-patched.json" >/dev/null
 kubectl --context "$context" -n goauthy rollout status statefulset/versity --timeout=240s
