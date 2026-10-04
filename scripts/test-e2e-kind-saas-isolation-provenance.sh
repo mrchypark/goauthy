@@ -258,6 +258,63 @@ jq -nc --arg config "sha256:$(printf '%064d' 9)" --arg d8 "$d8" '{config_digest:
 if jq -e $pin_args --argjson node_pins "$(cat "$tmp/snapshot-wrong-config.json")" -f "$repo/scripts/e2e-kind-saas-isolation-runtime-pins.jq" "$tmp/pods.json" >/dev/null 2>&1; then echo 'runtime pin predicate accepted a snapshot with the wrong config_digest' >&2; exit 1; fi
 jq -nc --arg config "$fixture_config" '{config_digest:$config, runtime_digests:"not-an-array"}' >"$tmp/snapshot-malformed.json"
 if jq -e $pin_args --argjson node_pins "$(cat "$tmp/snapshot-malformed.json")" -f "$repo/scripts/e2e-kind-saas-isolation-runtime-pins.jq" "$tmp/pods.json" >/dev/null 2>&1; then echo 'runtime pin predicate accepted a malformed snapshot' >&2; exit 1; fi
+candidate_config_digest=sha256:$(printf '%064d' 3)
+candidate_manifest_digest=sha256:$(printf '%064d' 6)
+GOAUTHY_IMAGE=goauthy@sha256:$(printf '%064d' 6)
+candidate_node_digests="sha256:$(printf '%064d' 8)"
+c3=$candidate_config_digest
+c6=$candidate_manifest_digest
+c8=$candidate_node_digests
+c9=sha256:$(printf '%064d' 9)
+candidate_pod() {
+	printf '%s %s %s %s %s\n' "$1" "$2" "$3" "$4" "$GOAUTHY_IMAGE"
+}
+candidate_pods_config=$(printf '%s\n' \
+	"$(candidate_pod goauthy-0 Running true "containerd://$c3")" \
+	"$(candidate_pod goauthy-1 Running true "containerd://$c3")" \
+	"$(candidate_pod goauthy-2 Running true "containerd://$c3")")
+assert_candidate_pods "$candidate_pods_config" "" || { echo 'candidate pod validation rejected config digests' >&2; exit 1; }
+candidate_pods_manifest=$(printf '%s\n' \
+	"$(candidate_pod goauthy-0 Running true "containerd://$c6")" \
+	"$(candidate_pod goauthy-1 Running true "containerd://$c6")" \
+	"$(candidate_pod goauthy-2 Running true "containerd://$c6")")
+assert_candidate_pods "$candidate_pods_manifest" "" || { echo 'candidate pod validation rejected manifest digests' >&2; exit 1; }
+candidate_pods_node=$(printf '%s\n' \
+	"$(candidate_pod goauthy-0 Running true "containerd://goauthy@$c8")" \
+	"$(candidate_pod goauthy-1 Running true "containerd://goauthy@$c8")" \
+	"$(candidate_pod goauthy-2 Running true "containerd://goauthy@$c8")")
+assert_candidate_pods "$candidate_pods_node" "$candidate_node_digests" || { echo 'candidate pod validation rejected a verified node hash' >&2; exit 1; }
+if assert_candidate_pods "$candidate_pods_node" "" >/dev/null 2>&1; then echo 'candidate pod validation trusted an unverified node hash' >&2; exit 1; fi
+candidate_pods_wrong_ref=$(printf '%s\n' \
+	"$(candidate_pod goauthy-0 Running true "containerd://$c3")" \
+	"$(candidate_pod goauthy-1 Running true "containerd://$c3")" \
+	"goauthy-2 Running true containerd://$c3 wrong@$c6")
+if assert_candidate_pods "$candidate_pods_wrong_ref" "" >/dev/null 2>&1; then echo 'candidate pod validation accepted a wrong image ref' >&2; exit 1; fi
+candidate_pods_unready=$(printf '%s\n' \
+	"$(candidate_pod goauthy-0 Running true "containerd://$c3")" \
+	"$(candidate_pod goauthy-1 Running true "containerd://$c3")" \
+	"$(candidate_pod goauthy-2 Running false "containerd://$c3")")
+if assert_candidate_pods "$candidate_pods_unready" "" >/dev/null 2>&1; then echo 'candidate pod validation accepted an unready pod' >&2; exit 1; fi
+candidate_pods_duplicate=$(printf '%s\n' \
+	"$(candidate_pod goauthy-0 Running true "containerd://$c3")" \
+	"$(candidate_pod goauthy-1 Running true "containerd://$c3")" \
+	"$(candidate_pod goauthy-1 Running true "containerd://$c3")")
+if assert_candidate_pods "$candidate_pods_duplicate" "" >/dev/null 2>&1; then echo 'candidate pod validation accepted a duplicate pod name' >&2; exit 1; fi
+candidate_pods_extra4=$(printf '%s\n' \
+	"$(candidate_pod goauthy-0 Running true "containerd://$c3")" \
+	"$(candidate_pod goauthy-1 Running true "containerd://$c3")" \
+	"$(candidate_pod goauthy-2 Running true "containerd://$c3")" \
+	"$(candidate_pod goauthy-2 Running true "containerd://$c3")")
+if assert_candidate_pods "$candidate_pods_extra4" "" >/dev/null 2>&1; then echo 'candidate pod validation accepted an extra fourth duplicate row' >&2; exit 1; fi
+candidate_pods_wrong_d=$(printf '%s\n' \
+	"$(candidate_pod goauthy-0 Running true "containerd://$c3")" \
+	"$(candidate_pod goauthy-1 Running true "containerd://$c3")" \
+	"$(candidate_pod goauthy-2 Running true "containerd://$c9")")
+if assert_candidate_pods "$candidate_pods_wrong_d" "" >/dev/null 2>&1; then echo 'candidate pod validation accepted a wrong digest' >&2; exit 1; fi
+real_config=$candidate_config_digest
+candidate_config_digest=$c9
+if assert_candidate_pods "$candidate_pods_config" "" >/dev/null 2>&1; then echo 'candidate pod validation accepted a wrong config digest' >&2; exit 1; fi
+candidate_config_digest=$real_config
 
 set +e
 run_runner bad-load MOCK_BAD_LOADED=fixture

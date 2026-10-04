@@ -247,10 +247,11 @@ summarize_results() {
 		fi
 	}
 	helper_pins=$(json_or_null "$evidence_dir/helper-image-pins.json")
+	candidate_node_pins=$(json_or_null "$evidence_dir/candidate-node-pins.json")
 	fixture_runtime=$(json_or_null "$evidence_dir/fixture-runtime-image-pins.json")
 	driver_runtime=$(json_or_null "$evidence_dir/driver-runtime-image-pins.json")
 	helper_head=$(cat "$evidence_dir/helper-source-head.txt" 2>/dev/null || true)
-	jq -n --argjson helper "$helper_pins" --argjson fixture "$fixture_runtime" --argjson driver "$driver_runtime" \
+	jq -n --argjson helper "$helper_pins" --argjson fixture "$fixture_runtime" --argjson driver "$driver_runtime" --argjson candidate_node "$candidate_node_pins" \
 		--arg candidate_image "${GOAUTHY_IMAGE:-}" --arg candidate_source "${GOAUTHY_CANDIDATE_SOURCE:-}" \
 		--arg helper_source_head "$helper_head" '
 		def runtime_digest: sub("^(containerd|docker-pullable)://"; "") | if contains("@sha256:") then sub("^.*@"; "") else . end;
@@ -262,7 +263,7 @@ summarize_results() {
 				and all($v.runtime_digests[]; type == "string" and test("^sha256:[0-9a-f]{64}$"))
 			then $v | {config_digest, runtime_digests} else null end) catch null;
 		{
-			candidate: {image: $candidate_image, source: $candidate_source},
+			candidate: {image: $candidate_image, source: $candidate_source, node_pins: node_pins($candidate_node)},
 			helper_source_head: $helper_source_head,
 			helper_image_pins: (
 				if $helper == null then null else
