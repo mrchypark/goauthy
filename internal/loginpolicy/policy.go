@@ -292,20 +292,55 @@ func (s *Store) allowBounded(ctx context.Context, ip string, now time.Time, requ
 	return response.RowsAffected == 1, nil
 }
 
+// checkSnapshotSQL reads the IP failure row and the global timing row in one
+// linearizable snapshot. The fixed source discriminator (1 = IP failure,
+// 2 = timing) keeps the two bounded rows (at most one each) separable without a
+// second round trip.
+const checkSnapshotSQL = `SELECT 1 AS src, failures, blocked_until_unix_ms, updated_at_unix_ms FROM login_ip_failures WHERE key_digest = ?
+	UNION ALL
+	SELECT 2 AS src, success_mean_unix_ms, NULL, NULL FROM login_timing WHERE id = 1`
+
 func (s *Store) Check(ctx context.Context, ip string, now time.Time) (Status, error) {
 	if s == nil || s.db == nil || ip == "" {
 		return Status{}, ErrInvalid
 	}
 	status := Status{Mean: DefaultSuccessFloor}
 	key := digest(ip)
-	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT failures,blocked_until_unix_ms,updated_at_unix_ms FROM login_ip_failures WHERE key_digest = ?`, Args: []any{key}, Consistency: rhiza.ConsistencyLinearizable})
+	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: checkSnapshotSQL, Args: []any{key}, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil {
 		return Status{}, err
 	}
-	if len(result.Rows) == 1 && len(result.Rows[0]) == 3 {
-		failures, failuresOK := result.Rows[0][0].(int64)
-		until, untilOK := result.Rows[0][1].(int64)
-		updated, updatedOK := result.Rows[0][2].(int64)
+	var ipRow, meanRow []any
+	for _, row := range result.Rows {
+		if len(row) != 4 {
+			return Status{}, ErrInvalid
+		}
+		src, ok := row[0].(int64)
+		if !ok {
+			return Status{}, ErrInvalid
+		}
+		switch src {
+		case 1:
+			if ipRow != nil {
+				return Status{}, ErrInvalid
+			}
+			ipRow = row
+		case 2:
+			if meanRow != nil {
+				return Status{}, ErrInvalid
+			}
+			meanRow = row
+		default:
+			return Status{}, ErrInvalid
+		}
+	}
+	// The IP row is validated before the timing row, preserving the original
+	// ordering where a malformed or forward-skewed IP row errors before any
+	// timing handling.
+	if ipRow != nil {
+		failures, failuresOK := ipRow[1].(int64)
+		until, untilOK := ipRow[2].(int64)
+		updated, updatedOK := ipRow[3].(int64)
 		if !failuresOK || !untilOK || !updatedOK || failures < 0 {
 			return Status{}, ErrInvalid
 		}
@@ -314,16 +349,26 @@ func (s *Store) Check(ctx context.Context, ip string, now time.Time) (Status, er
 			return Status{}, ErrInvalid
 		}
 		if updated <= nowMs-failureIdleTTL.Milliseconds() {
-			return s.withMean(ctx, status)
+			return applyMean(status, meanRow)
 		}
 		status.Failures = failures
 		if until > nowMs {
 			status.BlockedUntil = time.UnixMilli(until).UTC()
 		}
-	} else if len(result.Rows) != 0 {
+	}
+	return applyMean(status, meanRow)
+}
+
+func applyMean(status Status, meanRow []any) (Status, error) {
+	if meanRow == nil {
+		return status, nil
+	}
+	mean, ok := meanRow[1].(int64)
+	if !ok || mean < 1 || mean > maxSuccessMean.Milliseconds() {
 		return Status{}, ErrInvalid
 	}
-	return s.withMean(ctx, status)
+	status.Mean = time.Duration(mean) * time.Millisecond
+	return status, nil
 }
 
 // Failure atomically increments the direct-peer failure counter and assigns a
@@ -471,25 +516,6 @@ func (s *Store) Success(ctx context.Context, ip string, elapsed time.Duration) e
 			ON CONFLICT(id) DO UPDATE SET success_mean_unix_ms = (login_timing.success_mean_unix_ms + excluded.success_mean_unix_ms) / 2`, Args: []any{mean}},
 	}})
 	return err
-}
-
-func (s *Store) withMean(ctx context.Context, status Status) (Status, error) {
-	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT success_mean_unix_ms FROM login_timing WHERE id = 1`, Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil {
-		return Status{}, err
-	}
-	if len(result.Rows) == 0 {
-		return status, nil
-	}
-	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
-		return Status{}, ErrInvalid
-	}
-	mean, ok := result.Rows[0][0].(int64)
-	if !ok || mean < 1 || mean > maxSuccessMean.Milliseconds() {
-		return Status{}, ErrInvalid
-	}
-	status.Mean = time.Duration(mean) * time.Millisecond
-	return status, nil
 }
 
 func Delay(status Status, elapsed time.Duration) time.Duration {
