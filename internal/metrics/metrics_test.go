@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1071,6 +1072,106 @@ func TestNoGlobalMetricLeakage(t *testing.T) {
 		if strings.HasPrefix(mf.GetName(), "goauthy_") {
 			t.Errorf("goauthy_ metric %q leaked to global registry", mf.GetName())
 		}
+	}
+}
+
+// --- AuthStageDuration bounded stage label --------------------------------
+
+// collectHistogramLabelCounts returns per-label sample counts for a histogram.
+func collectHistogramLabelCounts(t *testing.T, reg *Registry, name, label string) map[string]uint64 {
+	t.Helper()
+	families, err := reg.reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	for _, mf := range families {
+		if mf.GetName() != name {
+			continue
+		}
+		out := make(map[string]uint64, len(mf.GetMetric()))
+		for _, m := range mf.GetMetric() {
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() == label {
+					out[lp.GetValue()] += m.GetHistogram().GetSampleCount()
+				}
+			}
+		}
+		return out
+	}
+	t.Fatalf("metric %q not found", name)
+	return nil
+}
+
+func TestAuthStageDurationKnownStagesObserved(t *testing.T) {
+	reg := NewRegistry()
+	stages := []AuthStage{
+		AuthStageCredentialLookup, AuthStagePasswordVerify, AuthStageSubjectRevalidate,
+		AuthStageInteractionConsume, AuthStageSessionRotate, AuthStageOAuthIssue,
+		AuthStageAuthorizeValidate, AuthStageAuthorizeSession,
+	}
+	for _, s := range stages {
+		reg.AuthStageDuration(s, 0.01)
+	}
+	got := collectHistogramLabelCounts(t, reg, "goauthy_auth_stage_duration_seconds", "stage")
+	if len(got) != len(stages) {
+		t.Fatalf("label cardinality=%d want=%d (%v)", len(got), len(stages), got)
+	}
+	for _, s := range stages {
+		if got[string(s)] != 1 {
+			t.Errorf("stage %q count=%d want=1", s, got[string(s)])
+		}
+	}
+}
+
+func TestAuthStageDurationRejectsUnknownAndInvalidValues(t *testing.T) {
+	reg := NewRegistry()
+	reg.AuthStageDuration(AuthStage("caller_supplied"), 0.01)
+	reg.AuthStageDuration(AuthStageCredentialLookup, -1)
+	reg.AuthStageDuration(AuthStageCredentialLookup, math.NaN())
+	reg.AuthStageDuration(AuthStageCredentialLookup, math.Inf(1))
+	reg.AuthStageDuration(AuthStageCredentialLookup, math.Inf(-1))
+
+	families, err := reg.reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	for _, mf := range families {
+		if mf.GetName() != "goauthy_auth_stage_duration_seconds" {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			if m.GetHistogram().GetSampleCount() != 0 {
+				t.Fatalf("invalid observation recorded: %v", m)
+			}
+		}
+	}
+	if text := gatherText(t, reg); strings.Contains(text, "caller_supplied") {
+		t.Fatalf("caller-supplied stage label leaked: %s", text)
+	}
+}
+
+func TestAuthStageDurationNilRegistryIsNoOp(t *testing.T) {
+	var reg *Registry
+	reg.AuthStageDuration(AuthStageCredentialLookup, 0.01)
+}
+
+func TestAuthStageDurationBoundedLabelsUnderVariedInput(t *testing.T) {
+	reg := NewRegistry()
+	inputs := []AuthStage{
+		AuthStageCredentialLookup, AuthStagePasswordVerify, "x", "", "credential_lookup ",
+		AuthStageCredentialLookup, AuthStageOAuthIssue, "oauth_issue_2",
+	}
+	for _, s := range inputs {
+		reg.AuthStageDuration(s, 0.005)
+	}
+	got := collectHistogramLabelCounts(t, reg, "goauthy_auth_stage_duration_seconds", "stage")
+	for label := range got {
+		if !allowedAuthStages[AuthStage(label)] {
+			t.Fatalf("unbounded stage label observed: %q", label)
+		}
+	}
+	if got[string(AuthStageCredentialLookup)] != 2 || got[string(AuthStagePasswordVerify)] != 1 || got[string(AuthStageOAuthIssue)] != 1 {
+		t.Fatalf("unexpected bounded counts: %v", got)
 	}
 }
 

@@ -223,6 +223,39 @@ func TestLoginMetricsNilRegistryNoPanic(t *testing.T) {
 	}
 }
 
+func TestLoginMetricsAuthStagesObservedAndBounded(t *testing.T) {
+	t.Parallel()
+	h := testHandler(t)
+	reg := metrics.NewRegistry()
+	h.SetMetrics(reg)
+	// Production wires the identity store to the same registry; the three
+	// credential stages are recorded there, not on the handler.
+	h.identity.SetMetrics(reg)
+
+	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
+	page := httptest.NewRecorder()
+	h.Authorize(page, get)
+	if page.Code != http.StatusOK {
+		t.Fatalf("authorize status=%d", page.Code)
+	}
+	init := page.Result().Cookies()[0]
+	interaction := interactionToken(t, page.Body.String())
+
+	completed := httptest.NewRecorder()
+	h.Login(completed, postLogin(init, interaction, "alice", "correct password"))
+	if completed.Code != http.StatusSeeOther {
+		t.Fatalf("login status=%d", completed.Code)
+	}
+
+	// Observation must not alter the login outcome, and the stage series must
+	// stay bounded by the fixed allowlist. A full password login observes all
+	// eight fixed stages: two authorize gates plus six login stages.
+	got := testutil.CollectAndCount(reg.AuthStageDurationCollector(), "goauthy_auth_stage_duration_seconds")
+	if got != 8 {
+		t.Fatalf("auth stage series=%d, want 8", got)
+	}
+}
+
 func TestLoginMetricsAuthorizedSessionSkipsCounters(t *testing.T) {
 	t.Parallel()
 	h := testHandler(t)

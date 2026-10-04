@@ -1366,6 +1366,7 @@ func run() (err error) {
 		}
 		oauthServer.SetMetrics(registry)
 		loginHandler.SetMetrics(registry)
+		identityStore.SetMetrics(registry)
 		appHandler = registry.Instrument(appHandler)
 
 		metricsMux := http.NewServeMux()

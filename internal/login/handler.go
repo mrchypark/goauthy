@@ -381,7 +381,9 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
+	validateStart := time.Now()
 	request, valid := h.oauth.ValidateAuthorizationRequestForLogin(w, r)
+	h.recordAuthStage(metrics.AuthStageAuthorizeValidate, validateStart)
 	if !valid {
 		return
 	}
@@ -427,23 +429,27 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessionStart := time.Now()
 	var session browser.IssuedSession
 	if current, token, ok := h.session(r); ok && !current.Authenticated() {
 		session = browser.IssuedSession{Session: current, Token: token}
 	} else {
 		peerIP, peerOK := h.resolvePeerIP(r)
 		if !peerOK {
+			h.recordAuthStage(metrics.AuthStageAuthorizeSession, sessionStart)
 			http.Error(w, "Invalid login request", http.StatusBadRequest)
 			return
 		}
 		session, err = h.browser.CreateInitSession(r.Context(), h.now().Add(interactionLifetime), peerIP)
 		if err != nil {
+			h.recordAuthStage(metrics.AuthStageAuthorizeSession, sessionStart)
 			slog.Error("authorize request failed", "operation", "init_session", "error_class", authorizeStoreErrorClass(err), "error_type", fmt.Sprintf("%T", err))
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 			return
 		}
 	}
 	interaction, err := h.browser.CreateAuthorizationInteraction(r.Context(), session.Token, request.RequestID, []byte(r.URL.RequestURI()), h.now().Add(interactionLifetime))
+	h.recordAuthStage(metrics.AuthStageAuthorizeSession, sessionStart)
 	if err != nil {
 		slog.Error("authorize request failed", "operation", "authorization_interaction", "error_class", authorizeStoreErrorClass(err), "error_type", fmt.Sprintf("%T", err))
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
@@ -1276,7 +1282,9 @@ func (h *Handler) finishAuthentication(w http.ResponseWriter, r *http.Request, s
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
+	consumeStart := time.Now()
 	consumed, err := h.consumeAuthenticationRequest(r, target, sessionToken, interactionDigest, subject, peerIP, consume)
+	h.recordAuthStage(metrics.AuthStageInteractionConsume, consumeStart)
 	if err != nil || consumed.RequestID != interaction.RequestID || !bytes.Equal(consumed.Payload, interaction.Payload) {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
@@ -1368,7 +1376,9 @@ func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.
 		h.redirectApproval(w, target.approval)
 		return
 	}
+	issueStart := time.Now()
 	h.oauth.CompleteAuthorizationWithSession(w, original, subject, request.RequestedScopes, newSession.CreatedAt, newSession.ID, newSession.AuthenticationMethod)
+	h.recordAuthStage(metrics.AuthStageOAuthIssue, issueStart)
 }
 
 // rotateBrowserSession is the common post-authentication browser transition.
@@ -1384,6 +1394,8 @@ func (h *Handler) rotateBrowserSessionWithBinding(w http.ResponseWriter, r *http
 }
 
 func (h *Handler) rotateBrowserSessionWithParent(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP, parentDigest string, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, error) {
+	rotateStart := time.Now()
+	defer h.recordAuthStage(metrics.AuthStageSessionRotate, rotateStart)
 	if h.onLoginLocation != nil && (authMethod == "webauthn" || authMethod == "mfa") && !security.ValidHeaderText(r.UserAgent()) {
 		return browser.IssuedSession{}, identity.ErrInvalidUserAgent
 	}
@@ -1904,6 +1916,15 @@ func (h *Handler) passwordlessCookie(value string) (*http.Cookie, error) {
 		return nil, errors.New("invalid issuer")
 	}
 	return &http.Cookie{Name: h.passkeyCookieName(), Value: value, Path: "/", HttpOnly: true, Secure: issuer.Scheme == "https", SameSite: http.SameSiteLaxMode}, nil
+}
+
+// recordAuthStage observes one bounded authentication stage duration using a
+// monotonic clock. The stage is a fixed enum and the value is an elapsed
+// duration; it is a no-op when no metrics registry is attached.
+func (h *Handler) recordAuthStage(stage metrics.AuthStage, start time.Time) {
+	if h.metrics != nil {
+		h.metrics.AuthStageDuration(stage, time.Since(start).Seconds())
+	}
 }
 
 // recordSuccessfulAuthentication is intentionally a no-op for every
