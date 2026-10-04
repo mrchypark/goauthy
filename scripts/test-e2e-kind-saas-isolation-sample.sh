@@ -20,7 +20,7 @@ awk '
 [ -s "$temp_dir/gate.jq" ] || { echo 'could not extract runner resource gate' >&2; exit 1; }
 
 jq -cn '
-	def id($n): "a00" + ($n|tostring);
+	def id($n): ($n|tostring) as $s | ("0" * (64 - ($s|length))) + $s;
 	["goauthy-0","goauthy-1","goauthy-2"] as $pods |
 	["goauthy","sidecarfixture"] as $containers |
 	{stats:[
@@ -34,7 +34,7 @@ jq -cn '
 		memory:{workingSetBytes:{value:"67890"}}}
 	]}' >"$temp_dir/cri.json"
 jq -cn '
-	def id($n): "a00" + ($n|tostring);
+	def id($n): ($n|tostring) as $s | ("0" * (64 - ($s|length))) + $s;
 	["goauthy-0","goauthy-1","goauthy-2"] as $pods |
 	["goauthy","sidecarfixture"] as $containers |
 	{items:[
@@ -79,12 +79,20 @@ CRI_FIXTURE=$temp_dir/cri.json
 KUBE_FIXTURE=$temp_dir/pods.json
 CADVISOR_FIXTURE=$temp_dir/cadvisor.txt
 export CRI_FIXTURE KUBE_FIXTURE CADVISOR_FIXTURE
+# Real 64-hex Kind/containerd IDs shared by the CRI fixtures and the cAdvisor
+# cgroup scope labels.
+hexid() { printf '%064x' "$1"; }
+id1=$(hexid 1)
+hexdead=$(printf 'deadbeef%056d' 0)
 : >"$temp_dir/cadvisor.txt"
+cfs_n=0
 for cfs_pod in goauthy-0 goauthy-1 goauthy-2; do
 	for cfs_container in goauthy sidecarfixture; do
-		printf 'container_cpu_cfs_periods_total{container="%s",namespace="goauthy",pod="%s",id="/x"} 100\n' "$cfs_container" "$cfs_pod" >>"$temp_dir/cadvisor.txt"
-		printf 'container_cpu_cfs_throttled_periods_total{container="%s",namespace="goauthy",pod="%s",id="/x"} 5\n' "$cfs_container" "$cfs_pod" >>"$temp_dir/cadvisor.txt"
-		printf 'container_cpu_cfs_throttled_seconds_total{container="%s",namespace="goauthy",pod="%s",id="/x"} 0.25\n' "$cfs_container" "$cfs_pod" >>"$temp_dir/cadvisor.txt"
+		cfs_n=$((cfs_n + 1))
+		cfs_id=$(hexid "$cfs_n")
+		printf 'container_cpu_cfs_periods_total{container="%s",namespace="goauthy",pod="%s",id="/kubepods.slice/cri-containerd-%s.scope"} 100\n' "$cfs_container" "$cfs_pod" "$cfs_id" >>"$temp_dir/cadvisor.txt"
+		printf 'container_cpu_cfs_throttled_periods_total{container="%s",namespace="goauthy",pod="%s",id="/kubepods.slice/cri-containerd-%s.scope"} 5\n' "$cfs_container" "$cfs_pod" "$cfs_id" >>"$temp_dir/cadvisor.txt"
+		printf 'container_cpu_cfs_throttled_seconds_total{container="%s",namespace="goauthy",pod="%s",id="/kubepods.slice/cri-containerd-%s.scope"} 0.25\n' "$cfs_container" "$cfs_pod" "$cfs_id" >>"$temp_dir/cadvisor.txt"
 	done
 done
 
@@ -93,9 +101,9 @@ run_case() {
 	kube_fixture=$temp_dir/pods.json
 	case $mode in
 		valid|large-pods|malformed-pods|multi-pods) cp "$temp_dir/cri.json" "$temp_dir/input.json" ;;
-		restart-mismatch) jq '.stats += [(.stats[] | select(.attributes.labels["io.kubernetes.pod.name"]=="goauthy-0" and .attributes.labels["io.kubernetes.container.name"]=="goauthy") | .attributes.id="deadbeef")]' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
+		restart-mismatch) jq --arg idd "$hexdead" '.stats += [(.stats[] | select(.attributes.labels["io.kubernetes.pod.name"]=="goauthy-0" and .attributes.labels["io.kubernetes.container.name"]=="goauthy") | .attributes.id=$idd)]' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
 		duplicate-active) jq '.stats += [.stats[] | select(.attributes.labels["io.kubernetes.pod.name"]=="goauthy-0" and .attributes.labels["io.kubernetes.container.name"]=="goauthy")]' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
-		mismatch-only) jq '(.stats[] | select(.attributes.labels["io.kubernetes.pod.name"]=="goauthy-0" and .attributes.labels["io.kubernetes.container.name"]=="goauthy").attributes.id)="deadbeef"' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
+		mismatch-only) jq --arg idd "$hexdead" '(.stats[] | select(.attributes.labels["io.kubernetes.pod.name"]=="goauthy-0" and .attributes.labels["io.kubernetes.container.name"]=="goauthy").attributes.id)=$idd' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
 		missing) jq 'del(.stats[0].cpu.usageCoreNanoSeconds)' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
 		null) jq '.stats[0].cpu.usageCoreNanoSeconds.value=null' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
 		wrong) jq '.stats[0].memory.workingSetBytes.value="not-a-counter"' "$temp_dir/cri.json" >"$temp_dir/input.json" ;;
@@ -130,7 +138,7 @@ run_case() {
 run_case wrapped-counters 0 valid
 jq -s -e 'length==6 and all(.[]; .memoryRSSBytes==null and (.unavailable|index("rss-not-exposed"))!=null)' "$temp_dir/wrapped-counters.jsonl" >/dev/null
 run_case restart-id-mismatch 0 restart-mismatch
-jq -s -e 'length==6 and ([.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .containerID=="a001" and .currentContainerID=="containerd://a001" and (.candidateContainerIDs|index("deadbeef"))!=null and ([.unavailable[]|select(.!="rss-not-exposed")]|length)==0)' "$temp_dir/restart-id-mismatch.jsonl" >/dev/null
+jq -s -e --arg id1 "$id1" --arg idd "$hexdead" 'length==6 and ([.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .containerID==$id1 and .currentContainerID==("containerd://"+$id1) and (.candidateContainerIDs|index($idd))!=null and ([.unavailable[]|select(.!="rss-not-exposed")]|length)==0)' "$temp_dir/restart-id-mismatch.jsonl" >/dev/null
 run_case duplicate-active-id 1 duplicate-active
 jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .containerID==null and (.unavailable|index("duplicate-container-rows"))!=null' "$temp_dir/duplicate-active-id.jsonl" >/dev/null
 run_case current-id-mismatch 1 mismatch-only
@@ -144,6 +152,26 @@ run_case cri-command-failure 1 command-fail
 # CPU CFS throttle evidence (node cAdvisor via the kubectl node proxy).
 run_case cfs-valid 0 valid
 jq -s -e 'length==6 and all(.[]; .cpuCfsPeriodsTotal==100 and .cpuCfsThrottledPeriodsTotal==5 and .cpuCfsThrottledSecondsTotal==0.25 and .cpuCfsUnavailable==[])' "$temp_dir/cfs-valid.jsonl" >/dev/null
+
+# Prometheus optional int64 timestamp must be accepted but never read as the
+# counter; with and without a timestamp the values are identical.
+sed 's/} 100$/} 100 1696700000000/; s/} 5$/} 5 1696700000000/; s/} 0.25$/} 0.25 1696700000000/' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-ts.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-ts.txt run_case cfs-timestamp 0 valid
+jq -s -e 'length==6 and all(.[]; .cpuCfsPeriodsTotal==100 and .cpuCfsThrottledPeriodsTotal==5 and .cpuCfsThrottledSecondsTotal==0.25 and .cpuCfsUnavailable==[])' "$temp_dir/cfs-timestamp.jsonl" >/dev/null
+
+# A label value containing a space must not shift the VALUE extraction.
+sed 's/namespace="goauthy",pod="goauthy-0"/namespace="goauthy",image="foo bar",pod="goauthy-0"/' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-label-space.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-label-space.txt run_case cfs-label-space 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==100 and .cpuCfsUnavailable==[]' "$temp_dir/cfs-label-space.jsonl" >/dev/null
+
+# Malformed timestamp and trailing unsupported tokens fail closed.
+sed 's/} 100$/} 100 notanumber/' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-bad-ts.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-bad-ts.txt run_case cfs-bad-timestamp 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cfs-counter-unavailable"))!=null' "$temp_dir/cfs-bad-timestamp.jsonl" >/dev/null
+
+sed 's/} 100$/} 100 1696700000000 extra/' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-trailing.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-trailing.txt run_case cfs-trailing-token 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cfs-counter-unavailable"))!=null' "$temp_dir/cfs-trailing-token.jsonl" >/dev/null
 
 grep -v '^container_cpu_cfs_periods_total{container="goauthy",namespace="goauthy",pod="goauthy-0"' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-missing.txt"
 CADVISOR_FIXTURE=$temp_dir/cadvisor-missing.txt run_case cfs-missing 0 valid
@@ -170,6 +198,52 @@ jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfs
 
 CADVISOR_FAIL=1 run_case cfs-endpoint-fail 0 valid
 jq -s -e 'length==6 and all(.[]; .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cadvisor-endpoint-unavailable"))!=null)' "$temp_dir/cfs-endpoint-fail.jsonl" >/dev/null
+unset CADVISOR_FAIL || :
+
+# cAdvisor source-instance binding: each accepted CFS metric must carry the
+# cgroup scope of the selected current CRI container ID. A mismatched,
+# malformed, absent, or conflicting instance is unavailable or ambiguous.
+sed 's#cri-containerd-[0-9a-f]*\.scope#cri-containerd-ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.scope#' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-mismatch.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-mismatch.txt run_case cfs-instance-mismatch 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cfs-counter-unavailable"))!=null' "$temp_dir/cfs-instance-mismatch.jsonl" >/dev/null
+
+sed 's#id="/kubepods.slice/cri-containerd-[0-9a-f]*\.scope"#id="/x"#' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-badinst.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-badinst.txt run_case cfs-instance-malformed 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cfs-counter-unavailable"))!=null' "$temp_dir/cfs-instance-malformed.jsonl" >/dev/null
+
+sed 's#,id="/kubepods.slice/cri-containerd-[0-9a-f]*\.scope"##' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-noid.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-noid.txt run_case cfs-instance-absent 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cfs-counter-unavailable"))!=null' "$temp_dir/cfs-instance-absent.jsonl" >/dev/null
+
+cp "$temp_dir/cadvisor.txt" "$temp_dir/cadvisor-conflict.txt"
+grep '^container_cpu_cfs_periods_total{container="goauthy",namespace="goauthy",pod="goauthy-0"' "$temp_dir/cadvisor.txt" | sed 's#cri-containerd-[0-9a-f]*\.scope#cri-containerd-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.scope#' >>"$temp_dir/cadvisor-conflict.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-conflict.txt run_case cfs-instance-conflict 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cfs-counter-ambiguous"))!=null' "$temp_dir/cfs-instance-conflict.jsonl" >/dev/null
+
+# A valid numeric timestamp with an invalid metric value must stay unavailable.
+sed 's/} 100$/} notanumber 1696700000000/' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-invalidval.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-invalidval.txt run_case cfs-invalid-value-valid-ts 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cfs-counter-unavailable"))!=null' "$temp_dir/cfs-invalid-value-valid-ts.jsonl" >/dev/null
+
+# Exact label-name binding: a lookalike label whose name merely ends in
+# "namespace"/"id" (e.g. container_label_io_kubernetes_pod_uid) must not be
+# read as the real label. The real labels win.
+sed 's#namespace="goauthy",pod="goauthy-0",id="#container_label_io_kubernetes_pod_uid="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",container_label_io_kubernetes_pod_namespace="evil",namespace="goauthy",pod="goauthy-0",id="#' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-lookalike.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-lookalike.txt run_case cfs-lookalike-labels 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==100 and .cpuCfsUnavailable==[]' "$temp_dir/cfs-lookalike-labels.jsonl" >/dev/null
+
+# Only a lookalike *_uid label and no real id label: the source instance is
+# absent and the metric must be unavailable even though the lookalike value
+# equals the current CRI id.
+sed 's#,id="/kubepods.slice/cri-containerd-[0-9a-f]*\.scope"#,container_label_io_kubernetes_pod_uid="/kubepods.slice/cri-containerd-0000000000000000000000000000000000000000000000000000000000000001.scope"#' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-lookalikeid.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-lookalikeid.txt run_case cfs-lookalike-id-absent 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cfs-counter-unavailable"))!=null' "$temp_dir/cfs-lookalike-id-absent.jsonl" >/dev/null
+
+# A quoted label value containing a comma and an escaped fake id= must not
+# shift the label boundary or the value extraction.
+sed 's#namespace="goauthy",pod="goauthy-0",id="#container_label_io_kubernetes_pod_uid="a,id=\"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",b",namespace="goauthy",pod="goauthy-0",id="#' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-comma.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-comma.txt run_case cfs-label-comma 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==100 and .cpuCfsUnavailable==[]' "$temp_dir/cfs-label-comma.jsonl" >/dev/null
 
 private_canary() {
 	canary_dir=$(mktemp -d) || return 1
@@ -252,7 +326,7 @@ private_canary() {
 
 run_case large-input 0 large-pods
 jq -s -e 'length==6 and all(.[]; .memoryRSSBytes==null and (.unavailable|index("rss-not-exposed"))!=null)' "$temp_dir/large-input.jsonl" >/dev/null
-jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .containerID=="a001" and .currentContainerID=="containerd://a001" and ([.unavailable[]|select(.!="rss-not-exposed")]|length)==0' "$temp_dir/large-input.jsonl" >/dev/null
+jq -s -e --arg id1 "$id1" '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .containerID==$id1 and .currentContainerID==("containerd://"+$id1) and ([.unavailable[]|select(.!="rss-not-exposed")]|length)==0' "$temp_dir/large-input.jsonl" >/dev/null
 for mode in malformed multi; do
 	KUBE_FIXTURE=$temp_dir/$mode.json
 	export KUBE_FIXTURE

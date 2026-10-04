@@ -867,5 +867,55 @@ else
 	jq -c '.iam_stages | {complete, attempt_complete}' "$results/criterion.json" >&2 || true
 fi
 
+mixed_stage=$tmp/iam-mixed-stage
+mkcase "$mixed_stage" 100 110 90
+flip_recovery_iam "$mixed_stage/driver-isolation113-driver-1-abcde.log"
+failed_sched=$(awk '/phase=recovery route=iam outcome=failed/ {for(i=1;i<=NF;i++) if($i ~ /^scheduled_unix_ms=/) {sub(/^scheduled_unix_ms=/,"",$i); print $i; exit}}' "$mixed_stage/driver-isolation113-driver-1-abcde.log")
+append_fatal "$mixed_stage/driver-isolation113-driver-1-abcde.log" 'Post "https://private.example.test/oidc/authorize?token=SECRET": context deadline exceeded (Client.Timeout exceeded while awaiting headers)'
+rec_stage "$mixed_stage/driver-isolation113-driver-1-abcde.log" recovery authorize-get none 200 1000.000 "$failed_sched"
+rec_stage "$mixed_stage/driver-isolation113-driver-1-abcde.log" recovery login-post timeout 0 10000.000 "$failed_sched"
+results=$(new_results)
+if "$wrapper" --summarize "$mixed_stage" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "mixed stage + single timeout (expected nonzero exit)"
+elif jq -e --argjson fs "$failed_sched" '
+	.protected.errors == 1
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.errors == 1
+	and .iam_failure_diagnostics.anchored == 1
+	and .iam_failure_diagnostics.unrecognized == 0
+	and .iam_failure_diagnostics.excess == 0
+	and .iam_failure_diagnostics.missing == 0
+	and .iam_failure_diagnostics.complete == true
+	and .iam_failure_diagnostics.status == "diagnosed"
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "unknown")] | length) == 0
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "transport_timeout" and .status == null)] | length) == 1
+	and ([.iam_stages.attempt_coverage[] | select(.driver_index == 1 and .phase == "recovery" and .scheduled_unix_ms == $fs and .stage_n == 2)] | length) == 1
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "mixed stage + single timeout no unknown pollution"
+else
+	bad "mixed stage + single timeout no unknown pollution"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+near_prefix=$tmp/iam-near-prefix
+mkcase "$near_prefix" 100 110 90
+flip_recovery_iam "$near_prefix/driver-isolation113-driver-1-abcde.log"
+printf '    connection_use_grant_test.go:1: isolation113-stageX bogus\n' >> "$near_prefix/driver-isolation113-driver-1-abcde.log"
+results=$(new_results)
+if "$wrapper" --summarize "$near_prefix" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "near-prefix stage unknown incomplete (expected nonzero exit)"
+elif jq -e '
+	.iam_failure_diagnostics.status == "incomplete"
+	and .iam_failure_diagnostics.unrecognized == 1
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "unknown")] | length) == 1
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "near-prefix stage unknown incomplete"
+else
+	bad "near-prefix stage unknown incomplete"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
 echo "passed=$pass failed=$fail" >&2
 [ "$fail" -eq 0 ]

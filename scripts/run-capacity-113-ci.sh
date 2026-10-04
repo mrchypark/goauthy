@@ -194,6 +194,7 @@ summarize_results() {
 				if (line !~ /^[[:space:]]*connection_use_grant_test\.go:[0-9]+:/) next
 				sub(/^[[:space:]]*connection_use_grant_test\.go:[0-9]+:[[:space:]]*/, "", line)
 				if (line ~ /^isolation113 /) next
+				if (line ~ /^isolation113-stage /) next
 				if (line ~ /^waiting [0-9]+ seconds for the login attempt window$/) next
 				reason = ""; status = ""
 				if (line ~ /^authorize status = [0-9]+, want login form:/) {
