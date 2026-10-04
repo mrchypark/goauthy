@@ -255,14 +255,20 @@ summarize_results() {
 		--arg helper_source_head "$helper_head" '
 		def runtime_digest: sub("^(containerd|docker-pullable)://"; "") | if contains("@sha256:") then sub("^.*@"; "") else . end;
 		def runtime_pins($v): if ($v | type) == "array" then [$v[] | {image, digest: (.imageID | runtime_digest)}] else null end;
+		def node_pins($v):
+			try (if ($v | type) == "object"
+				and ($v.config_digest | test("^sha256:[0-9a-f]{64}$"))
+				and ($v.runtime_digests | type) == "array"
+				and all($v.runtime_digests[]; type == "string" and test("^sha256:[0-9a-f]{64}$"))
+			then $v | {config_digest, runtime_digests} else null end) catch null;
 		{
 			candidate: {image: $candidate_image, source: $candidate_source},
 			helper_source_head: $helper_source_head,
 			helper_image_pins: (
 				if $helper == null then null else
 					{
-						fixture: ($helper.fixture | {image_ref, manifest_digest, config_digest, loaded_image_id}),
-						driver: ($helper.driver | {image_ref, manifest_digest, config_digest, loaded_image_id})
+						fixture: ($helper.fixture | {image_ref, manifest_digest, config_digest, loaded_image_id, node_pins: node_pins(.node_pins)}),
+						driver: ($helper.driver | {image_ref, manifest_digest, config_digest, loaded_image_id, node_pins: node_pins(.node_pins)})
 					}
 				end),
 			fixture_runtime_pins: runtime_pins($fixture),

@@ -11,6 +11,7 @@ umask 077
 : "${GOAUTHY_E2E_CLIENT_SECRET:?set the local synthetic bootstrap client secret}"
 : "${ISOLATION113_EVIDENCE_DIR:?set an absolute task-state directory for local evidence}"
 case "$GOAUTHY_IMAGE" in *@sha256:*) ;; *) echo 'GOAUTHY_IMAGE must be an immutable @sha256 reference' >&2; exit 1;; esac
+. "$(dirname -- "$0")/e2e-kind-saas-isolation-113-node-pins.sh"
 
 namespace=goauthy
 fixture_image=goauthy-saas-isolation-fixture:e2e
@@ -154,7 +155,8 @@ record_container_pins() {
 	manifest_digest=$3
 	config_digest=$4
 	expected_count=$5
-	jq -ce --arg container "$container_name" --arg ref "$image_ref" --arg manifest "$manifest_digest" --arg config "$config_digest" --argjson count "$expected_count" -f scripts/e2e-kind-saas-isolation-runtime-pins.jq
+	node_pins=$6
+	jq -ce --arg container "$container_name" --arg ref "$image_ref" --arg manifest "$manifest_digest" --arg config "$config_digest" --argjson count "$expected_count" --argjson node_pins "$node_pins" -f scripts/e2e-kind-saas-isolation-runtime-pins.jq
 }
 
 assert_candidate_pods() {
@@ -188,6 +190,14 @@ image_container=
 cat "$temp_dir/roots.crt" "$temp_dir/ca.crt" >"$temp_dir/ca-certificates.crt"
 
 kind load docker-image "$fixture_image" "$driver_image" --name "$KIND_CLUSTER"
+node_image_pin_snapshot "$fixture_image" "$fixture_config_digest" "$temp_dir/fixture-node-pins.json"
+node_image_pin_snapshot "$driver_image" "$driver_config_digest" "$temp_dir/driver-node-pins.json"
+jq '. + {fixture: (.fixture + {node_pins: $fixture_node_pins}), driver: (.driver + {node_pins: $driver_node_pins})}' \
+	--argjson fixture_node_pins "$(cat "$temp_dir/fixture-node-pins.json")" \
+	--argjson driver_node_pins "$(cat "$temp_dir/driver-node-pins.json")" \
+	"$ISOLATION113_EVIDENCE_DIR/helper-image-pins.json" >"$temp_dir/helper-image-pins.json" ||
+	{ echo 'failed to record verified helper node pins' >&2; exit 1; }
+mv "$temp_dir/helper-image-pins.json" "$ISOLATION113_EVIDENCE_DIR/helper-image-pins.json"
 kubectl --context "$context" -n "$namespace" create configmap isolation113-ca --from-file=ca-certificates.crt="$temp_dir/ca-certificates.crt" --dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
 kubectl --context "$context" -n "$namespace" create secret generic isolation113-fixture-tls --from-file=tls.crt="$temp_dir/fixture.crt" --from-file=tls.key="$temp_dir/fixture.key" --dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
 umask 077
@@ -211,7 +221,7 @@ kubectl --context "$context" -n "$namespace" get statefulset goauthy -o json | j
 kubectl --context "$context" -n "$namespace" rollout status statefulset/goauthy --timeout=240s
 kubectl --context "$context" -n "$namespace" wait --for=condition=Ready pod/goauthy-0 pod/goauthy-1 pod/goauthy-2 --timeout=180s
 kubectl --context "$context" -n "$namespace" get pods -l app.kubernetes.io/name=goauthy -o json |
-	record_container_pins sidecarfixture "$fixture_image" "$fixture_manifest_digest" "$fixture_config_digest" 3 >"$ISOLATION113_EVIDENCE_DIR/fixture-runtime-image-pins.json"
+	record_container_pins sidecarfixture "$fixture_image" "$fixture_manifest_digest" "$fixture_config_digest" 3 "$(cat "$temp_dir/fixture-node-pins.json")" >"$ISOLATION113_EVIDENCE_DIR/fixture-runtime-image-pins.json"
 authorize_url='http://127.0.0.1:18443/oidc/authorize?client_id=goauthy-dev&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A5555%2Fcallback&scope=goauthy.read%20offline_access&state=isolation113-functional-readiness&code_challenge=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&code_challenge_method=S256'
 readiness_deadline=$(( $(date +%s) + 60 ))
 readiness_evidence=$ISOLATION113_EVIDENCE_DIR/authorize-readiness.tsv
@@ -262,7 +272,7 @@ driver_pods=$(kubectl --context "$context" -n "$namespace" get pods -l job-name=
 driver_pod_count=$(printf '%s\n' "$driver_pods" | awk 'NF {n++} END {print n+0}')
 [ "$driver_pod_count" -eq 3 ] || { echo "expected logs from three driver pods, found $driver_pod_count" >&2; job_status=1; }
 if ! kubectl --context "$context" -n "$namespace" get pods -l job-name=isolation113-driver -o json |
-	record_container_pins driver "$driver_image" "$driver_manifest_digest" "$driver_config_digest" 3 >"$ISOLATION113_EVIDENCE_DIR/driver-runtime-image-pins.json"; then
+	record_container_pins driver "$driver_image" "$driver_manifest_digest" "$driver_config_digest" 3 "$(cat "$temp_dir/driver-node-pins.json")" >"$ISOLATION113_EVIDENCE_DIR/driver-runtime-image-pins.json"; then
 	echo 'driver runtime image pins are missing or differ from the native build' >&2
 	job_status=1
 fi
