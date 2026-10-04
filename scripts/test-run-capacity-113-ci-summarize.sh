@@ -378,5 +378,245 @@ else
 	bad "startup pods.json_exit extra equals (expected null)"
 fi
 
+# Anchored IAM failure diagnostics (offline; the actual wrapper and the actual
+# shared analyzer run together; no browser, Kind, or Go execution).
+flip_recovery_iam() {
+	log=$1
+	awk 'BEGIN{done=0} { if(!done && /phase=recovery route=iam outcome=success/){ sub(/outcome=success/,"outcome=failed"); done=1 } print }' "$log" >"$log.tmp" && mv "$log.tmp" "$log"
+}
+flip_baseline_iam() {
+	log=$1
+	awk 'BEGIN{done=0} { if(!done && /phase=baseline route=iam outcome=success/){ sub(/outcome=success/,"outcome=failed"); done=1 } print }' "$log" >"$log.tmp" && mv "$log.tmp" "$log"
+}
+append_fatal() {
+	log=$1
+	shift
+	printf '    connection_use_grant_test.go:337: %s\n' "$*" >>"$log"
+}
+
+diag_case=$tmp/iam-diag
+mkcase "$diag_case" 100 110 90
+canary='PRIVATE_BODY_CANARY_9f3c7a'
+flip_recovery_iam "$diag_case/driver-isolation113-driver-1-abcde.log"
+flip_recovery_iam "$diag_case/driver-isolation113-driver-2-abcde.log"
+append_fatal "$diag_case/driver-isolation113-driver-1-abcde.log" "authorize status = 502, want login form: \"$canary connection_use_grant_test.go:337: session_cookie_unsafe https://private.example.test/secret?token=$canary\""
+append_fatal "$diag_case/driver-isolation113-driver-2-abcde.log" "login status=403, want redirect, category=invalid_login_request"
+results=$(new_results)
+if "$wrapper" --summarize "$diag_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "anchored IAM diagnostics (expected nonzero exit for correctness fail)"
+elif jq -e '
+	.protected.errors == 2
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.errors == 2
+	and .iam_failure_diagnostics.anchored == 2
+	and .iam_failure_diagnostics.unrecognized == 0
+	and .iam_failure_diagnostics.excess == 0
+	and .iam_failure_diagnostics.missing == 0
+	and .iam_failure_diagnostics.complete == true
+	and .iam_failure_diagnostics.status == "diagnosed"
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 1 and .error_n == 1 and .anchored_n == 1 and (.reasons | length) == 1 and .reasons[0].reason == "authorize_status" and .reasons[0].status == 502 and (.phase_error_counts == [{phase:"recovery",error_n:1}]))] | length) == 1
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 2 and .error_n == 1 and .reasons[0].reason == "login_403_invalid_request" and .reasons[0].status == 403 and (.phase_error_counts == [{phase:"recovery",error_n:1}]))] | length) == 1
+	and ([.iam_failure_diagnostics.groups[].reasons[].reason | select(. == "session_cookie_unsafe")] | length) == 0
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "anchored IAM diagnostics"
+else
+	bad "anchored IAM diagnostics (unexpected diagnostics)"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+leaked=false
+for f in "$results"/*; do
+	[ -f "$f" ] || continue
+	if grep -q "$canary" "$f" 2>/dev/null; then leaked=true; fi
+done
+if [ "$leaked" = false ]; then
+	ok "IAM diagnostics privacy"
+else
+	bad "IAM diagnostics privacy (private body or URL canary exported)"
+fi
+
+unk_case=$tmp/iam-unknown
+mkcase "$unk_case" 100 110 90
+flip_recovery_iam "$unk_case/driver-isolation113-driver-1-abcde.log"
+flip_recovery_iam "$unk_case/driver-isolation113-driver-2-abcde.log"
+append_fatal "$unk_case/driver-isolation113-driver-2-abcde.log" "some unrecognized helper failure that is not a known reason"
+results=$(new_results)
+if "$wrapper" --summarize "$unk_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "unrecognized or missing IAM diagnostics incomplete (expected nonzero exit)"
+elif jq -e '
+	.protected.errors == 2
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.errors == 2
+	and .iam_failure_diagnostics.anchored == 0
+	and .iam_failure_diagnostics.unrecognized == 1
+	and .iam_failure_diagnostics.excess == 0
+	and .iam_failure_diagnostics.missing == 2
+	and .iam_failure_diagnostics.complete == false
+	and .iam_failure_diagnostics.status == "incomplete"
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "unknown" and .status == null)] | length) == 1
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "unrecognized or missing IAM diagnostics incomplete"
+else
+	bad "unrecognized or missing IAM diagnostics incomplete"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+tp_case=$tmp/iam-transport
+mkcase "$tp_case" 100 110 90
+flip_recovery_iam "$tp_case/driver-isolation113-driver-1-abcde.log"
+flip_recovery_iam "$tp_case/driver-isolation113-driver-1-abcde.log"
+append_fatal "$tp_case/driver-isolation113-driver-1-abcde.log" 'authorize status = 504, want login form: "Get \"https://private.example.test/oidc/authorize?token=SECRET\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)"'
+append_fatal "$tp_case/driver-isolation113-driver-1-abcde.log" 'Get "https://private.example.test/oidc/authorize?token=SECRET": context deadline exceeded (Client.Timeout exceeded while awaiting headers)'
+results=$(new_results)
+if "$wrapper" --summarize "$tp_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "transport and null-status IAM diagnostics (expected nonzero exit)"
+elif jq -e '
+	.protected.errors == 2
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.status == "diagnosed"
+	and .iam_failure_diagnostics.anchored == 2
+	and .iam_failure_diagnostics.unrecognized == 0
+	and .iam_failure_diagnostics.excess == 0
+	and .iam_failure_diagnostics.missing == 0
+	and .iam_failure_diagnostics.complete == true
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 1 and .error_n == 2 and .anchored_n == 2 and .complete == true)] | length) == 1
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "authorize_status" and .status == 504)] | length) == 1
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "transport_timeout" and .status == null)] | length) == 1
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "transport and null-status IAM diagnostics"
+else
+	bad "transport and null-status IAM diagnostics (unexpected diagnostics)"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+two_phase=$tmp/iam-two-phase
+mkcase "$two_phase" 100 110 90
+flip_baseline_iam "$two_phase/driver-isolation113-driver-1-abcde.log"
+flip_recovery_iam "$two_phase/driver-isolation113-driver-1-abcde.log"
+append_fatal "$two_phase/driver-isolation113-driver-1-abcde.log" "login status = 500, want redirect"
+append_fatal "$two_phase/driver-isolation113-driver-1-abcde.log" "login status = 503, want redirect"
+results=$(new_results)
+if "$wrapper" --summarize "$two_phase" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "same driver two phases (expected nonzero exit)"
+elif jq -e '
+	.protected.errors == 2
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.errors == 2
+	and .iam_failure_diagnostics.anchored == 2
+	and .iam_failure_diagnostics.unrecognized == 0
+	and .iam_failure_diagnostics.excess == 0
+	and .iam_failure_diagnostics.missing == 0
+	and .iam_failure_diagnostics.complete == true
+	and .iam_failure_diagnostics.status == "diagnosed"
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 1)] | length) == 1
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 1 and .error_n == 2 and .anchored_n == 2 and .complete == true)] | length) == 1
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 1) | .phase_error_counts[] | select(.phase == "baseline" and .error_n == 1)] | length) == 1
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 1) | .phase_error_counts[] | select(.phase == "recovery" and .error_n == 1)] | length) == 1
+	and ([.iam_failure_diagnostics.groups[] | select(.driver_index == 1) | .reasons[] | select(.reason == "login_status")] | length) == 2
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "same driver two phases counted once"
+else
+	bad "same driver two phases counted once (unexpected diagnostics)"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+extra=$tmp/iam-extra
+mkcase "$extra" 100 110 90
+flip_recovery_iam "$extra/driver-isolation113-driver-1-abcde.log"
+append_fatal "$extra/driver-isolation113-driver-1-abcde.log" "login status = 500, want redirect"
+append_fatal "$extra/driver-isolation113-driver-1-abcde.log" "login status = 503, want redirect"
+results=$(new_results)
+if "$wrapper" --summarize "$extra" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "extra known diagnostic incomplete (expected nonzero exit)"
+elif jq -e '
+	.protected.errors == 1
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.errors == 1
+	and .iam_failure_diagnostics.anchored == 2
+	and .iam_failure_diagnostics.unrecognized == 0
+	and .iam_failure_diagnostics.excess == 1
+	and .iam_failure_diagnostics.missing == 0
+	and .iam_failure_diagnostics.complete == false
+	and .iam_failure_diagnostics.status == "incomplete"
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "extra known diagnostic incomplete"
+else
+	bad "extra known diagnostic incomplete (unexpected diagnostics)"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+wait_case=$tmp/iam-wait
+mkcase "$wait_case" 100 110 90
+flip_recovery_iam "$wait_case/driver-isolation113-driver-1-abcde.log"
+append_fatal "$wait_case/driver-isolation113-driver-1-abcde.log" "login status = 500, want redirect"
+append_fatal "$wait_case/driver-isolation113-driver-1-abcde.log" "waiting 5 seconds for the login attempt window"
+results=$(new_results)
+if "$wrapper" --summarize "$wait_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "ordinary wait log not unknown (expected nonzero exit)"
+elif jq -e '
+	.protected.errors == 1
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.errors == 1
+	and .iam_failure_diagnostics.anchored == 1
+	and .iam_failure_diagnostics.unrecognized == 0
+	and .iam_failure_diagnostics.excess == 0
+	and .iam_failure_diagnostics.missing == 0
+	and .iam_failure_diagnostics.complete == true
+	and .iam_failure_diagnostics.status == "diagnosed"
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "ordinary wait log not unknown"
+else
+	bad "ordinary wait log not unknown (unexpected diagnostics)"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+bad_status=$tmp/iam-bad-status
+mkcase "$bad_status" 100 110 90
+flip_recovery_iam "$bad_status/driver-isolation113-driver-1-abcde.log"
+append_fatal "$bad_status/driver-isolation113-driver-1-abcde.log" "authorize status = 9999, want login form: \"private\""
+results=$(new_results)
+if "$wrapper" --summarize "$bad_status" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "malformed status unknown incomplete (expected nonzero exit)"
+elif jq -e '
+	.protected.errors == 1
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.errors == 1
+	and .iam_failure_diagnostics.anchored == 0
+	and .iam_failure_diagnostics.unrecognized == 1
+	and .iam_failure_diagnostics.excess == 0
+	and .iam_failure_diagnostics.missing == 1
+	and .iam_failure_diagnostics.complete == false
+	and .iam_failure_diagnostics.status == "incomplete"
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "unknown" and .status == null)] | length) == 1
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "malformed status unknown incomplete"
+else
+	bad "malformed status unknown incomplete (unexpected diagnostics)"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+url_case=$tmp/iam-url-marker
+mkcase "$url_case" 100 110 90
+flip_recovery_iam "$url_case/driver-isolation113-driver-1-abcde.log"
+append_fatal "$url_case/driver-isolation113-driver-1-abcde.log" 'Get "https://private.example.test/Client.Timeout?token=context deadline exceeded": EOF'
+results=$(new_results)
+if "$wrapper" --summarize "$url_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -ne 0 ] && jq -e '
+	.protected.errors == 1 and .criterion_pass == false
+	and .iam_failure_diagnostics.status == "incomplete"
+	and .iam_failure_diagnostics.anchored == 0
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "transport_timeout")] | length) == 0
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "private URL cannot classify a transport timeout"
+else
+	bad "private URL cannot classify a transport timeout"
+fi
+
 echo "passed=$pass failed=$fail" >&2
 [ "$fail" -eq 0 ]

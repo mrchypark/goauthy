@@ -176,6 +176,66 @@ summarize_results() {
 		ln -s "$f" "$stage_dir/$(basename "$f")"
 	done
 
+	# Bounded diagnostic-only projection of browser t.Helper fatal records from
+	# the private staged per-driver logs. Only the exact fixed test-file anchor,
+	# a controlled reason enum, an optional 100..599 numeric status, and the
+	# per-driver index already present in the staged filename are read. Response
+	# bodies, URLs, credentials, and arbitrary error text are never classified
+	# or copied into any safe artifact. Unrecognized or missing diagnostics stay
+	# unknown; they are never treated as success or as cause proof.
+	: >"$temp_dir/iam-fatal.tsv"
+	for f in "$stage_dir"/driver-isolation113-driver-*.log; do
+		[ -f "$f" ] || continue
+		fidx=$(basename "$f" | sed -nE 's/.*goauthy-([0-9]+)-.*/\1/p')
+		[ -n "$fidx" ] || continue
+		awk -v di="$fidx" '
+			{
+				line = $0
+				if (line !~ /^[[:space:]]*connection_use_grant_test\.go:[0-9]+:/) next
+				sub(/^[[:space:]]*connection_use_grant_test\.go:[0-9]+:[[:space:]]*/, "", line)
+				if (line ~ /^isolation113 /) next
+				if (line ~ /^waiting [0-9]+ seconds for the login attempt window$/) next
+				reason = ""; status = ""
+				if (line ~ /^authorize status = [0-9]+, want login form:/) {
+					n = line; sub(/^authorize status = /, "", n); sub(/,.*/, "", n)
+					if (n ~ /^[0-9]+$/ && n + 0 >= 100 && n + 0 <= 599) { reason = "authorize_status"; status = n }
+				} else if (line ~ /^login status=403, want redirect, category=invalid_login_request$/) {
+					reason = "login_403_invalid_request"; status = "403"
+				} else if (line ~ /^login status=403, want redirect, category=unclassified_403$/) {
+					reason = "login_403_unclassified"; status = "403"
+				} else if (line ~ /^login status = [0-9]+, want redirect/) {
+					n = line; sub(/^login status = /, "", n); sub(/,.*/, "", n)
+					if (n ~ /^[0-9]+$/ && n + 0 >= 100 && n + 0 <= 599) { reason = "login_status"; status = n }
+				} else if (line ~ /^login did not rotate the browser session/) {
+					reason = "session_rotation"
+				} else if (line ~ /^login redirect is not a valid callback:/) {
+					reason = "callback_invalid"
+				} else if (line ~ /^login form has no interaction token/) {
+					reason = "interaction_missing"
+				} else if (line ~ /^unsafe browser session cookie/) {
+					reason = "session_cookie_unsafe"
+				} else if (line ~ /^authorize response did not set a browser session cookie/) {
+					reason = "session_cookie_missing"
+				} else if (line ~ /^(Get|Post) "/) {
+					n = line
+					sub(/^(Get|Post) "[^"]*":[[:space:]]*/, "", n)
+					if (n != line && n ~ /Client\.Timeout|^context deadline exceeded/) reason = "transport_timeout"
+				}
+				if (reason == "") reason = "unknown"
+				print di "\t" reason "\t" status
+			}
+		' "$f" >>"$temp_dir/iam-fatal.tsv"
+	done
+	if [ -s "$temp_dir/iam-fatal.tsv" ]; then
+		jq -R -s 'split("\n") | map(select(length > 0)) | map(split("\t")) | map({
+			driver_index: (.[0] | tonumber),
+			reason: .[1],
+			status: (if .[2] == "" then null else (.[2] | tonumber) end)
+		})' "$temp_dir/iam-fatal.tsv" >"$temp_dir/iam-fatal.json"
+	else
+		printf '[]' >"$temp_dir/iam-fatal.json"
+	fi
+
 	analyzer_status=0
 	analyzer_ok=false
 	if [ ! -x "$analyzer" ]; then
@@ -188,7 +248,7 @@ summarize_results() {
 	fi
 
 	if [ "$analyzer_ok" = true ]; then
-		jq '{
+		jq --slurpfile iam_fatal "$temp_dir/iam-fatal.json" '{
 			schema_version,
 			analyzer,
 			diagnostic_directory_basename,
@@ -199,8 +259,44 @@ summarize_results() {
 				excess: .denominators.excess,
 				unexpected_groups: .denominators.unexpected_groups
 			},
-			groups: [.groups[] | {driver_index, phase, route, operation, n, success_n, error_n, p95_ms, p99_ms}],
+			groups: [.groups[] | {driver_index, phase, route, operation, n, success_n, error_n, outcomes, statuses, p95_ms, p99_ms}],
 			protected: .protected,
+			fault_routes: .fault_routes,
+			iam_failure_diagnostics: (
+				([.protected.groups[] | select(.route == "iam" and .error_n > 0)]) as $ig |
+				([$ig[].error_n] | add // 0) as $ierr |
+				([$ig[] | .driver_index] | unique) as $drivers |
+				([$drivers[] | . as $d |
+					([$ig[] | select(.driver_index == $d)]) as $g |
+					([$g[].error_n] | add // 0) as $err |
+					([$iam_fatal[0][] | select(.driver_index == $d)]) as $f |
+					([$f[] | select(.reason != "unknown")] | length) as $known |
+					{
+						driver_index: $d,
+						error_n: $err,
+						phase_error_counts: [$g[] | {phase, error_n}],
+						anchored_n: $known,
+						unrecognized_n: (($f | length) - $known),
+						excess_n: (if $known > $err then $known - $err else 0 end),
+						missing_n: (if $err > $known then $err - $known else 0 end),
+						complete: ($err > 0 and $known == $err and (($f | length) - $known) == 0),
+						reasons: $f
+					}
+				]) as $diag |
+				([$diag[] | select(.complete | not)] | length) as $incomplete |
+				{
+					criterion: "every protected IAM error must carry an anchored connection_use_grant_test.go t.Helper diagnostic; recognized count must equal total errors exactly with no unrecognized or excess diagnostics, otherwise incomplete, never success or cause proof",
+					source: "private staged per-driver logs; anchored fixed test-file fatal prefixes only; raw fatals carry no phase attribution",
+					errors: $ierr,
+					anchored: ([$diag[].anchored_n] | add // 0),
+					unrecognized: ([$diag[].unrecognized_n] | add // 0),
+					excess: ([$diag[].excess_n] | add // 0),
+					missing: ([$diag[].missing_n] | add // 0),
+					complete: ($ierr > 0 and $incomplete == 0),
+					status: (if $ierr == 0 then "none" elif $incomplete == 0 then "diagnosed" else "incomplete" end),
+					groups: $diag
+				}
+			),
 			performance: {
 				criterion: .performance.criterion,
 				status: .performance.status,
@@ -221,6 +317,17 @@ summarize_results() {
 			analyzer: "scripts/summarize-e2e-kind-saas-isolation-113.sh",
 			diagnostic_directory_basename: "unavailable",
 			error: {reason: $reason, analyzer_status: $status},
+			iam_failure_diagnostics: {
+				criterion: "every protected IAM error must carry an anchored connection_use_grant_test.go t.Helper diagnostic; unrecognized or missing diagnostics are unknown, never success or cause proof",
+				source: "unavailable",
+				errors: null,
+				anchored: null,
+				unrecognized: null,
+				unknown: null,
+				complete: false,
+				status: "unavailable",
+				groups: []
+			},
 			overall: {correctness: "fail", performance: "inconclusive", resource_ceiling: "inconclusive", status: "fail", issue_closure: false, admission: "none", reason: "analyzer unavailable; correctness fail-closed"},
 			criterion_pass: false,
 			criterion_status: "inconclusive"
@@ -328,6 +435,18 @@ summarize_results() {
 		echo
 		echo '```json'
 		jq '.protected' "$results_dir/criterion.json" 2>/dev/null || true
+		echo '```'
+		echo
+		echo '## IAM failure diagnostics'
+		echo
+		echo '```json'
+		jq '.iam_failure_diagnostics' "$results_dir/criterion.json" 2>/dev/null || true
+		echo '```'
+		echo
+		echo '## Fault routes'
+		echo
+		echo '```json'
+		jq '.fault_routes' "$results_dir/criterion.json" 2>/dev/null || true
 		echo '```'
 		echo
 		echo '## Denominators'
