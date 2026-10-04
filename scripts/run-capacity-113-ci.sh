@@ -476,7 +476,9 @@ printf '%s' "$candidate_config_id" | grep -Eq '^sha256:[0-9a-f]{64}$' ||
 # resolves; only attach it when absent, so a pre-registered identical image is
 # not disturbed. The config blob (config ID) is preserved; the packaging
 # manifest digest may differ from the original registry manifest and is not
-# claimed equal.
+# claimed equal. The owned alias must be retained through every later host
+# candidate use and removed only once by the EXIT cleanup, because removing it
+# midrun can drop the image content the host still needs.
 proposed_alias="${GOAUTHY_IMAGE%%@*}:${KIND_CLUSTER}"
 if docker image inspect "$proposed_alias" >/dev/null 2>&1; then
 	fail "refusing to overwrite a pre-existing host image tag: $proposed_alias"
@@ -484,9 +486,6 @@ fi
 load_alias=$proposed_alias
 docker tag "$GOAUTHY_IMAGE" "$proposed_alias"
 kind load docker-image "$proposed_alias" --name "$KIND_CLUSTER"
-if docker rmi "$proposed_alias" >/dev/null 2>&1; then
-	load_alias=
-fi
 if ! docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null; then
 	docker exec "$node" ctr --namespace k8s.io images tag "$proposed_alias" "$GOAUTHY_IMAGE" >/dev/null ||
 		fail 'failed to attach the canonical candidate reference in the Kind node'

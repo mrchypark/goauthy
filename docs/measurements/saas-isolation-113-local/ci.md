@@ -46,7 +46,9 @@ interpolated directly into a `run:` script.
    to the loaded image with `ctr --namespace k8s.io images tag`. It then
    requires the node config image ID (strict `sha256:<64 hex>`) to equal the
    host original config ID, failing fast on mismatch without overwriting an
-   existing node identity, and removes only the tag this run created. The
+   existing node identity. The owned alias is retained through every later host
+   candidate use and removed only once by the EXIT cleanup (removing it midrun
+   can drop the image content the host still needs). The
    deployment keeps the exact canonical reference; the config blob (config ID)
    is preserved while the packaging/manifest digest may differ from the
    original registry manifest and is not claimed equal. The archive `RepoTags`
@@ -286,8 +288,15 @@ incompatibility in the wrapper fails fast without provisioning Kind.
    already resolves at the CRI, and only attaches it with
    `ctr --namespace k8s.io images tag` when absent. It then requires the node
    config image ID (strict `sha256:<64 hex>`) to equal the host original config
-   ID, failing fast on mismatch without overwriting an existing node identity,
-   and removes only the tag this run created on all exits. The image config blob
+   ID, failing fast on mismatch without overwriting an existing node identity.
+   The owned alias is retained through every later host candidate use and
+   removed only once by the EXIT cleanup, because removing it midrun can drop
+   the image content the host still needs. The image config blob
    (config ID) is preserved; the packaging/manifest digest may differ from the
-   original registry manifest and is not claimed equal. No workload or aggregate
-   result was produced.
+   original registry manifest and is not claimed equal. The seventh dispatch
+   `37171888645` (head `cfa`) reached the new canonical loader and logged
+   `candidate image loaded: config_id=sha256:aff79de4... reference=ghcr.io/
+   mrchypark/goauthy@sha256:21c9419...` before failing a later host candidate
+   lookup (`No such image` on the exact canonical reference) with no workload or
+   aggregate result; that failure came from the midrun alias removal now fixed,
+   and no app/Rhiza/runtime/latency defect is inferred.
