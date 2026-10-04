@@ -503,7 +503,8 @@ incompatibility in the wrapper fails fast without provisioning Kind.
     timed out at `07:27:13Z` and the runner rejected all three driver evidence
     at `07:27:14Z`; the actual job `Failed` condition is not exported, so no
     failed-job assertion is made. Successful-observation nearest-rank IAM
-    P95=P99 (ms), small n 6/6/4:
+    P95=P99 (ms): phase totals are 6/6/4, while percentiles exclude failed
+    observations and use the success counts shown below:
 
     | Driver | Baseline (n) | Mixed (n) | Recovery (n) |
     | --- | --- | --- | --- |
