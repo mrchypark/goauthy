@@ -1398,6 +1398,7 @@ func (h *Handler) rotateBrowserSessionWithParent(w http.ResponseWriter, r *http.
 	var (
 		newSession browser.IssuedSession
 		err        error
+		combined   bool
 	)
 	if parentDigest != "" {
 		newSession, err = h.browser.CreateReauthenticatedSession(r.Context(), subject, authMethod, h.now().Add(sessionLifetime), peerIP, parentDigest, binding)
@@ -1406,20 +1407,25 @@ func (h *Handler) rotateBrowserSessionWithParent(w http.ResponseWriter, r *http.
 			return browser.IssuedSession{}, errors.New("upstream binding requires external or mfa authentication")
 		}
 		newSession, err = h.browser.CreateUpstreamSession(r.Context(), subject, *binding, authMethod, h.now().Add(sessionLifetime), peerIP)
+	} else if authMethod == "pwd" {
+		newSession, err = h.browser.CreatePasswordSession(r.Context(), subject, authMethod, h.now().Add(sessionLifetime), peerIP, sessionToken)
+		combined = true
 	} else {
 		newSession, err = h.browser.CreateSession(r.Context(), subject, authMethod, h.now().Add(sessionLifetime), peerIP)
 	}
 	if err != nil {
 		return browser.IssuedSession{}, err
 	}
-	if err := h.identity.RecordLoginForSession(r.Context(), subject, newSession.ID); err != nil {
-		// The replacement must not become usable if bookkeeping cannot prove
-		// that it belongs to the active authenticated session.
-		_ = h.browser.RevokeSessionID(r.Context(), newSession.ID)
-		return browser.IssuedSession{}, err
-	}
-	if err := h.browser.RevokeSession(r.Context(), sessionToken); err != nil {
-		return browser.IssuedSession{}, err
+	if !combined {
+		if err := h.identity.RecordLoginForSession(r.Context(), subject, newSession.ID); err != nil {
+			// The replacement must not become usable if bookkeeping cannot prove
+			// that it belongs to the active authenticated session.
+			_ = h.browser.RevokeSessionID(r.Context(), newSession.ID)
+			return browser.IssuedSession{}, err
+		}
+		if err := h.browser.RevokeSession(r.Context(), sessionToken); err != nil {
+			return browser.IssuedSession{}, err
+		}
 	}
 	cookie, err := browser.SessionCookie(h.issuer, newSession.Token, newSession.ExpiresAt)
 	if err != nil {

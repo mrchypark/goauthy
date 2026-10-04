@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 
+	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -26,14 +27,8 @@ func (s *Store) RecordLoginForSession(ctx context.Context, subject, sessionID st
 	now := s.now().UTC().UnixMilli()
 	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID: mutationID("user-last-login", subject, sessionID, nonce),
-		SQL: `UPDATE identity_users SET last_failed_login_at_unix_ms=NULL,failed_login_attempts=NULL,last_login_at_unix_ms = MAX(COALESCE(last_login_at_unix_ms, 0), login.created_at_unix_ms)
-		FROM browser_sessions AS login
-		WHERE identity_users.subject = ? AND identity_users.disabled = 0
-		AND login.token_digest = ? AND login.subject = identity_users.subject
-		AND login.auth_method IN ('pwd', 'mfa', 'webauthn', 'external')
-		AND login.revoked_at_unix_ms IS NULL AND login.expires_at_unix_ms > ?
-		AND (identity_users.user_expires_at_unix_ms IS NULL OR identity_users.user_expires_at_unix_ms > ?)`,
-		Args: []any{subject, sessionID, now, now},
+		SQL:       browser.LoginRecordSQL,
+		Args:      []any{subject, sessionID, now, now},
 	})
 	if err != nil {
 		return err

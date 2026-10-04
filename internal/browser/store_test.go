@@ -943,6 +943,169 @@ func testStore(t *testing.T) *Store {
 	return store
 }
 
+func TestCreatePasswordSessionCombinesWrites(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	init, err := s.CreateInitSession(ctx, time.Now().Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := time.Now().Add(-time.Hour).UnixMilli()
+	newSession, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", init.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newSession.Token == "" || newSession.Session.ID == "" {
+		t.Fatal("missing new session")
+	}
+	if _, err := s.LoadSessionReadOnly(ctx, init.Token); !errors.Is(err, ErrRevoked) {
+		t.Fatalf("old init session should be revoked: %v", err)
+	}
+	row, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT last_login_at_unix_ms FROM identity_users WHERE subject=?`, Args: []any{"user-1"}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(row.Rows) != 1 {
+		t.Fatalf("login bookkeeping read: %v", err)
+	}
+	if lastLogin := row.Rows[0][0].(int64); lastLogin < before {
+		t.Fatalf("login timestamp %d not monotonic (>= %d)", lastLogin, before)
+	}
+}
+
+func TestCreatePasswordSessionRejectsBadOldInit(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	init, err := s.CreateInitSession(ctx, time.Now().Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RevokeSession(ctx, init.Token); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", init.Token); err == nil {
+		t.Fatal("expected rejection for revoked old init")
+	}
+	assertNoPasswordReplacement(t, s, ctx, "user-1")
+}
+
+func TestCreatePasswordSessionRejectsPeerMismatch(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	init, err := s.CreateInitSession(ctx, time.Now().Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.9", init.Token); err == nil {
+		t.Fatal("expected rejection for peer mismatch")
+	}
+	assertNoPasswordReplacement(t, s, ctx, "user-1")
+}
+
+func TestCreatePasswordSessionRejectsExpiredUser(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	init, err := s.CreateInitSession(ctx, time.Now().Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "password-expired-user", SQL: `UPDATE identity_users SET user_expires_at_unix_ms=? WHERE subject=?`, Args: []any{time.Now().Add(-time.Hour).UnixMilli(), "user-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", init.Token); err == nil {
+		t.Fatal("expected rejection for expired user")
+	}
+	assertNoPasswordReplacement(t, s, ctx, "user-1")
+}
+
+func TestCreatePasswordSessionRejectsExpiredOldInit(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	init, err := s.CreateInitSession(ctx, time.Now().Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "password-expire-init", SQL: `UPDATE browser_sessions SET expires_at_unix_ms=? WHERE token_digest=?`, Args: []any{time.Now().Add(-time.Hour).UnixMilli(), init.Session.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", init.Token); err == nil {
+		t.Fatal("expected rejection for expired old init")
+	}
+	assertNoPasswordReplacement(t, s, ctx, "user-1")
+}
+
+func TestCreatePasswordSessionRejectsDisabledUser(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	init, err := s.CreateInitSession(ctx, time.Now().Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "password-disable-user", SQL: `UPDATE identity_users SET disabled=1 WHERE subject=?`, Args: []any{"user-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", init.Token); err == nil {
+		t.Fatal("expected rejection for disabled user")
+	}
+	assertNoPasswordReplacement(t, s, ctx, "user-1")
+}
+
+func TestCreatePasswordSessionResetsFailedMetadataMonotonic(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	later := time.Now().Add(48 * time.Hour).UnixMilli()
+	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "password-seed-metadata", SQL: `UPDATE identity_users SET last_login_at_unix_ms=?, failed_login_attempts=3, last_failed_login_at_unix_ms=? WHERE subject=?`, Args: []any{later, later, "user-1"}}); err != nil {
+		t.Fatal(err)
+	}
+	init, err := s.CreateInitSession(ctx, time.Now().Add(time.Hour), "203.0.113.8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", init.Token); err != nil {
+		t.Fatal(err)
+	}
+	row, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT last_login_at_unix_ms, failed_login_attempts, last_failed_login_at_unix_ms FROM identity_users WHERE subject=?`, Args: []any{"user-1"}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(row.Rows) != 1 {
+		t.Fatalf("metadata read: %v", err)
+	}
+	if got := row.Rows[0][0].(int64); got != later {
+		t.Fatalf("monotonic last_login=%d want=%d", got, later)
+	}
+	if row.Rows[0][1] != nil || row.Rows[0][2] != nil {
+		t.Fatalf("failure metadata not reset: %v", row.Rows[0])
+	}
+}
+
+func assertNoPasswordReplacement(t *testing.T, s *Store, ctx context.Context, subject string) {
+	t.Helper()
+	row, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(*) FROM browser_sessions WHERE subject=?`, Args: []any{subject}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(row.Rows) != 1 {
+		t.Fatalf("session count read: %v", err)
+	}
+	if count := row.Rows[0][0].(int64); count != 0 {
+		t.Fatalf("expected no new session, got %d", count)
+	}
+	meta, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT last_login_at_unix_ms FROM identity_users WHERE subject=?`, Args: []any{subject}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(meta.Rows) != 1 {
+		t.Fatalf("metadata read: %v", err)
+	}
+	if meta.Rows[0][0] != nil {
+		t.Fatalf("expected no bookkeeping, got %v", meta.Rows[0][0])
+	}
+}
+
+func TestCreatePasswordSessionRollsBackOnGuardFailure(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", "invalid-token"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for invalid old token, got %v", err)
+	}
+	row, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(*) FROM browser_sessions WHERE subject='user-1'`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(row.Rows) != 1 {
+		t.Fatalf("session count read: %v", err)
+	}
+	if count := row.Rows[0][0].(int64); count != 0 {
+		t.Fatalf("expected rollback (no new session), got %d", count)
+	}
+}
+
 func TestCheckPeerIPLegacyEmptySession(t *testing.T) {
 	session := Session{PeerIP: ""}
 	if err := CheckPeerIP(session, "203.0.113.8"); err != nil {

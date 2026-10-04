@@ -73,8 +73,8 @@ func TestLoginMetadataFailurePreservesOldSessionAndPublishesNoCookie(t *testing.
 	}
 	assertLoginMetadata(t, db, nil)
 	rows, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT subject, revoked_at_unix_ms IS NULL FROM browser_sessions ORDER BY subject`, Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil || len(rows.Rows) != 2 || rows.Rows[0][0] != "" || rows.Rows[0][1] != int64(1) || rows.Rows[1][0] != "user-1" || rows.Rows[1][1] != int64(0) {
-		t.Fatalf("old/new session state=%v err=%v", rows.Rows, err)
+	if err != nil || len(rows.Rows) != 1 || rows.Rows[0][0] != "" || rows.Rows[0][1] != int64(1) {
+		t.Fatalf("atomic rollback session state=%v err=%v", rows.Rows, err)
 	}
 }
 

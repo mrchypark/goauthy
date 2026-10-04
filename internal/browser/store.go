@@ -262,6 +262,70 @@ func (s *Store) createSessionWithParent(ctx context.Context, subject, authMethod
 	return IssuedSession{Session: session, Token: token}, nil
 }
 
+// LoginRecordSQL is the shared durable login-bookkeeping statement. The identity
+// package's RecordLoginForSession reuses it verbatim so the bookkeeping cannot
+// drift from the combined password-session transaction.
+const LoginRecordSQL = `UPDATE identity_users SET last_failed_login_at_unix_ms=NULL,failed_login_attempts=NULL,last_login_at_unix_ms = MAX(COALESCE(last_login_at_unix_ms, 0), login.created_at_unix_ms)
+	FROM browser_sessions AS login
+	WHERE identity_users.subject = ? AND identity_users.disabled = 0
+	AND login.token_digest = ? AND login.subject = identity_users.subject
+	AND login.auth_method IN ('pwd', 'mfa', 'webauthn', 'external')
+	AND login.revoked_at_unix_ms IS NULL AND login.expires_at_unix_ms > ?
+	AND (identity_users.user_expires_at_unix_ms IS NULL OR identity_users.user_expires_at_unix_ms > ?)`
+
+// CreatePasswordSession creates the authenticated password session, records the
+// durable login bookkeeping, and retires the old init session in one guarded
+// Rhiza transaction. It is the password-only fast path; every other
+// authentication method keeps the separate CreateSession/RecordLoginForSession/
+// RevokeSession sequence. The old-token guard requires a canonical, current,
+// unrevoked, unexpired init session bound to this peer; any guard failure rolls
+// the whole transaction back so no usable replacement or bookkeeping survives.
+func (s *Store) CreatePasswordSession(ctx context.Context, subject, authMethod string, expiresAt time.Time, peerIP, oldInitToken string) (IssuedSession, error) {
+	if strings.TrimSpace(subject) == "" || len(subject) > maxSubjectLength {
+		return IssuedSession{}, errors.New("invalid browser session subject")
+	}
+	if authMethod != "pwd" {
+		return IssuedSession{}, errors.New("password session requires pwd authentication method")
+	}
+	oldDigest, err := tokenDigest(oldInitToken)
+	if err != nil {
+		return IssuedSession{}, ErrNotFound
+	}
+	now := s.timeNow()
+	expiresAt = expiresAt.UTC()
+	if !expiresAt.After(now) {
+		return IssuedSession{}, errors.New("browser session expiry must be in the future")
+	}
+	token, digest, err := newToken()
+	if err != nil {
+		return IssuedSession{}, err
+	}
+	insert := rhiza.SQLStatement{SQL: `INSERT INTO browser_sessions (token_digest, subject, auth_method, created_at_unix_ms, expires_at_unix_ms, last_seen_at_unix_ms, peer_ip)
+		SELECT ?,subject,?,?,MIN(?,COALESCE(user_expires_at_unix_ms,?)),?,? FROM identity_users
+		WHERE subject=? AND disabled=0 AND (user_expires_at_unix_ms IS NULL OR user_expires_at_unix_ms > ?)`,
+		Args: []any{digest, authMethod, now.UnixMilli(), expiresAt.UnixMilli(), expiresAt.UnixMilli(), now.UnixMilli(), peerIP, subject, now.UnixMilli()}}
+	one := int64(1)
+	statements := []rhiza.SQLStatement{
+		{SQL: `DELETE FROM browser_upstream_session_bindings WHERE session_digest IN (SELECT token_digest FROM browser_sessions WHERE expires_at_unix_ms <= ?)`, Args: []any{now.UnixMilli()}},
+		{SQL: `DELETE FROM browser_sessions WHERE expires_at_unix_ms <= ?`, Args: []any{now.UnixMilli()}},
+		insert,
+		{SQL: `UPDATE browser_sessions SET revoked_at_unix_ms = COALESCE(revoked_at_unix_ms, ?) WHERE token_digest = ? AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ? AND subject = '' AND auth_method = '' AND peer_ip = ?`, Args: []any{now.UnixMilli(), oldDigest, now.UnixMilli(), peerIP}, ExpectedRowsAffected: &one},
+		{SQL: LoginRecordSQL, Args: []any{subject, digest, now.UnixMilli(), now.UnixMilli()}, ExpectedRowsAffected: &one},
+	}
+	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
+		RequestID:  mutationID("password-session-create", digest),
+		Statements: statements,
+	})
+	if err != nil {
+		return IssuedSession{}, err
+	}
+	session, _, err := s.loadSession(ctx, digest, now)
+	if err != nil {
+		return IssuedSession{}, err
+	}
+	return IssuedSession{Session: session, Token: token}, nil
+}
+
 // LoadSession uses a linearizable read because a revoked or expired session is
 // a security decision.
 func (s *Store) LoadSession(ctx context.Context, token string) (Session, error) {
