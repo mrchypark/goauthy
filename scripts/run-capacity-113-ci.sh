@@ -100,7 +100,7 @@ startup_project_jq='
 		pods_json_exit: $pods_exit,
 		available: $valid,
 		complete: (([$pods_out[].index] | sort | unique) == [0, 1, 2] and ($pods_out | length) == 3),
-		observed: ([$pods_out[].containers[]] | length) > 0,
+		observed: (([$pods_out[].containers[]] | length) > 0),
 		pods: $pods_out
 	}
 '
@@ -280,8 +280,9 @@ summarize_results() {
 		--arg kubectl "$kubectl_version" \
 		--arg kustomize "$(kustomize version 2>/dev/null || true)" \
 		--arg awk "$(awk --version 2>/dev/null | head -n 1 || true)" \
+		--arg jq "$(jq --version 2>/dev/null || true)" \
 		--arg runner_image_os "${ImageOS:-}" --arg runner_os "${RUNNER_OS:-}" --arg runner_arch "${RUNNER_ARCH:-}" \
-		'{os:$os,kernel:$kernel,arch:$arch,cpus:$cpus,mem_total_kib:$mem_total_kib,go:$go,docker:$docker,kind:$kind,kubectl:$kubectl,kustomize:$kustomize,awk:$awk,runner_image_os:$runner_image_os,runner_os:$runner_os,runner_arch:$runner_arch}' \
+		'{os:$os,kernel:$kernel,arch:$arch,cpus:$cpus,mem_total_kib:$mem_total_kib,go:$go,docker:$docker,kind:$kind,kubectl:$kubectl,kustomize:$kustomize,awk:$awk,jq:$jq,runner_image_os:$runner_image_os,runner_os:$runner_os,runner_arch:$runner_arch}' \
 		>"$results_dir/runner-environment.json" || fail 'failed to write runner environment metadata'
 
 	if [ "$analyzer_ok" = true ]; then

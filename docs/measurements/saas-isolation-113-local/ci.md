@@ -145,7 +145,7 @@ The workflow uploads only the contents of `capacity-113-results`:
   and fixture/driver runtime `image` and normalized `imageID` digests only.
   Arbitrary fields such as pod names are dropped.
 - `runner-environment.json` - OS, kernel, arch, CPU count, memory total, and
-  tool versions (including `awk`).
+  tool versions (including `awk` and `jq`).
 - `report.md` - the human-readable summary also written to the job summary.
 
 The upload step uses an explicit file allowlist (the five files above), not
@@ -209,7 +209,10 @@ claim, or measured pass.
 
 Both run as a cheap step in the existing `Manifest checks` job of
 `.github/workflows/ci.yml`, after a `jq` presence check. No required check is
-removed, bypassed, or path-filtered.
+removed, bypassed, or path-filtered. The capacity workflow additionally runs
+`scripts/test-run-capacity-113-ci-summarize.sh` as an offline preflight on the
+actual runner `jq` before any cluster setup, so a jq-grammar/version
+incompatibility in the wrapper fails fast without provisioning Kind.
 
 ## Limitations
 
@@ -239,5 +242,16 @@ removed, bypassed, or path-filtered.
   `available:false`/`complete:false`/`observed:false`, but the private capture
   is not exported so the actual root (missing/invalid capture versus projection
   failure) remains unknown; the `.startup` aggregate now distinguishes these via
-  the `reason` and `pods_json_exit` fields. No app/image defect is inferred
-  without evidence, and no workload or aggregate result was produced.
+  the `reason` and `pods_json_exit` fields. The fifth dispatch `37169046902`
+  (head `c997`) failed at the 3-GoAuthy readiness stage with
+  `.startup` `reason:projection-error`, `pods_json_exit:0`, `available:false`,
+  which proved the capture command succeeded and the `List`/`items` array
+  precheck passed while the transform jq itself failed. A compatibility defect
+  was reproduced with jq 1.7.1: a bare comparison as an object value,
+  `observed: (... | length) > 0`, fails to compile. The fifth run did not
+  record its jq version or transform stderr, so its exact error is unverified.
+  The projection now wraps that comparison in parentheses and the same program
+  compiles on jq 1.7.1 and 1.8.1. The workflow runs the offline controls as a
+  preflight on the actual runner jq before any cluster setup and records the jq
+  version in `runner-environment.json`. No app/image defect is inferred, and no
+  workload or aggregate result was produced.

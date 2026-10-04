@@ -109,6 +109,12 @@ jobs:
           go version
           awk --version | head -n 1
 
+      - name: Offline preflight (actual runner jq)
+        run: |
+          set -eu
+          jq --version
+          sh scripts/test-run-capacity-113-ci-summarize.sh
+
       - name: Log in to GHCR (read-only)
         env:
           GHCR_USER: ${{ github.actor }}
