@@ -129,6 +129,7 @@ jobs:
           set -eu
           jq --version
           sh scripts/test-run-capacity-113-ci-summarize.sh
+          sh scripts/test-saas-isolation-113-auth-stage.sh
 
       - name: Log in to GHCR (read-only)
         if: ${{ !inputs.local_build }}

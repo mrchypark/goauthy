@@ -29,6 +29,8 @@ sampler_pid=
 forward_pid=
 failure_capture_done=false
 runner_completed=false
+job_status=0
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 capture_failure_state() {
 	[ "$failure_capture_done" = true ] && return 0
@@ -75,6 +77,54 @@ capture_failure_state() {
 	chmod 600 "$capture_dir"/* 2>/dev/null || true
 }
 
+# Bounded native per-pod authentication-stage capture. Reuses the existing
+# per-pod port-forward pattern to read the GoAuthy metrics listener on
+# 127.0.0.1:9090 inside each pod network namespace. The raw exposition body is
+# briefly held in a private 0600 file under the 0700 run temp directory, fed
+# to the strict privacy-safe extractor, and deleted immediately after; the raw
+# body is never logged or uploaded and only the extractor's bounded JSON is
+# written to the evidence directory. A missing endpoint, a rejected series, or
+# a wired-but-unobserved stage is a hard failure for the run.
+collect_auth_stage_metrics() {
+	auth_phase=$1
+	for auth_index in 0 1 2; do
+		auth_port=$((19090 + auth_index))
+		auth_raw=$temp_dir/auth-stage-$auth_phase-$auth_index.raw
+		auth_out=$ISOLATION113_EVIDENCE_DIR/auth-stage-$auth_phase-$auth_index.json
+		: >"$auth_raw"
+		kubectl --context "$context" -n "$namespace" port-forward --address=127.0.0.1 "pod/goauthy-$auth_index" "$auth_port:9090" >"$temp_dir/auth-forward-$auth_phase-$auth_index.log" 2>&1 &
+		forward_pid=$!
+		auth_ok=false
+		for _ in $(seq 1 50); do
+			if curl --silent --show-error --fail --connect-timeout 1 --max-time 2 --header "Authorization: Bearer $metrics_token" "http://127.0.0.1:$auth_port/metrics" >"$auth_raw" 2>/dev/null; then
+				auth_ok=true
+				break
+			fi
+			sleep 0.2
+		done
+		kill -TERM "$forward_pid" >/dev/null 2>&1 || true
+		wait "$forward_pid" 2>/dev/null || true
+		forward_pid=
+		if [ "$auth_ok" != true ]; then
+			echo "auth stage metrics endpoint did not respond on goauthy-$auth_index" >&2
+			job_status=1
+			rm -f "$auth_raw"
+			continue
+		fi
+		auth_captured_ms=$(( $(date +%s) * 1000 ))
+		if ! "$script_dir/collect-saas-isolation-113-auth-stage.sh" "$auth_index" "$auth_captured_ms" <"$auth_raw" >"$auth_out"; then
+			echo "auth stage metrics were rejected on goauthy-$auth_index ($auth_phase)" >&2
+			job_status=1
+			: >"$auth_out"
+		fi
+		rm -f "$auth_raw"
+		if [ "$auth_phase" = post ] && [ -s "$auth_out" ] && ! jq -e '[.stages[] | select(.count > 0)] | length > 0' "$auth_out" >/dev/null 2>&1; then
+			echo "auth stage metrics were wired but no known stage was observed on goauthy-$auth_index" >&2
+			job_status=1
+		fi
+	done
+}
+
 for tool in docker kind kubectl kustomize openssl go curl nc tar jq timeout; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "missing required tool: $tool" >&2; exit 1; }
 done
@@ -101,7 +151,7 @@ if [ "${GOAUTHY_LOCAL_CANDIDATE:-0}" = 1 ]; then
 	[ "$GOAUTHY_CANDIDATE_SOURCE" = "$runner_source_head" ] ||
 		{ echo 'source-build candidate source does not match the helper checkout HEAD' >&2; exit 1; }
 fi
-for port in 18443 18444 18445; do
+for port in 18443 18444 18445 19090 19091 19092; do
 	! nc -z 127.0.0.1 "$port" >/dev/null 2>&1 || { echo "metrics port already in use: $port" >&2; exit 1; }
 done
 
@@ -211,6 +261,12 @@ kubectl --context "$context" -n "$namespace" create secret generic isolation113-
 umask 077
 printf '%s' "$fixture_token" >"$temp_dir/token"
 kubectl --context "$context" -n "$namespace" create secret generic isolation113-token --from-file=token="$temp_dir/token" --dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
+# Dedicated synthetic bearer token for the native per-pod metrics listener. It
+# is generated for this run, mounted read-only into the GoAuthy container, and
+# never written to any evidence artifact or log.
+metrics_token=$(openssl rand -hex 32)
+printf '%s' "$metrics_token" >"$temp_dir/metrics-token"
+kubectl --context "$context" -n "$namespace" create secret generic isolation113-metrics-token --from-file=token="$temp_dir/metrics-token" --dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
 kubectl --context "$context" -n "$namespace" create secret generic isolation113-driver \
 	--from-literal=username=admin \
 	--from-literal=password="$GOAUTHY_E2E_BROWSER_PASSWORD" \
@@ -221,6 +277,17 @@ kustomize build deploy/kind-saas-isolation-113 | sed \
 [ "$(grep -Fc "image: $GOAUTHY_IMAGE" "$temp_dir/profile.yaml")" -eq 1 ] || { echo 'rendered profile must retain the selected immutable GoAuthy image' >&2; exit 1; }
 ! grep -F 'image: goauthy:e2e' "$temp_dir/profile.yaml" >/dev/null || { echo 'rendered profile still contains the mutable GoAuthy base image' >&2; exit 1; }
 kubectl --context "$context" apply -f "$temp_dir/profile.yaml"
+# Enable the application's native metrics listener on the pod loopback only,
+# with the run-scoped token file, so each pod can be scraped through the
+# existing per-pod port-forward pattern. This adds no public endpoint, no
+# sidecar, and no workload change beyond the observability listener. The
+# secret is mounted 0400; the profile sets pod fsGroup 65532 and the GoAuthy
+# container runs as runAsGroup 65532, so the kubelet grants the matching group
+# read access and the listener can open the token file. No access is relaxed.
+cat >"$temp_dir/metrics-enable-patch.json" <<'JSON'
+{"spec":{"template":{"spec":{"containers":[{"name":"goauthy","env":[{"name":"GOAUTHY_METRICS_LISTEN_ADDR","value":"127.0.0.1:9090"},{"name":"GOAUTHY_METRICS_TOKEN_FILE","value":"/run/metrics-token/token"}],"volumeMounts":[{"name":"isolation113-metrics-token","mountPath":"/run/metrics-token","readOnly":true}]}],"volumes":[{"name":"isolation113-metrics-token","secret":{"secretName":"isolation113-metrics-token","defaultMode":256}}]}}}}
+JSON
+kubectl --context "$context" -n "$namespace" patch statefulset goauthy --type=strategic --patch-file "$temp_dir/metrics-enable-patch.json" >/dev/null || { echo 'failed to enable the native per-pod metrics listener' >&2; exit 1; }
 kubectl --context "$context" -n "$namespace" get statefulset goauthy -o json | jq -e '
 	.spec.template.spec.containers[] | select(.name=="goauthy") | .env as $env
 	| ([$env[]|select(.name=="GOAUTHY_CONNECTIONS_RESOURCE")|.value] == ["https://goauthy.connections.local.test"])
@@ -269,6 +336,8 @@ printf '%s\n' "$ready_after" | tee "$ISOLATION113_EVIDENCE_DIR/pod-image-pins-af
 assert_candidate_pods "$ready_after" "$candidate_node_digests" || { echo 'post-overlay app image references or runtime digests differ from the selected immutable candidate' >&2; exit 1; }
 printf '%s\n' "$ready_after" >"$ISOLATION113_EVIDENCE_DIR/pod-image-pins.txt"
 
+collect_auth_stage_metrics pre
+
 sample_output=$ISOLATION113_EVIDENCE_DIR/container-samples.jsonl
 echo 'stage=three-member fixture overlay ready; launching bounded IAM/API-key diagnostic'
 kubectl create --dry-run=client -f deploy/kind-saas-isolation-113/driver-job.yaml -o json | jq -e '
@@ -284,8 +353,10 @@ done
 [ "$(printf '%s\n' "$kube_ips" | awk 'NF {print}' | sort -u | awk 'END {print NR+0}')" -eq 3 ] || { echo 'expected three distinct driver pod IPs' >&2; exit 1; }
 ./scripts/e2e-kind-saas-isolation-sample.sh "$KIND_CLUSTER" "$namespace" "$sample_output" >"$ISOLATION113_EVIDENCE_DIR/sampler.log" 2>&1 &
 sampler_pid=$!
-job_status=0
-kubectl --context "$context" -n "$namespace" wait --for=condition=complete job/isolation113-driver --timeout=220s || job_status=$?
+# Preserve any sticky failure already recorded (for example by the pre-scrape
+# or the pre-scrape's endpoint check); a later passing driver wait must not
+# clear it. A failing wait only sets the status when nothing failed yet.
+if kubectl --context "$context" -n "$namespace" wait --for=condition=complete job/isolation113-driver --timeout=220s; then :; else wait_status=$?; [ "$job_status" -ne 0 ] || job_status=$wait_status; fi
 if [ "$job_status" -ne 0 ]; then capture_failure_state; fi
 driver_pods=$(kubectl --context "$context" -n "$namespace" get pods -l job-name=isolation113-driver -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
 driver_pod_count=$(printf '%s\n' "$driver_pods" | awk 'NF {n++} END {print n+0}')
@@ -386,6 +457,8 @@ echo "candidate_source=$GOAUTHY_CANDIDATE_SOURCE"
 echo "container_samples=$sample_output"
 echo "driver_log=$ISOLATION113_EVIDENCE_DIR/driver.log"
 echo "fixture_metrics=$ISOLATION113_EVIDENCE_DIR/fixture-metrics-{0,1,2}.json"
+collect_auth_stage_metrics post
+echo "auth_stage_metrics=$ISOLATION113_EVIDENCE_DIR/auth-stage-{pre,post}-{0,1,2}.json"
 if [ "$job_status" -ne 0 ]; then
 	capture_failure_state || true
 	exit "$job_status"

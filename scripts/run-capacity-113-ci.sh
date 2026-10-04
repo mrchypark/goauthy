@@ -356,6 +356,29 @@ summarize_results() {
 		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
 		fail 'failed to add startup observability to the resource summary'
 
+	# Optional diagnostic authentication-stage summary. It is added only when
+	# the privacy-safe summarizer validates the bounded per-pod pre/post
+	# records; otherwise a fixed-reason unavailable marker is recorded. Only the
+	# three fixed capture reasons may enter the public safe JSON. This append
+	# never touches the mandatory resource series, the resource availability
+	# marker, or the overall criterion gates.
+	auth_stage_summary=$("$root/scripts/summarize-saas-isolation-113-auth-stage.sh" "$evidence_dir" 2>/dev/null || true)
+	if ! printf '%s' "$auth_stage_summary" | jq -e '.available == true' >/dev/null 2>&1; then
+		auth_reason=$(printf '%s' "$auth_stage_summary" | jq -r '
+			if .reason == "capture-invalid" then "capture-invalid"
+			elif .reason == "capture-incomplete" then "capture-incomplete"
+			else "capture-missing" end
+		' 2>/dev/null || true)
+		case "$auth_reason" in
+			capture-invalid|capture-incomplete|capture-missing) ;;
+			*) auth_reason=capture-missing ;;
+		esac
+		auth_stage_summary=$(jq -n --arg reason "$auth_reason" '{schema_version: 1, available: false, reason: $reason}')
+	fi
+	jq --argjson auth "$auth_stage_summary" '. + {auth_stage: $auth}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
+		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
+		fail 'failed to add authentication-stage diagnostics to the resource summary'
+
 	json_or_null() {
 		if [ -s "$1" ] && jq -e . "$1" >/dev/null 2>&1; then
 			cat "$1"
@@ -498,6 +521,12 @@ summarize_results() {
 		echo
 		echo '```json'
 		jq '.fixture' "$results_dir/criterion.json" 2>/dev/null || true
+		echo '```'
+		echo
+		echo '## Authentication stage diagnostics (capture-interval deltas)'
+		echo
+		echo '```json'
+		jq '.auth_stage' "$results_dir/resource-summary.json" 2>/dev/null || true
 		echo '```'
 		echo
 		echo '## Runner environment'
