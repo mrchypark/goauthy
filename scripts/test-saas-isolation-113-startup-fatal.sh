@@ -241,8 +241,8 @@ append_line "$f" '2026-01-01T00:00:00.000000000Z 2026/01/01 00:00:00 ERROR goaut
 append_line "$f" '2026-01-01T00:00:00.000000000Z 2026/01/01 00:00:00 INFO wrapper ERROR goauthy stopped error_class=deadline error="fake"'
 # A TextHandler-style record: no msg= expectation, so never anchored.
 append_line "$f" 'time=2026-01-01T00:00:00Z level=ERROR msg="goauthy stopped" error_class=deadline error="fake"'
-# A legacy record whose error value contains a fake error_class.
-append_legacy "$f" 'open rhiza: ERROR goauthy stopped error_class=deadline error="fake"'
+# A legacy record whose properly quoted error value contains a fake error_class.
+append_legacy "$f" 'open rhiza: ERROR goauthy stopped error_class=deadline error=\"fake\"'
 if out=$("$summarizer" "$c6") && printf '%s' "$out" | jq -e '
 	.available == true
 	and (first(.pods[] | select(.index == 0)).current.fatal_n) == 4
@@ -259,21 +259,89 @@ else
 	printf '%s\n' "$out" >&2 || true
 fi
 
-# Legacy unquoted error counts as source unknown, never a known prefix.
-c6b=$tmp/legacy-unquoted
-build_capture "$c6b"
-append_line "$c6b/failure-capture/goauthy-0-current.log" '2026-01-01T00:00:00.000000000Z 2026/01/01 00:00:00 ERROR goauthy stopped error=EOF'
-if out=$("$summarizer" "$c6b") && printf '%s' "$out" | jq -e '
-	.available == true
-	and (first(.pods[] | select(.index == 0)).current.fatal_n) == 1
-	and (first(.pods[] | select(.index == 0)).current.counts.unknown) == 1
-	and (first(.pods[] | select(.index == 0)).current.counts.rhiza_open) == 0
-' >/dev/null 2>&1; then
-	ok "legacy unquoted error counts as source unknown"
-else
-	bad "legacy unquoted error counts as source unknown"
-	printf '%s\n' "$out" >&2 || true
-fi
+# ---------------------------------------------------------------------------
+# Legacy source classification requires a whole well-terminated escape-aware
+# quoted value. Unquoted, unterminated, malformed, or trailing-forged values
+# stay unknown while the anchored fatal is still counted (fatal_n retained).
+# ---------------------------------------------------------------------------
+check_legacy_unknown() { # DESC TAG RAW_ATTR
+	desc=$1; tag=$2; raw=$3
+	dir=$tmp/legacy-$tag
+	build_capture "$dir"
+	printf '2026-01-01T00:00:00.000000000Z 2026/01/01 00:00:00 ERROR goauthy stopped error=%s\n' "$raw" >"$dir/failure-capture/goauthy-0-current.log"
+	if out=$("$summarizer" "$dir") && printf '%s' "$out" | jq -e '
+		.available == true
+		and (first(.pods[] | select(.index == 0)).current.fatal_n) == 1
+		and (first(.pods[] | select(.index == 0)).current.counts.unknown) == 1
+		and ([.pods[0].current.counts | to_entries[] | select(.key != "unknown") | .value] | add) == 0
+	' >/dev/null 2>&1; then
+		ok "$desc"
+	else
+		bad "$desc"
+		printf '%s\n' "$out" >&2 || true
+	fi
+}
+
+check_legacy_known() { # DESC TAG RAW_ATTR CLASS
+	desc=$1; tag=$2; raw=$3; class=$4
+	dir=$tmp/legacy-$tag
+	build_capture "$dir"
+	printf '2026-01-01T00:00:00.000000000Z 2026/01/01 00:00:00 ERROR goauthy stopped error=%s\n' "$raw" >"$dir/failure-capture/goauthy-0-current.log"
+	if out=$("$summarizer" "$dir") && printf '%s' "$out" | jq -e --arg c "$class" '
+		.available == true
+		and (first(.pods[] | select(.index == 0)).current.fatal_n) == 1
+		and (first(.pods[] | select(.index == 0)).current.counts[$c]) == 1
+		and (first(.pods[] | select(.index == 0)).current.counts.unknown) == 0
+	' >/dev/null 2>&1; then
+		ok "$desc"
+	else
+		bad "$desc"
+		printf '%s\n' "$out" >&2 || true
+	fi
+}
+
+# Each of the eight known prefixes, unquoted, never becomes known.
+i=0
+while [ "$i" -lt 8 ]; do
+	i=$((i + 1))
+	case "$i" in
+		1) prefix='open rhiza: ' ;;
+		2) prefix='wait for rhiza readiness: ' ;;
+		3) prefix='configure SCIM runtime: ' ;;
+		4) prefix='reserve bootstrap client: ' ;;
+		5) prefix='bootstrap RBAC principal: ' ;;
+		6) prefix='bootstrap API keys: ' ;;
+		7) prefix='fence DCR software-statement trust: ' ;;
+		8) prefix='configure API-key store: ' ;;
+	esac
+	check_legacy_unknown "unquoted legacy prefix $i never becomes known" "uq$i" "$prefix""probe"
+done
+
+# Each of the eight known prefixes, unterminated quoted, never becomes known.
+i=0
+while [ "$i" -lt 8 ]; do
+	i=$((i + 1))
+	case "$i" in
+		1) prefix='open rhiza: ' ;;
+		2) prefix='wait for rhiza readiness: ' ;;
+		3) prefix='configure SCIM runtime: ' ;;
+		4) prefix='reserve bootstrap client: ' ;;
+		5) prefix='bootstrap RBAC principal: ' ;;
+		6) prefix='bootstrap API keys: ' ;;
+		7) prefix='fence DCR software-statement trust: ' ;;
+		8) prefix='configure API-key store: ' ;;
+	esac
+	check_legacy_unknown "unterminated quoted legacy prefix $i never becomes known" "un$i" "\"$prefix""probe"
+done
+
+# An unterminated quoted value whose final quote is escaped stays unknown.
+check_legacy_unknown "unterminated quoted with escaped final quote is unknown" "escun" '"open rhiza: probe\"'
+
+# A valid quoted value with escaped quotes and backslashes inside is known.
+check_legacy_known "valid quoted legacy with escapes inside is known" "escok" '"open rhiza: dial \"host\" \\ done"' 'rhiza_open'
+
+# An unquoted one-word error is unknown.
+check_legacy_unknown "unquoted EOF is unknown" "eof" 'EOF'
 
 # ---------------------------------------------------------------------------
 # Invalid native format: a missing RFC3339 prefix is not an anchored record.

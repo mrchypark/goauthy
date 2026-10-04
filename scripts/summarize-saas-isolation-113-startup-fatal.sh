@@ -124,6 +124,32 @@ scan_jq='
 		if (index(rest, "configure API-key store: ") == 1) return "storage_config"
 		return "unknown"
 	}
+	# Extract the raw content of a whole, well-terminated, escape-aware quoted
+	# value. s starts immediately after "error=". Sets g_qok=1 only when s is a
+	# quoted value whose closing quote is unescaped and whose only trailing
+	# characters are whitespace (a forged trailing attribute is rejected).
+	# Backslash escapes are preserved verbatim in the returned content; this is
+	# a bounded quoted-value boundary, not a full Go string grammar.
+	function quoted_legacy(s,   i, n, ch, esc, closed, out, tail) {
+		g_qok = 0
+		if (substr(s, 1, 1) != "\"") return ""
+		esc = 0
+		closed = 0
+		out = ""
+		n = length(s)
+		for (i = 2; i <= n; i++) {
+			ch = substr(s, i, 1)
+			if (esc) { out = out ch; esc = 0 }
+			else if (ch == "\\") { esc = 1; out = out ch }
+			else if (ch == "\"") { closed = i; break }
+			else { out = out ch }
+		}
+		if (closed == 0) return ""
+		tail = substr(s, closed + 1)
+		if (tail ~ /[^[:space:]]/) return ""
+		g_qok = 1
+		return out
+	}
 	# Strict whole-attribute typed parse. The class token is either an unquoted
 	# token up to the next space or an exactly quoted token; it must be followed
 	# by a native " error=" attribute whose value may be quoted or unquoted. No
@@ -185,8 +211,12 @@ scan_jq='
 			}
 		} else if (index(rest, "error=") == 1) {
 			ev = substr(rest, length("error=") + 1)
-			if (substr(ev, 1, 1) == "\"") ev = substr(ev, 2)
-			cls = legacy_class(ev)
+			val = quoted_legacy(ev)
+			if (g_qok) {
+				cls = legacy_class(val)
+			} else {
+				cls = "unknown"
+			}
 			counts[g_idx, g_phase, cls]++
 			total++
 		}
