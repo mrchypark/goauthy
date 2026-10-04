@@ -113,6 +113,50 @@ base=$tmp/base
 mkcase "$base" 100 110 90
 expect_summary "positive" "$base" pass pass true true
 
+# Source-build pin projection (offline). The released-image default keeps the
+# candidate digests null; the source-build mode records the OCI manifest and
+# config digests as separate fields and never conflates them.
+sb_default=$(new_results)
+if "$wrapper" --summarize "$base" "$sb_default" >/dev/null 2>"$tmp/err" &&
+	jq -e '.candidate.mode == "released-image" and .candidate.manifest_digest == null and .candidate.config_digest == null' "$sb_default/pins.json" >/dev/null 2>&1; then
+	ok "released-image pin projection"
+else
+	bad "released-image pin projection"
+fi
+sb_manifest=sha256:$(printf '%064d' 6)
+sb_config=sha256:$(printf '%064d' 3)
+sb_local=$(new_results)
+if GOAUTHY_LOCAL_BUILD=1 GOAUTHY_CANDIDATE_MANIFEST_DIGEST="$sb_manifest" GOAUTHY_CANDIDATE_CONFIG_DIGEST="$sb_config" \
+	"$wrapper" --summarize "$base" "$sb_local" >/dev/null 2>"$tmp/err" &&
+	jq -e --arg m "$sb_manifest" --arg c "$sb_config" '.candidate.mode == "source-build" and .candidate.manifest_digest == $m and .candidate.config_digest == $c and .candidate.manifest_digest != .candidate.config_digest' "$sb_local/pins.json" >/dev/null 2>&1; then
+	ok "source-build pin projection"
+else
+	bad "source-build pin projection"
+	jq -c '.candidate' "$sb_local/pins.json" >&2 || true
+fi
+
+# Privacy/ownership: a raw or malformed env digest must never leak into the
+# safe aggregate; each field is emitted only as a strict sha256 digest or null.
+sb_raw=$(new_results)
+if GOAUTHY_LOCAL_BUILD=1 GOAUTHY_CANDIDATE_MANIFEST_DIGEST='not-a-digest' GOAUTHY_CANDIDATE_CONFIG_DIGEST='sha256:short' \
+	"$wrapper" --summarize "$base" "$sb_raw" >/dev/null 2>"$tmp/err" &&
+	jq -e '.candidate.mode == "source-build" and .candidate.manifest_digest == null and .candidate.config_digest == null' "$sb_raw/pins.json" >/dev/null 2>&1 &&
+	! grep -q 'not-a-digest' "$sb_raw/pins.json"; then
+	ok "source-build pin projection rejects raw digests"
+else
+	bad "source-build pin projection rejects raw digests"
+	jq -c '.candidate' "$sb_raw/pins.json" >&2 || true
+fi
+sb_mixed=$(new_results)
+if GOAUTHY_LOCAL_BUILD=1 GOAUTHY_CANDIDATE_MANIFEST_DIGEST="$sb_manifest" GOAUTHY_CANDIDATE_CONFIG_DIGEST='raw-value' \
+	"$wrapper" --summarize "$base" "$sb_mixed" >/dev/null 2>"$tmp/err" &&
+	jq -e --arg m "$sb_manifest" '.candidate.mode == "source-build" and .candidate.manifest_digest == $m and .candidate.config_digest == null' "$sb_mixed/pins.json" >/dev/null 2>&1; then
+	ok "source-build pin projection keeps valid manifest only"
+else
+	bad "source-build pin projection keeps valid manifest only"
+	jq -c '.candidate' "$sb_mixed/pins.json" >&2 || true
+fi
+
 explicit=$tmp/explicit
 mkcase "$explicit" 100 110 90
 for idx in 0 1 2; do

@@ -266,6 +266,18 @@ c3=$candidate_config_digest
 c6=$candidate_manifest_digest
 c8=$candidate_node_digests
 c9=sha256:$(printf '%064d' 9)
+
+# Source-build OCI manifest binding: the manifest digest must be present in
+# the node snapshot runtime_digests. A config-only snapshot is rejected and
+# the config digest is never substituted for the manifest digest.
+jq -nc --arg m "$c6" --arg c "$c3" '{config_digest:$c, runtime_digests:[$c,$m]}' >"$tmp/bind-ok.json"
+assert_candidate_manifest_binding "$tmp/bind-ok.json" "$c6" || { echo 'manifest binding rejected a present OCI manifest digest' >&2; exit 1; }
+jq -nc --arg c "$c3" '{config_digest:$c, runtime_digests:[$c]}' >"$tmp/bind-config-only.json"
+if assert_candidate_manifest_binding "$tmp/bind-config-only.json" "$c6" >/dev/null 2>&1; then echo 'manifest binding accepted a config-only snapshot' >&2; exit 1; fi
+jq -nc --arg c "$c3" '{config_digest:$c, runtime_digests:[]}' >"$tmp/bind-empty.json"
+if assert_candidate_manifest_binding "$tmp/bind-empty.json" "$c6" >/dev/null 2>&1; then echo 'manifest binding accepted an empty snapshot' >&2; exit 1; fi
+if assert_candidate_manifest_binding "$tmp/bind-ok.json" 'sha256:short' >/dev/null 2>&1; then echo 'manifest binding accepted a malformed expected digest' >&2; exit 1; fi
+if assert_candidate_manifest_binding "$tmp/bind-missing-file.json" "$c6" >/dev/null 2>&1; then echo 'manifest binding accepted a missing snapshot' >&2; exit 1; fi
 candidate_pod() {
 	printf '%s %s %s %s %s\n' "$1" "$2" "$3" "$4" "$GOAUTHY_IMAGE"
 }

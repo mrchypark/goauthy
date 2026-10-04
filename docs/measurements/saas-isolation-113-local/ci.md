@@ -530,3 +530,29 @@ incompatibility in the wrapper fails fast without provisioning Kind.
     OPEN with #105 GC disabled, unapproved resource/SLO, and three logical
     members on one physical CI node. All thirteen prior failures (1-13) remain
     documented with their metrics and unconfirmed causes.
+
+## Forthcoming source-build measurement mode
+
+A forthcoming run mode builds the candidate inside the workflow from a clean
+`candidate_source` commit on the branch workflow ref (`local_build=true`)
+instead of pulling a prebuilt immutable image. The image is ephemeral: it is
+built for one run and is neither a release artifact nor published to a
+registry. The measurement criteria are unchanged: three logical GoAuthy
+members on one Kind host with local Versity, the same shared analyzer, the
+same relative IAM P95/P99 criterion, and the same failure handling. The exact
+source commit, helper/fixture manifest digests, config, and runtime image
+pins are recorded as separate evidence and are not conflated.
+
+Dependency state: Lattice 0.11.1 is now the current candidate; run 14 measured
+release v0.2.0 with Lattice 0.10. The current candidate also carries a
+structural read-amplification reduction on the connection-use invoke path: the
+API provider metadata and the ready credential are read in one linearizable
+snapshot, reducing the per-invoke linearizable read count from 9 to 7. This is
+a structural estimate only; no causal fix claim is made until an actual
+measurement under the approved criteria.
+
+All fourteen prior failure histories and their uncertainty are preserved. This
+mode changes no timing, scheduler, security, or oracle behavior and adds no new
+test, build, or implementation files and no raw logs or caches. Issue #113
+stays OPEN until an actual approved-criteria proof is recorded and the
+resource/SLO scope is made explicit; no resource ceiling is invented here.

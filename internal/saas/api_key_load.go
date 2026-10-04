@@ -13,8 +13,32 @@ func (s *CredentialStore) loadAPIKey(ctx context.Context, owner, collection, con
 	return s.loadAPIKeyForDispatch(ctx, owner, collection, connection, authority, nil)
 }
 
+// loadAPIKeyForDispatch reads the current provider metadata and the ready
+// credential in one linearizable snapshot. The provider configuration and the
+// credential version are selected together, so a concurrent provider or
+// credential change cannot produce a mixed pair. The dispatch-time binding
+// check and the postflight reload still fence the outbound request.
 func (s *CredentialStore) loadAPIKeyForDispatch(ctx context.Context, owner, collection, connection string, authority func() (string, []any), expected *providerHTTPBinding) (credentialBinding, credential, error) {
-	info, generation, err := s.registeredAPIKeyInfo(ctx, owner, collection, connection, authority)
+	if ctx == nil || s == nil || s.db == nil || !validText(owner) || !validText(collection) || !validText(connection) {
+		return credentialBinding{}, credential{}, errCredential
+	}
+	g, ga, err := authorityGuard(authority)
+	if err != nil {
+		return credentialBinding{}, credential{}, err
+	}
+	q, err := s.db.Query(ctx, rhiza.QueryRequest{
+		SQL:         loadAPIKeyForDispatchSQL + ` AND ` + g + ` ORDER BY x.token_version DESC LIMIT 1`,
+		Args:        append([]any{apiKeyProviderID, connection, owner, collection, s.now()}, ga...),
+		Consistency: rhiza.ConsistencyLinearizable,
+	})
+	if err != nil {
+		return credentialBinding{}, credential{}, err
+	}
+	if len(q.Rows) != 1 || len(q.Rows[0]) != 8 {
+		return credentialBinding{}, credential{}, ErrCredentialNotFound
+	}
+	row := q.Rows[0]
+	info, generation, err := s.registeredAPIKeyFromRow(row[:6])
 	if err != nil {
 		return credentialBinding{}, credential{}, err
 	}
@@ -31,36 +55,15 @@ func (s *CredentialStore) loadAPIKeyForDispatch(ctx context.Context, owner, coll
 	if info.ID != "" {
 		providerID = info.ID
 	}
-	b := credentialBinding{Owner: owner, CollectionID: collection, ConnectionID: connection, ProviderID: providerID, Generation: generation, TokenVersion: 1}
-	provider, ppa := s.apiKeyProviderGuard(b, info.Revision)
-	g, ga, err := authorityGuard(authority)
-	if err != nil {
-		return credentialBinding{}, credential{}, err
-	}
-	parent, pa := s.apiKeyParentGuard(b)
-	args := []any{b.ConnectionID, b.Owner, b.CollectionID, b.ProviderID, b.Generation}
-	args = append(args, pa...)
-	args = append(args, ppa...)
-	args = append(args, ga...)
-	q, err := s.db.Query(ctx, rhiza.QueryRequest{
-		SQL:  `SELECT token_version,credential FROM saas_connection_credentials WHERE connection_id=? AND owner_subject=? AND collection_id=? AND provider_id=? AND generation=? AND state='ready' AND ` + parent + ` AND ` + provider + ` AND ` + g + ` ORDER BY token_version DESC LIMIT 1`,
-		Args: args, Consistency: rhiza.ConsistencyLinearizable,
-	})
-	if err != nil {
-		return credentialBinding{}, credential{}, err
-	}
-	if len(q.Rows) != 1 || len(q.Rows[0]) != 2 {
-		return credentialBinding{}, credential{}, ErrCredentialNotFound
-	}
-	version, ok := q.Rows[0][0].(int64)
+	version, ok := row[6].(int64)
 	if !ok || version < 1 {
 		return credentialBinding{}, credential{}, errCredential
 	}
-	envelope, ok := q.Rows[0][1].([]byte)
+	envelope, ok := row[7].([]byte)
 	if !ok {
 		return credentialBinding{}, credential{}, errCredential
 	}
-	b.TokenVersion = version
+	b := credentialBinding{Owner: owner, CollectionID: collection, ConnectionID: connection, ProviderID: providerID, Generation: generation, TokenVersion: version}
 	value, err := openCredential(s.keys, b, envelope)
 	if err != nil || value.APIKey == "" {
 		return credentialBinding{}, credential{}, errCredential
@@ -70,3 +73,16 @@ func (s *CredentialStore) loadAPIKeyForDispatch(ctx context.Context, owner, coll
 	}
 	return b, value, nil
 }
+
+// loadAPIKeyForDispatchSQL joins the current generation/provider configuration
+// with the ready credential in one statement. The provider_id join uses the
+// legacy empty-provider sentinel apiKeyProviderID; a registered provider must
+// be enabled and match its collection's single provider reference. The caller
+// appends the parent authority predicate.
+const loadAPIKeyForDispatchSQL = `SELECT c.generation,COALESCE(json_extract(d.providers_json,'$[0]'),''),COALESCE(p.kind,''),COALESCE(p.enabled,0),COALESCE(p.revision,0),COALESCE(p.connector_json,''),x.token_version,x.credential
+	FROM auth_collection_connections c
+	JOIN auth_collection_definitions d ON d.id=c.collection_id
+	JOIN identity_users u ON u.subject=c.owner_subject
+	LEFT JOIN saas_providers p ON p.id=json_extract(d.providers_json,'$[0]') AND p.deleted=0
+	JOIN saas_connection_credentials x ON x.connection_id=c.id AND x.owner_subject=c.owner_subject AND x.collection_id=c.collection_id AND x.generation=c.generation AND x.provider_id=COALESCE(NULLIF(json_extract(d.providers_json,'$[0]'),''),?) AND x.state='ready'
+	WHERE c.id=? AND c.owner_subject=? AND c.collection_id=? AND d.enabled=1 AND d.deleted=0 AND d.auth_method='api_key' AND json_array_length(d.providers_json) <= 1 AND ((json_array_length(d.providers_json)=0) OR (json_array_length(d.providers_json)=1 AND p.kind='api_key' AND p.enabled=1 AND p.deleted=0 AND p.id=json_extract(d.providers_json,'$[0]'))) AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?)`

@@ -10,7 +10,13 @@ umask 077
 : "${GOAUTHY_E2E_BROWSER_PASSWORD:?set the local synthetic bootstrap password}"
 : "${GOAUTHY_E2E_CLIENT_SECRET:?set the local synthetic bootstrap client secret}"
 : "${ISOLATION113_EVIDENCE_DIR:?set an absolute task-state directory for local evidence}"
-case "$GOAUTHY_IMAGE" in *@sha256:*) ;; *) echo 'GOAUTHY_IMAGE must be an immutable @sha256 reference' >&2; exit 1;; esac
+# The released-image path requires an immutable @sha256 reference. The
+# manual-CI source-build path instead requires the wrapper-supplied OCI
+# manifest digest and binds it to the imported node image below.
+case "$GOAUTHY_IMAGE" in
+	*@sha256:*) ;;
+	*) [ "${GOAUTHY_LOCAL_CANDIDATE:-0}" = 1 ] || { echo 'GOAUTHY_IMAGE must be an immutable @sha256 reference' >&2; exit 1; } ;;
+esac
 . "$(dirname -- "$0")/e2e-kind-saas-isolation-113-node-pins.sh"
 
 namespace=goauthy
@@ -77,11 +83,24 @@ case "$ISOLATION113_EVIDENCE_DIR" in "$PWD"/*) echo 'evidence directory must be 
 test ! -e "$ISOLATION113_EVIDENCE_DIR" || { echo 'evidence directory already exists; refusing to overwrite' >&2; exit 1; }
 kind get clusters | grep -Fx "$KIND_CLUSTER" >/dev/null || { echo "owned Kind cluster not found: $KIND_CLUSTER" >&2; exit 1; }
 docker image inspect "$GOAUTHY_IMAGE" >/dev/null
-candidate_manifest_digest=${GOAUTHY_IMAGE##*@}
+if [ "${GOAUTHY_LOCAL_CANDIDATE:-0}" = 1 ]; then
+	: "${GOAUTHY_CANDIDATE_MANIFEST_DIGEST:?set GOAUTHY_CANDIDATE_MANIFEST_DIGEST for a local source-build candidate}"
+	printf '%s' "$GOAUTHY_CANDIDATE_MANIFEST_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || { echo 'GOAUTHY_CANDIDATE_MANIFEST_DIGEST must be a sha256 digest' >&2; exit 1; }
+	candidate_manifest_digest=$GOAUTHY_CANDIDATE_MANIFEST_DIGEST
+else
+	candidate_manifest_digest=${GOAUTHY_IMAGE##*@}
+fi
 candidate_config_blob=$(docker image save "$GOAUTHY_IMAGE" | tar -xOf - manifest.json | jq -er '.[0].Config | select(test("^blobs/sha256/[0-9a-f]{64}$"))')
 candidate_config_digest=sha256:${candidate_config_blob##*/}
 runner_source_head=$(git rev-parse --verify HEAD)
 [ -z "$(git status --porcelain --untracked-files=all)" ] || { echo 'helper images require a clean committed checkout' >&2; exit 1; }
+if [ "${GOAUTHY_LOCAL_CANDIDATE:-0}" = 1 ]; then
+	# The candidate and the helper images are built from the same reviewed
+	# checkout. Keep the two heads as separate evidence fields but fail closed
+	# if a source build is requested for a source other than the checkout HEAD.
+	[ "$GOAUTHY_CANDIDATE_SOURCE" = "$runner_source_head" ] ||
+		{ echo 'source-build candidate source does not match the helper checkout HEAD' >&2; exit 1; }
+fi
 for port in 18443 18444 18445; do
 	! nc -z 127.0.0.1 "$port" >/dev/null 2>&1 || { echo "metrics port already in use: $port" >&2; exit 1; }
 done
@@ -215,6 +234,13 @@ node_image_pin_snapshot "$GOAUTHY_IMAGE" "$candidate_config_digest" "$temp_dir/c
 	{ echo 'candidate node pin snapshot failed' >&2; exit 1; }
 candidate_node_digests=$(jq -er '.runtime_digests | join(" ")' "$temp_dir/candidate-node-pins.json")
 cp "$temp_dir/candidate-node-pins.json" "$ISOLATION113_EVIDENCE_DIR/candidate-node-pins.json"
+if [ "${GOAUTHY_LOCAL_CANDIDATE:-0}" = 1 ]; then
+	# Strong payload binding: the canonical runtime reference must resolve to
+	# the exact OCI manifest digest produced by the source build, not merely a
+	# matching config digest. The manifest and config are recorded separately.
+	assert_candidate_manifest_binding "$ISOLATION113_EVIDENCE_DIR/candidate-node-pins.json" "$candidate_manifest_digest" ||
+		{ echo 'source-build candidate node manifest digest does not match the built OCI manifest digest' >&2; exit 1; }
+fi
 authorize_url='http://127.0.0.1:18443/oidc/authorize?client_id=goauthy-dev&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A5555%2Fcallback&scope=goauthy.read%20offline_access&state=isolation113-functional-readiness&code_challenge=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&code_challenge_method=S256'
 readiness_deadline=$(( $(date +%s) + 60 ))
 readiness_evidence=$ISOLATION113_EVIDENCE_DIR/authorize-readiness.tsv

@@ -4,22 +4,29 @@ name: Capacity 113 calibration
 # single-node local Kind greenfield profile (three logical GoAuthy members
 # plus a local Versity object store) and runs the existing
 # scripts/e2e-kind-saas-isolation-113.sh diagnostic against a pinned
-# immutable candidate image. It performs no release, deploy, package write,
-# or foreign write, does not close the issue automatically, and never runs
-# on push, schedule, or pull_request_target.
+# immutable candidate image. An optional source-build mode builds the
+# reviewed checkout into a local OCI image instead of consuming a released
+# image. Either mode performs no release, deploy, package write, or foreign
+# write, does not close the issue automatically, and never runs on push,
+# schedule, or pull_request_target.
 on:
   workflow_dispatch:
     inputs:
       candidate_image:
-        description: Immutable GoAuthy image reference (name@sha256:...)
+        description: Immutable GoAuthy image reference (name@sha256:...); ignored when local_build is true
         required: true
         type: string
         default: ghcr.io/mrchypark/goauthy@sha256:21c941913d6ae6333d59fa5da4dfc4d61ab2ecafa0eb9299ade01815d486c499
       candidate_source:
-        description: Reviewed GoAuthy source SHA (40 lowercase hex)
+        description: Reviewed GoAuthy source SHA (40 lowercase hex); must equal the checkout HEAD when local_build is true
         required: true
         type: string
         default: 944895a2b10b50275d6691e6b07d692414454f01
+      local_build:
+        description: Build the reviewed source locally (no release or registry publication)
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -40,6 +47,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # A source build must check out the exact reviewed SHA so the
+          # wrapper's clean-HEAD-equals-source check is meaningful.
+          ref: ${{ inputs.local_build && inputs.candidate_source || github.ref }}
           persist-credentials: false
 
       - name: Setup Go
@@ -54,12 +64,17 @@ jobs:
         env:
           CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
           CANDIDATE_SOURCE: ${{ inputs.candidate_source }}
+          LOCAL_BUILD: ${{ inputs.local_build }}
         run: |
           set -eu
-          printf '%s' "$CANDIDATE_IMAGE" | grep -Eq '^ghcr\.io/mrchypark/goauthy@sha256:[0-9a-f]{64}$' ||
-            { echo "candidate_image must be ghcr.io/mrchypark/goauthy@sha256:<64 lowercase hex>" >&2; exit 1; }
           printf '%s' "$CANDIDATE_SOURCE" | grep -Eq '^[0-9a-f]{40}$' ||
             { echo "candidate_source must be a 40-character lowercase hex SHA" >&2; exit 1; }
+          if [ "$LOCAL_BUILD" = "true" ]; then
+            echo "local source-build dispatch: candidate_image is ignored"
+          else
+            printf '%s' "$CANDIDATE_IMAGE" | grep -Eq '^ghcr\.io/mrchypark/goauthy@sha256:[0-9a-f]{64}$' ||
+              { echo "candidate_image must be ghcr.io/mrchypark/goauthy@sha256:<64 lowercase hex>" >&2; exit 1; }
+          fi
           echo "dispatch inputs validated"
 
       - name: Free disk space
@@ -116,6 +131,7 @@ jobs:
           sh scripts/test-run-capacity-113-ci-summarize.sh
 
       - name: Log in to GHCR (read-only)
+        if: ${{ !inputs.local_build }}
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ github.token }}
@@ -127,14 +143,21 @@ jobs:
         env:
           CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
           CANDIDATE_SOURCE: ${{ inputs.candidate_source }}
+          LOCAL_BUILD: ${{ inputs.local_build }}
         run: |
           set -eu
           evidence_dir="$RUNNER_TEMP/capacity-113-evidence"
           results_dir="$RUNNER_TEMP/capacity-113-results"
           mkdir -p "$results_dir"
-          GOAUTHY_IMAGE="$CANDIDATE_IMAGE" \
-          GOAUTHY_CANDIDATE_SOURCE="$CANDIDATE_SOURCE" \
-            ./scripts/run-capacity-113-ci.sh "$evidence_dir" "$results_dir"
+          if [ "$LOCAL_BUILD" = "true" ]; then
+            GOAUTHY_LOCAL_BUILD=1 \
+            GOAUTHY_CANDIDATE_SOURCE="$CANDIDATE_SOURCE" \
+              ./scripts/run-capacity-113-ci.sh "$evidence_dir" "$results_dir"
+          else
+            GOAUTHY_IMAGE="$CANDIDATE_IMAGE" \
+            GOAUTHY_CANDIDATE_SOURCE="$CANDIDATE_SOURCE" \
+              ./scripts/run-capacity-113-ci.sh "$evidence_dir" "$results_dir"
+          fi
 
       - name: Publish calibration summary
         if: always()

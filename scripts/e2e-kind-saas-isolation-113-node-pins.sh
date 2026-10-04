@@ -36,6 +36,24 @@ node_image_pin_snapshot() {
 	rm -f "$cri_file"
 }
 
+# assert_candidate_manifest_binding takes exactly 2 arguments:
+#   SNAPSHOT_FILE EXPECTED_MANIFEST_DIGEST
+# Requires the node pin snapshot produced by node_image_pin_snapshot to carry
+# the expected OCI manifest digest in runtime_digests. The config digest is
+# recorded separately in the snapshot and is never substituted for the
+# manifest digest. A missing/malformed snapshot, a malformed expected digest,
+# or an absent manifest digest fails closed.
+assert_candidate_manifest_binding() {
+	snapshot_file=$1
+	expected_manifest=$2
+	jq -e --arg manifest "$expected_manifest" '
+		($manifest | type) == "string"
+		and ($manifest | test("^sha256:[0-9a-f]{64}$"))
+		and ((.runtime_digests | type) == "array")
+		and ([.runtime_digests[]? | select(. == $manifest)] | length > 0)
+	' "$snapshot_file" >/dev/null 2>&1
+}
+
 # assert_candidate_pods takes exactly 2 arguments:
 #   POD_LINES NODE_DIGESTS
 # POD_LINES is the five-column kubectl jsonpath output (name phase ready

@@ -19,7 +19,7 @@ umask 077
 
 usage() {
 	echo "usage: $0 [--summarize] EVIDENCE_DIR RESULTS_DIR" >&2
-	echo "env: GOAUTHY_IMAGE GOAUTHY_CANDIDATE_SOURCE [KIND_CLUSTER] [KIND_NODE_IMAGE]" >&2
+	echo "env: GOAUTHY_IMAGE GOAUTHY_CANDIDATE_SOURCE [GOAUTHY_LOCAL_BUILD] [KIND_CLUSTER] [KIND_NODE_IMAGE]" >&2
 	exit 2
 }
 
@@ -361,8 +361,12 @@ summarize_results() {
 	helper_head=$(cat "$evidence_dir/helper-source-head.txt" 2>/dev/null || true)
 	jq -n --argjson helper "$helper_pins" --argjson fixture "$fixture_runtime" --argjson driver "$driver_runtime" --argjson candidate_node "$candidate_node_pins" \
 		--arg candidate_image "${GOAUTHY_IMAGE:-}" --arg candidate_source "${GOAUTHY_CANDIDATE_SOURCE:-}" \
-		--arg helper_source_head "$helper_head" '
+		--arg helper_source_head "$helper_head" \
+		--arg local_build "${GOAUTHY_LOCAL_BUILD:-0}" \
+		--arg candidate_manifest "${candidate_manifest_digest:-${GOAUTHY_CANDIDATE_MANIFEST_DIGEST:-}}" \
+		--arg candidate_config "${candidate_config_id:-${GOAUTHY_CANDIDATE_CONFIG_DIGEST:-}}" '
 		def runtime_digest: sub("^(containerd|docker-pullable)://"; "") | if contains("@sha256:") then sub("^.*@"; "") else . end;
+		def strict_digest: if (type) == "string" and (test("^sha256:[0-9a-f]{64}$")) then . else null end;
 		def runtime_pins($v): if ($v | type) == "array" then [$v[] | {image, digest: (.imageID | runtime_digest)}] else null end;
 		def node_pins($v):
 			try (if ($v | type) == "object"
@@ -371,7 +375,14 @@ summarize_results() {
 				and all($v.runtime_digests[]; type == "string" and test("^sha256:[0-9a-f]{64}$"))
 			then $v | {config_digest, runtime_digests} else null end) catch null;
 		{
-			candidate: {image: $candidate_image, source: $candidate_source, node_pins: node_pins($candidate_node)},
+			candidate: {
+				image: $candidate_image,
+				source: $candidate_source,
+			mode: (if $local_build == "1" then "source-build" else "released-image" end),
+			manifest_digest: (if $local_build == "1" then ($candidate_manifest | strict_digest) else null end),
+			config_digest: (if $local_build == "1" then ($candidate_config | strict_digest) else null end),
+				node_pins: node_pins($candidate_node)
+			},
 			helper_source_head: $helper_source_head,
 			helper_image_pins: (
 				if $helper == null then null else
@@ -516,15 +527,31 @@ results_dir=$2
 
 cd "$root"
 
-: "${GOAUTHY_IMAGE:?set GOAUTHY_IMAGE to the immutable candidate image reference}"
 : "${GOAUTHY_CANDIDATE_SOURCE:?set GOAUTHY_CANDIDATE_SOURCE to the reviewed source SHA}"
+: "${GOAUTHY_LOCAL_BUILD:=0}"
 : "${KIND_CLUSTER:=goauthy-capacity-113-ci}"
 : "${KIND_NODE_IMAGE:=kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5}"
 
-printf '%s' "$GOAUTHY_IMAGE" | grep -Eq '^ghcr\.io/mrchypark/goauthy@sha256:[0-9a-f]{64}$' || fail 'GOAUTHY_IMAGE must be ghcr.io/mrchypark/goauthy@sha256:<64 lowercase hex>'
+case "$GOAUTHY_LOCAL_BUILD" in 0|1) ;; *) fail 'GOAUTHY_LOCAL_BUILD must be 0 or 1' ;; esac
 printf '%s' "$GOAUTHY_CANDIDATE_SOURCE" | grep -Eq '^[0-9a-f]{40}$' || fail 'GOAUTHY_CANDIDATE_SOURCE must be a 40-character lowercase hex SHA'
 case "$KIND_CLUSTER" in ''|*[!a-z0-9-]*|-*|*-) fail 'KIND_CLUSTER must be a DNS label' ;; esac
 [ "${#KIND_CLUSTER}" -le 40 ] || fail 'KIND_CLUSTER is too long'
+if [ "$GOAUTHY_LOCAL_BUILD" = 1 ]; then
+	# Manual-CI-only ephemeral source build. No release, no registry
+	# publication, and no pull of any mutable tag: the candidate image is
+	# built from the reviewed source and bound to the actual imported OCI
+	# manifest and config digests before the diagnostic driver starts.
+	[ -z "${GOAUTHY_IMAGE:-}" ] || fail 'GOAUTHY_LOCAL_BUILD=1 must not be combined with a pre-set GOAUTHY_IMAGE'
+	[ "$(git -C "$root" rev-parse --verify HEAD 2>/dev/null || true)" = "$GOAUTHY_CANDIDATE_SOURCE" ] ||
+		fail 'source build requires the reviewed source SHA to equal the clean checkout HEAD'
+	[ -z "$(git -C "$root" status --porcelain --untracked-files=all)" ] ||
+		fail 'source build requires a clean committed checkout'
+	GOAUTHY_IMAGE="goauthy:ci-$KIND_CLUSTER"
+	export GOAUTHY_IMAGE
+else
+	: "${GOAUTHY_IMAGE:?set GOAUTHY_IMAGE to the immutable candidate image reference}"
+	printf '%s' "$GOAUTHY_IMAGE" | grep -Eq '^ghcr\.io/mrchypark/goauthy@sha256:[0-9a-f]{64}$' || fail 'GOAUTHY_IMAGE must be ghcr.io/mrchypark/goauthy@sha256:<64 lowercase hex>'
+fi
 case "$evidence_dir" in /*) ;; *) fail 'EVIDENCE_DIR must be absolute' ;; esac
 case "$results_dir" in /*) ;; *) fail 'RESULTS_DIR must be absolute' ;; esac
 case "$evidence_dir" in "$root"/*) fail 'EVIDENCE_DIR must be outside the repository' ;; esac
@@ -548,6 +575,7 @@ chmod 700 "$temp_dir"
 created=false
 inotify_original=
 load_alias=
+candidate_owned=0
 
 cleanup() {
 	status=$?
@@ -555,6 +583,12 @@ cleanup() {
 	cleanup_failed=false
 	if [ -n "$load_alias" ]; then
 		docker rmi "$load_alias" >/dev/null 2>&1 || cleanup_failed=true
+	fi
+	# Remove the source-build tag only when this run created it. A fail before
+	# the owned load/tag (including a pre-existing-tag rejection) must never
+	# delete an unowned tag.
+	if [ "$candidate_owned" = 1 ]; then
+		docker rmi "$GOAUTHY_IMAGE" >/dev/null 2>&1 || true
 	fi
 	if [ "$created" = true ]; then
 		if [ -n "$inotify_original" ]; then
@@ -590,41 +624,122 @@ docker exec "$node" sysctl -w fs.inotify.max_user_instances=512 >/dev/null 2>&1 
 	docker exec "$node" sh -c 'echo 512 > /proc/sys/fs/inotify/max_user_instances'
 "$root/scripts/e2e-preflight.sh" kind-inotify --cluster "$KIND_CLUSTER"
 
-docker pull "$GOAUTHY_IMAGE"
+candidate_manifest_digest=
+candidate_build_mode=released-image
+if [ "$GOAUTHY_LOCAL_BUILD" = 1 ]; then
+	candidate_build_mode=source-build
+	candidate_oci=$temp_dir/candidate-oci.tar
+	candidate_meta=$temp_dir/candidate-build-metadata.json
+	# Refuse to touch a pre-existing host tag before any costly work.
+	if docker image inspect "$GOAUTHY_IMAGE" >/dev/null 2>&1; then
+		fail "refusing to overwrite a pre-existing host image tag: $GOAUTHY_IMAGE"
+	fi
+	# Build the reviewed source into a real OCI image layout. The docker
+	# exporter is not used here, so no mutable tag is published or pulled and
+	# no registry is contacted. Provenance and SBOM attestations are disabled
+	# so the emission is a bounded single-platform manifest, not an index with
+	# attestation manifests. The buildx metadata records the actual OCI
+	# manifest and config digests; the archive is the single payload that is
+	# imported into the Kind node below.
+	docker buildx build \
+		--output "type=oci,dest=$candidate_oci,name=$GOAUTHY_IMAGE" \
+		--metadata-file "$candidate_meta" \
+		--label "org.opencontainers.image.revision=$GOAUTHY_CANDIDATE_SOURCE" \
+		--provenance=false --sbom=false \
+		-f "$root/Dockerfile" "$root"
+	candidate_manifest_digest=$(jq -er '
+		."containerimage.digest" as $digest
+		| ."containerimage.descriptor" as $descriptor
+		| select(($digest|type)=="string" and ($digest|test("^sha256:[0-9a-f]{64}$")))
+		| select($descriptor.mediaType=="application/vnd.oci.image.manifest.v1+json" and $descriptor.digest==$digest)
+		| $digest
+	' "$candidate_meta") || fail 'source-build OCI manifest digest is missing or malformed'
+	meta_config_digest=$(jq -er '."containerimage.config.digest" | select(type=="string" and test("^sha256:[0-9a-f]{64}$"))' "$candidate_meta") ||
+		fail 'source-build OCI config digest is missing or malformed'
+	docker load -i "$candidate_oci" >/dev/null ||
+		fail 'failed to load the source-build OCI archive into the host image store'
+	if ! docker image inspect "$GOAUTHY_IMAGE" >/dev/null 2>&1; then
+		docker tag "$meta_config_digest" "$GOAUTHY_IMAGE" >/dev/null ||
+			fail 'failed to tag the source-build candidate in the host image store'
+	fi
+	candidate_owned=1
+else
+	docker pull "$GOAUTHY_IMAGE"
+fi
 revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$GOAUTHY_IMAGE" 2>/dev/null || true)
 [ "$revision" = "$GOAUTHY_CANDIDATE_SOURCE" ] || fail "candidate image revision label '$revision' does not match GOAUTHY_CANDIDATE_SOURCE '$GOAUTHY_CANDIDATE_SOURCE'"
 candidate_config_id=$(docker image inspect --format '{{.Id}}' "$GOAUTHY_IMAGE" 2>/dev/null || true)
 printf '%s' "$candidate_config_id" | grep -Eq '^sha256:[0-9a-f]{64}$' ||
 	fail 'candidate image config id is not a sha256 digest'
-# The sixth run failed with the app container ErrImageNeverPull. The importer
-# mechanism is inferred, not directly observed: Kind's docker-save importer may
-# not attach the original digest reference, so the canonical deployment
-# reference may not resolve. Check whether the canonical reference already
-# resolves; only attach it when absent, so a pre-registered identical image is
-# not disturbed. The config blob (config ID) is preserved; the packaging
-# manifest digest may differ from the original registry manifest and is not
-# claimed equal. The owned alias must be retained through every later host
-# candidate use and removed only once by the EXIT cleanup, because removing it
-# midrun can drop the image content the host still needs.
-proposed_alias="${GOAUTHY_IMAGE%%@*}:${KIND_CLUSTER}"
-if docker image inspect "$proposed_alias" >/dev/null 2>&1; then
-	fail "refusing to overwrite a pre-existing host image tag: $proposed_alias"
+if [ "$GOAUTHY_LOCAL_BUILD" = 1 ]; then
+	# Bind the host payload: the loaded image config must equal the build OCI
+	# config digest, and the saved archive must expose the same config blob.
+	[ "$candidate_config_id" = "$meta_config_digest" ] ||
+		fail 'source-build image config id differs from the build OCI config digest'
+	saved_config_blob=$(docker image save "$GOAUTHY_IMAGE" | tar -xOf - manifest.json | jq -er '.[0].Config | select(test("^blobs/sha256/[0-9a-f]{64}$"))') ||
+		fail 'source-build saved archive manifest is missing a strict config blob path'
+	[ "sha256:${saved_config_blob##*/}" = "$candidate_config_id" ] ||
+		fail 'source-build saved archive config digest differs from the image config id'
 fi
-load_alias=$proposed_alias
-docker tag "$GOAUTHY_IMAGE" "$proposed_alias"
-kind load docker-image "$proposed_alias" --name "$KIND_CLUSTER"
-if ! docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null; then
-	docker exec "$node" ctr --namespace k8s.io images tag "$proposed_alias" "$GOAUTHY_IMAGE" >/dev/null ||
-		fail 'failed to attach the canonical candidate reference in the Kind node'
+if [ "$GOAUTHY_LOCAL_BUILD" = 1 ]; then
+	# Import the exact OCI layout archive, preserving the content-addressed
+	# manifest digest, then attach the canonical runtime reference to that
+	# imported manifest and verify both the manifest and config before the
+	# driver starts.
+	kind load image-archive "$candidate_oci" --name "$KIND_CLUSTER" ||
+		fail 'failed to import the source-build OCI archive into the Kind node'
+	if docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null; then
+		# The canonical reference already resolves. Accept it only when its
+		# current content is exactly the imported manifest and config; never
+		# silently repoint an unexpected target.
+		jq -e --arg config "$candidate_config_id" --arg manifest "$candidate_manifest_digest" '
+			(.status.id // "") == $config
+			and ([(.status.repoDigests // [])[] | sub("^.*@"; "")] | index($manifest) != null)
+		' "$temp_dir/cri-image.json" >/dev/null ||
+			fail 'source-build candidate canonical reference resolves to unexpected content in the Kind node'
+	else
+		# The reference is absent, so a plain tag cannot overwrite an
+		# unexpected target. No --force.
+		docker exec "$node" ctr --namespace k8s.io images tag "$candidate_manifest_digest" "$GOAUTHY_IMAGE" >/dev/null ||
+			fail 'failed to attach the canonical source-build candidate reference in the Kind node'
+		docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null ||
+			fail 'source-build candidate canonical reference does not resolve in the Kind node CRI'
+	fi
+else
+	# The sixth run failed with the app container ErrImageNeverPull. The importer
+	# mechanism is inferred, not directly observed: Kind's docker-save importer may
+	# not attach the original digest reference, so the canonical deployment
+	# reference may not resolve. Check whether the canonical reference already
+	# resolves; only attach it when absent, so a pre-registered identical image is
+	# not disturbed. The config blob (config ID) is preserved; the packaging
+	# manifest digest may differ from the original registry manifest and is not
+	# claimed equal. The owned alias must be retained through every later host
+	# candidate use and removed only once by the EXIT cleanup, because removing it
+	# midrun can drop the image content the host still needs.
+	proposed_alias="${GOAUTHY_IMAGE%%@*}:${KIND_CLUSTER}"
+	if docker image inspect "$proposed_alias" >/dev/null 2>&1; then
+		fail "refusing to overwrite a pre-existing host image tag: $proposed_alias"
+	fi
+	load_alias=$proposed_alias
+	docker tag "$GOAUTHY_IMAGE" "$proposed_alias"
+	kind load docker-image "$proposed_alias" --name "$KIND_CLUSTER"
 	if ! docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null; then
-		fail 'candidate canonical reference does not resolve in the Kind node CRI'
+		docker exec "$node" ctr --namespace k8s.io images tag "$proposed_alias" "$GOAUTHY_IMAGE" >/dev/null ||
+			fail 'failed to attach the canonical candidate reference in the Kind node'
+		if ! docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null; then
+			fail 'candidate canonical reference does not resolve in the Kind node CRI'
+		fi
 	fi
 fi
 node_config_id=$(jq -r '.status.id // empty' "$temp_dir/cri-image.json" 2>/dev/null || true)
 [ -n "$node_config_id" ] || fail 'candidate CRI image identity is empty'
 [ "$node_config_id" = "$candidate_config_id" ] ||
 	fail 'candidate image config identity differs between the host original and the Kind node'
-printf 'candidate image loaded: config_id=%s reference=%s\n' "$candidate_config_id" "$GOAUTHY_IMAGE" >&2
+if [ "$GOAUTHY_LOCAL_BUILD" = 1 ]; then
+	jq -e --arg manifest "$candidate_manifest_digest" '[(.status.repoDigests // [])[] | sub("^.*@"; "")] | index($manifest) != null' "$temp_dir/cri-image.json" >/dev/null ||
+		fail 'source-build candidate node manifest digest does not match the build OCI manifest digest'
+fi
+printf 'candidate image loaded: mode=%s config_id=%s manifest_digest=%s reference=%s\n' "$candidate_build_mode" "$candidate_config_id" "${candidate_manifest_digest:-none}" "$GOAUTHY_IMAGE" >&2
 
 browser_password=$(openssl rand -hex 16)
 client_secret=$(openssl rand -hex 32)
@@ -690,6 +805,8 @@ runner_status=0
 KIND_CLUSTER="$KIND_CLUSTER" \
 GOAUTHY_IMAGE="$GOAUTHY_IMAGE" \
 GOAUTHY_CANDIDATE_SOURCE="$GOAUTHY_CANDIDATE_SOURCE" \
+GOAUTHY_LOCAL_CANDIDATE="$GOAUTHY_LOCAL_BUILD" \
+GOAUTHY_CANDIDATE_MANIFEST_DIGEST="$candidate_manifest_digest" \
 GOAUTHY_E2E_BROWSER_PASSWORD="$browser_password" \
 GOAUTHY_E2E_CLIENT_SECRET="$client_secret" \
 ISOLATION113_EVIDENCE_DIR="$evidence_dir" \
