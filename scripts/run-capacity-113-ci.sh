@@ -501,8 +501,8 @@ printf 'candidate image loaded: config_id=%s reference=%s\n' "$candidate_config_
 
 browser_password=$(openssl rand -hex 16)
 client_secret=$(openssl rand -hex 32)
-master_key=$(openssl rand -base64 32 | tr -d '\n')
-oauth_hmac=$(openssl rand -base64 32 | tr -d '\n')
+master_key=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '=\n')
+oauth_hmac=$(openssl rand -base64 32 | tr '/+' '_-' | tr -d '=\n')
 dcr_token=$(openssl rand -hex 16)
 rhiza_admin=$(openssl rand -hex 32)
 voter0=$(openssl rand -hex 32)
