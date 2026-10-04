@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -331,10 +332,14 @@ func runIsolation113Diagnostic(t *testing.T, primary, secondary, user, password,
 				t.Run(phaseName+"-iam-"+strconv.FormatInt(scheduledAt.UnixNano(), 10), func(t *testing.T) {
 					requestStart := time.Now()
 					outcome := "failed"
+					trace := &isolation113StageTrace{}
 					defer func() {
 						t.Logf("isolation113 phase=%s route=iam outcome=%s scheduled_unix_ms=%d start_lag_ms=%.3f completion_latency_ms=%.3f", phaseName, outcome, scheduledAt.UnixMilli(), float64(requestStart.Sub(scheduledAt))/float64(time.Millisecond), float64(time.Since(requestStart))/float64(time.Millisecond))
+						for _, leg := range trace.snapshot() {
+							t.Logf("isolation113-stage phase=%s route=iam stage=%s outcome=%s status=%d elapsed_ms=%.3f scheduled_unix_ms=%d", phaseName, leg.Stage, leg.ErrorClass, leg.Status, leg.ElapsedMS, scheduledAt.UnixMilli())
+						}
 					}()
-					_, _ = loginForCode(t, newBrowserClient(t), primary, secondary, defaultRedirectURI, challenge, user, password, state)
+					_, _ = loginForCode(t, isolation113IAMClient(t, trace), primary, secondary, defaultRedirectURI, challenge, user, password, state)
 					outcome = "success"
 				})
 			}}
@@ -485,6 +490,83 @@ func invokeGrantMeasured(client *http.Client, base, grant, token, body string) (
 	defer r.Body.Close()
 	_, readErr := io.Copy(io.Discard, io.LimitReader(r.Body, 16<<10))
 	return time.Since(start), r.StatusCode, readErr
+}
+
+// isolation113StageTrace records per-HTTP-leg timing for the IAM login flow. It
+// keeps a fixed stage/outcome enum and numeric latency/status only: never a URL,
+// query string, header, token, credential, or response body.
+type isolation113StageTrace struct {
+	mu   sync.Mutex
+	legs []isolation113StageLeg
+}
+
+type isolation113StageLeg struct {
+	Stage      string
+	ElapsedMS  float64
+	Status     int
+	ErrorClass string
+}
+
+func (t *isolation113StageTrace) record(stage string, elapsed time.Duration, status int, err error) {
+	class := "none"
+	var networkError net.Error
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		class = "timeout"
+	case errors.As(err, &networkError) && networkError.Timeout():
+		class = "timeout"
+	case errors.Is(err, context.Canceled):
+		class = "canceled"
+	case err != nil:
+		class = "transport"
+	}
+	t.mu.Lock()
+	t.legs = append(t.legs, isolation113StageLeg{Stage: stage, ElapsedMS: float64(elapsed) / float64(time.Millisecond), Status: status, ErrorClass: class})
+	t.mu.Unlock()
+}
+
+func (t *isolation113StageTrace) snapshot() []isolation113StageLeg {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]isolation113StageLeg(nil), t.legs...)
+}
+
+// isolation113StageTransport classifies each IAM leg by a fixed method+path
+// enum and records time-to-response-headers only; the response body is read by
+// the caller after RoundTrip returns, so body time is not included. It never
+// inspects or retains request contents.
+type isolation113StageTransport struct {
+	base  http.RoundTripper
+	trace *isolation113StageTrace
+}
+
+func (t *isolation113StageTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	stage := "other"
+	switch {
+	case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/oidc/authorize"):
+		stage = "authorize-get"
+	case req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/auth/login"):
+		stage = "login-post"
+	}
+	start := time.Now()
+	response, err := t.base.RoundTrip(req)
+	status := 0
+	if response != nil {
+		status = response.StatusCode
+	}
+	t.trace.record(stage, time.Since(start), status, err)
+	return response, err
+}
+
+func isolation113IAMClient(t *testing.T, trace *isolation113StageTrace) *http.Client {
+	t.Helper()
+	client := newBrowserClient(t)
+	base := client.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	client.Transport = &isolation113StageTransport{base: base, trace: trace}
+	return client
 }
 
 func mustGrantList(t *testing.T, client *http.Client, base string, headers map[string]string) []byte {

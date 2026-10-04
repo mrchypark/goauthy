@@ -565,12 +565,55 @@ incompatibility in the wrapper fails fast without provisioning Kind.
     PASS/FAIL or cleanup claim is made. Entry 15 is retained. Criteria are
     unchanged; issue #113 stays OPEN with #105 GC disabled, resource/SLO
     unapproved, and three logical members on one physical CI node.
+17. [Run 37198925168](https://github.com/mrchypark/goauthy/actions/runs/37198925168),
+    source/helper `1f593e6452a0943fb34ec5a4241e877ddde06792`, job `111426416713`,
+    FAILED after 12m57. This is the first source-build run whose candidate
+    pipeline is runtime-proven: the dual OCI/Docker exporters, host Docker
+    load, Kind canonical manifest/config identity, and runtime image pins all
+    passed. The actual OCI manifest
+    `sha256:b3850c6f56069c97785058c121aa62ba06088e7284e1d3d8b5c8f179b943dc61`
+    and config
+    `sha256:abec25ff18daa029fdecad48cbb1a37750c19b412047d402e74102d3f0be5d78`
+    were bound without publication. The workload ran and produced a safe
+    analyzer result: 48 IAM observations (38 success, 10 anchored
+    `transport_timeout`/`null` HTTP status; baseline 0 error), with per-phase
+    error observations d0 mixed 2 / recovery 2, d1 mixed 1 / recovery 2, d2
+    mixed 1 / recovery 2. Those per-phase counts are separate observations with
+    no raw-fatal-to-phase association; no fatal phase assertion is made. 2 of 6
+    relative IAM comparisons failed (d1 mixed and d1 recovery); d0 and d2
+    passed. All attempt denominators (6/6/4) were complete, but the percentiles
+    use successful observations only, so the run cannot be admitted. Successful-
+    observation nearest-rank IAM P95=P99 (ms):
 
-## Forthcoming source-build measurement mode
+    | Driver | Baseline (n) | Mixed (n) | Recovery (n) |
+    | --- | --- | --- | --- |
+    | 0 | 13536.299 (6) | 10638.483 (6) | 7063.692 (4) |
+    | 1 | 5931.345 (6) | 10638.506 (6) | 12925.734 (4) |
+    | 2 | 11832.414 (6) | 11235.556 (6) | 9253.944 (4) |
+
+    API: account 15 all HTTP 200 / protected 0; fault 15 all actual HTTP 502.
+    Fixture 30 started/completed, active 0, drain true; all six resource series
+    complete. CPU throttling was not measured. Three logical GoAuthy members on
+    one Kind CI host with local Versity, 500m app / 100m sidecar; the zero-error
+    criterion is unchanged. The 9->7 source read-barrier optimization was
+    inadequate to pass the relative criterion; no query was instrumented and no
+    causal fix, SLO, GC, physical-three-host, or admission claim is made. Raw
+    logs are private and not uploaded; the five safe aggregates are private
+    run17-safe artifacts available to the parent. Entries 15 and 16 remain
+    pre-workload candidate-ingestion/reference histories and are not rewritten
+    as workload receipts. All sixteen prior failure histories are retained;
+    issue #113 stays OPEN with #105 GC disabled, resource/SLO unapproved, and
+    three logical members on one physical CI node.
+
+## Source-build measurement mode
 
 Runs 15 and 16 were the first attempts in this mode and failed before the
 workload (candidate ingestion and Kind CRI reference proof respectively; see
-entries 15 and 16), so the mode is not yet proven. A
+entries 15 and 16). Run 17 proved the source-build candidate pipeline end to
+end — dual OCI/Docker export, host load, Kind canonical manifest/config
+identity, and runtime image pins — and ran the workload under the unchanged
+criteria (see entry 17); the mode is now runtime-proven, while the relative
+latency criterion still fails and no admission is claimed. A
 source-build run mode builds the candidate inside the workflow from a clean
 `candidate_source` commit on the branch workflow ref (`local_build=true`)
 instead of pulling a prebuilt immutable image. The image is ephemeral: it is
@@ -589,7 +632,7 @@ snapshot, reducing the per-invoke linearizable read count from 9 to 7. This is
 a structural estimate only; no causal fix claim is made until an actual
 measurement under the approved criteria.
 
-All fourteen prior failure histories and their uncertainty are preserved. This
+All sixteen prior failure histories and their uncertainty are preserved. This
 mode changes no timing, scheduler, security, or oracle behavior and adds no new
 test, build, or implementation files and no raw logs or caches. Issue #113
 stays OPEN until an actual approved-criteria proof is recorded and the

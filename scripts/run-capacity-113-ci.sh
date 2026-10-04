@@ -260,9 +260,17 @@ summarize_results() {
 				unexpected_groups: .denominators.unexpected_groups
 			},
 			groups: [.groups[] | {driver_index, phase, route, operation, n, success_n, error_n, outcomes, statuses, p95_ms, p99_ms}],
-			protected: .protected,
-			fault_routes: .fault_routes,
-			iam_failure_diagnostics: (
+		protected: .protected,
+		fault_routes: .fault_routes,
+		iam_stages: {
+			stage_outcomes: [.iam_stages.stage_outcomes[] | {driver_index, phase, stage, outcome, n, elapsed_ms_max, elapsed_ms_p95}],
+			timeout_n: .iam_stages.timeout_n,
+			coverage: [.iam_stages.coverage[] | {driver_index, phase, iam_attempts, stage_observations}],
+			attempt_coverage: [.iam_stages.attempt_coverage[] | {driver_index, phase, scheduled_unix_ms, stage_n}],
+			complete: .iam_stages.complete,
+			attempt_complete: .iam_stages.attempt_complete
+		},
+		iam_failure_diagnostics: (
 				([.protected.groups[] | select(.route == "iam" and .error_n > 0)]) as $ig |
 				([$ig[].error_n] | add // 0) as $ierr |
 				([$ig[] | .driver_index] | unique) as $drivers |

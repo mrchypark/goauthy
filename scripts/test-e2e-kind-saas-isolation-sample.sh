@@ -7,7 +7,7 @@ temp_dir=$(mktemp -d)
 trap 'rm -rf "$temp_dir"' 0 HUP INT TERM
 mkdir "$temp_dir/bin"
 
-for tool in awk date jq mktemp sh stat; do
+for tool in awk date grep jq mktemp sed sh stat; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "required tool missing: $tool" >&2; exit 1; }
 done
 
@@ -65,6 +65,10 @@ cat >"$temp_dir/bin/kubectl" <<'EOF'
 #!/bin/sh
 case "$*" in
 	*" get pods "*) cat "$KUBE_FIXTURE" ;;
+	*" get --raw "*)
+		if [ "${CADVISOR_FAIL:-0}" = 1 ]; then exit 7; fi
+		cat "$CADVISOR_FIXTURE"
+		;;
 	*) exit 2 ;;
 esac
 EOF
@@ -73,7 +77,16 @@ PATH="$temp_dir/bin:$PATH"
 export PATH
 CRI_FIXTURE=$temp_dir/cri.json
 KUBE_FIXTURE=$temp_dir/pods.json
-export CRI_FIXTURE KUBE_FIXTURE
+CADVISOR_FIXTURE=$temp_dir/cadvisor.txt
+export CRI_FIXTURE KUBE_FIXTURE CADVISOR_FIXTURE
+: >"$temp_dir/cadvisor.txt"
+for cfs_pod in goauthy-0 goauthy-1 goauthy-2; do
+	for cfs_container in goauthy sidecarfixture; do
+		printf 'container_cpu_cfs_periods_total{container="%s",namespace="goauthy",pod="%s",id="/x"} 100\n' "$cfs_container" "$cfs_pod" >>"$temp_dir/cadvisor.txt"
+		printf 'container_cpu_cfs_throttled_periods_total{container="%s",namespace="goauthy",pod="%s",id="/x"} 5\n' "$cfs_container" "$cfs_pod" >>"$temp_dir/cadvisor.txt"
+		printf 'container_cpu_cfs_throttled_seconds_total{container="%s",namespace="goauthy",pod="%s",id="/x"} 0.25\n' "$cfs_container" "$cfs_pod" >>"$temp_dir/cadvisor.txt"
+	done
+done
 
 run_case() {
 	name=$1 expected=$2 mode=$3
@@ -127,6 +140,36 @@ run_case null-required-counter 1 null
 run_case wrong-type-counter 1 wrong
 run_case negative-counter 1 negative
 run_case cri-command-failure 1 command-fail
+
+# CPU CFS throttle evidence (node cAdvisor via the kubectl node proxy).
+run_case cfs-valid 0 valid
+jq -s -e 'length==6 and all(.[]; .cpuCfsPeriodsTotal==100 and .cpuCfsThrottledPeriodsTotal==5 and .cpuCfsThrottledSecondsTotal==0.25 and .cpuCfsUnavailable==[])' "$temp_dir/cfs-valid.jsonl" >/dev/null
+
+grep -v '^container_cpu_cfs_periods_total{container="goauthy",namespace="goauthy",pod="goauthy-0"' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-missing.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-missing.txt run_case cfs-missing 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cfs-counter-unavailable"))!=null' "$temp_dir/cfs-missing.jsonl" >/dev/null
+
+{ cat "$temp_dir/cadvisor.txt"; grep '^container_cpu_cfs_periods_total{container="goauthy",namespace="goauthy",pod="goauthy-0"' "$temp_dir/cadvisor.txt"; } >"$temp_dir/cadvisor-dup.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-dup.txt run_case cfs-dup 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cfs-counter-ambiguous"))!=null' "$temp_dir/cfs-dup.jsonl" >/dev/null
+
+sed 's/^\(container_cpu_cfs_periods_total{container="goauthy",namespace="goauthy",pod="goauthy-0"[^}]*}\) .*/\1 notanumber/' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-invalid.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-invalid.txt run_case cfs-invalid 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cfs-counter-unavailable"))!=null' "$temp_dir/cfs-invalid.jsonl" >/dev/null
+
+sed 's/^\(container_cpu_cfs_periods_total{container="goauthy",namespace="goauthy",pod="goauthy-0"[^}]*}\) .*/\1 100.5/' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-fractional.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-fractional.txt run_case cfs-fractional-period 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cfs-counter-unavailable"))!=null' "$temp_dir/cfs-fractional-period.jsonl" >/dev/null
+
+sed 's/^\(container_cpu_cfs_periods_total{container="goauthy",namespace="goauthy",pod="goauthy-0"[^}]*}\) .*/\1 9007199254740992/' "$temp_dir/cadvisor.txt" >"$temp_dir/cadvisor-oversize.txt"
+CADVISOR_FIXTURE=$temp_dir/cadvisor-oversize.txt run_case cfs-oversize-period 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cfs-counter-unavailable"))!=null' "$temp_dir/cfs-oversize-period.jsonl" >/dev/null
+
+CADVISOR_FIXTURE=$temp_dir/cadvisor.txt run_case cfs-seconds-fractional 0 valid
+jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsThrottledSecondsTotal==0.25 and .cpuCfsUnavailable==[]' "$temp_dir/cfs-seconds-fractional.jsonl" >/dev/null
+
+CADVISOR_FAIL=1 run_case cfs-endpoint-fail 0 valid
+jq -s -e 'length==6 and all(.[]; .cpuCfsPeriodsTotal==null and (.cpuCfsUnavailable|index("cadvisor-endpoint-unavailable"))!=null)' "$temp_dir/cfs-endpoint-fail.jsonl" >/dev/null
 
 private_canary() {
 	canary_dir=$(mktemp -d) || return 1

@@ -664,5 +664,208 @@ else
 	bad "private URL cannot classify a transport timeout"
 fi
 
+rec_stage() {
+	log=$1; phase=$2; stage=$3; outcome=$4; status=$5; elapsed=$6; sched=$7
+	printf 'connection_use_grant_test.go:1: isolation113-stage phase=%s route=iam stage=%s outcome=%s status=%s elapsed_ms=%s scheduled_unix_ms=%s\n' \
+		"$phase" "$stage" "$outcome" "$status" "$elapsed" "$sched" >>"$log"
+}
+
+gen_samples_cfs() {
+	dir=$1; mode=$2
+	: >"$dir/container-samples.jsonl"
+	for pod in 0 1 2; do
+		for cont in goauthy sidecarfixture; do
+			for t in 1 2 3; do
+				case "$mode" in
+					valid) periods=$((t * 100)); throttled=$((t * 10)); seconds=$t ;;
+					missing) periods=null; throttled=null; seconds=null ;;
+					reset) periods=$((300 - t * 100)); throttled=0; seconds=0 ;;
+				esac
+				jq -nc --arg ts "2026-01-01T00:00:0${t}Z" --argjson p "$pod" --arg c "$cont" --arg cid "containerd://cfs-${pod}-${cont}" \
+					--argjson periods "$periods" --argjson throttled "$throttled" --argjson seconds "$seconds" \
+					'{hostTimestampUTC:$ts,pod:("goauthy-"+($p|tostring)),container:$c,containerID:$cid,cpuUsageCoreNanoSeconds:1000,memoryWorkingSetBytes:1000000,memoryRSSBytes:900000,unavailable:[],cpuCfsPeriodsTotal:$periods,cpuCfsThrottledPeriodsTotal:$throttled,cpuCfsThrottledSecondsTotal:$seconds,cpuCfsUnavailable:[]}' \
+					>>"$dir/container-samples.jsonl"
+			done
+		done
+	done
+}
+
+stage_case=$tmp/iam-stage
+mkcase "$stage_case" 100 110 90
+rec_stage "$stage_case/driver-isolation113-driver-0-abcde.log" baseline authorize-get none 200 3000.000 1
+rec_stage "$stage_case/driver-isolation113-driver-0-abcde.log" baseline login-post none 302 1000.000 1
+rec_stage "$stage_case/driver-isolation113-driver-0-abcde.log" mixed authorize-get timeout 0 10000.000 7
+stage_canary='PRIVATE_STAGE_CANARY_9f3c7a'
+printf '%s\n' "$stage_canary" >> "$stage_case/driver-isolation113-driver-0-abcde.log"
+results=$(new_results)
+if "$wrapper" --summarize "$stage_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -ne 0 ]; then
+	bad "stage survives wrapper (unexpected nonzero exit)"
+elif jq -e '
+	.iam_stages.timeout_n == 1
+	and ([.iam_stages.stage_outcomes[] | select(.stage == "authorize-get" and .outcome == "timeout" and .n == 1 and .elapsed_ms_max == 10000)] | length) == 1
+	and (.iam_stages.stage_outcomes | length) == 3
+' "$results/criterion.json" >/dev/null 2>&1 &&
+	! grep -q "$stage_canary" "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md" 2>/dev/null; then
+	ok "stage survives wrapper 5 allowlist"
+else
+	bad "stage survives wrapper 5 allowlist"
+	jq -c '.iam_stages' "$results/criterion.json" >&2 || true
+fi
+
+missing_stage=$tmp/iam-missing-stage
+mkcase "$missing_stage" 100 110 90
+results=$(new_results)
+"$wrapper" --summarize "$missing_stage" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.iam_stages.complete == false
+	and .iam_stages.attempt_complete == false
+	and ([.iam_stages.attempt_coverage[] | select(.stage_n == 0)] | length) == 48
+	and (.iam_stages.timeout_n == 0)
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "per-attempt missing stage evidence"
+else
+	bad "per-attempt missing stage evidence"
+	jq -c '.iam_stages | {attempt_complete, timeout_n, coverage_n: (.attempt_coverage | length)}' "$results/criterion.json" >&2 || true
+fi
+
+unk_stage=$tmp/iam-unknown-stage
+mkcase "$unk_stage" 100 110 90
+printf 'connection_use_grant_test.go:1: isolation113-stage phase=baseline route=iam stage=bogus outcome=none status=200 elapsed_ms=1.000 scheduled_unix_ms=1\n' >> "$unk_stage/driver-isolation113-driver-0-abcde.log"
+results=$(new_results)
+if "$wrapper" --summarize "$unk_stage" "$results" >"$tmp/out" 2>"$tmp/err"; then
+	bad "unknown stage rejected (expected nonzero exit)"
+else
+	ok "unknown stage rejected"
+fi
+
+for mode in valid missing reset; do
+	cfs_case=$tmp/cfs-$mode
+	mkdir -p "$cfs_case"
+	for idx in 0 1 2; do gen_driver_log "$cfs_case" "$idx" 100 110 90; done
+	gen_samples_cfs "$cfs_case" "$mode"
+	gen_fixture "$cfs_case"
+	results=$(new_results)
+	"$wrapper" --summarize "$cfs_case" "$results" >/dev/null 2>"$tmp/err" || true
+	if [ "$mode" = valid ]; then want_complete=true; want_delta=200; else want_complete=false; want_delta=null; fi
+	if jq -e --argjson wc "$want_complete" --argjson wd "$want_delta" '
+		([.series[] | select(.container == "goauthy")] | length) == 3
+		and ([.series[] | select(.container == "goauthy") | .cfs_periods.complete] | all(. == $wc))
+		and ([.series[] | select(.container == "goauthy") | .cfs_periods.delta] | all(. == $wd))
+		' "$results/resource-summary.json" >/dev/null 2>&1; then
+		ok "cfs $mode"
+	else
+		bad "cfs $mode"
+		jq -c '.series[] | select(.container == "goauthy") | .cfs_periods' "$results/resource-summary.json" >&2 || true
+	fi
+done
+
+gen_samples_cfs_bad() {
+	dir=$1; mode=$2
+	: >"$dir/container-samples.jsonl"
+	for pod in 0 1 2; do
+		for cont in goauthy sidecarfixture; do
+			for t in 1 2; do
+				case "$mode" in
+					fractional) periods=100.5; throttled=10; seconds=1 ;;
+					oversize) periods=9007199254740992; throttled=10; seconds=1 ;;
+				esac
+				jq -nc --arg ts "2026-01-01T00:00:0${t}Z" --argjson p "$pod" --arg c "$cont" --arg cid "containerd://bad-${pod}-${cont}" \
+					--argjson periods "$periods" --argjson throttled "$throttled" --argjson seconds "$seconds" \
+					'{hostTimestampUTC:$ts,pod:("goauthy-"+($p|tostring)),container:$c,containerID:$cid,cpuUsageCoreNanoSeconds:1000,memoryWorkingSetBytes:1000000,memoryRSSBytes:900000,unavailable:[],cpuCfsPeriodsTotal:$periods,cpuCfsThrottledPeriodsTotal:$throttled,cpuCfsThrottledSecondsTotal:$seconds,cpuCfsUnavailable:[]}' \
+					>>"$dir/container-samples.jsonl"
+			done
+		done
+	done
+}
+
+for mode in fractional oversize; do
+	bad_case=$tmp/cfs-bad-$mode
+	mkdir -p "$bad_case"
+	for idx in 0 1 2; do gen_driver_log "$bad_case" "$idx" 100 110 90; done
+	gen_samples_cfs_bad "$bad_case" "$mode"
+	gen_fixture "$bad_case"
+	results=$(new_results)
+	if "$wrapper" --summarize "$bad_case" "$results" >"$tmp/out" 2>"$tmp/err"; then
+		bad "cfs $mode rejected (expected nonzero exit)"
+	else
+		ok "cfs $mode rejected"
+	fi
+done
+
+series_case=$tmp/cfs-series
+mkdir -p "$series_case"
+for idx in 0 1 2; do gen_driver_log "$series_case" "$idx" 100 110 90; done
+gen_samples_cfs "$series_case" valid
+gen_fixture "$series_case"
+results=$(new_results)
+"$wrapper" --summarize "$series_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	([.series[] | select(.container == "goauthy")] | length) == 3
+	and ([.series[] | select(.container == "sidecarfixture")] | length) == 3
+' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "cfs three goauthy series"
+else
+	bad "cfs three goauthy series"
+	jq -c '[.series[] | .container] | group_by(.) | map({container: .[0], n: length})' "$results/resource-summary.json" >&2 || true
+fi
+
+gen_samples_cfs_edge() {
+	dir=$1; mode=$2
+	: >"$dir/container-samples.jsonl"
+	for pod in 0 1 2; do
+		for cont in goauthy sidecarfixture; do
+			for t in 1 2 3; do
+				cid_null=false; cid="containerd://edge-${mode}-${pod}-${cont}"; periods=$((t * 100))
+				case "$mode" in
+					instance) cid="containerd://edge-${mode}-${pod}-${cont}-${t}" ;;
+					missing-id) cid_null=true; cid="" ;;
+					gap) if [ "$t" = 2 ]; then periods=null; fi ;;
+				esac
+				jq -nc --arg ts "2026-01-01T00:00:0${t}Z" --argjson p "$pod" --arg c "$cont" --argjson cid_null "$cid_null" --arg cid "$cid" \
+					--argjson periods "$periods" --argjson throttled "$((t * 10))" --argjson seconds "$t" \
+					'{hostTimestampUTC:$ts,pod:("goauthy-"+($p|tostring)),container:$c,containerID:(if $cid_null then null else $cid end),cpuUsageCoreNanoSeconds:1000,memoryWorkingSetBytes:1000000,memoryRSSBytes:900000,unavailable:[],cpuCfsPeriodsTotal:$periods,cpuCfsThrottledPeriodsTotal:$throttled,cpuCfsThrottledSecondsTotal:$seconds,cpuCfsUnavailable:[]}' \
+					>>"$dir/container-samples.jsonl"
+		done
+	done
+	done
+}
+
+for mode in instance missing-id gap; do
+	edge_case=$tmp/cfs-edge-$mode
+	mkdir -p "$edge_case"
+	for idx in 0 1 2; do gen_driver_log "$edge_case" "$idx" 100 110 90; done
+	gen_samples_cfs_edge "$edge_case" "$mode"
+	gen_fixture "$edge_case"
+	results=$(new_results)
+	"$wrapper" --summarize "$edge_case" "$results" >/dev/null 2>"$tmp/err" || true
+	if jq -e '
+		([.series[] | select(.container == "goauthy")] | length) == 3
+		and ([.series[] | select(.container == "goauthy") | .cfs_periods.complete] | all(. == false))
+		and ([.series[] | select(.container == "goauthy") | .cfs_periods.delta] | all(. == null))
+	' "$results/resource-summary.json" >/dev/null 2>&1; then
+		ok "cfs $mode incomplete"
+	else
+		bad "cfs $mode incomplete"
+		jq -c '.series[] | select(.container == "goauthy") | .cfs_periods' "$results/resource-summary.json" >&2 || true
+	fi
+done
+
+wrong_phase=$tmp/iam-wrong-phase
+mkcase "$wrong_phase" 100 110 90
+rec_stage "$wrong_phase/driver-isolation113-driver-0-abcde.log" mixed authorize-get none 200 3000.000 1
+results=$(new_results)
+"$wrapper" --summarize "$wrong_phase" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.iam_stages.complete == false
+	and .iam_stages.attempt_complete == false
+	and ([.iam_stages.attempt_coverage[] | select(.scheduled_unix_ms == 1 and .stage_n == 0)] | length) == 1
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "wrong-phase stage join fail closed"
+else
+	bad "wrong-phase stage join fail closed"
+	jq -c '.iam_stages | {complete, attempt_complete}' "$results/criterion.json" >&2 || true
+fi
+
 echo "passed=$pass failed=$fail" >&2
 [ "$fail" -eq 0 ]

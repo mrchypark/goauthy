@@ -3,6 +3,20 @@ def nearest_rank($arr; $p): ($arr | sort) as $s | $s[((($s | length) * $p) | cei
 def p95($arr): if ($arr | length) == 0 then null else nearest_rank($arr; 0.95) end;
 def p99($arr): if ($arr | length) == 0 then null else nearest_rank($arr; 0.99) end;
 def limit($v; $f; $o): if $v == null then null else [$v * $f, $v + $o] | max end;
+def cfs_delta($field):
+  . as $all |
+  (map(select(.[$field] != null and .containerID != null))) as $v |
+  (if ($v | length) >= 2 and ($v | length) == ($all | length) then
+    ($v | map(.containerID) | unique) as $inst |
+    ($v | map(.[$field])) as $vals |
+    (if ($inst | length) == 1 and ([range(1; ($vals | length)) as $i | $vals[$i] >= $vals[$i-1]] | all) then
+      {first: $vals[0], last: $vals[-1], delta: ($vals[-1] - $vals[0]), complete: true}
+    else
+      {first: null, last: null, delta: null, complete: false}
+    end)
+  else
+    {first: null, last: null, delta: null, complete: false}
+  end);
 
 def base_expected($phase; $route; $operation):
   if $route == "iam" then
@@ -61,12 +75,43 @@ if $obs_n == 0 then error("no observation records") else . end |
   p99_ms: p99(.success_latencies_ms)
 }] as $groups_output |
 
+($input.stages // []) as $stages |
+($stages | group_by([.driver_index, .phase, .stage, .outcome])) as $stage_groups |
+[$stage_groups[] | {
+  driver_index: .[0].driver_index,
+  phase: .[0].phase,
+  stage: .[0].stage,
+  outcome: .[0].outcome,
+  n: length,
+  elapsed_ms_max: (map(.elapsed_ms) | max),
+  elapsed_ms_p95: p95(map(.elapsed_ms))
+}] as $stage_outcome_groups |
+($stages | map(select(.outcome == "timeout")) | length) as $stage_timeout_n |
+
 ($obs | map(.driver_index) | unique) as $drivers |
 ($drivers | any(. != null)) as $attributed |
 ($fix | map(.index) | sort) as $fixture_indices |
 if $fixture_indices != [0, 1, 2] then error("fixture metrics must cover indices 0,1,2") else . end |
 (if $attributed then 1 else 3 end) as $mult |
 (if $attributed then [0, 1, 2] else [null] end) as $slots |
+
+([$slots[] as $d | ["baseline", "mixed", "recovery"][] as $p |
+  {
+    driver_index: $d,
+    phase: $p,
+    iam_attempts: ([$groups[] | select(.driver_index == $d and .route == "iam" and .phase == $p) | .n] | add // 0),
+    stage_observations: ([$stage_outcome_groups[] | select(.driver_index == $d and .phase == $p) | .n] | add // 0)
+  }]) as $stage_coverage |
+
+([$obs[] | select(.route == "iam") | . as $o |
+  {
+    driver_index: $o.driver_index,
+    phase: $o.phase,
+    scheduled_unix_ms: $o.scheduled_unix_ms,
+    stage_n: ([$stages[] | select(.driver_index == $o.driver_index and .phase == $o.phase and .scheduled_unix_ms == $o.scheduled_unix_ms)] | length)
+  }]) as $attempt_stage_coverage |
+
+([$stages[] | select((. as $s | [$attempt_stage_coverage[] | select(.driver_index == $s.driver_index and .phase == $s.phase and .scheduled_unix_ms == $s.scheduled_unix_ms)] | length) == 0)] | length) as $unmatched_stages |
 
 [$slots[] as $d | expected_groups[] as $eg |
   ([$groups[] | select(.driver_index == $d and .phase == $eg.phase and .route == $eg.route and .operation == $eg.operation)][0]) as $g |
@@ -138,7 +183,11 @@ if $fixture_indices != [0, 1, 2] then error("fixture metrics must cover indices 
   peak_rss_bytes: (map(.memoryRSSBytes) | map(select(. != null)) | if length == 0 then null else max end),
   peak_cpu_nano: (map(.cpuUsageCoreNanoSeconds) | max),
   working_set_range_bytes: ((map(.memoryWorkingSetBytes) | sort | .[-1]) - (map(.memoryWorkingSetBytes) | sort | .[0])),
-  unavailable: (group_by(.unavailable) | map({reasons: .[0].unavailable, n: length}))
+  unavailable: (group_by(.unavailable) | map({reasons: .[0].unavailable, n: length})),
+  cfs_periods: cfs_delta("cpuCfsPeriodsTotal"),
+  cfs_throttled_periods: cfs_delta("cpuCfsThrottledPeriodsTotal"),
+  cfs_throttled_seconds: cfs_delta("cpuCfsThrottledSecondsTotal"),
+  cfs_unavailable: (group_by(.cpuCfsUnavailable // []) | map({reasons: .[0].cpuCfsUnavailable, n: length}))
 }] as $resource_series |
 
 ([$samp[] | .unavailable[]? | select(. != "rss-not-exposed")] | length) as $unavailable_non_rss |
@@ -227,6 +276,17 @@ if $fixture_indices != [0, 1, 2] then error("fixture metrics must cover indices 
     evidence: {unavailable_non_rss_count: $unavailable_non_rss, complete: ($unavailable_non_rss == 0)}
   },
   fixture: {per_index: $fixture_check, aggregate: $fixture_aggregate, complete: $fixture_complete, mismatches: $fixture_mismatches},
+  iam_stages: {
+    stage_outcomes: $stage_outcome_groups,
+    timeout_n: $stage_timeout_n,
+    coverage: $stage_coverage,
+    attempt_coverage: $attempt_stage_coverage,
+    complete: ($stage_coverage | all(.stage_observations > 0 or .iam_attempts == 0))
+              and ($attempt_stage_coverage | all(.stage_n > 0))
+              and ($unmatched_stages == 0),
+    attempt_complete: ($attempt_stage_coverage | all(.stage_n > 0)),
+    note: "per-HTTP-leg stage observations; missing stage evidence is reported as missing, never as zero"
+  },
   small_sample: {
     min_group_n: ([$groups[].n] | min),
     threshold: 16,

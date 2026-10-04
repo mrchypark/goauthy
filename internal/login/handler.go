@@ -667,7 +667,7 @@ func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request, form log
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	h.completeAuthentication(w, r, sessionToken, form.interaction, auth.Subject, "pwd", func() error {
+	h.completeAuthenticationWithInteraction(w, r, sessionToken, form.interaction, interaction, auth.Subject, "pwd", func() error {
 		return h.recordSuccessfulAuthentication(r.Context(), peerIP, h.now().Sub(started), nil)
 	})
 }
@@ -1242,9 +1242,37 @@ func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *ht
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
+	h.finishAuthentication(w, r, sessionToken, interactionDigest, subject, authMethod, onConsumed, consume, peerIP, interaction)
+}
+
+// completeAuthenticationWithInteraction completes an account login from an
+// interaction already loaded in the same request. The loaded snapshot is reused,
+// but the authorization request is re-resolved fresh at the original gate so a
+// concurrent client/ForceMFA change is fenced before the one-time interaction is
+// consumed and the session is rotated.
+func (h *Handler) completeAuthenticationWithInteraction(w http.ResponseWriter, r *http.Request, sessionToken, interactionToken string, interaction browser.AuthorizationInteraction, subject, authMethod string, onConsumed func() error) {
+	peerIP, peerOK := h.resolvePeerIP(r)
+	if !peerOK {
+		http.Error(w, "Invalid login request", http.StatusBadRequest)
+		return
+	}
+	digest, err := browser.CanonicalTokenDigest(interactionToken)
+	if err != nil {
+		http.Error(w, "Invalid login request", http.StatusForbidden)
+		return
+	}
+	consume := func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+		return h.browser.ConsumeAuthorizationInteraction(ctx, sessionToken, interactionToken)
+	}
+	h.finishAuthentication(w, r, sessionToken, digest, subject, authMethod, onConsumed, consume, peerIP, interaction)
+}
+
+// finishAuthentication re-resolves the current authorization request from the
+// loaded interaction, enforces the ForceMFA gate, consumes the one-time
+// interaction atomically, and rotates the session only after every fence passes.
+func (h *Handler) finishAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, interactionDigest, subject, authMethod string, onConsumed func() error, consume func(context.Context) (browser.AuthorizationInteraction, error), peerIP string, interaction browser.AuthorizationInteraction) {
 	target, err := h.resolveAuthenticationRequest(r, interaction.Payload)
-	request := target.policy
-	if err != nil || (request.ForceMFA && authMethod != "mfa") {
+	if err != nil || (target.policy.ForceMFA && authMethod != "mfa") {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
