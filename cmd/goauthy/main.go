@@ -79,8 +79,27 @@ func main() {
 		err = run()
 	}
 	if err != nil {
-		slog.Error("goauthy stopped", "error", err)
+		slog.Error("goauthy stopped", "error_class", startupErrorClass(err), "error", err)
 		os.Exit(1)
+	}
+}
+
+func startupErrorClass(err error) string {
+	switch {
+	case errors.Is(err, rhiza.ErrCommitUnknown):
+		return "write_outcome_unknown"
+	case errors.Is(err, rhiza.ErrNotReady):
+		return "node_not_ready"
+	case errors.Is(err, rhiza.ErrQuorumUnavailable):
+		return "quorum_unavailable"
+	case errors.Is(err, rhiza.ErrDurabilityUnavailable):
+		return "ack_durability_unavailable"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "unknown"
 	}
 }
 
