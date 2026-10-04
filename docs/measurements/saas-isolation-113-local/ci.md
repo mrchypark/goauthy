@@ -637,3 +637,29 @@ mode changes no timing, scheduler, security, or oracle behavior and adds no new
 test, build, or implementation files and no raw logs or caches. Issue #113
 stays OPEN until an actual approved-criteria proof is recorded and the
 resource/SLO scope is made explicit; no resource ceiling is invented here.
+
+## Further diagnostic campaign receipts
+
+- [Run 18](https://github.com/mrchypark/goauthy/actions/runs/37204522085)
+  failed in offline preflight: jq 1.7 rejected an unparenthesized object-value
+  expression. No candidate build, cluster or workload ran. Commit `c40efac`
+  corrects the grammar; the permanent controls pass with actual jq 1.7 and 1.8.1.
+- [Run 19](https://github.com/mrchypark/goauthy/actions/runs/37205285315)
+  was cancelled during offline preflight after actionable diagnostic review
+  findings. Its candidate build and calibration were skipped; it is neither a
+  runtime failure nor a performance receipt.
+- [Run 20](https://github.com/mrchypark/goauthy/actions/runs/37207196840)
+  at `e1af21eb88298d3834cee0e2ae9edadea7d2980d` ran the corrected diagnostic
+  source and failed the unchanged criteria: 37/48 IAM success, 11 anchored
+  transport timeouts and 6/6 relative comparisons failed. Complete per-attempt
+  header-stage coverage places three failed round trips at authorize GET and
+  eight at login POST; the stage enums are six `timeout` and five `transport`,
+  while all eleven outer fatal diagnostics classify as transport timeouts.
+  Account calls were 15×200, fault calls 15×expected502, and all 30 fixture
+  requests completed with zero active. Six resource series contain 174 samples
+  each (1,044 rows), with complete CFS deltas and no unavailable non-RSS data.
+  App throttled seconds increased by 0.340, 0.281 and 2.135 respectively over
+  the full capture; these aggregates have no phase alignment and establish no
+  CPU cause or exclusion. The analyzer succeeded, but correctness and relative
+  latency failed. No performance admission, capacity, SLO or issue closure is
+  claimed, and no unchanged-source rerun hides the failed receipt.

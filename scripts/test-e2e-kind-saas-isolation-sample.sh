@@ -245,6 +245,64 @@ sed 's#namespace="goauthy",pod="goauthy-0",id="#container_label_io_kubernetes_po
 CADVISOR_FIXTURE=$temp_dir/cadvisor-comma.txt run_case cfs-label-comma 0 valid
 jq -s -e '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")][0] | .cpuCfsPeriodsTotal==100 and .cpuCfsUnavailable==[]' "$temp_dir/cfs-label-comma.jsonl" >/dev/null
 
+# Sampler-to-summary pipeline controls using the ACTUAL cfs_delta from the
+# shared analyzer (bounded extract, not a copied implementation). These run
+# real sampler-produced rows through the real delta function.
+series_count() {
+  if count_value=$(jq -s '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")]|length' "$1" 2>/dev/null); then
+    printf '%s\n' "$count_value"
+  else
+    printf '0\n'
+  fi
+}
+capture_two() {
+  name=$1
+  output=$temp_dir/$name.jsonl
+  "$root/scripts/e2e-kind-saas-isolation-sample.sh" fixture goauthy "$output" >/dev/null 2>&1 &
+  sampler_pid=$!
+  i=0
+  while [ "$(series_count "$output")" -lt 2 ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+  kill -TERM "$sampler_pid" 2>/dev/null || :
+  wait "$sampler_pid" || { echo "$name: sampler failed" >&2; exit 1; }
+  [ "$(series_count "$output")" -ge 2 ] || { echo "$name: sampler emitted fewer than two target rows" >&2; exit 1; }
+}
+awk '
+  /^def cfs_delta\(/ { copy=1 }
+  copy && /^def / && !/^def cfs_delta\(/ { exit }
+  copy { print }
+' "$root/scripts/summarize-e2e-kind-saas-isolation-113.jq" >"$temp_dir/cfs_delta.jq"
+[ -s "$temp_dir/cfs_delta.jq" ] || { echo 'could not extract cfs_delta' >&2; exit 1; }
+{ cat "$temp_dir/cfs_delta.jq"; echo '$rows[0] | cfs_delta($field)'; } >"$temp_dir/cfs_delta_run.jq"
+series() { jq -s -c '[.[]|select(.pod=="goauthy-0" and .container=="goauthy")]'; }
+
+CADVISOR_FIXTURE=$temp_dir/cadvisor.txt capture_two cfs-pipeline-valid
+CADVISOR_FIXTURE=$temp_dir/cadvisor-mismatch.txt capture_two cfs-pipeline-mismatch
+CADVISOR_FIXTURE=$temp_dir/cadvisor-noid.txt capture_two cfs-pipeline-absent
+series <"$temp_dir/cfs-pipeline-valid.jsonl" >"$temp_dir/series-valid.json"
+series <"$temp_dir/cfs-pipeline-mismatch.jsonl" >"$temp_dir/series-mismatch.json"
+series <"$temp_dir/cfs-pipeline-absent.jsonl" >"$temp_dir/series-absent.json"
+
+# Two matching valid samples: stable containerID, length 2, complete, delta 0.
+jq -e 'length == 2 and ([.[].containerID] | unique | length) == 1' "$temp_dir/series-valid.json" >/dev/null
+jq -n --slurpfile rows "$temp_dir/series-valid.json" --arg field "cpuCfsPeriodsTotal" -f "$temp_dir/cfs_delta_run.jq" >"$temp_dir/cfs-delta-valid.json"
+jq -e '.complete == true and .delta == 0 and .first == 100 and .last == 100' "$temp_dir/cfs-delta-valid.json" >/dev/null
+
+# Both mismatch / absent: no usable field, complete false, delta null.
+jq -n --slurpfile rows "$temp_dir/series-mismatch.json" --arg field "cpuCfsPeriodsTotal" -f "$temp_dir/cfs_delta_run.jq" >"$temp_dir/cfs-delta-mismatch.json"
+jq -e '.complete == false and .delta == null' "$temp_dir/cfs-delta-mismatch.json" >/dev/null
+jq -n --slurpfile rows "$temp_dir/series-absent.json" --arg field "cpuCfsPeriodsTotal" -f "$temp_dir/cfs_delta_run.jq" >"$temp_dir/cfs-delta-absent.json"
+jq -e '.complete == false and .delta == null' "$temp_dir/cfs-delta-absent.json" >/dev/null
+
+# A matching valid sample followed by a mismatch sample with the same constant
+# CRI containerID models a cAdvisor identity change while the CRI ID stays
+# constant: incomplete, delta null.
+{ cat "$temp_dir/cfs_delta.jq"; echo '$a[0] + $b[0] | cfs_delta($field)'; } >"$temp_dir/cfs_delta_combined.jq"
+series <"$temp_dir/cfs-pipeline-valid.jsonl" | jq -c '.[0:1]' >"$temp_dir/series-a.json"
+series <"$temp_dir/cfs-pipeline-mismatch.jsonl" | jq -c '.[0:1]' >"$temp_dir/series-b.json"
+jq -n --slurpfile a "$temp_dir/series-a.json" --slurpfile b "$temp_dir/series-b.json" --arg field "cpuCfsPeriodsTotal" -f "$temp_dir/cfs_delta_combined.jq" >"$temp_dir/cfs-delta-combined.json"
+jq -e '.complete == false and .delta == null' "$temp_dir/cfs-delta-combined.json" >/dev/null
+jq -ne --slurpfile a "$temp_dir/series-a.json" --slurpfile b "$temp_dir/series-b.json" '$a[0] + $b[0] | length == 2 and all(.[]; (.containerID | type) == "string" and (.containerID | length) > 0) and ([.[].containerID] | unique | length) == 1' >/dev/null
+
 private_canary() {
 	canary_dir=$(mktemp -d) || return 1
 	old_tmpdir=${TMPDIR-}
