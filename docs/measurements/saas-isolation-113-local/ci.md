@@ -120,6 +120,20 @@ The workflow uploads only the contents of `capacity-113-results`:
   status.
 - `resource-summary.json` - analyzer-derived resource series, evidence, and
   ceiling (or an `available: false` marker when the analyzer is unavailable).
+  It carries an additive `startup` object derived from the already-captured
+  private `failure-capture/pods.json`: `available`/`complete`/`observed` flags
+  and a sparse `pods` array (only captured members, no synthetic absent
+  records; `complete` requires sorted unique indexes `[0,1,2]` and exactly three
+  entries). Each container view is bounded to a fixed role
+  (`init`/`app`/`fixture`/`other`), a fixed phase (`Running`/`Waiting`/
+  `Terminated`/`Unknown`), a bounded restart bucket (`0`/`1-2`/`3-5`/`6+`/
+  `unknown`), and fixed waiting/terminated reasons (Kubernetes states such as
+  `ErrImageNeverPull`, `CrashLoopBackOff`, `OOMKilled`, `Error`, `Completed`,
+  `ContainerCreating`, `PodInitializing`, `ErrImagePull`, `ImagePullBackOff`,
+  `CreateContainerConfigError`, `CreateContainerError`, `RunContainerError`,
+  `InvalidImageName`, else `other`). Missing/absent status or restart counts
+  yield `Unknown`/`unknown` without dropping other records; private fields
+  (messages, image/container IDs, IPs, env, URLs, logs) are never emitted.
 - `pins.json` - candidate image/source, helper source head, fixed helper build
   digests (`image_ref`/`manifest_digest`/`config_digest`/`loaded_image_id`),
   and fixture/driver runtime `image` and normalized `imageID` digests only.
@@ -179,7 +193,12 @@ claim, or measured pass.
   covers the analyzer's positive, missing-baseline, admitted-error, and
   fail-closed cases.
 - `scripts/test-run-capacity-113-ci-summarize.sh` covers the wrapper's
-  `--summarize` report-aggregation path and missing-baseline controls offline.
+  `--summarize` report-aggregation path, missing-baseline controls, the
+  multi-document baseline transform, and startup observability (real separate
+  `initContainerStatuses`/`containerStatuses`, fixed role/reason allowlist
+  including `ImagePullBackOff`/`CreateContainerConfigError`, unknown strings as
+  `other`, adversarial private fields absent, and missing-status/null-restart
+  retention) offline.
 
 Both run as a cheap step in the existing `Manifest checks` job of
 `.github/workflows/ci.yml`, after a `jq` presence check. No required check is
@@ -202,4 +221,9 @@ removed, bypassed, or path-filtered.
   workload or aggregate result. After the client bump, the second dispatch
   `37164764400` passed `kind load` but failed in the wrapper baseline transform
   (`jq: Cannot iterate over null` on the multi-document `baseline.json`, exit 5),
-  again before any workload or aggregate result.
+  again before any workload or aggregate result. The third dispatch
+  `37165483144`
+  reached a readiness timeout with cause unknown because the private
+  `failure-capture/pods.json` was not exported; the wrapper now derives a fixed
+  allowlisted `.startup` view from that already-captured file (never exported)
+  so a future readiness failure has a bounded, privacy-safe diagnosis.

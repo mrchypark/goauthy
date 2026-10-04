@@ -30,6 +30,89 @@ fail() {
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 
+startup_project_jq='
+	def known_name($n):
+		if $n == "fixture-loopback-address" then "init"
+		elif $n == "wait-for-rhiza-bucket" then "init"
+		elif $n == "goauthy" then "app"
+		elif $n == "sidecarfixture" then "fixture"
+		else "other" end;
+	def reason_enum($r):
+		if $r == null then null
+		elif ($r == "ErrImageNeverPull" or $r == "CrashLoopBackOff" or $r == "OOMKilled" or $r == "Error" or $r == "Completed"
+			or $r == "ContainerCreating" or $r == "PodInitializing" or $r == "ErrImagePull" or $r == "ImagePullBackOff"
+			or $r == "CreateContainerConfigError" or $r == "CreateContainerError" or $r == "RunContainerError"
+			or $r == "InvalidImageName") then $r
+		else "other" end;
+	def phase_enum($s):
+		($s.running // null) as $r |
+		($s.waiting // null) as $w |
+		($s.terminated // null) as $t |
+		if $r != null then "Running"
+		elif $w != null then "Waiting"
+		elif $t != null then "Terminated"
+		else "Unknown" end;
+	def restart_bucket($c):
+		($c | type) as $ty |
+		if $ty == "number" then
+			(if ($c | isfinite) then
+				(if $c >= 0 and ($c | floor) == $c then
+					(if $c == 0 then "0" elif $c <= 2 then "1-2" elif $c <= 5 then "3-5" else "6+" end)
+				else "unknown" end)
+			else "unknown" end)
+		else "unknown" end;
+	def container_view($idx; $statuses; $c):
+		([$statuses[] | select(.name == $c.name)][0]) as $st |
+		($st.ready // false) as $ready |
+		($st.state // {}) as $state |
+		($state.waiting // null) as $waiting |
+		($state.terminated // null) as $terminated |
+		{
+			index: $idx,
+			name: known_name($c.name),
+			phase: phase_enum($state),
+			ready: ($ready == true),
+			restart_bucket: restart_bucket($st.restartCount // null),
+			waiting: (if $waiting != null then reason_enum($waiting.reason) else null end),
+			terminated: (if $terminated != null then reason_enum($terminated.reason) else null end)
+		};
+	. as $pods |
+	(($pods | type) == "object") as $is_obj |
+	(if $is_obj then ($pods.items // null) != null else false end) as $valid |
+	(if $valid then
+		($pods.items | map(select((.metadata.name // "") | test("^goauthy-[0-9]+$")) | select(.metadata.namespace == "goauthy")))
+	else [] end) as $gp |
+	[range(0;3) as $idx |
+		($gp[] | select(.metadata.name == ("goauthy-" + ($idx | tostring)))) as $pod |
+		{
+			index: $idx,
+			present: ($pod != null),
+			containers: (if $pod == null then []
+				else
+					([(($pod.spec.initContainers // [])[] | container_view($idx; ($pod.status.initContainerStatuses // []); .)),
+					  (($pod.spec.containers // [])[] | container_view($idx; ($pod.status.containerStatuses // []); .))] | flatten)
+				end)
+		}
+	] as $pods_out |
+	{
+		source: "failure-capture/pods.json",
+		available: $valid,
+		complete: (([$pods_out[].index] | sort | unique) == [0, 1, 2] and ($pods_out | length) == 3),
+		observed: ([$pods_out[].containers[]] | length) > 0,
+		pods: $pods_out
+	}
+'
+
+startup_summary() {
+	pods=$evidence_dir/failure-capture/pods.json
+	if [ -f "$pods" ] && jq -e . "$pods" >/dev/null 2>&1; then
+		jq "$startup_project_jq" "$pods" 2>/dev/null ||
+			jq -n '{source:"failure-capture/pods.json",available:false,complete:false,observed:false,pods:[]}'
+	else
+		jq -n '{source:"failure-capture/pods.json",available:false,complete:false,observed:false,pods:[]}'
+	fi
+}
+
 summarize_results() {
 	analyzer=$root/scripts/summarize-e2e-kind-saas-isolation-113.sh
 	stage_dir=$temp_dir/analyzer-stage
@@ -124,6 +207,11 @@ summarize_results() {
 			evidence: {unavailable_non_rss_count: null, complete: false}
 		}' >"$results_dir/resource-summary.json"
 	fi
+
+	startup=$(startup_summary) || fail 'failed to derive startup observability'
+	jq --argjson startup "$startup" '. + {startup: $startup}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
+		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
+		fail 'failed to add startup observability to the resource summary'
 
 	json_or_null() {
 		if [ -s "$1" ] && jq -e . "$1" >/dev/null 2>&1; then
@@ -224,6 +312,12 @@ summarize_results() {
 		echo
 		echo '```json'
 		jq . "$results_dir/resource-summary.json" 2>/dev/null || true
+		echo '```'
+		echo
+		echo '## Startup'
+		echo
+		echo '```json'
+		jq '.startup' "$results_dir/resource-summary.json" 2>/dev/null || true
 		echo '```'
 		echo
 		echo '## Fixture'

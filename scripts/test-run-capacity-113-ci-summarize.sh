@@ -194,5 +194,108 @@ if bt_run "$bt_case/dup.json"; then bad "baseline duplicate target (expected rej
 printf 'not json' >"$bt_case/malformed.json"
 if bt_run "$bt_case/malformed.json"; then bad "baseline malformed source (expected reject)"; else ok "baseline malformed source"; fi
 
+# Startup observability projection (offline; reuses failure-capture/pods.json).
+startup_case=$tmp/startup
+mkdir -p "$startup_case/failure-capture"
+jq -nc '{
+	kind: "PodList",
+	items: [
+		{metadata: {name: "goauthy-0", namespace: "goauthy"},
+		 spec: {initContainers: [{name: "wait-for-rhiza-bucket", image: "img", imageID: "sha256:private-img", containerID: "containerd://private-init"}],
+		       containers: [{name: "goauthy", image: "img", imageID: "sha256:private-app", containerID: "containerd://private-app"},
+		                     {name: "sidecarfixture", image: "img", imageID: "sha256:private-fx", containerID: "containerd://private-fx"},
+		                     {name: "mystery", image: "img"},
+		                     {name: "extra", image: "img"},
+		                     {name: "weird", image: "img"}]},
+		 status: {phase: "Pending", podIP: "10.0.0.9",
+		       initContainerStatuses: [
+		         {name: "wait-for-rhiza-bucket", ready: false, restartCount: 0, state: {waiting: {reason: "ErrImageNeverPull", message: "private-msg"}}}],
+		       containerStatuses: [
+		         {name: "goauthy", ready: false, restartCount: 0, state: {waiting: {reason: "ErrImageNeverPull"}}},
+		         {name: "sidecarfixture", ready: false, restartCount: 0, state: {terminated: {reason: "Completed"}}},
+		         {name: "mystery", ready: false, restartCount: 0, state: {waiting: {reason: "ImagePullBackOff", message: "private-pull"}}},
+		         {name: "extra", ready: false, restartCount: 0, state: {waiting: {reason: "CreateContainerConfigError", message: "private-cfg"}}},
+		         {name: "weird", ready: false, restartCount: 0, state: {waiting: {reason: "SomeArbitraryPrivateReason", message: "private-weird"}}}]}},
+		{metadata: {name: "goauthy-1", namespace: "goauthy"},
+		 spec: {containers: [{name: "goauthy"}]},
+		 status: {phase: "Running",
+		       containerStatuses: [{name: "goauthy", ready: false, state: {waiting: {reason: "CrashLoopBackOff"}}}]}},
+		{metadata: {name: "goauthy-9", namespace: "other"},
+		 spec: {containers: [{name: "goauthy"}]},
+		 status: {phase: "Running", containerStatuses: [{name: "goauthy", ready: true, restartCount: 0, state: {running: {}}}]}}
+	]
+}' >"$startup_case/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$startup_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.startup.available == true
+	and .startup.complete == false
+	and .startup.observed == true
+	and ([.startup.pods[].index] | sort | unique) == [0, 1]
+	and ([.startup.pods[] | select(.index == 0 and .present)] | length) == 1
+	and ([.startup.pods[] | select(.index == 2)] | length) == 0
+	and ([.startup.pods[].containers[] | select(.name == "init" and .waiting == "ErrImageNeverPull")] | length) == 1
+	and ([.startup.pods[].containers[] | select(.name == "app" and .waiting == "ErrImageNeverPull")] | length) == 1
+	and ([.startup.pods[].containers[] | select(.name == "fixture" and .terminated == "Completed")] | length) == 1
+	and ([.startup.pods[].containers[] | select(.name == "other" and .waiting == "ImagePullBackOff")] | length) == 1
+	and ([.startup.pods[].containers[] | select(.name == "other" and .waiting == "CreateContainerConfigError")] | length) == 1
+	and ([.startup.pods[].containers[] | select(.name == "other" and .waiting == "other")] | length) == 1
+	and ([.startup.pods[] | select(.index == 1) | .containers[] | select(.name == "app" and .waiting == "CrashLoopBackOff" and .restart_bucket == "unknown")] | length) == 1
+	and ([.startup.pods[].containers[] | keys[] | select(. == "imageID" or . == "containerID" or . == "podIP" or . == "message" or . == "env" or . == "url" or . == "logs" or . == "image")] | length) == 0
+' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup projection"
+else
+	bad "startup projection (unexpected view)"
+	jq -c '.startup' "$results/resource-summary.json" >&2 || true
+fi
+
+nostatus_startup=$tmp/nostatus-startup
+mkdir -p "$nostatus_startup/failure-capture"
+jq -nc '{kind:"PodList",items:[{metadata:{name:"goauthy-0",namespace:"goauthy"},spec:{containers:[{name:"goauthy"}]},status:{phase:"Pending"}},{metadata:{name:"goauthy-1",namespace:"goauthy"},spec:{containers:[{name:"goauthy"}]}}]}' >"$nostatus_startup/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$nostatus_startup" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.startup.available == true
+	and .startup.observed == true
+	and ([.startup.pods[].containers[] | select(.name == "app" and .phase == "Unknown" and .restart_bucket == "unknown")] | length) == 2
+' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup missing status retained"
+else
+	bad "startup missing status retained (capture lost)"
+	jq -c '.startup' "$results/resource-summary.json" >&2 || true
+fi
+
+dup_startup=$tmp/dup-startup
+mkdir -p "$dup_startup/failure-capture"
+jq -nc '{kind:"PodList",items:[{metadata:{name:"goauthy-0",namespace:"goauthy"},spec:{containers:[{name:"goauthy"}]}},{metadata:{name:"goauthy-0",namespace:"goauthy"},spec:{containers:[{name:"goauthy"}]}},{metadata:{name:"goauthy-1",namespace:"goauthy"},spec:{containers:[{name:"goauthy"}]}}]}' >"$dup_startup/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$dup_startup" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.available == true and .startup.complete == false' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup duplicate capture not complete"
+else
+	bad "startup duplicate capture not complete (false complete)"
+fi
+
+missing_startup=$tmp/missing-startup
+mkdir -p "$missing_startup"
+results=$(new_results)
+"$wrapper" --summarize "$missing_startup" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.available == false and .startup.complete == false and .startup.observed == false and (.startup.pods | length) == 0' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup missing source"
+else
+	bad "startup missing source (expected honest unavailable)"
+fi
+
+malformed_startup=$tmp/malformed-startup
+mkdir -p "$malformed_startup/failure-capture"
+printf 'not json' >"$malformed_startup/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$malformed_startup" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.startup.available == false and .startup.complete == false and .startup.observed == false' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup malformed source"
+else
+	bad "startup malformed source (expected honest unavailable)"
+fi
+
 echo "passed=$pass failed=$fail" >&2
 [ "$fail" -eq 0 ]
