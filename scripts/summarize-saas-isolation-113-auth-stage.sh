@@ -32,24 +32,29 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 : >"$tmp/post.jsonl"
 
 # Exact bounded schema for one collector record. Rejects extra keys at every
-# level, a non-integer count, non-integer or non-monotonic buckets, a +Inf
-# bucket that does not equal the count, an unknown stage, and an unknown
-# top-level field. No free-form text is read from the record.
+# level, a non-integer count, non-integer, duplicate, non-finite, or
+# non-increasing bucket bounds, a +Inf bucket that does not equal the count, an
+# unknown stage, and an unknown top-level field. An actually observed zero
+# child (count 0, sum 0, every bucket 0) is valid: a histogram child can
+# publish zero between label creation and the first observation. No free-form
+# text is read from the record.
 validator='
 def is_int: type == "number" and isfinite and . >= 0 and (floor == .) and . <= 9007199254740991;
 def is_num: type == "number" and isfinite and . >= 0 and . <= 9007199254740991;
-def le_ok: . == "+Inf" or (test("^[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?$"));
+def le_key: if . == "+Inf" then 1e300 else (. | tonumber) end;
+def le_finite: . == "+Inf" or ((type == "string") and (test("^[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?$")) and ((. | tonumber) | isfinite) and ((. | tonumber) >= 0));
 def stage_names: ["credential_lookup","password_verify","subject_revalidate","interaction_consume","session_rotate","oauth_issue","authorize_validate","authorize_session"];
 def valid_stage_value($v):
 	($v | keys | sort) == ["buckets","count","sum"]
 	and ($v.count | is_int)
 	and ($v.sum | is_num)
 	and (($v.buckets | type) == "array") and (($v.buckets | length) > 0)
-	and ([$v.buckets[] | ((. | keys | sort) == ["le","value"]) and ((.le | type) == "string") and (.le | le_ok) and (.value | is_int)] | all)
-	and ([$v.buckets[].le] | index("+Inf") != null)
+	and ([$v.buckets[] | ((. | keys | sort) == ["le","value"]) and ((.le | type) == "string") and (.le | le_finite) and (.value | is_int)] | all)
 	and (([$v.buckets[] | select(.le == "+Inf")] | length) == 1)
+	and ($v.buckets[-1].le == "+Inf")
 	and (([$v.buckets[] | select(.le == "+Inf")][0].value) == $v.count)
-	and ([range(0; (($v.buckets | length) - 1)) as $i | ($v.buckets[$i].value <= $v.buckets[$i + 1].value)] | all);
+	and ([range(0; (($v.buckets | length) - 1)) as $i | ($v.buckets[$i].value <= $v.buckets[$i + 1].value)] | all)
+	and ([range(0; (($v.buckets | length) - 1)) as $i | (($v.buckets[$i].le | le_key) < ($v.buckets[$i + 1].le | le_key))] | all);
 (keys | sort) == ["captured_at_unix_ms","family","pod_index","schema_version","stages"]
 and .schema_version == 1
 and .family == "goauthy_auth_stage_duration_seconds"
@@ -80,8 +85,13 @@ for idx in 0 1 2; do
 	for phase in pre post; do
 		f=$dir/auth-stage-$phase-$idx.json
 		if [ -f "$f" ]; then
-			if jq -e --argjson idx "$idx" "$validator" "$f" >/dev/null 2>&1; then
-				jq -c '.' "$f" >>"$tmp/$phase.jsonl"
+			# Each capture file must hold exactly one JSON object that passes
+			# the whole strict schema. This rejects a valid document hiding
+			# behind an invalid one, a valid one followed by an invalid one,
+			# two valid documents, and scalar or array documents, and it
+			# appends only the single canonical validated object.
+			if jq -s -c --argjson idx "$idx" 'if ((length == 1) and (.[0] | ('"$validator"'))) then .[0] else error("invalid auth stage capture") end' "$f" >"$tmp/canonical.json" 2>/dev/null; then
+				cat "$tmp/canonical.json" >>"$tmp/$phase.jsonl"
 			else
 				invalid=true
 			fi
@@ -112,6 +122,24 @@ jq -s '.' "$tmp/post.jsonl" >"$tmp/post.json"
 if ! jq -n --slurpfile pre "$tmp/pre.json" --slurpfile post "$tmp/post.json" -e '
 	[ $post[0][] as $p | ($pre[0][] | select(.pod_index == $p.pod_index)) as $q |
 		($p.captured_at_unix_ms != $q.captured_at_unix_ms) ] | all
+' >/dev/null; then
+	emit_unavailable capture-invalid
+	exit 0
+fi
+
+# Fail closed on a pre-only stage (a stage present in pre but absent in post)
+# and on incompatible bucket bounds between pre and post for a shared stage.
+# Only a wholly absent pre stage is synthesized as zero; an actually observed
+# zero child (count 0, sum 0, every bucket 0) is valid and is compared
+# normally.
+if ! jq -n --slurpfile pre "$tmp/pre.json" --slurpfile post "$tmp/post.json" -e '
+	def le_set($s): ([$s.buckets[].le] | sort);
+	[ $pre[0][] as $q | ($post[0][] | select(.pod_index == $q.pod_index)) as $p |
+		([$q.stages | keys[] | select(. as $k | ($p.stages | has($k)) | not)] | length) == 0
+		and
+		([$p.stages | keys[] | select(. as $k | ($q.stages | has($k)) and
+			(le_set($p.stages[$k]) != le_set($q.stages[$k])))] | length) == 0
+	] | all
 ' >/dev/null; then
 	emit_unavailable capture-invalid
 	exit 0

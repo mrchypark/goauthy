@@ -16,6 +16,18 @@ def bucket_value($buckets; $le): ([$buckets[] | select(.le == $le)][0].value // 
 
 $post[0] as $post_all |
 $pre[0] as $pre_all |
+# Fail closed on a pre-only stage (a stage present in pre but absent in post)
+# and on incompatible bucket bounds between pre and post for a shared stage.
+# Only a wholly absent pre stage is synthesized as zero; an actually observed
+# zero child (count 0, sum 0, every bucket 0) is valid and compared normally.
+if ([$pre_all[] | . as $q | ($post_all[] | select(.pod_index == $q.pod_index)) as $p |
+     ([$q.stages | keys[] | select(. as $k | ($p.stages | has($k)) | not)] | length) > 0
+     or
+     ([$p.stages | keys[] | select(. as $k | ($q.stages | has($k)) and
+        (([$p.stages[$k] | .buckets[].le] | sort) != ([$q.stages[$k] | .buckets[].le] | sort)))] | length) > 0
+   ] | any)
+  then error("pre-only stage or incompatible bucket bounds between pre and post")
+else . end |
 [ $post_all[] | . as $p |
   ($pre_all[] | select(.pod_index == $p.pod_index)) as $q |
   {

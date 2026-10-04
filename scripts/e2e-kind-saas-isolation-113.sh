@@ -327,8 +327,6 @@ for pod in goauthy-0 goauthy-1 goauthy-2; do
 	[ "$status" = 200 ] || { echo "authorize endpoint did not become functional on $pod within the shared 60-second startup window (last HTTP status: $status)" >&2; exit 1; }
 	printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pod" "$status" >>"$readiness_evidence"
 done
-start_ms=$(( $(date +%s) * 1000 + 30000 ))
-kubectl --context "$context" -n "$namespace" create configmap isolation113-run --from-literal=start-unix-ms="$start_ms" --dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
 
 printf '%s\n' "$prestart_spec" >"$ISOLATION113_EVIDENCE_DIR/pod-image-pins-before.txt"
 ready_after=$(kubectl --context "$context" -n "$namespace" get pods -l app.kubernetes.io/name=goauthy -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase} {.status.containerStatuses[?(@.name=="goauthy")].ready} {.status.containerStatuses[?(@.name=="goauthy")].imageID} {.spec.containers[?(@.name=="goauthy")].image}{"\n"}{end}')
@@ -337,6 +335,15 @@ assert_candidate_pods "$ready_after" "$candidate_node_digests" || { echo 'post-o
 printf '%s\n' "$ready_after" >"$ISOLATION113_EVIDENCE_DIR/pod-image-pins.txt"
 
 collect_auth_stage_metrics pre
+if [ "$job_status" -ne 0 ]; then
+	echo 'pre-scrape auth stage capture failed; refusing to launch the workload without a pre observation' >&2
+	capture_failure_state || true
+	exit "$job_status"
+fi
+# The synchronized start time is computed after the pre-scrape so a slow
+# pre-scrape retry cannot consume the driver's fixed 30-second schedule slack.
+start_ms=$(( $(date +%s) * 1000 + 30000 ))
+kubectl --context "$context" -n "$namespace" create configmap isolation113-run --from-literal=start-unix-ms="$start_ms" --dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
 
 sample_output=$ISOLATION113_EVIDENCE_DIR/container-samples.jsonl
 echo 'stage=three-member fixture overlay ready; launching bounded IAM/API-key diagnostic'

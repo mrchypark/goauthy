@@ -663,3 +663,37 @@ resource/SLO scope is made explicit; no resource ceiling is invented here.
   CPU cause or exclusion. The analyzer succeeded, but correctness and relative
   latency failed. No performance admission, capacity, SLO or issue closure is
   claimed, and no unchanged-source rerun hides the failed receipt.
+- [Run 21](https://github.com/mrchypark/goauthy/actions/runs/37212047509),
+  candidate `2fab9d80ad39f0c997c161833baac07684c234c8`, ran the corrected
+  candidate source and failed the unchanged criteria: 47/48 IAM success, 1
+  anchored transport timeout (driver 2 mixed POST outer, 10000.298 ms). 96
+  header rounds / 48 attempts complete with 0 unknown/excess/missing. All 6
+  relative comparisons failed (success-only small-n quantiles). Nearest-rank
+  IAM P95=P99 (ms):
+
+  | Driver | Baseline (n) | Mixed (n) | Recovery (n) |
+  | --- | --- | --- | --- |
+  | 0 | 2868.487 (6) | 9568.004 (6) | 12370.402 (4) |
+  | 1 | 2960.564 (6) | 8338.476 (6) | 16894.167 (4) |
+  | 2 | 2859.972 (6) | 4158.526 (5 success, 1 error) | 16892.513 (4) |
+
+  Account calls were 15×200, fault calls 15×expected502, and all 30 fixture
+  requests completed with zero active. Six resource series contain 182 samples
+  each (1,092 rows), with complete CFS deltas and no unavailable non-RSS data.
+  The capture interval is wide only; no per-phase, per-request, or CPU causality
+  is established. The analyzer succeeded, but correctness and relative latency
+  failed. No performance admission, capacity, SLO or issue closure is claimed.
+- [Run 22](https://github.com/mrchypark/goauthy/actions/runs/37216878279),
+  exact `e0bfab2f6c1a855a17ed0cdbf3ee87bd789322dd`, SOURCEBUILD candidate
+  manifest `0a3446c05598b906fd81088462e003fb1519b7ba3469f17c7c463b790f77c59f`
+  and config `4f5396676046a0a102e1f392072be26a971a3bc9146f9c6fdae8e2bd5589a79d`,
+  failed BEFORE WORKLOAD during rollout. Safe app aggregate: pods 0 and 2 Running Ready
+  with restart 0; pod 1 Waiting/CrashLoopBackOff with restart 3-5. No IAM, auth
+  capture, or performance results were produced; performance is INCONCLUSIVE.
+  The actual start cause is unknown and no OOM claim is made. Five safe-only
+  artifacts were produced; raw pod logs were not uploaded and no private paths
+  or details are exposed. Public Run 22 comment
+  [5982361271](https://github.com/mrchypark/goauthy/issues/113#issuecomment-5982361271).
+  Collector review identified defects in multiple-document validation,
+  pre-capture scheduling, and incomplete histogram comparisons. Corrections
+  are pending in PR139; final validation and merge are not yet established.

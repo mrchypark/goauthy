@@ -135,6 +135,22 @@ else
 	bad "collector accepts an absent family as an empty stage map"
 fi
 
+# An observed zero child is valid: a histogram child can publish zero between
+# label creation and the first observation.
+zero_in=$tmp/zero.txt
+{
+	printf 'goauthy_auth_stage_duration_seconds_bucket{stage="credential_lookup",le="0.01"} 0\n'
+	printf 'goauthy_auth_stage_duration_seconds_bucket{stage="credential_lookup",le="+Inf"} 0\n'
+	printf 'goauthy_auth_stage_duration_seconds_sum{stage="credential_lookup"} 0\n'
+	printf 'goauthy_auth_stage_duration_seconds_count{stage="credential_lookup"} 0\n'
+} >"$zero_in"
+if out=$(collect 0 1 "$zero_in") &&
+	printf '%s' "$out" | jq -e '.stages.credential_lookup.count == 0 and .stages.credential_lookup.sum == 0 and ([.stages.credential_lookup.buckets[].value] | all(. == 0))' >/dev/null; then
+	ok "collector accepts an observed zero histogram child"
+else
+	bad "collector accepts an observed zero histogram child"
+fi
+
 # ---------------------------------------------------------------------------
 # Summarizer: capture-interval deltas over a realistic eight-stage fixture.
 # ---------------------------------------------------------------------------
@@ -234,14 +250,19 @@ fi
 # ---------------------------------------------------------------------------
 # Strict schema controls on the safe summarizer input.
 # ---------------------------------------------------------------------------
-schema_case() { # DIR MUTATOR
-	dir=$1; mutator=$2
-	rm -rf "$dir"; mkdir -p "$dir"
+schema_case() { # DIR MUTATOR [SKIP_PHASE_IDX]
+	dir=$1; mutator=$2; skip=${3:-}
+	mkdir -p "$dir"
 	for idx in 0 1 2; do
-		collect "$idx" 1000 "$tmp/pre-src.txt" >"$dir/auth-stage-pre-$idx.json"
-		collect "$idx" 2000 "$tmp/post-src.txt" >"$dir/auth-stage-post-$idx.json"
+		for phase in pre post; do
+			[ "$skip" = "$phase-$idx" ] && continue
+			case "$phase" in
+				pre) collect "$idx" 1000 "$tmp/pre-src.txt" >"$dir/auth-stage-pre-$idx.json" ;;
+				post) collect "$idx" 2000 "$tmp/post-src.txt" >"$dir/auth-stage-post-$idx.json" ;;
+			esac
+		done
 	done
-	# shellcheck disable=SC2086
+	[ -n "$mutator" ] || return 0
 	eval "$mutator"
 }
 
@@ -270,7 +291,7 @@ expect_unavailable "strict schema rejects an unknown stage key" "$tmp/schema-unk
 schema_case "$tmp/schema-ts" 'jq ".captured_at_unix_ms = 1000" "$tmp/schema-ts/auth-stage-post-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/schema-ts/auth-stage-post-0.json"'
 expect_unavailable "strict schema rejects an identical pre/post capture timestamp" "$tmp/schema-ts" capture-invalid
 
-schema_case "$tmp/schema-missing" 'rm -f "$tmp/schema-missing/auth-stage-post-2.json"'
+schema_case "$tmp/schema-missing" '' "post-2"
 expect_unavailable "strict schema rejects a missing expected pod" "$tmp/schema-missing" capture-incomplete
 
 schema_case "$tmp/schema-binding" 'cp "$tmp/schema-binding/auth-stage-post-1.json" "$tmp/schema-binding/auth-stage-post-2.json"'
@@ -280,6 +301,101 @@ if out=$("$summarizer" "$tmp") && printf '%s' "$out" | jq -e '.available == fals
 	ok "summarizer reports a missing capture as unavailable"
 else
 	bad "summarizer reports a missing capture as unavailable"
+fi
+
+# ---------------------------------------------------------------------------
+# Bucket-bound and stage-set compatibility controls.
+# ---------------------------------------------------------------------------
+schema_case "$tmp/bounds-missing-pre" 'jq ".stages.credential_lookup.buckets = [.stages.credential_lookup.buckets[] | select(.le != \"0.01\")]" "$tmp/bounds-missing-pre/auth-stage-pre-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/bounds-missing-pre/auth-stage-pre-0.json"'
+expect_unavailable "strict schema rejects a missing pre bucket" "$tmp/bounds-missing-pre" capture-invalid
+
+schema_case "$tmp/bounds-removed-post" 'jq ".stages.credential_lookup.buckets = [.stages.credential_lookup.buckets[] | select(.le != \"0.01\")]" "$tmp/bounds-removed-post/auth-stage-post-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/bounds-removed-post/auth-stage-post-0.json"'
+expect_unavailable "strict schema rejects a removed post bucket" "$tmp/bounds-removed-post" capture-invalid
+
+schema_case "$tmp/bounds-duplicate" 'jq ".stages.credential_lookup.buckets += [.stages.credential_lookup.buckets[0]]" "$tmp/bounds-duplicate/auth-stage-post-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/bounds-duplicate/auth-stage-post-0.json"'
+expect_unavailable "strict schema rejects duplicate bucket bounds" "$tmp/bounds-duplicate" capture-invalid
+
+schema_case "$tmp/bounds-alias" 'jq ".stages.credential_lookup.buckets[0].le = \"abc\"" "$tmp/bounds-alias/auth-stage-post-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/bounds-alias/auth-stage-post-0.json"'
+expect_unavailable "strict schema rejects a non-numeric bucket bound" "$tmp/bounds-alias" capture-invalid
+
+schema_case "$tmp/bounds-equal-alias" 'jq ".stages.credential_lookup.buckets[0].le = \"1e-2\"" "$tmp/bounds-equal-alias/auth-stage-post-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/bounds-equal-alias/auth-stage-post-0.json"'
+expect_unavailable "strict schema rejects an aliased equal bucket bound" "$tmp/bounds-equal-alias" capture-invalid
+
+schema_case "$tmp/bounds-unordered" 'jq ".stages.credential_lookup.buckets = [{le:\"0.05\",value:1},{le:\"0.01\",value:1},{le:\"+Inf\",value:2}]" "$tmp/bounds-unordered/auth-stage-post-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/bounds-unordered/auth-stage-post-0.json"'
+expect_unavailable "strict schema rejects numerically unordered bucket bounds" "$tmp/bounds-unordered" capture-invalid
+
+schema_case "$tmp/bounds-count0" 'jq ".stages.credential_lookup.count = 0" "$tmp/bounds-count0/auth-stage-pre-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/bounds-count0/auth-stage-pre-0.json"'
+expect_unavailable "strict schema rejects an inconsistent zero count with nonzero buckets" "$tmp/bounds-count0" capture-invalid
+
+# An actually observed zero child (count 0, sum 0, every bucket 0, compatible
+# bounds) is valid and must compare to post normally, not be relabeled invalid.
+schema_case "$tmp/zero-valid" 'jq ".stages.credential_lookup = {count:0,sum:0,buckets:[{le:\"0.01\",value:0},{le:\"+Inf\",value:0}]}" "$tmp/zero-valid/auth-stage-pre-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/zero-valid/auth-stage-pre-0.json"'
+if out=$("$summarizer" "$tmp/zero-valid") &&
+	printf '%s' "$out" | jq -e '.available == true and ([.pods[] | select(.pod_index == 0)][0].stages[] | select(.stage == "credential_lookup") | .count_pre) == 0 and ([.pods[] | select(.pod_index == 0)][0].stages[] | select(.stage == "credential_lookup") | .reset) == false and ([.pods[] | select(.pod_index == 0)][0].stages[] | select(.stage == "credential_lookup") | .count_delta) == ([.pods[] | select(.pod_index == 0)][0].stages[] | select(.stage == "credential_lookup") | .count_post)' >/dev/null; then
+	ok "a valid zero pre stage yields a normal positive delta"
+else
+	bad "a valid zero pre stage yields a normal positive delta"
+fi
+
+schema_case "$tmp/stage-preonly" 'jq "del(.stages.oauth_issue)" "$tmp/stage-preonly/auth-stage-post-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/stage-preonly/auth-stage-post-0.json"'
+expect_unavailable "strict schema rejects a pre-only stage on one pod" "$tmp/stage-preonly" capture-invalid
+
+# A wholly absent pre stage is the only legitimate zero (an unobserved child).
+schema_case "$tmp/stage-postonly" 'jq "del(.stages.oauth_issue)" "$tmp/stage-postonly/auth-stage-pre-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/stage-postonly/auth-stage-pre-0.json"'
+if out=$("$summarizer" "$tmp/stage-postonly") &&
+	printf '%s' "$out" | jq -e '.available == true and ([.pods[] | select(.pod_index == 0)][0].stages[] | select(.stage == "oauth_issue") | .count_pre) == 0 and ([.pods[] | select(.pod_index == 0)][0].stages[] | select(.stage == "oauth_issue") | .count_delta) > 0 and ([.pods[] | select(.pod_index == 0)][0].stages[] | select(.stage == "oauth_issue") | .count_delta) == ([.pods[] | select(.pod_index == 0)][0].stages[] | select(.stage == "oauth_issue") | .count_post)' >/dev/null; then
+	ok "a wholly absent pre stage is permitted as an unobserved child"
+else
+	bad "a wholly absent pre stage is permitted as an unobserved child"
+fi
+
+# Multi-document and non-object capture files must be rejected whole, so a
+# valid document can never smuggle an invalid document (or an unknown stage
+# name) into the public safe JSON. Each pod is collected with its real pod
+# index so a negative result can only come from the stream guard, never from a
+# pod-binding mismatch.
+valid_post=$tmp/valid-post.json
+collect 0 2000 "$tmp/post-src.txt" >"$valid_post"
+canary_doc=$tmp/canary.json
+# A valid-shaped unknown stage inside .stages is the meaningful canary: it
+# would survive if only .stages were copied and the unknown-stage check failed.
+jq -c '.stages.CANARY_SECRET_STAGE = {count: 1, sum: 0.1, buckets: [{le: "0.01", value: 0}, {le: "+Inf", value: 1}]}' "$valid_post" >"$canary_doc"
+multidoc_case() { # DIR BUILDER
+	dir=$1; builder=$2
+	mkdir -p "$dir"
+	for idx in 0 1 2; do
+		collect "$idx" 1000 "$tmp/pre-src.txt" >"$dir/auth-stage-pre-$idx.json"
+		collect "$idx" 2000 "$tmp/post-src.txt" >"$dir/auth-stage-post-$idx.json"
+	done
+	eval "$builder"
+}
+
+multidoc_case "$tmp/md-base" ':'
+if out=$("$summarizer" "$tmp/md-base") && printf '%s' "$out" | jq -e '.available == true and .captured == true and (.pods | length) == 3' >/dev/null; then
+	ok "multi-document positive control is available"
+else
+	bad "multi-document positive control is available"
+fi
+
+multidoc_case "$tmp/md-invalid-first" '{ cat "$canary_doc"; cat "$valid_post"; } >"$tmp/md-invalid-first/auth-stage-post-0.json"'
+expect_unavailable "strict schema rejects an invalid document before a valid one" "$tmp/md-invalid-first" capture-invalid
+
+multidoc_case "$tmp/md-invalid-last" '{ cat "$valid_post"; cat "$canary_doc"; } >"$tmp/md-invalid-last/auth-stage-post-0.json"'
+expect_unavailable "strict schema rejects a valid document before an invalid one" "$tmp/md-invalid-last" capture-invalid
+
+multidoc_case "$tmp/md-two-valid" '{ cat "$valid_post"; cat "$valid_post"; } >"$tmp/md-two-valid/auth-stage-post-0.json"'
+expect_unavailable "strict schema rejects two valid documents" "$tmp/md-two-valid" capture-invalid
+
+multidoc_case "$tmp/md-scalar" 'printf "5\n" >"$tmp/md-scalar/auth-stage-post-0.json"'
+expect_unavailable "strict schema rejects a scalar document" "$tmp/md-scalar" capture-invalid
+
+multidoc_case "$tmp/md-array" 'printf "[1,2]\n" >"$tmp/md-array/auth-stage-post-0.json"'
+expect_unavailable "strict schema rejects an array document" "$tmp/md-array" capture-invalid
+
+if out=$("$summarizer" "$tmp/md-invalid-first") && ! printf '%s' "$out" | grep -q 'CANARY_SECRET_STAGE'; then
+	ok "public safe output never carries an unknown stage name"
+else
+	bad "public safe output never carries an unknown stage name"
 fi
 
 # ---------------------------------------------------------------------------
@@ -332,7 +448,6 @@ printf '%s\n' "$job_status"
 RUN
 
 run_harness() { # CURL_OK WAIT_RC
-	rm -f "$harness/evidence"/auth-stage-*.json
 	if HARNESS=$harness SCRIPT_DIR=$script_dir MOCK_CURL_OK=$1 MOCK_WAIT_RC=$2 \
 		MOCK_METRICS_FILE=$harness/metrics.txt PATH="$harness/bin:$PATH" \
 		sh "$harness/run.sh" 2>/dev/null; then :; else :; fi
@@ -360,11 +475,81 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Schedule control: start_ms/configmap must follow the pre-scrape, and a
+# pre-scrape failure must fail fast before the workload is launched.
+# ---------------------------------------------------------------------------
+pre_line=$(grep -n '^collect_auth_stage_metrics pre$' "$runner" | head -1 | cut -d: -f1)
+start_line=$(grep -n '^start_ms=' "$runner" | head -1 | cut -d: -f1)
+cm_line=$(grep -n 'create configmap isolation113-run' "$runner" | head -1 | cut -d: -f1)
+apply_line=$(grep -n 'apply -f deploy/kind-saas-isolation-113/driver-job.yaml' "$runner" | head -1 | cut -d: -f1)
+if [ -n "$pre_line" ] && [ -n "$start_line" ] && [ -n "$cm_line" ] && [ -n "$apply_line" ] &&
+	[ "$pre_line" -lt "$start_line" ] && [ "$start_line" -lt "$cm_line" ] && [ "$cm_line" -lt "$apply_line" ]; then
+	ok "schedule order: pre-scrape, then start_ms/configmap, then driver"
+else
+	bad "schedule order: pre-scrape, then start_ms/configmap, then driver"
+fi
+
+sched=$tmp/sched
+mkdir -p "$sched/bin" "$sched/tmp" "$sched/evidence"
+awk '/^collect_auth_stage_metrics pre$/{f=1} f{print} f && /create configmap isolation113-run/{exit}' "$runner" >"$sched/region.sh"
+if [ -s "$sched/region.sh" ]; then
+	ok "schedule control extracts the real pre-scrape/configmap region"
+else
+	bad "schedule control extracts the real pre-scrape/configmap region"
+fi
+cat >"$sched/bin/date" <<'MOCK'
+#!/bin/sh
+if [ -f "$MOCK_PRE_DONE" ]; then printf 'AFTER\n' >>"$MOCK_DATE_LOG"; else printf 'BEFORE\n' >>"$MOCK_DATE_LOG"; fi
+printf '1700000000\n'
+MOCK
+cat >"$sched/bin/kubectl" <<'MOCK'
+#!/bin/sh
+printf '%s\n' "$*" >>"$MOCK_KUBECTL_LOG"
+exit 0
+MOCK
+chmod +x "$sched/bin/date" "$sched/bin/kubectl"
+cat >"$sched/run.sh" <<'RUN'
+set -u
+temp_dir=$HARNESS/tmp
+ISOLATION113_EVIDENCE_DIR=$HARNESS/evidence
+context=kind-test
+namespace=goauthy
+job_status=0
+collect_auth_stage_metrics() {
+	case "$MOCK_PRE_MODE" in
+		delayed) sleep 1; touch "$MOCK_PRE_DONE"; job_status=0 ;;
+		fail) job_status=1 ;;
+	esac
+}
+capture_failure_state() { :; }
+. "$HARNESS/region.sh"
+RUN
+
+: >"$sched/date.log"; : >"$sched/kubectl.log"
+HARNESS=$sched MOCK_PRE_MODE=delayed MOCK_PRE_DONE=$sched/pre-delayed.done MOCK_DATE_LOG=$sched/date.log MOCK_KUBECTL_LOG=$sched/kubectl.log PATH="$sched/bin:$PATH" sh "$sched/run.sh" >/dev/null 2>&1 || true
+if [ "$(cat "$sched/date.log" 2>/dev/null)" = "AFTER" ] && grep -q 'start-unix-ms=1700000030000' "$sched/kubectl.log"; then
+	ok "a delayed pre-scrape does not consume the driver schedule slack"
+else
+	bad "a delayed pre-scrape does not consume the driver schedule slack"
+fi
+
+: >"$sched/date.log"; : >"$sched/kubectl.log"
+if HARNESS=$sched MOCK_PRE_MODE=fail MOCK_PRE_DONE=$sched/pre-fail.done MOCK_DATE_LOG=$sched/date.log MOCK_KUBECTL_LOG=$sched/kubectl.log PATH="$sched/bin:$PATH" sh "$sched/run.sh" >/dev/null 2>&1; then
+	bad "pre-scrape failure fails fast before start_ms/configmap"
+else
+	if [ ! -s "$sched/date.log" ] && [ ! -s "$sched/kubectl.log" ]; then
+		ok "pre-scrape failure fails fast before start_ms/configmap"
+	else
+		bad "pre-scrape failure fails fast before start_ms/configmap"
+	fi
+fi
+
+# ---------------------------------------------------------------------------
 # Direct integration: auth_stage must not remove the mandatory resource gates.
 # ---------------------------------------------------------------------------
 gen_evidence() { # DIR WITH_AUTH(0/1)
 	dir=$1; with_auth=$2
-	rm -rf "$dir"; mkdir -p "$dir"
+	mkdir -p "$dir"
 	stamp=0
 	for idx in 0 1 2; do
 		log=$dir/driver-isolation113-driver-$idx-abcde.log
