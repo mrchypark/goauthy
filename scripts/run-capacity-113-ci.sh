@@ -420,11 +420,15 @@ temp_dir=$(mktemp -d)
 chmod 700 "$temp_dir"
 created=false
 inotify_original=
+load_alias=
 
 cleanup() {
 	status=$?
 	trap - 0 1 2 15
 	cleanup_failed=false
+	if [ -n "$load_alias" ]; then
+		docker rmi "$load_alias" >/dev/null 2>&1 || cleanup_failed=true
+	fi
 	if [ "$created" = true ]; then
 		if [ -n "$inotify_original" ]; then
 			docker exec "$node" sysctl -w "fs.inotify.max_user_instances=$inotify_original" >/dev/null 2>&1 || cleanup_failed=true
@@ -462,7 +466,39 @@ docker exec "$node" sysctl -w fs.inotify.max_user_instances=512 >/dev/null 2>&1 
 docker pull "$GOAUTHY_IMAGE"
 revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$GOAUTHY_IMAGE" 2>/dev/null || true)
 [ "$revision" = "$GOAUTHY_CANDIDATE_SOURCE" ] || fail "candidate image revision label '$revision' does not match GOAUTHY_CANDIDATE_SOURCE '$GOAUTHY_CANDIDATE_SOURCE'"
-kind load docker-image "$GOAUTHY_IMAGE" --name "$KIND_CLUSTER"
+candidate_config_id=$(docker image inspect --format '{{.Id}}' "$GOAUTHY_IMAGE" 2>/dev/null || true)
+printf '%s' "$candidate_config_id" | grep -Eq '^sha256:[0-9a-f]{64}$' ||
+	fail 'candidate image config id is not a sha256 digest'
+# The sixth run failed with the app container ErrImageNeverPull. The importer
+# mechanism is inferred, not directly observed: Kind's docker-save importer may
+# not attach the original digest reference, so the canonical deployment
+# reference may not resolve. Check whether the canonical reference already
+# resolves; only attach it when absent, so a pre-registered identical image is
+# not disturbed. The config blob (config ID) is preserved; the packaging
+# manifest digest may differ from the original registry manifest and is not
+# claimed equal.
+proposed_alias="${GOAUTHY_IMAGE%%@*}:${KIND_CLUSTER}"
+if docker image inspect "$proposed_alias" >/dev/null 2>&1; then
+	fail "refusing to overwrite a pre-existing host image tag: $proposed_alias"
+fi
+load_alias=$proposed_alias
+docker tag "$GOAUTHY_IMAGE" "$proposed_alias"
+kind load docker-image "$proposed_alias" --name "$KIND_CLUSTER"
+if docker rmi "$proposed_alias" >/dev/null 2>&1; then
+	load_alias=
+fi
+if ! docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null; then
+	docker exec "$node" ctr --namespace k8s.io images tag "$proposed_alias" "$GOAUTHY_IMAGE" >/dev/null ||
+		fail 'failed to attach the canonical candidate reference in the Kind node'
+	if ! docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null; then
+		fail 'candidate canonical reference does not resolve in the Kind node CRI'
+	fi
+fi
+node_config_id=$(jq -r '.status.id // empty' "$temp_dir/cri-image.json" 2>/dev/null || true)
+[ -n "$node_config_id" ] || fail 'candidate CRI image identity is empty'
+[ "$node_config_id" = "$candidate_config_id" ] ||
+	fail 'candidate image config identity differs between the host original and the Kind node'
+printf 'candidate image loaded: config_id=%s reference=%s\n' "$candidate_config_id" "$GOAUTHY_IMAGE" >&2
 
 browser_password=$(openssl rand -hex 16)
 client_secret=$(openssl rand -hex 32)

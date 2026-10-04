@@ -36,6 +36,22 @@ interpolated directly into a `run:` script.
    `org.opencontainers.image.revision` label equals `candidate_source`
    (fail-closed provenance). Both the workflow and the wrapper restrict
    `candidate_image` to `ghcr.io/mrchypark/goauthy@sha256:<64 lowercase hex>`.
+   The sixth run confirmed the app container `ErrImageNeverPull`. The importer
+   mechanism is inferred, not directly observed: Kind's `docker save` importer
+   may not attach the original digest reference, so the canonical deployment
+   reference may not resolve. The wrapper therefore loads a task-owned alias
+   derived from the unique `KIND_CLUSTER` name, refusing to touch a pre-existing
+   host tag, and first checks whether the canonical `name@sha256:...` reference
+   already resolves at the CRI; only when absent does it attach that reference
+   to the loaded image with `ctr --namespace k8s.io images tag`. It then
+   requires the node config image ID (strict `sha256:<64 hex>`) to equal the
+   host original config ID, failing fast on mismatch without overwriting an
+   existing node identity, and removes only the tag this run created. The
+   deployment keeps the exact canonical reference; the config blob (config ID)
+   is preserved while the packaging/manifest digest may differ from the
+   original registry manifest and is not claimed equal. The archive `RepoTags`
+   were not captured, so the importer mechanism is inferred, not directly
+   observed.
 4. Generates ephemeral synthetic local credentials (bootstrap password, client
    secret, master key, OAuth HMAC, DCR token, Rhiza admin/voter tokens, Versity
    root credentials) with `openssl`. No credential is hardcoded or committed.
@@ -253,5 +269,25 @@ incompatibility in the wrapper fails fast without provisioning Kind.
   The projection now wraps that comparison in parentheses and the same program
   compiles on jq 1.7.1 and 1.8.1. The workflow runs the offline controls as a
   preflight on the actual runner jq before any cluster setup and records the jq
-  version in `runner-environment.json`. No app/image defect is inferred, and no
-  workload or aggregate result was produced.
+  version in `runner-environment.json`. The sixth dispatch `37170059233`
+  (head `9b`) then reached readiness with the safe `.startup` aggregate
+  `available/complete/observed:true`, `pods_json_exit:0`, all three indexes
+  present, both init containers `Terminated`/`Completed` ready, the fixture
+  sidecar `Running` ready, and the GoAuthy app container `Waiting`/
+   `ErrImageNeverPull`. This isolates a local candidate image-reference
+   resolution failure in the Kind CRI, not an app/Rhiza/runtime/latency defect.
+   The observed `ErrImageNeverPull` is consistent with Kind's `docker save`
+   importer not attaching the original digest reference, so
+   `kind load docker-image name@sha256:...` may leave the canonical deployment
+   reference unresolvable; the archive `RepoTags` were not captured, so this
+   mechanism is inferred, not directly observed. The wrapper now loads a
+   task-owned alias derived from the unique `KIND_CLUSTER` name (refusing to
+   touch a pre-existing host tag), first checks whether the canonical reference
+   already resolves at the CRI, and only attaches it with
+   `ctr --namespace k8s.io images tag` when absent. It then requires the node
+   config image ID (strict `sha256:<64 hex>`) to equal the host original config
+   ID, failing fast on mismatch without overwriting an existing node identity,
+   and removes only the tag this run created on all exits. The image config blob
+   (config ID) is preserved; the packaging/manifest digest may differ from the
+   original registry manifest and is not claimed equal. No workload or aggregate
+   result was produced.
