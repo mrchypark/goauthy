@@ -143,7 +143,9 @@ results=$(new_results)
 if "$wrapper" --summarize "$noanalyzer" "$results" >"$tmp/out" 2>"$tmp/err"; then
 	bad "analyzer failure (expected nonzero exit)"
 else
-	if jq -e '.overall.correctness == "fail" and .criterion_pass == false' "$results/criterion.json" >/dev/null 2>&1 &&
+	if jq -e '.overall.correctness == "fail" and .criterion_pass == false
+		and (.iam_failure_diagnostics | keys == ["anchored", "complete", "criterion", "errors", "excess", "groups", "missing", "source", "status", "unrecognized"])
+		and (.iam_failure_diagnostics | .errors == null and .anchored == null and .unrecognized == null and .excess == null and .missing == null and .complete == false and .status == "unavailable" and .source == "unavailable" and .groups == [])' "$results/criterion.json" >/dev/null 2>&1 &&
 		jq -e '.available == false' "$results/resource-summary.json" >/dev/null 2>&1 &&
 		[ -s "$results/pins.json" ] && [ -s "$results/runner-environment.json" ] && [ -s "$results/report.md" ] && [ -s "$results/resource-summary.json" ]; then
 		ok "analyzer failure"

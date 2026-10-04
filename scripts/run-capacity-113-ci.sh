@@ -318,12 +318,13 @@ summarize_results() {
 			diagnostic_directory_basename: "unavailable",
 			error: {reason: $reason, analyzer_status: $status},
 			iam_failure_diagnostics: {
-				criterion: "every protected IAM error must carry an anchored connection_use_grant_test.go t.Helper diagnostic; unrecognized or missing diagnostics are unknown, never success or cause proof",
+				criterion: "every protected IAM error must carry an anchored connection_use_grant_test.go t.Helper diagnostic; recognized count must equal total errors exactly with no unrecognized or excess diagnostics, otherwise incomplete, never success or cause proof",
 				source: "unavailable",
 				errors: null,
 				anchored: null,
 				unrecognized: null,
-				unknown: null,
+				excess: null,
+				missing: null,
 				complete: false,
 				status: "unavailable",
 				groups: []
