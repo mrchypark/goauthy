@@ -530,10 +530,31 @@ incompatibility in the wrapper fails fast without provisioning Kind.
     OPEN with #105 GC disabled, unapproved resource/SLO, and three logical
     members on one physical CI node. All thirteen prior failures (1-13) remain
     documented with their metrics and unconfirmed causes.
+15. [Run 37195769886](https://github.com/mrchypark/goauthy/actions/runs/37195769886),
+    job `111417190519`, FAILED `2026-10-04T10:40:10Z` before any workload.
+    This was the first source-build (`local_build=true`) calibration: the app
+    image built successfully with OCI manifest
+    `sha256:fc177b97c90d13a17b2d51d70ce42029a2d008450cb7761039f2d15a0879f406`
+    and config
+    `sha256:f8df4b1087b99381135b557c2227952782c8291ce7979f6f82c51a529181eba5`.
+    The host's classic Docker rejected the OCI archive on `docker load`
+    (missing blobs/json), so no candidate was ingested. No IAM, API-key,
+    fixture, or resource observations were produced and no aggregate artifact
+    exists. This is a runtime candidate-ingestion failure, not a performance
+    PASS/FAIL result. A wrapper correction is in progress to emit Docker-host
+    and OCI Kind archives from the same build and to bind the actual OCI
+    hashes/config/source against host/node identities without publication; it
+    is not claimed to have passed, to have repeated measurements, or to have
+    proved cleanup state. All fourteen prior failure histories and the
+    criteria are unchanged; issue #113 stays OPEN with #105 GC disabled,
+    resource/SLO unapproved, and three logical members on one physical CI
+    node.
 
 ## Forthcoming source-build measurement mode
 
-A forthcoming run mode builds the candidate inside the workflow from a clean
+Run 15 was the first attempt in this mode and failed before the workload at
+candidate ingestion (see entry 15), so the mode is not yet proven. A
+source-build run mode builds the candidate inside the workflow from a clean
 `candidate_source` commit on the branch workflow ref (`local_build=true`)
 instead of pulling a prebuilt immutable image. The image is ephemeral: it is
 built for one run and is neither a release artifact nor published to a

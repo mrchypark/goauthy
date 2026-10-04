@@ -576,6 +576,7 @@ created=false
 inotify_original=
 load_alias=
 candidate_owned=0
+meta_config_digest=
 
 cleanup() {
 	status=$?
@@ -584,11 +585,22 @@ cleanup() {
 	if [ -n "$load_alias" ]; then
 		docker rmi "$load_alias" >/dev/null 2>&1 || cleanup_failed=true
 	fi
-	# Remove the source-build tag only when this run created it. A fail before
-	# the owned load/tag (including a pre-existing-tag rejection) must never
-	# delete an unowned tag.
+	# Ownership is reserved before load, so a partial load that created the tag
+	# but returned nonzero is still cleaned up. Delete only when the current
+	# tag config equals the known built config: an absent tag is nothing to do,
+	# and a mismatched tag is preserved with a controlled cleanup failure
+	# rather than deleting an unexpected target. A fail before the reservation
+	# never deletes anything.
 	if [ "$candidate_owned" = 1 ]; then
-		docker rmi "$GOAUTHY_IMAGE" >/dev/null 2>&1 || true
+		current_tag_id=$(docker image inspect --format '{{.Id}}' "$GOAUTHY_IMAGE" 2>/dev/null || true)
+		if [ -n "$current_tag_id" ]; then
+			if [ "$current_tag_id" = "$meta_config_digest" ]; then
+				docker rmi "$GOAUTHY_IMAGE" >/dev/null 2>&1 || cleanup_failed=true
+			else
+				echo "capacity-113-ci: cleanup preserved an unexpected image tag: $GOAUTHY_IMAGE" >&2
+				cleanup_failed=true
+			fi
+		fi
 	fi
 	if [ "$created" = true ]; then
 		if [ -n "$inotify_original" ]; then
@@ -629,40 +641,45 @@ candidate_build_mode=released-image
 if [ "$GOAUTHY_LOCAL_BUILD" = 1 ]; then
 	candidate_build_mode=source-build
 	candidate_oci=$temp_dir/candidate-oci.tar
-	candidate_meta=$temp_dir/candidate-build-metadata.json
+	candidate_docker=$temp_dir/candidate-docker.tar
 	# Refuse to touch a pre-existing host tag before any costly work.
 	if docker image inspect "$GOAUTHY_IMAGE" >/dev/null 2>&1; then
 		fail "refusing to overwrite a pre-existing host image tag: $GOAUTHY_IMAGE"
 	fi
-	# Build the reviewed source into a real OCI image layout. The docker
-	# exporter is not used here, so no mutable tag is published or pulled and
-	# no registry is contacted. Provenance and SBOM attestations are disabled
-	# so the emission is a bounded single-platform manifest, not an index with
-	# attestation manifests. The buildx metadata records the actual OCI
-	# manifest and config digests; the archive is the single payload that is
-	# imported into the Kind node below.
+	# One build, two exporters: a real OCI image layout for the Kind node and a
+	# classic Docker archive for the host. The classic Docker archive is loaded
+	# into the host because the classic CI Docker store does not accept OCI
+	# layouts. Provenance/SBOM are disabled so each emission is a bounded
+	# single-platform manifest. No mutable tag is published or pulled and no
+	# registry is contacted.
 	docker buildx build \
 		--output "type=oci,dest=$candidate_oci,name=$GOAUTHY_IMAGE" \
-		--metadata-file "$candidate_meta" \
+		--output "type=docker,dest=$candidate_docker" \
 		--label "org.opencontainers.image.revision=$GOAUTHY_CANDIDATE_SOURCE" \
 		--provenance=false --sbom=false \
 		-f "$root/Dockerfile" "$root"
-	candidate_manifest_digest=$(jq -er '
-		."containerimage.digest" as $digest
-		| ."containerimage.descriptor" as $descriptor
-		| select(($digest|type)=="string" and ($digest|test("^sha256:[0-9a-f]{64}$")))
-		| select($descriptor.mediaType=="application/vnd.oci.image.manifest.v1+json" and $descriptor.digest==$digest)
-		| $digest
-	' "$candidate_meta") || fail 'source-build OCI manifest digest is missing or malformed'
-	meta_config_digest=$(jq -er '."containerimage.config.digest" | select(type=="string" and test("^sha256:[0-9a-f]{64}$"))' "$candidate_meta") ||
+	# Derive the actual OCI manifest and config identity from the archive
+	# itself. The shared multi-exporter metadata key is not trusted because it
+	# merges exporter results.
+	. "$root/scripts/capacity-113-oci-archive-identity.sh"
+	oci_identity=$(oci_archive_identity "$candidate_oci" "$GOAUTHY_CANDIDATE_SOURCE") ||
+		fail 'source-build OCI archive identity verification failed'
+	candidate_manifest_digest=$(printf '%s\n' "$oci_identity" | awk -F'\t' 'NR==1{print $1}')
+	meta_config_digest=$(printf '%s\n' "$oci_identity" | awk -F'\t' 'NR==1{print $2}')
+	printf '%s' "$candidate_manifest_digest" | grep -Eq '^sha256:[0-9a-f]{64}$' ||
+		fail 'source-build OCI manifest digest is missing or malformed'
+	printf '%s' "$meta_config_digest" | grep -Eq '^sha256:[0-9a-f]{64}$' ||
 		fail 'source-build OCI config digest is missing or malformed'
-	docker load -i "$candidate_oci" >/dev/null ||
-		fail 'failed to load the source-build OCI archive into the host image store'
+	# Reserve ownership after the absence check and known config, before the
+	# host load, so a partial load that creates the tag but returns nonzero is
+	# still cleaned up (cleanup re-verifies the tag config before deleting).
+	candidate_owned=1
+	docker load -i "$candidate_docker" >/dev/null ||
+		fail 'failed to load the source-build Docker archive into the host image store'
 	if ! docker image inspect "$GOAUTHY_IMAGE" >/dev/null 2>&1; then
 		docker tag "$meta_config_digest" "$GOAUTHY_IMAGE" >/dev/null ||
 			fail 'failed to tag the source-build candidate in the host image store'
 	fi
-	candidate_owned=1
 else
 	docker pull "$GOAUTHY_IMAGE"
 fi
@@ -698,9 +715,37 @@ if [ "$GOAUTHY_LOCAL_BUILD" = 1 ]; then
 		' "$temp_dir/cri-image.json" >/dev/null ||
 			fail 'source-build candidate canonical reference resolves to unexpected content in the Kind node'
 	else
-		# The reference is absent, so a plain tag cannot overwrite an
-		# unexpected target. No --force.
-		docker exec "$node" ctr --namespace k8s.io images tag "$candidate_manifest_digest" "$GOAUTHY_IMAGE" >/dev/null ||
+		# Several registered names for the same target digest are equivalent
+		# aliases of one payload, not different content. Verify every alias
+		# resolves to the same built config, then choose deterministically: a
+		# canonical repo@sha256 name if present, else a mapped name; never a
+		# bare digest and never --force.
+		imported_names=$(docker exec "$node" ctr --namespace k8s.io images ls 2>/dev/null |
+			awk -v manifest="$candidate_manifest_digest" '$3 == manifest { print $1 }' | sort)
+		[ -n "$imported_names" ] || fail 'source-build candidate manifest digest is not registered in the Kind node image store'
+		for alias in $imported_names; do
+			docker exec "$node" crictl inspecti -o json "$alias" >"$temp_dir/imported-image.json" 2>/dev/null ||
+				fail 'source-build imported candidate alias is not inspectable in the Kind node CRI'
+			alias_config=$(jq -r '.status.id // ""' "$temp_dir/imported-image.json")
+			[ "$alias_config" = "$candidate_config_id" ] ||
+				fail 'source-build imported candidate alias config digest does not match the built OCI config digest'
+		done
+		imported_name=
+		for alias in $imported_names; do
+			case "$alias" in
+				*@sha256:*) imported_name=$alias; break ;;
+			esac
+		done
+		if [ -z "$imported_name" ]; then
+			for alias in $imported_names; do
+				case "$alias" in
+					sha256:*) continue ;;
+					*) imported_name=$alias; break ;;
+				esac
+			done
+		fi
+		[ -n "$imported_name" ] || fail 'source-build candidate has no non-bare registered image name in the Kind node'
+		docker exec "$node" ctr --namespace k8s.io images tag "$imported_name" "$GOAUTHY_IMAGE" >/dev/null ||
 			fail 'failed to attach the canonical source-build candidate reference in the Kind node'
 		docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null ||
 			fail 'source-build candidate canonical reference does not resolve in the Kind node CRI'
