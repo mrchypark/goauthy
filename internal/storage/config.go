@@ -63,6 +63,11 @@ const (
 	rhizaCheckpointIntervalMax = 24 * time.Hour
 )
 
+// Controlled cluster candidate: coalesce archive publications for 20ms.
+// SyncThrough still blocks until each requested slot is published before ACK.
+// Dev and durable standalone retain the native default.
+const rhizaClusterObjStoreBatchDelay = 20 * time.Millisecond
+
 var unsupportedClusterObjectStoreEnv = []string{
 	"GOAUTHY_RHIZA_OBJECT_STORE_DIR",
 	"GOAUTHY_RHIZA_OBJECT_STORE_RETRIES",
@@ -170,6 +175,7 @@ func RhizaConfigFromEnv(getenv func(string) string) (rhiza.Config, error) {
 	config.AdminToken = adminToken
 	config.PeerToken = peerToken
 	config.Members = members
+	config.ObjStoreBatchDelay = rhizaClusterObjStoreBatchDelay
 	return withObjectStore(config, getenv)
 }
 

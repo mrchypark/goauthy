@@ -30,6 +30,9 @@ func TestRhizaConfigFromEnvStandaloneProfiles(t *testing.T) {
 	if !reflect.DeepEqual(configs[0], configs[1]) {
 		t.Fatalf("dev and standalone configs differ: %#v != %#v", configs[0], configs[1])
 	}
+	if configs[0].ObjStoreBatchDelay != 0 {
+		t.Fatal("local profiles must retain the native archive batch delay")
+	}
 }
 
 func TestRhizaConfigFromEnvStandaloneRejectsClusterSettings(t *testing.T) {
@@ -61,6 +64,9 @@ func TestRhizaConfigFromEnvCluster(t *testing.T) {
 	}
 	if len(config.Members) != 3 || config.Members[0].ID != "goauthy-0" || config.Members[0].PublicKey != rhiza.PeerPublicKey("prod", "goauthy-0", "voter-0") || config.PeerToken != "voter-1" || config.AdminToken != "admin-token" || config.ObjStoreDurability != rhiza.ObjectStoreDurabilityBeforeAck || config.ObjStoreProvider != "s3" || config.CheckpointInterval != time.Second {
 		t.Fatalf("unexpected cluster config: %#v", config)
+	}
+	if config.ObjStoreBatchDelay != 20*time.Millisecond {
+		t.Fatal("S3 cluster must carry the candidate archive batch delay")
 	}
 }
 
@@ -110,6 +116,9 @@ func TestRhizaConfigFromEnvDurableStandalone(t *testing.T) {
 	if len(config.Members) != 0 || config.PeerAddr != "" || config.AdminToken != "" || config.ObjStoreProvider != "s3" || config.ObjStoreDurability != rhiza.ObjectStoreDurabilityBeforeAck || config.ObjStorePrefix != "production" {
 		t.Fatal("durable standalone did not preserve the isolated before-ack contract")
 	}
+	if config.ObjStoreBatchDelay != 0 {
+		t.Fatal("durable standalone must retain the native archive batch delay")
+	}
 	for _, name := range []string{"GOAUTHY_RHIZA_OBJECT_STORE_BUCKET", "GOAUTHY_RHIZA_OBJECT_STORE_PREFIX"} {
 		invalid := copyEnv(env)
 		delete(invalid, name)
@@ -145,6 +154,13 @@ func TestRhizaConfigFromEnvGCSBeforeAck(t *testing.T) {
 			}
 			if config.ObjStoreProvider != "gcs" || config.ObjStoreBucket != "goauthy" || config.ObjStorePrefix != "production" || config.ObjStoreDurability != rhiza.ObjectStoreDurabilityBeforeAck || config.ObjStoreEndpoint != "" || config.ObjStoreAccessKey != "" || config.ObjStoreSecretKey != "" {
 				t.Fatalf("unexpected GCS config: %#v", config)
+			}
+			wantBatchDelay := time.Duration(0)
+			if profile == RhizaProfileCluster {
+				wantBatchDelay = 20 * time.Millisecond
+			}
+			if config.ObjStoreBatchDelay != wantBatchDelay {
+				t.Fatalf("GCS %s batch delay = %s, want %s", profile, config.ObjStoreBatchDelay, wantBatchDelay)
 			}
 		})
 	}
