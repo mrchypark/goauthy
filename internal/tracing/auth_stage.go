@@ -28,6 +28,9 @@ var authStageNames = map[string]struct{}{
 	"session_load":        {},
 	"request_resolve":     {},
 	"storage_execute":     {},
+	"storage_submit":      {},
+	"storage_status":      {},
+	"storage_replay":      {},
 }
 
 // ObserveAuthStage records one auth pipeline stage as a child of the span
