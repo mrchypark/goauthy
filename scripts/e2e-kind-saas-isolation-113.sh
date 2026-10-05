@@ -272,11 +272,7 @@ kubectl --context "$context" -n "$namespace" create secret generic isolation113-
 	--from-literal=password="$GOAUTHY_E2E_BROWSER_PASSWORD" \
 	--from-literal=client-secret="$GOAUTHY_E2E_CLIENT_SECRET" \
 	--dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
-kustomize build deploy/kind-saas-isolation-113 | sed \
-	-e "s#image: goauthy:e2e\$#image: $GOAUTHY_IMAGE#" >"$temp_dir/profile.yaml"
-[ "$(grep -Fc "image: $GOAUTHY_IMAGE" "$temp_dir/profile.yaml")" -eq 1 ] || { echo 'rendered profile must retain the selected immutable GoAuthy image' >&2; exit 1; }
-! grep -F 'image: goauthy:e2e' "$temp_dir/profile.yaml" >/dev/null || { echo 'rendered profile still contains the mutable GoAuthy base image' >&2; exit 1; }
-kubectl --context "$context" apply -f "$temp_dir/profile.yaml"
+profile_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 # Enable the application's native metrics listener on the pod loopback only,
 # with the run-scoped token file, so each pod can be scraped through the
 # existing per-pod port-forward pattern. This adds no public endpoint, no
@@ -284,10 +280,42 @@ kubectl --context "$context" apply -f "$temp_dir/profile.yaml"
 # secret is mounted 0400; the profile sets pod fsGroup 65532 and the GoAuthy
 # container runs as runAsGroup 65532, so the kubelet grants the matching group
 # read access and the listener can open the token file. No access is relaxed.
-cat >"$temp_dir/metrics-enable-patch.json" <<'JSON'
-{"spec":{"template":{"spec":{"containers":[{"name":"goauthy","env":[{"name":"GOAUTHY_METRICS_LISTEN_ADDR","value":"127.0.0.1:9090"},{"name":"GOAUTHY_METRICS_TOKEN_FILE","value":"/run/metrics-token/token"}],"volumeMounts":[{"name":"isolation113-metrics-token","mountPath":"/run/metrics-token","readOnly":true}]}],"volumes":[{"name":"isolation113-metrics-token","secret":{"secretName":"isolation113-metrics-token","defaultMode":256}}]}}}}
+#
+# The listener is composed into the rendered profile through a temporary
+# overlay BEFORE the first apply. It must not be applied as a post-apply
+# spec.template mutation: the GoAuthy StatefulSet keeps cluster member identity
+# in the `data` emptyDir (deploy/k8s/statefulset.yaml), which is bound to the
+# Pod lifetime. Changing spec.template after the StatefulSet exists rolls the
+# Pods, discards that ephemeral state, and a voter that already registered
+# returns with its local identity absent, aborting startup on the voter state
+# continuity guard. Composing first keeps one apply and no post-apply
+# template mutation.
+mkdir -p "$temp_dir/metrics-overlay"
+# kustomize rejects an absolute resource outside the overlay root ("new root
+# cannot be absolute"), and load restrictions stay at their defaults. Reference
+# the canonical profile relatively instead: ascend one level per component of
+# the overlay's physical path (pwd -P resolves symlinked temp parents such as
+# /var -> /private/var, which would otherwise miscount the ascent).
+overlay_dir=$(CDPATH='' cd -P -- "$temp_dir/metrics-overlay" && pwd)
+overlay_depth=$(printf '%s' "$overlay_dir" | awk -F/ '{ print NF-1 }')
+overlay_up=$(awk -v depth="$overlay_depth" 'BEGIN { prefix = ""; for (i = 0; i < depth; i++) prefix = prefix "../"; printf "%s", prefix }')
+profile_base="$overlay_up${profile_root#/}/deploy/kind-saas-isolation-113"
+cat >"$temp_dir/metrics-overlay/metrics-enable-patch.json" <<'JSON'
+{"apiVersion":"apps/v1","kind":"StatefulSet","metadata":{"name":"goauthy","namespace":"goauthy"},"spec":{"template":{"spec":{"containers":[{"name":"goauthy","env":[{"name":"GOAUTHY_METRICS_LISTEN_ADDR","value":"127.0.0.1:9090"},{"name":"GOAUTHY_METRICS_TOKEN_FILE","value":"/run/metrics-token/token"}],"volumeMounts":[{"name":"isolation113-metrics-token","mountPath":"/run/metrics-token","readOnly":true}]}],"volumes":[{"name":"isolation113-metrics-token","secret":{"secretName":"isolation113-metrics-token","defaultMode":256}}]}}}}
 JSON
-kubectl --context "$context" -n "$namespace" patch statefulset goauthy --type=strategic --patch-file "$temp_dir/metrics-enable-patch.json" >/dev/null || { echo 'failed to enable the native per-pod metrics listener' >&2; exit 1; }
+cat >"$temp_dir/metrics-overlay/kustomization.yaml" <<YAML
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - $profile_base
+patches:
+  - path: metrics-enable-patch.json
+YAML
+kustomize build "$temp_dir/metrics-overlay" | sed \
+	-e "s#image: goauthy:e2e\$#image: $GOAUTHY_IMAGE#" >"$temp_dir/profile.yaml"
+[ "$(grep -Fc "image: $GOAUTHY_IMAGE" "$temp_dir/profile.yaml")" -eq 1 ] || { echo 'rendered profile must retain the selected immutable GoAuthy image' >&2; exit 1; }
+! grep -F 'image: goauthy:e2e' "$temp_dir/profile.yaml" >/dev/null || { echo 'rendered profile still contains the mutable GoAuthy base image' >&2; exit 1; }
+kubectl --context "$context" apply -f "$temp_dir/profile.yaml"
 kubectl --context "$context" -n "$namespace" get statefulset goauthy -o json | jq -e '
 	.spec.template.spec.containers[] | select(.name=="goauthy") | .env as $env
 	| ([$env[]|select(.name=="GOAUTHY_CONNECTIONS_RESOURCE")|.value] == ["https://goauthy.connections.local.test"])
