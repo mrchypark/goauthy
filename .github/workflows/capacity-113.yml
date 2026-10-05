@@ -107,7 +107,7 @@ jobs:
         run: |
           set -eu
           kustomize_archive=/tmp/kustomize.tar.gz
-          kustomize_sha="3669470b454d865c8184c6bce78df05e977c9aea31c30df3c669317d43bcc7a7"
+          kustomize_sha="3669470b454d865c8184d6bce78df05e977c9aea31c30df3c669317d43bcc7a7"
           curl -sSfL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" -o "$kustomize_archive"
           printf '%s  %s\n' "$kustomize_sha" "$kustomize_archive" | sha256sum -c -
           tar -xzf "$kustomize_archive" -C /usr/local/bin kustomize
