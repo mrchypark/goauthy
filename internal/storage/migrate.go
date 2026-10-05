@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"time"
 
+	"github.com/mrchypark/goauthy/internal/tracing"
 	"github.com/mrchypark/rhiza"
 )
 
@@ -3082,6 +3084,10 @@ func schemaV2Request(requestID string) rhiza.ExecuteRequest {
 // Execute accepts a Rhiza SQL mutation only when it committed. Rhiza reports
 // deterministic SQL rejection in the receipt rather than as a Go error.
 func Execute(ctx context.Context, db *rhiza.DB, request rhiza.ExecuteRequest) (rhiza.ExecuteResponse, error) {
+	// Bounded timing only: the span carries the stage name and nothing else, so
+	// no SQL text, request ID, or error detail can leak into telemetry.
+	started := time.Now()
+	defer func() { tracing.ObserveAuthStage(ctx, "storage_execute", started) }()
 	if err := rhiza.ValidateExecuteRequest(request); err != nil {
 		return rhiza.ExecuteResponse{}, err
 	}

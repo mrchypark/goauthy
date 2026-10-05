@@ -21,6 +21,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/metrics"
 	"github.com/mrchypark/goauthy/internal/scim"
 	"github.com/mrchypark/goauthy/internal/storage"
+	"github.com/mrchypark/goauthy/internal/tracing"
 	"github.com/mrchypark/rhiza"
 )
 
@@ -791,6 +792,7 @@ func (s *Store) authenticate(ctx context.Context, username string, password []by
 	if s.metrics != nil {
 		s.metrics.AuthStageDuration(metrics.AuthStageCredentialLookup, time.Since(stageStart).Seconds())
 	}
+	tracing.ObserveAuthStage(ctx, string(metrics.AuthStageCredentialLookup), stageStart)
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -799,6 +801,7 @@ func (s *Store) authenticate(ctx context.Context, username string, password []by
 	if s.metrics != nil {
 		s.metrics.AuthStageDuration(metrics.AuthStagePasswordVerify, time.Since(stageStart).Seconds())
 	}
+	tracing.ObserveAuthStage(ctx, string(metrics.AuthStagePasswordVerify), stageStart)
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -820,6 +823,7 @@ func (s *Store) authenticate(ctx context.Context, username string, password []by
 		if s.metrics != nil {
 			s.metrics.AuthStageDuration(metrics.AuthStageSubjectRevalidate, time.Since(stageStart).Seconds())
 		}
+		tracing.ObserveAuthStage(ctx, string(metrics.AuthStageSubjectRevalidate), stageStart)
 		if errors.Is(err, ErrInactiveSubject) {
 			return Authentication{}, ErrInvalidCredentials
 		}
@@ -828,6 +832,7 @@ func (s *Store) authenticate(ctx context.Context, username string, password []by
 	if s.metrics != nil {
 		s.metrics.AuthStageDuration(metrics.AuthStageSubjectRevalidate, time.Since(stageStart).Seconds())
 	}
+	tracing.ObserveAuthStage(ctx, string(metrics.AuthStageSubjectRevalidate), stageStart)
 	if expires := s.passwordExpiry(changedAt); expires != nil && s.now().UTC().After(*expires) {
 		var recoveryErr error
 		if onExpired != nil {
