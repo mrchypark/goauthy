@@ -9,24 +9,30 @@ name: Capacity 113 calibration
 # image. Either mode performs no release, deploy, package write, or foreign
 # write, does not close the issue automatically, and never runs on push,
 # schedule, or pull_request_target.
+#
+# On the diagnostic side branch this workflow is DIAGNOSTIC ONLY: it always
+# source-builds the exact dispatched diagnostic SHA, records the three storage
+# submit/status/replay boundaries through one extra 100m CPU / 64Mi memory
+# collector Pod, and publishes only three approved safe JSON files. It makes no
+# qualification, performance, SLO or production claim.
 on:
   workflow_dispatch:
     inputs:
       candidate_image:
-        description: Immutable GoAuthy image reference (name@sha256:...); ignored when local_build is true
+        description: Immutable GoAuthy image reference (name@sha256:...); ignored, this branch is source-build only
         required: true
         type: string
         default: ghcr.io/mrchypark/goauthy@sha256:21c941913d6ae6333d59fa5da4dfc4d61ab2ecafa0eb9299ade01815d486c499
       candidate_source:
-        description: Reviewed GoAuthy source SHA (40 lowercase hex); must equal the checkout HEAD when local_build is true
+        description: Reviewed GoAuthy source SHA (40 lowercase hex); must equal the checkout HEAD
         required: true
         type: string
         default: 944895a2b10b50275d6691e6b07d692414454f01
       local_build:
-        description: Build the reviewed source locally (no release or registry publication)
+        description: Must be true on this diagnostic branch; source-build only
         required: false
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -69,13 +75,9 @@ jobs:
           set -eu
           printf '%s' "$CANDIDATE_SOURCE" | grep -Eq '^[0-9a-f]{40}$' ||
             { echo "candidate_source must be a 40-character lowercase hex SHA" >&2; exit 1; }
-          if [ "$LOCAL_BUILD" = "true" ]; then
-            echo "local source-build dispatch: candidate_image is ignored"
-          else
-            printf '%s' "$CANDIDATE_IMAGE" | grep -Eq '^ghcr\.io/mrchypark/goauthy@sha256:[0-9a-f]{64}$' ||
-              { echo "candidate_image must be ghcr.io/mrchypark/goauthy@sha256:<64 lowercase hex>" >&2; exit 1; }
-          fi
-          echo "dispatch inputs validated"
+          [ "$LOCAL_BUILD" = "true" ] ||
+            { echo "this diagnostic branch is source-build only: local_build must be true" >&2; exit 1; }
+          echo "diagnostic dispatch inputs validated; candidate_image is ignored"
 
       - name: Free disk space
         run: |
@@ -105,7 +107,7 @@ jobs:
         run: |
           set -eu
           kustomize_archive=/tmp/kustomize.tar.gz
-          kustomize_sha="3669470b454d865c8184d6bce78df05e977c9aea31c30df3c669317d43bcc7a7"
+          kustomize_sha="3669470b454d865c8184c6bce78df05e977c9aea31c30df3c669317d43bcc7a7"
           curl -sSfL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" -o "$kustomize_archive"
           printf '%s  %s\n' "$kustomize_sha" "$kustomize_archive" | sha256sum -c -
           tar -xzf "$kustomize_archive" -C /usr/local/bin kustomize
@@ -124,16 +126,18 @@ jobs:
           go version
           awk --version | head -n 1
 
-      - name: Offline preflight (actual runner jq)
+      # Focused offline controls for exactly the diagnostic path added on this
+      # branch: the aggregate shape gates and the derive/drift guards. The
+      # broader same-SHA suites are deliberately not repeated here.
+      - name: Offline preflight (diagnostic controls only)
         run: |
           set -eu
           jq --version
-          sh scripts/test-run-capacity-113-ci-summarize.sh
-          sh scripts/test-saas-isolation-113-auth-stage.sh
-          sh scripts/test-saas-isolation-113-startup-fatal.sh
+          sh scripts/test-isolation113-stage-aggregate.sh
+          sh scripts/test-capacity113-trace-derive.sh
 
       - name: Log in to GHCR (read-only)
-        if: ${{ !inputs.local_build }}
+        if: ${{ false }}
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ github.token }}
@@ -141,48 +145,73 @@ jobs:
           set -eu
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
-      - name: Run capacity 113 calibration
+      - name: Run capacity 113 diagnostic stage recording
         env:
-          CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
           CANDIDATE_SOURCE: ${{ inputs.candidate_source }}
-          LOCAL_BUILD: ${{ inputs.local_build }}
         run: |
           set -eu
           evidence_dir="$RUNNER_TEMP/capacity-113-evidence"
           results_dir="$RUNNER_TEMP/capacity-113-results"
           mkdir -p "$results_dir"
-          if [ "$LOCAL_BUILD" = "true" ]; then
-            GOAUTHY_LOCAL_BUILD=1 \
-            GOAUTHY_CANDIDATE_SOURCE="$CANDIDATE_SOURCE" \
-              ./scripts/run-capacity-113-ci.sh "$evidence_dir" "$results_dir"
-          else
-            GOAUTHY_IMAGE="$CANDIDATE_IMAGE" \
-            GOAUTHY_CANDIDATE_SOURCE="$CANDIDATE_SOURCE" \
-              ./scripts/run-capacity-113-ci.sh "$evidence_dir" "$results_dir"
-          fi
+          GOAUTHY_CANDIDATE_SOURCE="$CANDIDATE_SOURCE" \
+            ./scripts/run-capacity-113-ci-trace-diagnostic.sh "$evidence_dir" "$results_dir"
 
-      - name: Publish calibration summary
+      # No campaign report is published: the existing report content includes a
+      # runner-environment section, and this branch publishes approved safe JSON
+      # only. No raw traces, span identifiers, pins, runner environment, env
+      # dumps or logs are uploaded or echoed anywhere in this workflow.
+      - name: Publish diagnostic summary
         if: always()
         env:
           RESULTS_DIR: ${{ runner.temp }}/capacity-113-results
         run: |
           set -eu
-          if [ -f "$RESULTS_DIR/report.md" ]; then
-            cat "$RESULTS_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "no calibration report was produced" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          {
+            echo "## DIAGNOSTIC ONLY - NOT A QUALIFICATION RESULT"
+            echo
+            echo "One extra 100m CPU / 64Mi memory OTLP collector Pod shared the 4-CPU runner to record the storage submit/status/replay boundaries. No qualification, performance, SLO or production claim is made, and no absolute latency conclusion is drawn. A failing campaign exit code is the expected source performance failure and is reported as recorded, never converted into a pass."
+            echo
+            if [ -s "$RESULTS_DIR/isolation113-stage-aggregate.json" ]; then
+              echo '### Bounded stage aggregate (names, counts, maxima, completeness only)'
+              echo
+              echo '```json'
+              cat "$RESULTS_DIR/isolation113-stage-aggregate.json"
+              echo '```'
+            else
+              echo "No stage aggregate was produced. Diagnostic evidence is INCOMPLETE and must be read as unresolved."
+            fi
+            echo
+            if [ -s "$RESULTS_DIR/criterion.json" ]; then
+              echo '### Criterion (safe aggregate)'
+              echo
+              echo '```json'
+              cat "$RESULTS_DIR/criterion.json"
+              echo '```'
+            else
+              echo "No criterion aggregate was produced."
+            fi
+            echo
+            if [ -s "$RESULTS_DIR/resource-summary.json" ]; then
+              echo '### Resource summary (safe aggregate)'
+              echo
+              echo '```json'
+              cat "$RESULTS_DIR/resource-summary.json"
+              echo '```'
+            else
+              echo "No resource summary was produced."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
+      # Exactly three approved safe JSON files. Nothing else from the run is
+      # published.
       - name: Upload safe aggregate evidence
         if: always()
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: capacity-113-safe-aggregate
+          name: capacity-113-diagnostic-safe-aggregate
           path: |
+            ${{ runner.temp }}/capacity-113-results/isolation113-stage-aggregate.json
             ${{ runner.temp }}/capacity-113-results/criterion.json
             ${{ runner.temp }}/capacity-113-results/resource-summary.json
-            ${{ runner.temp }}/capacity-113-results/pins.json
-            ${{ runner.temp }}/capacity-113-results/runner-environment.json
-            ${{ runner.temp }}/capacity-113-results/report.md
           if-no-files-found: warn
           retention-days: 14

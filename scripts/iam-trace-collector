@@ -1,0 +1,80 @@
+#!/bin/sh
+# Cached shell launcher for the diagnostic OTLP collector.
+#
+# Builds scripts/iam-trace-collector-src on demand into a personal cache keyed by
+# the module source, its dependencies, the build environment and the
+# Go/platform identity, then runs the binary. Personal-use only: repeatability
+# and easy local debugging, not public packaging. No Go shebang, no Python, no
+# Node.
+#
+# Usage:
+#   scripts/iam-trace-collector --print-bin   print the cached binary path
+#   scripts/iam-trace-collector ARGS...       exec the collector with ARGS
+#
+# Guardrails:
+#   CODEX_GO_SCRIPT_CACHE overrides the default personal cache location.
+#   CACHED_GO_REBUILD=1 forces a rebuild. CACHED_GO_DEBUG=1 logs the build path.
+#   CODEX_GO_BUILD_PKG selects the build package when main is not at the root.
+#   Commit go.mod, go.sum and sources; never commit cached binaries.
+#   Dependencies are NOT vendored: go.mod, go.sum and go mod download are used.
+set -eu
+TOOL_NAME=$(basename "$0")
+SCRIPT_PATH=$(
+  if readlink -f "$0" >/dev/null 2>&1; then
+    readlink -f "$0"
+  elif realpath "$0" >/dev/null 2>&1; then
+    realpath "$0"
+  elif [ "${0#*/*}" != "$0" ]; then
+    printf '%s\n' "$0"
+  else
+    command -v "$0"
+  fi
+)
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$SCRIPT_PATH")" && pwd)
+SRC_DIR="$SCRIPT_DIR/$TOOL_NAME-src"
+CACHE_ROOT="${CODEX_GO_SCRIPT_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/codex-go-scripts}"
+BUILD_PKG="${CODEX_GO_BUILD_PKG:-.}"
+PLATFORM=$(go env GOOS GOARCH | tr '\n' '-' | sed 's/-$//')
+[ -f "$SRC_DIR/go.mod" ] || { printf 'missing Go module: %s/go.mod\n' "$SRC_DIR" >&2; exit 1; }
+# The cache key must cover the same environment the build actually uses, so a
+# CGO or workspace change can never reuse a binary built under other settings.
+KEY=$(
+  cd "$SRC_DIR" && {
+    CGO_ENABLED=0 GOWORK=off go env GOVERSION GOOS GOARCH GOWORK GOFLAGS CGO_ENABLED GOEXPERIMENT CC CXX
+    printf 'BUILD_PKG=%s\n' "$BUILD_PKG"
+    if command -v shasum >/dev/null 2>&1; then
+      find . -type d \( \( -name ".*" ! -name "." \) -o -name "vendor" \) -prune -o -type f -exec shasum -a 256 {} + | sort
+    else
+      find . -type d \( \( -name ".*" ! -name "." \) -o -name "vendor" \) -prune -o -type f -exec sha256sum {} + | sort
+    fi
+  } | if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256
+  else
+    sha256sum
+  fi | awk '{print $1}'
+)
+[ -n "$KEY" ] || { printf 'failed to compute cache key\n' >&2; exit 1; }
+BIN_DIR="$CACHE_ROOT/$TOOL_NAME/$PLATFORM/$KEY"
+BIN="$BIN_DIR/$TOOL_NAME"
+
+if [ "${CACHED_GO_REBUILD:-0}" = "1" ] || [ ! -x "$BIN" ]; then
+  mkdir -p "$BIN_DIR"
+  [ "${CACHED_GO_DEBUG:-0}" = "1" ] && printf 'building %s\n' "$BIN" >&2
+  # Unique owned temporary inside this cache entry, created only by the build.
+  # Nothing is deleted before the build, and the trap only ever removes this
+  # script's own temporary path.
+  TMP=$(mktemp "$BIN_DIR/$TOOL_NAME.tmp.XXXXXX")
+  trap '[ ! -e "$TMP" ] || rm "$TMP"' 0 1 2 3 15
+  # Static and workspace-free: the image is assembled from this host-native Linux
+  # binary and must not depend on cgo or a surrounding Go workspace.
+  (cd "$SRC_DIR" && CGO_ENABLED=0 GOWORK=off go build -trimpath -o "$TMP" "$BUILD_PKG")
+  mv "$TMP" "$BIN"
+  trap - 0 1 2 3 15
+fi
+
+[ -x "$BIN" ] || { printf 'collector binary missing after build: %s\n' "$BIN" >&2; exit 1; }
+if [ "${1:-}" = "--print-bin" ]; then
+  printf '%s\n' "$BIN"
+  exit 0
+fi
+exec "$BIN" "$@"
