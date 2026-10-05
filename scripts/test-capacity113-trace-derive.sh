@@ -51,6 +51,7 @@ make_fixture() {
   cp "$root/scripts/run-capacity-113-ci-trace-diagnostic.sh" "$fixture/scripts/"
   cp "$root/scripts/e2e-kind-saas-isolation-113.sh" "$fixture/scripts/"
   cp "$root/scripts/run-capacity-113-ci.sh" "$fixture/scripts/"
+  cp "$root/Dockerfile" "$fixture/Dockerfile"
   chmod 755 "$fixture/scripts/run-capacity-113-ci-trace-diagnostic.sh"
   chmod 644 "$fixture/scripts/e2e-kind-saas-isolation-113.sh" "$fixture/scripts/run-capacity-113-ci.sh"
   printf '%s\n' "$fixture"
@@ -172,6 +173,24 @@ grep -Fq 'auth-traces.jsonl' "$wrapper" || fail 'raw capture must still happen i
 ok
 
 # --------------------------------------------------------------- drift controls
+
+# Diagnostic overlay only affects the app, and its temporary local module
+# reference never changes the original module cache or original Dockerfile.
+for file in node.go server.go overlay.json; do
+  [ "$(grep -Fc "COPY --from=native_diag /$file /diagnostic/$file" "$derived/Dockerfile")" = 1 ] || fail "missing named-context copy: $file"
+done
+[ "$(grep -Fc -- '-overlay=/diagnostic/overlay.json' "$derived/Dockerfile")" = 1 ] || fail 'only the app may be overlaid'
+grep -Fq -- '-modfile=/diagnostic/diagnostic.mod' "$derived/Dockerfile" || fail 'local diagnostic module reference missing'
+awk '!/COPY --from=native_diag/ && !/RUN ln -s/ && !/-overlay=/ {print}' "$derived/Dockerfile" >"$work/helper-builds.derived"
+awk '!/-o \/goauthy \.\/cmd\/goauthy$/' "$scratch/Dockerfile" >"$work/helper-builds.original"
+cmp "$work/helper-builds.derived" "$work/helper-builds.original" || fail 'non-app Docker instructions changed'
+[ "$(grep -Fc -- '--build-context native_diag=' "$wrapper")" = 1 ] || fail 'named build context missing'
+[ ! -e "$derived/native-overlay" ] || fail 'derive-only must not execute the Go helper'
+for n in 0 1 2; do
+  grep -Fq "logs goauthy-$n -c goauthy" "$wrapper" || fail "missing native capture $n"
+done
+ok
+
 # Each mutation must fail closed, before any external tool, with a non-zero status.
 mutate() {
   fixture=$1
@@ -286,6 +305,27 @@ derive "$fixture" 1 >/dev/null
 ok
 
 # ------------------------------------------------------------------- hygiene
+fixture=$(make_fixture | tail -n 1)
+mutate "$fixture" ../Dockerfile \
+  "RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy ./cmd/goauthy" \
+  "RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy.alt ./cmd/goauthy"
+derive "$fixture" 1 >/dev/null
+ok
+fixture=$(make_fixture | tail -n 1)
+mutate "$fixture" run-capacity-113-ci.sh \
+  '		-f "$root/Dockerfile" "$root"' \
+  '		-f "$root/Dockerfile.alt" "$root"'
+derive "$fixture" 1 >/dev/null
+ok
+
+# The derive path must not have created anything outside the caller results dir.
+fixture=$(make_fixture | tail -n 1)
+mutate "$fixture" run-capacity-113-ci.sh \
+  '	docker buildx build \' \
+  '	docker build \'
+derive "$fixture" 1 >/dev/null
+ok
+
 # The derive path must not have created anything outside the caller results dir.
 for fixture in "$work"/repo.*; do
   [ -d "$fixture" ] || continue

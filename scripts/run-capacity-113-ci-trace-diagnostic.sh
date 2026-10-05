@@ -3,7 +3,7 @@
 #
 # Derived from the existing e2e and wrapper scripts without editing either one.
 # The FULL e2e workload/capture/summary and the full wrapper results are kept:
-# the only functional addition is a diagnostic OTLP collector (built from the
+# the additions are a diagnostic-only native phase overlay and an OTLP collector (built from the
 # cached host binary of scripts/iam-trace-collector-src) plus a trace-endpoint
 # env var composed into the SAME metrics overlay BEFORE the first profile apply.
 #
@@ -177,6 +177,27 @@ spec:
 YAML
 chmod 600 "$scratch/collector.yaml"
 
+# Native phase recording is applied only to the diagnostic main app build.
+# All helper builds and the original Dockerfile remain unchanged. A temporary
+# local module reference lets Go overlay two copies without replacing files
+# beneath GOMODCACHE (which Go explicitly forbids).
+awk '
+  BEGIN { q=sprintf("%c",39) }
+  $0 == "RUN CGO_ENABLED=0 go build -trimpath -ldflags=" q "-s -w" q " -o /goauthy ./cmd/goauthy" {
+    print "COPY --from=native_diag /node.go /diagnostic/node.go"
+    print "COPY --from=native_diag /server.go /diagnostic/server.go"
+    print "COPY --from=native_diag /overlay.json /diagnostic/overlay.json"
+    print "RUN ln -s /go/pkg/mod/github.com/mrchypark/rhiza@v0.18.0 /diagnostic/rhiza && test -f /diagnostic/rhiza/pkg/node/node.go && test -f /diagnostic/rhiza/pkg/network/server.go && cp go.mod /diagnostic/diagnostic.mod && cp go.sum /diagnostic/diagnostic.sum && printf " q "\\nreplace github.com/mrchypark/rhiza => /diagnostic/rhiza\\n" q " >> /diagnostic/diagnostic.mod"
+    print "RUN CGO_ENABLED=0 go build -modfile=/diagnostic/diagnostic.mod -overlay=/diagnostic/overlay.json -trimpath -ldflags=" q "-s -w" q " -o /goauthy ./cmd/goauthy"
+    appbuild++; next
+  }
+  { print }
+  END { if (appbuild != 1) exit 1 }
+' "$root/Dockerfile" >"$scratch/Dockerfile" || {
+  echo 'diagnostic: Dockerfile app build anchor drift' >&2
+  exit 1
+}
+
 # ------------------------------------------------------------------ e2e derive
 # Five exactly-once anchors, all fail-closed on drift:
 #   1 node-pins source line
@@ -242,7 +263,7 @@ awk -v root="$root" -v scratch="$scratch" -v img="$collector_image" '
 # The e2e call anchor and summarize_results are matched as contiguous blocks, so
 # the KIND_CLUSTER inline export that precedes the call and the summarize call
 # that follows it are asserted together. Deriving does not restate them.
-awk -v root="$root" -v e2e="$scratch/e2e.sh" -v ev='$evidence_dir' -v agg='$2/isolation113-stage-aggregate.json' -v crit='$2/criterion.json' -v summ="$root/scripts/summarize-isolation113-stage-aggregate.sh" '
+awk -v root="$root" -v scratch="$scratch" -v e2e="$scratch/e2e.sh" -v ev='$evidence_dir' -v agg='$2/isolation113-stage-aggregate.json' -v crit='$2/criterion.json' -v summ="$root/scripts/summarize-isolation113-stage-aggregate.sh" '
   BEGIN { q=sprintf("%c",39) }
   $0 == "root=$(CDPATH=" q q " cd -- \"$(dirname -- \"$0\")/..\" && pwd)" {
     print "root=" root
@@ -254,6 +275,7 @@ awk -v root="$root" -v e2e="$scratch/e2e.sh" -v ev='$evidence_dir' -v agg='$2/is
     print
     next
   }
+  $0 == "\tdocker buildx build \\" { builders++ }
   $0 == "\t\"$root/scripts/e2e-kind-saas-isolation-113.sh\" || runner_status=$?" {
     print "\t\"" e2e "\" || runner_status=$?"
     # Diagnostic capture happens here, inside the child wrapper, before its own
@@ -266,11 +288,23 @@ awk -v root="$root" -v e2e="$scratch/e2e.sh" -v ev='$evidence_dir' -v agg='$2/is
     print "\t[ ! -e \"" ev "/auth-traces.jsonl.part\" ] || rm \"" ev "/auth-traces.jsonl.part\""
     print "\techo \"capacity-113-ci: warning: diagnostic auth traces are MISSING in this run; tracing evidence is diagnostic only and must not be read as a pass\" >&2"
     print "fi"
+    for (i=0; i<3; i++) {
+      print "if kubectl --request-timeout=5s --context \"$context\" -n goauthy logs goauthy-" i " -c goauthy --tail=20000 --limit-bytes=8388608 >\"" ev "/native-log-" i ".private.log.part\" 2>/dev/null && [ -s \"" ev "/native-log-" i ".private.log.part\" ]; then"
+      print "\tchmod 600 \"" ev "/native-log-" i ".private.log.part\" && mv \"" ev "/native-log-" i ".private.log.part\" \"" ev "/native-log-" i ".private.log\""
+      print "else"
+      print "\t[ ! -e \"" ev "/native-log-" i ".private.log.part\" ] || rm \"" ev "/native-log-" i ".private.log.part\""
+      print "\techo \"diagnostic: native timing capture missing for member " i "\" >&2"
+      print "fi"
+    }
     calls++
     next
   }
+  $0 == "\t\t-f \"$root/Dockerfile\" \"$root\"" {
+    print "\t\t-f \"" scratch "/Dockerfile\" --build-context native_diag=\"" scratch "/native-overlay\" \"$root\""
+    dockerfiles++; next
+  }
   { print }
-  END { if (roots != 1 || summaries != 1 || calls != 1) exit 1 }
+  END { if (roots != 1 || summaries != 1 || calls != 1 || dockerfiles != 1 || builders != 1) exit 1 }
 ' "$root/scripts/run-capacity-113-ci.sh" >"$scratch/wrapper.sh" || {
   echo 'diagnostic: wrapper source drift' >&2
   exit 1
@@ -376,6 +410,24 @@ USER 65532:65532
 ENTRYPOINT ["/usr/local/bin/iam-trace-collector"]
 DOCKERFILE
 
+# Resolve exactly the already-pinned native sources after runtime preconditions;
+# only the two permitted source files are read by the helper. The original
+# module directory is not copied or modified.
+rhiza_dir=$(cd "$root" && go list -m -f '{{.Dir}}' github.com/mrchypark/rhiza) || rhiza_dir=
+if [ -z "$rhiza_dir" ]; then
+  (cd "$root" && go mod download github.com/mrchypark/rhiza@v0.18.0)
+  rhiza_dir=$(cd "$root" && go list -m -f '{{.Dir}}' github.com/mrchypark/rhiza)
+fi
+case "$rhiza_dir" in
+*/github.com/mrchypark/rhiza@v0.18.0) ;;
+*) echo 'diagnostic: expected pinned Rhiza v0.18.0 source directory' >&2; exit 1 ;;
+esac
+"$root/scripts/derive-isolation113-native-overlay" "$rhiza_dir" "$scratch/native-overlay"
+jq -n '{Replace:{
+  "/diagnostic/rhiza/pkg/node/node.go":"/diagnostic/node.go",
+  "/diagnostic/rhiza/pkg/network/server.go":"/diagnostic/server.go"
+}}' >"$scratch/native-overlay/overlay.json"
+
 GOAUTHY_LOCAL_BUILD=1
 GOAUTHY_CANDIDATE_SOURCE=${GOAUTHY_CANDIDATE_SOURCE:-}
 if [ -z "$GOAUTHY_CANDIDATE_SOURCE" ]; then
@@ -401,11 +453,32 @@ set +e
 diagnostic_rc=$?
 set -e
 
+# Whole-capture counts/maxima only: these native calls can overlap, and their
+# maxima are never summed or attributed to a particular request or phase.
+set +e
+"$root/scripts/summarize-isolation113-native-timings.sh" "$1" "$scratch/native-aggregate.json"
+native_rc=$?
+set -e
+if [ -s "$scratch/native-aggregate.json" ] && [ -s "$aggregate" ]; then
+  if jq --slurpfile native "$scratch/native-aggregate.json" '. + {native_timings:$native[0]}' "$aggregate" >"$scratch/aggregate.embed.json"; then
+    mv "$scratch/aggregate.embed.json" "$aggregate"
+    chmod 600 "$aggregate"
+  else
+    native_rc=2
+  fi
+else
+  native_rc=2
+fi
+
 if [ "$campaign_rc" -ne 0 ]; then
   exit "$campaign_rc"
 fi
 if [ "$diagnostic_rc" -ne 0 ]; then
   echo "diagnostic: campaign passed but the recording is INCOMPLETE (aggregator status $diagnostic_rc); unresolved, never a pass" >&2
   exit "$diagnostic_rc"
+fi
+if [ "$native_rc" -ne 0 ]; then
+  echo 'diagnostic: native phase recording incomplete; unresolved' >&2
+  exit "$native_rc"
 fi
 exit 0

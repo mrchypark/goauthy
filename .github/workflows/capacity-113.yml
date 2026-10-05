@@ -134,6 +134,8 @@ jobs:
           set -eu
           jq --version
           sh scripts/test-isolation113-stage-aggregate.sh
+          sh scripts/test-isolation113-native-timings.sh
+          (cd scripts/derive-isolation113-native-overlay-src && GOWORK=off go test ./... && GOWORK=off go vet ./...)
           sh scripts/test-capacity113-trace-derive.sh
 
       - name: Log in to GHCR (read-only)
