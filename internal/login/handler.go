@@ -383,7 +383,7 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	validateStart := time.Now()
 	request, valid := h.oauth.ValidateAuthorizationRequestForLogin(w, r)
-	h.recordAuthStage(metrics.AuthStageAuthorizeValidate, validateStart)
+	h.recordAuthStage(r.Context(), metrics.AuthStageAuthorizeValidate, validateStart)
 	if !valid {
 		return
 	}
@@ -436,20 +436,20 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 	} else {
 		peerIP, peerOK := h.resolvePeerIP(r)
 		if !peerOK {
-			h.recordAuthStage(metrics.AuthStageAuthorizeSession, sessionStart)
+			h.recordAuthStage(r.Context(), metrics.AuthStageAuthorizeSession, sessionStart)
 			http.Error(w, "Invalid login request", http.StatusBadRequest)
 			return
 		}
 		session, err = h.browser.CreateInitSession(r.Context(), h.now().Add(interactionLifetime), peerIP)
 		if err != nil {
-			h.recordAuthStage(metrics.AuthStageAuthorizeSession, sessionStart)
+			h.recordAuthStage(r.Context(), metrics.AuthStageAuthorizeSession, sessionStart)
 			slog.Error("authorize request failed", "operation", "init_session", "error_class", authorizeStoreErrorClass(err), "error_type", fmt.Sprintf("%T", err))
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 			return
 		}
 	}
 	interaction, err := h.browser.CreateAuthorizationInteraction(r.Context(), session.Token, request.RequestID, []byte(r.URL.RequestURI()), h.now().Add(interactionLifetime))
-	h.recordAuthStage(metrics.AuthStageAuthorizeSession, sessionStart)
+	h.recordAuthStage(r.Context(), metrics.AuthStageAuthorizeSession, sessionStart)
 	if err != nil {
 		slog.Error("authorize request failed", "operation", "authorization_interaction", "error_class", authorizeStoreErrorClass(err), "error_type", fmt.Sprintf("%T", err))
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
@@ -989,7 +989,9 @@ checkRateLimit:
 		return identity.Authentication{}, "", time.Time{}, false
 	}
 	if h.policy != nil {
+		checkStart := time.Now()
 		status, err := h.policy.Check(r.Context(), peerIP, h.now().UTC())
+		tracing.ObserveAuthStage(r.Context(), "policy_check", checkStart)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 			return identity.Authentication{}, "", time.Time{}, false
@@ -998,7 +1000,9 @@ checkRateLimit:
 			writeBlocked(w, h.now, status.BlockedUntil)
 			return identity.Authentication{}, "", time.Time{}, false
 		}
+		allowStart := time.Now()
 		allowed, err := h.policy.Allow(r.Context(), peerIP, h.now().UTC())
+		tracing.ObserveAuthStage(r.Context(), "policy_allow", allowStart)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 			return identity.Authentication{}, "", time.Time{}, false
@@ -1010,7 +1014,9 @@ checkRateLimit:
 	}
 	accountHash := loginpolicy.AccountStuffingDigest(username)
 	if h.policy != nil {
+		lockStart := time.Now()
 		locked, remaining, lockErr := h.policy.CheckAccountLock(r.Context(), accountHash, h.now().UTC())
+		tracing.ObserveAuthStage(r.Context(), "policy_account_lock", lockStart)
 		if lockErr != nil {
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 			return identity.Authentication{}, "", time.Time{}, false
@@ -1284,7 +1290,7 @@ func (h *Handler) finishAuthentication(w http.ResponseWriter, r *http.Request, s
 	}
 	consumeStart := time.Now()
 	consumed, err := h.consumeAuthenticationRequest(r, target, sessionToken, interactionDigest, subject, peerIP, consume)
-	h.recordAuthStage(metrics.AuthStageInteractionConsume, consumeStart)
+	h.recordAuthStage(r.Context(), metrics.AuthStageInteractionConsume, consumeStart)
 	if err != nil || consumed.RequestID != interaction.RequestID || !bytes.Equal(consumed.Payload, interaction.Payload) {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
@@ -1378,7 +1384,7 @@ func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.
 	}
 	issueStart := time.Now()
 	h.oauth.CompleteAuthorizationWithSession(w, original, subject, request.RequestedScopes, newSession.CreatedAt, newSession.ID, newSession.AuthenticationMethod)
-	h.recordAuthStage(metrics.AuthStageOAuthIssue, issueStart)
+	h.recordAuthStage(r.Context(), metrics.AuthStageOAuthIssue, issueStart)
 }
 
 // rotateBrowserSession is the common post-authentication browser transition.
@@ -1395,7 +1401,7 @@ func (h *Handler) rotateBrowserSessionWithBinding(w http.ResponseWriter, r *http
 
 func (h *Handler) rotateBrowserSessionWithParent(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP, parentDigest string, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, error) {
 	rotateStart := time.Now()
-	defer h.recordAuthStage(metrics.AuthStageSessionRotate, rotateStart)
+	defer h.recordAuthStage(r.Context(), metrics.AuthStageSessionRotate, rotateStart)
 	if h.onLoginLocation != nil && (authMethod == "webauthn" || authMethod == "mfa") && !security.ValidHeaderText(r.UserAgent()) {
 		return browser.IssuedSession{}, identity.ErrInvalidUserAgent
 	}
@@ -1920,11 +1926,14 @@ func (h *Handler) passwordlessCookie(value string) (*http.Cookie, error) {
 
 // recordAuthStage observes one bounded authentication stage duration using a
 // monotonic clock. The stage is a fixed enum and the value is an elapsed
-// duration; it is a no-op when no metrics registry is attached.
-func (h *Handler) recordAuthStage(stage metrics.AuthStage, start time.Time) {
+// duration; it is a no-op when no metrics registry is attached. The same
+// bounded stage is mirrored onto the request span when the parent context
+// carries a recording span, so metrics stay optional.
+func (h *Handler) recordAuthStage(ctx context.Context, stage metrics.AuthStage, start time.Time) {
 	if h.metrics != nil {
 		h.metrics.AuthStageDuration(stage, time.Since(start).Seconds())
 	}
+	tracing.ObserveAuthStage(ctx, string(stage), start)
 }
 
 // recordSuccessfulAuthentication is intentionally a no-op for every
@@ -1934,7 +1943,10 @@ func (h *Handler) recordSuccessfulAuthentication(ctx context.Context, peerIP str
 	if authErr != nil || h.policy == nil {
 		return authErr
 	}
-	return h.policy.Success(ctx, peerIP, elapsed)
+	successStart := time.Now()
+	successErr := h.policy.Success(ctx, peerIP, elapsed)
+	tracing.ObserveAuthStage(ctx, "policy_success", successStart)
+	return successErr
 }
 
 func waitContext(ctx context.Context, delay time.Duration) error {
