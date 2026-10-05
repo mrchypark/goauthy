@@ -431,8 +431,11 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 
 	sessionStart := time.Now()
 	var session browser.IssuedSession
+	var interaction browser.IssuedAuthorizationInteraction
+	reusedSession := false
 	if current, token, ok := h.session(r); ok && !current.Authenticated() {
 		session = browser.IssuedSession{Session: current, Token: token}
+		reusedSession = true
 	} else {
 		peerIP, peerOK := h.resolvePeerIP(r)
 		if !peerOK {
@@ -440,20 +443,24 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid login request", http.StatusBadRequest)
 			return
 		}
-		session, err = h.browser.CreateInitSession(r.Context(), h.now().Add(interactionLifetime), peerIP)
+		// One guarded durable batch persists the new init session together with
+		// its authorization interaction, so a failure leaves neither row behind.
+		session, interaction, err = h.browser.CreateInitSessionWithAuthorizationInteraction(r.Context(), peerIP, request.RequestID, []byte(r.URL.RequestURI()), h.now().Add(interactionLifetime))
+		h.recordAuthStage(r.Context(), metrics.AuthStageAuthorizeSession, sessionStart)
 		if err != nil {
-			h.recordAuthStage(r.Context(), metrics.AuthStageAuthorizeSession, sessionStart)
-			slog.Error("authorize request failed", "operation", "init_session", "error_class", authorizeStoreErrorClass(err), "error_type", fmt.Sprintf("%T", err))
+			slog.Error("authorize request failed", "operation", "init_session_authorization_interaction", "error_class", authorizeStoreErrorClass(err), "error_type", fmt.Sprintf("%T", err))
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 			return
 		}
 	}
-	interaction, err := h.browser.CreateAuthorizationInteraction(r.Context(), session.Token, request.RequestID, []byte(r.URL.RequestURI()), h.now().Add(interactionLifetime))
-	h.recordAuthStage(r.Context(), metrics.AuthStageAuthorizeSession, sessionStart)
-	if err != nil {
-		slog.Error("authorize request failed", "operation", "authorization_interaction", "error_class", authorizeStoreErrorClass(err), "error_type", fmt.Sprintf("%T", err))
-		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-		return
+	if reusedSession {
+		interaction, err = h.browser.CreateAuthorizationInteraction(r.Context(), session.Token, request.RequestID, []byte(r.URL.RequestURI()), h.now().Add(interactionLifetime))
+		h.recordAuthStage(r.Context(), metrics.AuthStageAuthorizeSession, sessionStart)
+		if err != nil {
+			slog.Error("authorize request failed", "operation", "authorization_interaction", "error_class", authorizeStoreErrorClass(err), "error_type", fmt.Sprintf("%T", err))
+			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+			return
+		}
 	}
 	cookie, err := browser.SessionCookie(h.issuer, session.Token, session.ExpiresAt)
 	if err != nil {

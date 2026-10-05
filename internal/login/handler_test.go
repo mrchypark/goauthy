@@ -1880,3 +1880,68 @@ func TestSessionIPBindingDirectModeRejectsMismatchedPeer(t *testing.T) {
 		}
 	}
 }
+
+// An unauthenticated init-session cookie must be reused rather than replaced.
+// The second authorize renders its own one-time interaction against the same
+// session, and no extra session is created.
+func TestAuthorizeReusesUnauthenticatedSessionCookieAcrossRequests(t *testing.T) {
+	t.Parallel()
+	h, db := testHandlerWithDB(t, false)
+	ctx := context.Background()
+	first := httptest.NewRecorder()
+	h.Authorize(first, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
+	if first.Code != http.StatusOK {
+		t.Fatalf("first authorize status=%d body=%q", first.Code, first.Body.String())
+	}
+	cookie := first.Result().Cookies()[0]
+	firstInteraction := interactionToken(t, first.Body.String())
+
+	reuse := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
+	reuse.AddCookie(cookie)
+	second := httptest.NewRecorder()
+	h.Authorize(second, reuse)
+	if second.Code != http.StatusOK {
+		t.Fatalf("reuse authorize status=%d body=%q", second.Code, second.Body.String())
+	}
+	reusedCookie := second.Result().Cookies()[0]
+	secondInteraction := interactionToken(t, second.Body.String())
+	if reusedCookie.Name != cookie.Name || reusedCookie.Value != cookie.Value {
+		t.Fatalf("session cookie changed across authorize requests: %v then %v", cookie, reusedCookie)
+	}
+	if firstInteraction == secondInteraction {
+		t.Fatal("each authorize request must render its own one-time interaction")
+	}
+	session, err := h.browser.LoadSessionReadOnly(ctx, cookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Subject != "" || session.AuthenticationMethod != "" || session.Authenticated() {
+		t.Fatalf("reused cookie must stay unauthenticated: %+v", session)
+	}
+	firstLoaded, err := h.browser.LoadAuthorizationInteractionReadOnly(ctx, cookie.Value, firstInteraction)
+	if err != nil {
+		t.Fatalf("first interaction must stay bound to the reused session: %v", err)
+	}
+	secondLoaded, err := h.browser.LoadAuthorizationInteractionReadOnly(ctx, cookie.Value, secondInteraction)
+	if err != nil {
+		t.Fatalf("second interaction must be bound to the reused session: %v", err)
+	}
+	if firstLoaded.RequestID == secondLoaded.RequestID {
+		t.Fatalf("distinct authorize requests must carry distinct request IDs: %q", firstLoaded.RequestID)
+	}
+	// The reuse branch must not create a second session.
+	result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(*) FROM browser_sessions`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
+		t.Fatalf("session count read: %+v %v", result.Rows, err)
+	}
+	if count := result.Rows[0][0].(int64); count != 1 {
+		t.Fatalf("browser_sessions=%d want 1", count)
+	}
+	// Both interactions stay independently usable against that one session.
+	if _, err := h.browser.ConsumeAuthorizationInteraction(ctx, cookie.Value, firstInteraction); err != nil {
+		t.Fatalf("first interaction must still be consumable: %v", err)
+	}
+	if _, err := h.browser.LoadAuthorizationInteractionReadOnly(ctx, cookie.Value, secondInteraction); err != nil {
+		t.Fatalf("consuming the first interaction must not disturb the second: %v", err)
+	}
+}

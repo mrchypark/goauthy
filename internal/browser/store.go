@@ -197,6 +197,95 @@ func (s *Store) CreateInitSession(ctx context.Context, expiresAt time.Time, peer
 	return s.createSession(ctx, "", "", expiresAt, peerIP, nil)
 }
 
+// expiredSessionCleanupStatements is the expiry sweep that precedes every
+// session insert. Rhiza does not enforce SQLite foreign keys, so bindings are
+// removed before their expired sessions to keep session-digest lookups from
+// retaining stale rows.
+func expiredSessionCleanupStatements(now time.Time) []rhiza.SQLStatement {
+	return []rhiza.SQLStatement{
+		{SQL: `DELETE FROM browser_upstream_session_bindings WHERE session_digest IN (SELECT token_digest FROM browser_sessions WHERE expires_at_unix_ms <= ?)`, Args: []any{now.UnixMilli()}},
+		{SQL: `DELETE FROM browser_sessions WHERE expires_at_unix_ms <= ?`, Args: []any{now.UnixMilli()}},
+	}
+}
+
+// initSessionInsert is the init-session row insert shared by CreateInitSession
+// and CreateInitSessionWithAuthorizationInteraction so the durable shape of a
+// new pre-login session cannot drift between them.
+func initSessionInsert(digest string, now, expiresAt time.Time, peerIP string) rhiza.SQLStatement {
+	return rhiza.SQLStatement{SQL: `INSERT INTO browser_sessions (token_digest, subject, auth_method, created_at_unix_ms, expires_at_unix_ms, last_seen_at_unix_ms, peer_ip) VALUES (?, ?, ?, ?, ?, ?, ?)`, Args: []any{digest, "", "", now.UnixMilli(), expiresAt.UnixMilli(), now.UnixMilli(), peerIP}}
+}
+
+// CreateInitSessionWithAuthorizationInteraction creates a new pre-login session
+// and its first authorization interaction in one guarded durable batch of five
+// statements: the two session expiry sweeps, the session insert, the interaction
+// expiry sweep, and the guarded interaction insert. The interaction insert still
+// requires the session to be live, idle-fresh, and subject-active in the same
+// transaction, so neither row can commit without the other and a failed pair
+// leaves no orphaned session behind. Expiry, request ID, payload, and
+// token-derivation contracts are identical to the separate CreateInitSession
+// then CreateAuthorizationInteraction sequence.
+//
+// Two different rejections can fail the batch, and they are not the same event.
+// A guarded-insert precondition failure is a failed proof of insertion and maps
+// to ErrNotFound, exactly as in CreateAuthorizationInteraction. An ordinary
+// statement execution failure, such as the request_id UNIQUE constraint on an
+// already-known authorization request, is not a precondition failure and
+// surfaces unchanged so callers cannot mistake it for absence.
+func (s *Store) CreateInitSessionWithAuthorizationInteraction(ctx context.Context, peerIP, requestID string, payload []byte, expiresAt time.Time) (IssuedSession, IssuedAuthorizationInteraction, error) {
+	if err := validateInteraction(requestID, payload); err != nil {
+		return IssuedSession{}, IssuedAuthorizationInteraction{}, err
+	}
+	now := s.timeNow()
+	expiresAt = expiresAt.UTC()
+	if !expiresAt.After(now) {
+		return IssuedSession{}, IssuedAuthorizationInteraction{}, errors.New("browser session expiry must be in the future")
+	}
+	sessionToken, sessionDigest, err := newToken()
+	if err != nil {
+		return IssuedSession{}, IssuedAuthorizationInteraction{}, err
+	}
+	interactionToken, interactionDigest, err := newToken()
+	if err != nil {
+		return IssuedSession{}, IssuedAuthorizationInteraction{}, err
+	}
+	sessionInsert := initSessionInsert(sessionDigest, now, expiresAt, peerIP)
+	one := int64(1)
+	sessionInsert.ExpectedRowsAffected = &one
+	statements := append(expiredSessionCleanupStatements(now),
+		sessionInsert,
+		expiredInteractionCleanup(now),
+		s.authorizationInteractionInsert(interactionDigest, requestID, sessionDigest, payload, now, expiresAt),
+	)
+	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
+		RequestID:  mutationID("init-authorization-pair-create", sessionDigest, interactionDigest),
+		Statements: statements,
+	})
+	if err != nil {
+		// A rejected precondition rolls back every statement in the batch,
+		// including the session insert, so one classification covers both rows.
+		// Recovery can return a populated receipt without confirming the exact
+		// request or ACK durability. Such errors must not become absence.
+		if errors.Is(err, rhiza.ErrCommitUnknown) || errors.Is(err, rhiza.ErrRequestConflict) {
+			return IssuedSession{}, IssuedAuthorizationInteraction{}, err
+		}
+		// Only a rejected guarded precondition means the pair was not proven
+		// inserted. Every other execution failure, such as a statement
+		// constraint violation, stays an error rather than becoming absence.
+		// Do not infer insertion from the batch's aggregate RowsAffected.
+		if response.Status == rhiza.MutationRejected && response.ErrorCode == rhiza.MutationErrorCodePreconditionFailed {
+			return IssuedSession{}, IssuedAuthorizationInteraction{}, ErrNotFound
+		}
+		return IssuedSession{}, IssuedAuthorizationInteraction{}, err
+	}
+	// Read back the stored session and require that the guarded insert happened.
+	session, _, err := s.loadSession(ctx, sessionDigest, now)
+	if err != nil {
+		return IssuedSession{}, IssuedAuthorizationInteraction{}, err
+	}
+	return IssuedSession{Session: session, Token: sessionToken},
+		IssuedAuthorizationInteraction{AuthorizationInteraction: AuthorizationInteraction{RequestID: requestID, Payload: append([]byte(nil), payload...), ExpiresAt: expiresAt}, Token: interactionToken}, nil
+}
+
 func (s *Store) createSession(ctx context.Context, subject, authMethod string, expiresAt time.Time, peerIP string, binding *UpstreamSessionBinding) (IssuedSession, error) {
 	return s.createSessionWithParent(ctx, subject, authMethod, expiresAt, peerIP, binding, nil)
 }
@@ -211,12 +300,14 @@ func (s *Store) createSessionWithParent(ctx context.Context, subject, authMethod
 	if err != nil {
 		return IssuedSession{}, err
 	}
-	insert := rhiza.SQLStatement{SQL: `INSERT INTO browser_sessions (token_digest, subject, auth_method, created_at_unix_ms, expires_at_unix_ms, last_seen_at_unix_ms, peer_ip) VALUES (?, ?, ?, ?, ?, ?, ?)`, Args: []any{digest, subject, authMethod, now.UnixMilli(), expiresAt.UnixMilli(), now.UnixMilli(), peerIP}}
+	var insert rhiza.SQLStatement
 	if subject != "" {
 		insert = rhiza.SQLStatement{SQL: `INSERT INTO browser_sessions (token_digest, subject, auth_method, created_at_unix_ms, expires_at_unix_ms, last_seen_at_unix_ms, peer_ip)
 			SELECT ?,subject,?,?,MIN(?,COALESCE(user_expires_at_unix_ms,?)),?,? FROM identity_users
 			WHERE subject=? AND disabled=0 AND (user_expires_at_unix_ms IS NULL OR user_expires_at_unix_ms > ?)`,
 			Args: []any{digest, authMethod, now.UnixMilli(), expiresAt.UnixMilli(), expiresAt.UnixMilli(), now.UnixMilli(), peerIP, subject, now.UnixMilli()}}
+	} else {
+		insert = initSessionInsert(digest, now, expiresAt, peerIP)
 	}
 	if parent != nil {
 		guard, args := s.SessionAuthorizationGuard(*parent, peerIP)
@@ -225,13 +316,7 @@ func (s *Store) createSessionWithParent(ctx context.Context, subject, authMethod
 		one := int64(1)
 		insert.ExpectedRowsAffected = &one
 	}
-	statements := []rhiza.SQLStatement{
-		// Rhiza does not enforce SQLite foreign keys. Remove bindings before their
-		// expired sessions so session-digest lookups cannot retain stale rows.
-		{SQL: `DELETE FROM browser_upstream_session_bindings WHERE session_digest IN (SELECT token_digest FROM browser_sessions WHERE expires_at_unix_ms <= ?)`, Args: []any{now.UnixMilli()}},
-		{SQL: `DELETE FROM browser_sessions WHERE expires_at_unix_ms <= ?`, Args: []any{now.UnixMilli()}},
-		insert,
-	}
+	statements := append(expiredSessionCleanupStatements(now), insert)
 	if binding != nil {
 		statements = append(statements, rhiza.SQLStatement{SQL: `INSERT INTO browser_upstream_session_bindings (session_digest, issuer, client_id, upstream_subject, upstream_sid, created_at_unix_ms)
 			SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM browser_sessions WHERE token_digest=? AND subject=? AND auth_method=? AND created_at_unix_ms=?)`,
@@ -499,6 +584,24 @@ type IssuedAuthorizationInteraction struct {
 	Token string
 }
 
+// expiredInteractionCleanup is the expiry sweep that precedes every
+// authorization-interaction insert.
+func expiredInteractionCleanup(now time.Time) rhiza.SQLStatement {
+	return rhiza.SQLStatement{SQL: `DELETE FROM browser_authorization_interactions WHERE expires_at_unix_ms <= ?`, Args: []any{now.UnixMilli()}}
+}
+
+// authorizationInteractionInsert is the guarded interaction insert shared by
+// CreateAuthorizationInteraction and the combined init-session pair path. The
+// precondition requires the bound session to still be live, idle-fresh, and
+// subject-active at this mutation's position in the order.
+func (s *Store) authorizationInteractionInsert(digest, requestID, sessionDigest string, payload []byte, now, expiresAt time.Time) rhiza.SQLStatement {
+	one := int64(1)
+	return rhiza.SQLStatement{SQL: `INSERT INTO browser_authorization_interactions (token_digest, request_id, session_digest, payload, created_at_unix_ms, expires_at_unix_ms)
+				SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM browser_sessions WHERE token_digest=?
+				AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ? AND last_seen_at_unix_ms > ? AND ` + activeSessionSubjectSQL + `)`,
+		Args: []any{digest, requestID, sessionDigest, base64.RawURLEncoding.EncodeToString(payload), now.UnixMilli(), expiresAt.UnixMilli(), sessionDigest, now.UnixMilli(), now.Add(-s.idleTimeout).UnixMilli(), now.UnixMilli()}, ExpectedRowsAffected: &one}
+}
+
 func (s *Store) CreateAuthorizationInteraction(ctx context.Context, sessionToken, requestID string, payload []byte, expiresAt time.Time) (IssuedAuthorizationInteraction, error) {
 	if err := validateInteraction(requestID, payload); err != nil {
 		return IssuedAuthorizationInteraction{}, err
@@ -521,15 +624,11 @@ func (s *Store) CreateAuthorizationInteraction(ctx context.Context, sessionToken
 	}
 	// Success proves guarded insertion at this mutation's position in the order,
 	// not existence or authority at a later snapshot. Loads/consumes revalidate.
-	one := int64(1)
 	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID: mutationID("authorization-create", digest),
 		Statements: []rhiza.SQLStatement{
-			{SQL: `DELETE FROM browser_authorization_interactions WHERE expires_at_unix_ms <= ?`, Args: []any{now.UnixMilli()}},
-			{SQL: `INSERT INTO browser_authorization_interactions (token_digest, request_id, session_digest, payload, created_at_unix_ms, expires_at_unix_ms)
-				SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM browser_sessions WHERE token_digest=?
-				AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ? AND last_seen_at_unix_ms > ? AND ` + activeSessionSubjectSQL + `)`,
-				Args: []any{digest, requestID, sessionDigest, base64.RawURLEncoding.EncodeToString(payload), now.UnixMilli(), expiresAt.UnixMilli(), sessionDigest, now.UnixMilli(), now.Add(-s.idleTimeout).UnixMilli(), now.UnixMilli()}, ExpectedRowsAffected: &one},
+			expiredInteractionCleanup(now),
+			s.authorizationInteractionInsert(digest, requestID, sessionDigest, payload, now, expiresAt),
 		},
 	})
 	if err != nil {

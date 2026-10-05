@@ -20,31 +20,77 @@ type confirmationKey struct{}
 type confirmationProbe struct {
 	request           rhiza.ExecuteRequest
 	response          rhiza.ExecuteResponse
+	pairRequest       rhiza.ExecuteRequest
+	pairResponse      rhiza.ExecuteResponse
 	queries, executes int
 	before            func(rhiza.ExecuteRequest)
 	after             func(rhiza.ExecuteResponse, error) (rhiza.ExecuteResponse, error)
 	touch             func(rhiza.ExecuteRequest)
+	pairBefore        func(rhiza.ExecuteRequest)
+	pairAfter         func(rhiza.ExecuteResponse, error) (rhiza.ExecuteResponse, error)
+}
+
+// isConfirmationCreator identifies the separate two-statement interaction
+// creator: expiry sweep plus one guarded insert of ten args.
+func isConfirmationCreator(request rhiza.ExecuteRequest) bool {
+	return len(request.Statements) == 2 && len(request.Statements[1].Args) == 10
+}
+
+// isConfirmationPair identifies the combined init-session and interaction batch
+// by its own shape. That batch is five statements: two session expiry sweeps, the
+// guarded session insert, the interaction expiry sweep, and the guarded
+// interaction insert. Both inserts carry ExpectedRowsAffected, and the third
+// statement is the session insert. This is deliberately a separate predicate from
+// the creator's, so a five-statement batch can never be mistaken for it and the
+// creator tests keep their own two-statement identification.
+func isConfirmationPair(request rhiza.ExecuteRequest) bool {
+	if len(request.Statements) != 5 || len(request.Statements[4].Args) != 10 {
+		return false
+	}
+	for _, index := range []int{2, 4} {
+		statement := request.Statements[index]
+		if statement.ExpectedRowsAffected == nil || *statement.ExpectedRowsAffected != 1 {
+			return false
+		}
+	}
+	return request.Statements[3].ExpectedRowsAffected == nil
 }
 
 func confirmationExecute(ctx context.Context, db *rhiza.DB, request rhiza.ExecuteRequest) (rhiza.ExecuteResponse, error) {
 	p, _ := ctx.Value(confirmationKey{}).(*confirmationProbe)
-	creator := len(request.Statements) == 2 && len(request.Statements[1].Args) == 10
+	creator, pair := isConfirmationCreator(request), isConfirmationPair(request)
 	if p != nil {
 		p.executes++
-		if creator {
+		switch {
+		case pair:
+			p.pairRequest = request
+			if p.pairBefore != nil {
+				p.pairBefore(request)
+			}
+		case creator:
 			p.request = request
 			if p.before != nil {
 				p.before(request)
 			}
-		} else if p.touch != nil {
-			p.touch(request)
+		default:
+			if p.touch != nil {
+				p.touch(request)
+			}
 		}
 	}
 	response, err := storage.Execute(ctx, db, request)
-	if p != nil && creator {
-		p.response = response
-		if p.after != nil {
-			return p.after(response, err)
+	if p != nil {
+		switch {
+		case pair:
+			p.pairResponse = response
+			if p.pairAfter != nil {
+				return p.pairAfter(response, err)
+			}
+		case creator:
+			p.response = response
+			if p.after != nil {
+				return p.after(response, err)
+			}
 		}
 	}
 	return response, err
@@ -277,5 +323,45 @@ func TestConfirmationCapturedCutoff(t *testing.T) {
 	}
 	if _, err := s.LoadAuthorizationInteractionReadOnly(t.Context(), session.Token, issued.Token); !errors.Is(err, ErrExpired) {
 		t.Fatalf("later expired authority=%v", err)
+	}
+}
+
+// The combined pair batch must treat a populated receipt the same way the
+// separate creator does: a veto carrying CommitUnknown or RequestConflict is not
+// absence and must not yield usable state. The pair is identified by its own
+// five-statement shape, not by the creator's two-statement heuristic.
+func TestConfirmationPairPopulatedReceiptErrors(t *testing.T) {
+	for _, status := range []rhiza.MutationStatus{rhiza.MutationCommitted, rhiza.MutationRejected} {
+		for _, failure := range []error{rhiza.ErrCommitUnknown, rhiza.ErrRequestConflict, context.Canceled, context.DeadlineExceeded, rhiza.ErrQuorumUnavailable} {
+			if status == rhiza.MutationRejected && !errors.Is(failure, rhiza.ErrCommitUnknown) && !errors.Is(failure, rhiza.ErrRequestConflict) {
+				continue
+			}
+			t.Run(fmt.Sprintf("%s/%v", status, failure), func(t *testing.T) {
+				s := testStore(t)
+				now := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC)
+				s.now = func() time.Time { return now }
+				p := &confirmationProbe{pairAfter: func(r rhiza.ExecuteResponse, err error) (rhiza.ExecuteResponse, error) {
+					if err != nil {
+						t.Fatal(err)
+					}
+					r.Status = status
+					r.ErrorCode = rhiza.MutationErrorCodePreconditionFailed
+					return r, failure
+				}}
+				session, interaction, err := s.CreateInitSessionWithAuthorizationInteraction(context.WithValue(t.Context(), confirmationKey{}, p), "203.0.113.9", "pair-veto", []byte("payload"), now.Add(time.Minute))
+				if !errors.Is(err, failure) || errors.Is(err, ErrNotFound) {
+					t.Fatalf("populated pair receipt became success/absence: %+v %v", session, err)
+				}
+				if session.Token != "" || session.ID != "" || interaction.Token != "" {
+					t.Fatalf("vetoed pair returned usable state: session=%+v interaction=%+v", session, interaction)
+				}
+				if !isConfirmationPair(p.pairRequest) || len(p.pairRequest.Statements) != 5 {
+					t.Fatalf("pair request not identified exactly: %+v", p.pairRequest.Statements)
+				}
+				if p.request.RequestID != "" {
+					t.Fatal("pair must not be captured as the two-statement creator")
+				}
+			})
+		}
 	}
 }
