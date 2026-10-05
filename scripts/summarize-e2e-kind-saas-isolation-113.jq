@@ -234,10 +234,10 @@ if $fixture_indices != [0, 1, 2] then error("fixture metrics must cover indices 
 [$fixture_route_check[] | select(.observed_started != .expected_started or .observed_completed != .expected_started or .observed_active != 0) | .] as $fixture_route_mismatches |
 ($fixture_route_check | all(.observed_started == .expected_started and .observed_completed == .expected_started and .observed_active == 0)) as $fixture_routes_agree |
 
-(if $fixture_index_complete then [] else [{check: "index_set", expected: [0, 1, 2], observed: $fixture_indices}] end) +
+((if $fixture_index_complete then [] else [{check: "index_set", expected: [0, 1, 2], observed: $fixture_indices}] end) +
 (if $fixture_routes_complete then [] else [{check: "route_set", expected: ([fixture_expected | keys_unsorted[]] | sort), observed: $fixture_routes_observed}] end) +
 $fixture_route_mismatches +
-$fixture_drain_mismatches as $fixture_mismatches |
+$fixture_drain_mismatches) as $fixture_mismatches |
 
 ($fixture_index_complete and $fixture_routes_complete and $fixture_routes_agree and $fixture_pods_drained) as $fixture_complete |
 ($protected_errors != 0 or ($denom_incomplete | length) > 0 or ($denom_excess | length) > 0 or ($unexpected_groups | length) > 0 or ($fixture_complete | not) or ($fault_mismatches | length) > 0) as $correctness_fail |
