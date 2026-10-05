@@ -323,7 +323,14 @@ summarize_results() {
 				comparisons: [.performance.comparisons[] | {driver_index, phase, route, n, p95_ms, p99_ms, p95_limit_ms, p99_limit_ms, pass}]
 			},
 			resources: {ceiling: .resources.ceiling, evidence: .resources.evidence},
-			fixture: {aggregate: .fixture.aggregate},
+			fixture: {
+				aggregate: .fixture.aggregate,
+				complete: .fixture.complete,
+				per_index: .fixture.per_index,
+				route_check: .fixture.route_check,
+				index_completeness: .fixture.index_completeness,
+				mismatches: .fixture.mismatches
+			},
 			small_sample,
 			overall,
 			criterion_pass: (.overall.correctness == "pass" and .overall.performance == "pass"),

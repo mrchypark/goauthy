@@ -197,6 +197,7 @@ for f in "$dir"/fixture-metrics-*.json; do
 	jq -e '
 		def int: type == "number" and isfinite and . >= 0 and floor == .;
 		. as $m |
+		($m | keys_unsorted | sort) == ["fail","healthy","slow-body","slow-headers"] and
 		(["healthy","slow-headers","slow-body","fail"] | all(.[]; . as $r |
 			($m[$r] | type) == "object" and
 			($m[$r].started | int) and ($m[$r].completed | int) and ($m[$r].active | int) and

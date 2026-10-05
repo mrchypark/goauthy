@@ -225,6 +225,81 @@ f=$nondrained/fixture-metrics-1.json
 jq '.healthy.completed = 3 | .healthy.active = 2' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
 expect_status "fixture non-drained" "$nondrained" "fail" "pass" "fail"
 
+# Arbitrary per-pod skew with exact global route totals is valid: pod index is
+# not driver index and no per-pod count distribution is contractual.
+skew=$tmp/skew
+mkcase "$skew" 100 110 90
+jq -nc '{healthy:{started:0,completed:0,active:0},"slow-headers":{started:0,completed:0,active:0},"slow-body":{started:0,completed:0,active:0},fail:{started:0,completed:0,active:0}}' >"$skew/fixture-metrics-2.json"
+jq -nc '{healthy:{started:10,completed:10,active:0},"slow-headers":{started:4,completed:4,active:0},"slow-body":{started:4,completed:4,active:0},fail:{started:2,completed:2,active:0}}' >"$skew/fixture-metrics-0.json"
+if out=$("$analyzer" "$skew" 2>"$tmp/err"); then
+	if printf '%s' "$out" | jq -e '
+		.overall.correctness == "pass" and .fixture.complete == true and (.fixture.mismatches | length) == 0 and
+		.fixture.aggregate.started == 30 and .fixture.aggregate.completed == 30 and .fixture.aggregate.active == 0 and
+		([.fixture.route_check[] | select(.route == "healthy" and .expected_started == 15 and .observed_started == 15)] | length) == 1 and
+		([.fixture.route_check[] | select(.route == "slow-headers" and .observed_started == 6)] | length) == 1 and
+		([.fixture.route_check[] | select(.route == "slow-body" and .observed_started == 6)] | length) == 1 and
+		([.fixture.route_check[] | select(.route == "fail" and .observed_started == 3)] | length) == 1 and
+		.fixture.index_completeness.complete == true and .fixture.index_completeness.observed == [0, 1, 2] and
+		([.fixture.per_index[] | select(.index == 2 and .complete == true)] | length) == 1 and
+		([.fixture.per_index[] | select(.index == 2) | .routes[] | select(.route == "healthy" and .observed_started == 0)] | length) == 1
+	' >/dev/null; then
+		ok "fixture arbitrary pod skew with exact route totals"
+	else
+		bad "fixture arbitrary pod skew with exact route totals (unexpected values)"
+		printf '%s' "$out" | jq -c '{correctness:.overall.correctness,complete:.fixture.complete,mismatches:.fixture.mismatches}' >&2 || true
+	fi
+else
+	bad "fixture arbitrary pod skew with exact route totals (analyzer exited nonzero)"
+	sanitize_err "$tmp/err" >&2
+fi
+
+# Same grand total 30 with wrong per-route totals (healthy 16, fail 2) fails.
+routewrong=$tmp/routewrong
+mkcase "$routewrong" 100 110 90
+jq -nc '{healthy:{started:6,completed:6,active:0},"slow-headers":{started:2,completed:2,active:0},"slow-body":{started:2,completed:2,active:0},fail:{started:0,completed:0,active:0}}' >"$routewrong/fixture-metrics-0.json"
+if out=$("$analyzer" "$routewrong" 2>"$tmp/err"); then
+	if printf '%s' "$out" | jq -e '
+		.overall.correctness == "fail" and .fixture.complete == false and
+		.fixture.aggregate.started == 30 and .fixture.aggregate.active == 0 and
+		([.fixture.mismatches[] | select(.route == "healthy" and .expected_started == 15 and .observed_started == 16)] | length) == 1 and
+		([.fixture.mismatches[] | select(.route == "fail" and .expected_started == 3 and .observed_started == 2)] | length) == 1
+	' >/dev/null; then
+		ok "fixture same grand total with wrong route totals"
+	else
+		bad "fixture same grand total with wrong route totals (unexpected values)"
+		printf '%s' "$out" | jq -c '{correctness:.overall.correctness,complete:.fixture.complete,mismatches:.fixture.mismatches}' >&2 || true
+	fi
+else
+	bad "fixture same grand total with wrong route totals (analyzer exited nonzero)"
+	sanitize_err "$tmp/err" >&2
+fi
+
+# Missing pod index: the existing input validation fails closed.
+nopodindex=$tmp/nopodindex
+mkcase "$nopodindex" 100 110 90
+rm "$nopodindex/fixture-metrics-2.json"
+expect_fail "fixture missing pod index" "$nopodindex"
+
+# Unexpected pod index: the existing input validation fails closed.
+extraidx=$tmp/extraidx
+mkcase "$extraidx" 100 110 90
+cp "$extraidx/fixture-metrics-2.json" "$extraidx/fixture-metrics-3.json"
+expect_fail "fixture unexpected pod index" "$extraidx"
+
+# A leading-zero filename parses as the same numeric pod index in jq.
+# The preflight requires exactly [0,1,2], so a duplicate is a hard error.
+dupidx=$tmp/dupidx
+mkcase "$dupidx" 100 110 90
+cp "$dupidx/fixture-metrics-0.json" "$dupidx/fixture-metrics-00.json"
+expect_fail "fixture duplicate numeric pod index" "$dupidx"
+
+# Extra unknown metric route key: raw fixture validation hard error.
+extraroute=$tmp/extraroute
+mkcase "$extraroute" 100 110 90
+f=$extraroute/fixture-metrics-0.json
+jq '.probe={started:1,completed:1,active:0}' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
+expect_fail "fixture unexpected route" "$extraroute"
+
 # Wrong fault status: expected 502 fault rejected.
 wrongfault=$tmp/wrongfault
 mkcase "$wrongfault" 100 110 90

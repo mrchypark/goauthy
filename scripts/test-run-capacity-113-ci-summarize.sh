@@ -110,6 +110,47 @@ expect_summary() {
 }
 
 base=$tmp/base
+
+# Wrapper safe output carries numeric fixture diagnosis for a real skew pass and
+# for a wrong-route failure, so the failure explains itself.
+skewwrap=$tmp/skewwrap
+mkcase "$skewwrap" 100 110 90
+jq -nc '{healthy:{started:0,completed:0,active:0},"slow-headers":{started:0,completed:0,active:0},"slow-body":{started:0,completed:0,active:0},fail:{started:0,completed:0,active:0}}' >"$skewwrap/fixture-metrics-2.json"
+jq -nc '{healthy:{started:10,completed:10,active:0},"slow-headers":{started:4,completed:4,active:0},"slow-body":{started:4,completed:4,active:0},fail:{started:2,completed:2,active:0}}' >"$skewwrap/fixture-metrics-0.json"
+skewres=$(new_results)
+if "$wrapper" --summarize "$skewwrap" "$skewres" >"$tmp/out" 2>"$tmp/err" &&
+	jq -e '
+		.overall.correctness == "pass" and .fixture.complete == true and (.fixture.mismatches | length) == 0 and
+		.fixture.aggregate.started == 30 and .fixture.aggregate.completed == 30 and .fixture.aggregate.active == 0 and
+		.fixture.index_completeness.observed == [0, 1, 2] and
+		([.fixture.route_check[] | select(.route == "healthy" and .observed_started == 15)] | length) == 1 and
+		([.fixture.per_index[] | select(.index == 2 and .complete == true)] | length) == 1
+	' "$skewres/criterion.json" >/dev/null 2>&1; then
+	ok "wrapper numeric fixture diagnosis on skew pass"
+else
+	bad "wrapper numeric fixture diagnosis on skew pass (unexpected criterion)"
+	jq -c '{correctness:.overall.correctness,complete:.fixture.complete,mismatches:.fixture.mismatches}' "$skewres/criterion.json" >&2 || true
+fi
+
+failwrap=$tmp/failwrap
+mkcase "$failwrap" 100 110 90
+jq -nc '{healthy:{started:6,completed:6,active:0},"slow-headers":{started:2,completed:2,active:0},"slow-body":{started:2,completed:2,active:0},fail:{started:0,completed:0,active:0}}' >"$failwrap/fixture-metrics-0.json"
+failres=$(new_results)
+if "$wrapper" --summarize "$failwrap" "$failres" >"$tmp/out" 2>"$tmp/err"; then wrc=0; else wrc=$?; fi
+if [ "$wrc" -eq 0 ]; then
+	bad "wrapper numeric fixture diagnosis on route failure (expected nonzero exit)"
+elif jq -e '
+	.overall.correctness == "fail" and .fixture.complete == false and
+	.fixture.aggregate.started == 30 and
+	([.fixture.mismatches[] | select(.route == "healthy" and .expected_started == 15 and .observed_started == 16)] | length) == 1 and
+	([.fixture.mismatches[] | select(.route == "fail" and .expected_started == 3 and .observed_started == 2)] | length) == 1 and
+	.fixture.index_completeness.complete == true
+' "$failres/criterion.json" >/dev/null 2>&1; then
+	ok "wrapper numeric fixture diagnosis on route failure"
+else
+	bad "wrapper numeric fixture diagnosis on route failure (unexpected criterion)"
+	jq -c '{correctness:.overall.correctness,complete:.fixture.complete,mismatches:.fixture.mismatches}' "$failres/criterion.json" >&2 || true
+fi
 mkcase "$base" 100 110 90
 expect_summary "positive" "$base" pass pass true true
 
