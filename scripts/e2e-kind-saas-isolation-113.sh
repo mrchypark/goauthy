@@ -342,6 +342,15 @@ if [ "${GOAUTHY_LOCAL_CANDIDATE:-0}" = 1 ]; then
 	assert_candidate_manifest_binding "$ISOLATION113_EVIDENCE_DIR/candidate-node-pins.json" "$candidate_manifest_digest" ||
 		{ echo 'source-build candidate node manifest digest does not match the built OCI manifest digest' >&2; exit 1; }
 fi
+
+printf '%s\n' "$prestart_spec" >"$ISOLATION113_EVIDENCE_DIR/pod-image-pins-before.txt"
+ready_after=$(kubectl --context "$context" -n "$namespace" get pods -l app.kubernetes.io/name=goauthy -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase} {.status.containerStatuses[?(@.name=="goauthy")].ready} {.status.containerStatuses[?(@.name=="goauthy")].imageID} {.spec.containers[?(@.name=="goauthy")].image}{"\n"}{end}')
+printf '%s\n' "$ready_after" | tee "$ISOLATION113_EVIDENCE_DIR/pod-image-pins-after.txt" >&2
+assert_candidate_pods "$ready_after" "$candidate_node_digests" || { echo 'post-overlay app image references or runtime digests differ from the selected immutable candidate' >&2; exit 1; }
+printf '%s\n' "$ready_after" >"$ISOLATION113_EVIDENCE_DIR/pod-image-pins.txt"
+
+collect_auth_stage_metrics pre
+
 authorize_url='http://127.0.0.1:18443/oidc/authorize?client_id=goauthy-dev&response_type=code&redirect_uri=http%3A%2F%2Flocalhost%3A5555%2Fcallback&scope=goauthy.read%20offline_access&state=isolation113-functional-readiness&code_challenge=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&code_challenge_method=S256'
 readiness_deadline=$(( $(date +%s) + 60 ))
 readiness_evidence=$ISOLATION113_EVIDENCE_DIR/authorize-readiness.tsv
@@ -358,22 +367,20 @@ for pod in goauthy-0 goauthy-1 goauthy-2; do
 	kill -TERM "$forward_pid" >/dev/null 2>&1 || true
 	wait "$forward_pid" 2>/dev/null || true
 	forward_pid=
-	[ "$status" = 200 ] || { echo "authorize endpoint did not become functional on $pod within the shared 60-second startup window (last HTTP status: $status)" >&2; exit 1; }
+	[ "$status" = 200 ] || {
+		collect_auth_stage_metrics post || true
+		echo "authorize endpoint did not become functional on $pod within the shared 60-second startup window (last HTTP status: $status)" >&2
+		exit 1
+	}
 	printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$pod" "$status" >>"$readiness_evidence"
 done
 
-printf '%s\n' "$prestart_spec" >"$ISOLATION113_EVIDENCE_DIR/pod-image-pins-before.txt"
-ready_after=$(kubectl --context "$context" -n "$namespace" get pods -l app.kubernetes.io/name=goauthy -o jsonpath='{range .items[*]}{.metadata.name} {.status.phase} {.status.containerStatuses[?(@.name=="goauthy")].ready} {.status.containerStatuses[?(@.name=="goauthy")].imageID} {.spec.containers[?(@.name=="goauthy")].image}{"\n"}{end}')
-printf '%s\n' "$ready_after" | tee "$ISOLATION113_EVIDENCE_DIR/pod-image-pins-after.txt" >&2
-assert_candidate_pods "$ready_after" "$candidate_node_digests" || { echo 'post-overlay app image references or runtime digests differ from the selected immutable candidate' >&2; exit 1; }
-printf '%s\n' "$ready_after" >"$ISOLATION113_EVIDENCE_DIR/pod-image-pins.txt"
-
-collect_auth_stage_metrics pre
 if [ "$job_status" -ne 0 ]; then
 	echo 'pre-scrape auth stage capture failed; refusing to launch the workload without a pre observation' >&2
 	capture_failure_state || true
 	exit "$job_status"
 fi
+
 # Diagnose boot under the same profile without launching a performance workload.
 if [ "$startup_only" -eq 1 ]; then
 	capture_failure_state

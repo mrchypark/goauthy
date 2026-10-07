@@ -203,6 +203,29 @@ else
 	printf '%s\n' "$out" >&2 || true
 fi
 
+# A valid pre-capture may have no histogram family before the first authorize
+# request. It remains distinct from a failed scrape and yields the post-only
+# stage delta from the same strict collector/summarizer path.
+empty_pre=$tmp/empty-pre
+mkdir -p "$empty_pre"
+: >"$tmp/no-auth-stage-family.txt"
+hist policy_check 0 1 0.1 1 >"$tmp/first-auth-stage-observation.txt"
+for idx in 0 1 2; do
+	collect "$idx" 1000 "$tmp/no-auth-stage-family.txt" >"$empty_pre/auth-stage-pre-$idx.json"
+	collect "$idx" 2000 "$tmp/first-auth-stage-observation.txt" >"$empty_pre/auth-stage-post-$idx.json"
+done
+if empty_pre_out=$("$summarizer" "$empty_pre") && printf '%s' "$empty_pre_out" | jq -e '
+	([.pods[].stages[] | select(.stage == "policy_check")]) as $policy |
+	.available == true and .captured == true
+	and ([.pods[].pod_index] | sort) == [0, 1, 2]
+	and ($policy | length) == 3 and all($policy[]; .count_delta == 1 and .sum_delta == 0.1)
+' >/dev/null; then
+	ok "empty pre-capture and first post-capture observation produce a valid bounded delta"
+else
+	bad "empty pre-capture and first post-capture observation produce a valid bounded delta"
+	printf '%s\n' "$empty_pre_out" >&2 || true
+fi
+
 if ! printf '%s' "$out" | jq -e '[paths | map(tostring) | join(".")] | any(test("percentile|p95|p99|average|mean|phase"))' >/dev/null; then
 	ok "summarizer emits no percentile, average, or phase field"
 else
@@ -489,74 +512,175 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Schedule control: start_ms/configmap must follow the pre-scrape, and a
-# pre-scrape failure must fail fast before the workload is launched.
+# Execute the real pin/readiness/startup/configmap region with a mocked capture
+# boundary. This checks delayed-pre slack, sticky failure, and each post path.
 # ---------------------------------------------------------------------------
+ready_line=$(grep -n '^kubectl --context .* wait --for=condition=Ready pod/goauthy-0' "$runner" | head -1 | cut -d: -f1)
+pin_snapshot_line=$(grep -n '^node_image_pin_snapshot "\$GOAUTHY_IMAGE"' "$runner" | head -1 | cut -d: -f1)
+pin_check_line=$(grep -n '^printf .*pod-image-pins.txt"$' "$runner" | head -1 | cut -d: -f1)
 pre_line=$(grep -n '^collect_auth_stage_metrics pre$' "$runner" | head -1 | cut -d: -f1)
+authorize_line=$(grep -n '^authorize_url=' "$runner" | head -1 | cut -d: -f1)
+deadline_line=$(grep -n '^readiness_deadline=' "$runner" | head -1 | cut -d: -f1)
 start_line=$(grep -n '^start_ms=' "$runner" | head -1 | cut -d: -f1)
 cm_line=$(grep -n 'create configmap isolation113-run' "$runner" | head -1 | cut -d: -f1)
-apply_line=$(grep -n 'apply -f deploy/kind-saas-isolation-113/driver-job.yaml' "$runner" | head -1 | cut -d: -f1)
-if [ -n "$pre_line" ] && [ -n "$start_line" ] && [ -n "$cm_line" ] && [ -n "$apply_line" ] &&
-	[ "$pre_line" -lt "$start_line" ] && [ "$start_line" -lt "$cm_line" ] && [ "$cm_line" -lt "$apply_line" ]; then
-	ok "schedule order: pre-scrape, then start_ms/configmap, then driver"
+apply_line=$(grep -n '^kubectl --context .* apply -f deploy/kind-saas-isolation-113/driver-job.yaml' "$runner" | head -1 | cut -d: -f1)
+if [ -n "$ready_line" ] && [ -n "$pin_snapshot_line" ] && [ -n "$pin_check_line" ] && [ -n "$pre_line" ] &&
+	[ -n "$authorize_line" ] && [ -n "$deadline_line" ] && [ -n "$start_line" ] && [ -n "$cm_line" ] && [ -n "$apply_line" ] &&
+	[ "$ready_line" -lt "$pin_snapshot_line" ] && [ "$pin_snapshot_line" -lt "$pin_check_line" ] &&
+	[ "$pin_check_line" -lt "$pre_line" ] && [ "$pre_line" -lt "$authorize_line" ] &&
+	[ "$authorize_line" -lt "$deadline_line" ] && [ "$deadline_line" -lt "$start_line" ] &&
+	[ "$start_line" -lt "$cm_line" ] && [ "$cm_line" -lt "$apply_line" ]; then
+	ok "Ready and image pins precede pre-capture; authorize deadline and workload schedule follow it"
 else
-	bad "schedule order: pre-scrape, then start_ms/configmap, then driver"
+	bad "Ready and image pins precede pre-capture; authorize deadline and workload schedule follow it"
 fi
 
-sched=$tmp/sched
-mkdir -p "$sched/bin" "$sched/tmp" "$sched/evidence"
-awk '/^collect_auth_stage_metrics pre$/{f=1} f{print} f && /create configmap isolation113-run/{exit}' "$runner" >"$sched/region.sh"
-if [ -s "$sched/region.sh" ]; then
-	ok "schedule control extracts the real pre-scrape/configmap region"
+gate=$tmp/gate
+mkdir -p "$gate/bin" "$gate/tmp" "$gate/evidence"
+awk '/^node_image_pin_snapshot "\$GOAUTHY_IMAGE"/{f=1} f && /create configmap isolation113-run/{print; exit} f{print}' "$runner" >"$gate/real-region.sh"
+awk '/^collect_auth_stage_metrics post$/{print; exit}' "$runner" >"$gate/normal-post.sh"
+if [ -s "$gate/real-region.sh" ] && [ "$(cat "$gate/normal-post.sh")" = 'collect_auth_stage_metrics post' ]; then
+	ok "behavior harness extracts the real pin/readiness/configmap region and normal post call"
 else
-	bad "schedule control extracts the real pre-scrape/configmap region"
+	bad "behavior harness extracts the real pin/readiness/configmap region and normal post call"
 fi
-cat >"$sched/bin/date" <<'MOCK'
-#!/bin/sh
-if [ -f "$MOCK_PRE_DONE" ]; then printf 'AFTER\n' >>"$MOCK_DATE_LOG"; else printf 'BEFORE\n' >>"$MOCK_DATE_LOG"; fi
-printf '1700000000\n'
-MOCK
-cat >"$sched/bin/kubectl" <<'MOCK'
+cat >"$gate/bin/kubectl" <<'MOCK'
 #!/bin/sh
 printf '%s\n' "$*" >>"$MOCK_KUBECTL_LOG"
+case " $* " in
+	*" get pod goauthy-0 goauthy-1 goauthy-2 -o json "*) printf '{"items":[{"status":{"containerStatuses":[{"name":"goauthy","ready":true,"restartCount":0}]}},{"status":{"containerStatuses":[{"name":"goauthy","ready":true,"restartCount":0}]}},{"status":{"containerStatuses":[{"name":"goauthy","ready":true,"restartCount":0}]}}]}\n' ;;
+	*" get pods -l app.kubernetes.io/name=goauthy "*) printf 'goauthy-0 Running true sha256:synthetic image\n' ;;
+	*" port-forward "*) exit 0 ;;
+	*" create configmap isolation113-run "*) printf 'configmap\n' ;;
+	*" apply -f - "*) cat >/dev/null ;;
+esac
 exit 0
 MOCK
-chmod +x "$sched/bin/date" "$sched/bin/kubectl"
-cat >"$sched/run.sh" <<'RUN'
-set -u
-temp_dir=$HARNESS/tmp
-ISOLATION113_EVIDENCE_DIR=$HARNESS/evidence
+cat >"$gate/bin/curl" <<'MOCK'
+#!/bin/sh
+n=$(cat "$MOCK_AUTH_COUNT"); n=$((n + 1)); printf '%s\n' "$n" >"$MOCK_AUTH_COUNT"
+printf 'authorize:%s\n' "$n" >>"$MOCK_EVENTS"
+if [ "$MOCK_AUTH_STATUS" != 200 ]; then touch "$MOCK_DEADLINE"; fi
+printf '%s' "$MOCK_AUTH_STATUS"
+MOCK
+cat >"$gate/bin/date" <<'MOCK'
+#!/bin/sh
+if [ "${1:-}" = -u ]; then printf '2026-10-08T00:00:00Z\n'; exit 0; fi
+if [ -f "$MOCK_DEADLINE" ]; then now=1700000060; else now=$(cat "$MOCK_NOW"); fi
+printf '%s\n' "$now"
+printf 'clock:%s\n' "$now" >>"$MOCK_EVENTS"
+MOCK
+cat >"$gate/bin/sleep" <<'MOCK'
+#!/bin/sh
+exit 0
+MOCK
+chmod +x "$gate/bin/kubectl" "$gate/bin/curl" "$gate/bin/date" "$gate/bin/sleep"
+cat >"$gate/run.sh" <<'RUN'
+set -eu
 context=kind-test
 namespace=goauthy
+temp_dir=$HARNESS/tmp
 job_status=0
-startup_only=0
+startup_only=$MOCK_STARTUP_ONLY
+GOAUTHY_IMAGE=synthetic
+candidate_config_digest=synthetic
+candidate_manifest_digest=synthetic
+prestart_spec=synthetic
+ISOLATION113_EVIDENCE_DIR=$HARNESS/evidence
+node_image_pin_snapshot() { printf '{"runtime_digests":["sha256:synthetic"]}\n' >"$3"; }
+assert_candidate_pods() { :; }
 collect_auth_stage_metrics() {
-	case "$MOCK_PRE_MODE" in
-		delayed) sleep 1; touch "$MOCK_PRE_DONE"; job_status=0 ;;
-		fail) job_status=1 ;;
+	printf 'capture:%s\n' "$1" >>"$MOCK_EVENTS"
+	case "$1" in pre) printf 'pre\n' >>"$MOCK_CAPTURES" ;; post) printf 'post\n' >>"$MOCK_CAPTURES" ;; esac
+	case "$1" in
+		pre)
+			if [ "$MOCK_PRE_DELAY" -eq 1 ]; then printf '1700000012\n' >"$MOCK_NOW"; fi
+			[ "$MOCK_PRE_FAIL" -eq 0 ] || job_status=1
+			;;
+		post)
+			if [ "$MOCK_POST_FAIL" -eq 1 ]; then job_status=1; return 1; fi
+			;;
 	esac
+	return 0
 }
-capture_failure_state() { :; }
-. "$HARNESS/region.sh"
+capture_failure_state() { printf 'failure-state\n' >>"$MOCK_EVENTS"; }
+. "$HARNESS/real-region.sh"
+. "$HARNESS/normal-post.sh"
 RUN
 
-: >"$sched/date.log"; : >"$sched/kubectl.log"
-HARNESS=$sched MOCK_PRE_MODE=delayed MOCK_PRE_DONE=$sched/pre-delayed.done MOCK_DATE_LOG=$sched/date.log MOCK_KUBECTL_LOG=$sched/kubectl.log PATH="$sched/bin:$PATH" sh "$sched/run.sh" >/dev/null 2>&1 || true
-if [ "$(cat "$sched/date.log" 2>/dev/null)" = "AFTER" ] && grep -q 'start-unix-ms=1700000030000' "$sched/kubectl.log"; then
-	ok "a delayed pre-scrape does not consume the driver schedule slack"
+run_gate() {
+	mode=$1; auth_status=$2; pre_fail=$3; fail_post=$4; delay_pre=$5
+	printf '0\n' >"$gate/auth-count"
+	: >"$gate/events"; : >"$gate/captures"; : >"$gate/kubectl.log"
+	printf '1700000000\n' >"$gate/now"
+	rm -f "$gate/deadline"
+	set +e
+	HARNESS=$gate MOCK_AUTH_COUNT=$gate/auth-count MOCK_EVENTS=$gate/events MOCK_CAPTURES=$gate/captures \
+		MOCK_DEADLINE=$gate/deadline MOCK_KUBECTL_LOG=$gate/kubectl.log MOCK_NOW=$gate/now \
+		MOCK_AUTH_STATUS=$auth_status MOCK_PRE_FAIL=$pre_fail MOCK_POST_FAIL=$fail_post MOCK_PRE_DELAY=$delay_pre \
+		MOCK_STARTUP_ONLY=$mode PATH="$gate/bin:$PATH" sh "$gate/run.sh" >"$gate/stdout" 2>"$gate/stderr"
+	rc=$?
+	set -e
+	return "$rc"
+}
+
+if run_gate 0 200 0 0 1; then
+	if [ "$(cat "$gate/auth-count")" = 3 ] && [ "$(cat "$gate/captures")" = "$(printf 'pre\npost')" ]; then
+		ok "normal gate captures pre/post once after three successful authorize probes"
+	else
+		bad "normal gate captures pre/post once after three successful authorize probes"
+		cat "$gate/events" "$gate/captures" >&2
+	fi
+	if awk '/^capture:pre$/{p=NR} /^clock:/{if(p>0 && c==0)c=NR} /^authorize:1$/{a=NR} END{exit !(p>0 && c>p && a>c)}' "$gate/events"; then
+		ok "pre-capture completes before the deadline clock and first authorize probe"
+	else
+		bad "pre-capture completes before the deadline clock and first authorize probe"
+		cat "$gate/events" >&2
+	fi
+	if grep -F 'start-unix-ms=1700000042000' "$gate/kubectl.log" >/dev/null && grep -F 'apply -f -' "$gate/kubectl.log" >/dev/null; then
+		ok "delayed pre preserves exactly 30 seconds of start/configmap slack"
+	else
+		bad "delayed pre preserves exactly 30 seconds of start/configmap slack"
+		cat "$gate/kubectl.log" >&2
+	fi
 else
-	bad "a delayed pre-scrape does not consume the driver schedule slack"
+	bad "normal gate captures pre/post once after three successful authorize probes"
 fi
 
-: >"$sched/date.log"; : >"$sched/kubectl.log"
-if HARNESS=$sched MOCK_PRE_MODE=fail MOCK_PRE_DONE=$sched/pre-fail.done MOCK_DATE_LOG=$sched/date.log MOCK_KUBECTL_LOG=$sched/kubectl.log PATH="$sched/bin:$PATH" sh "$sched/run.sh" >/dev/null 2>&1; then
-	bad "pre-scrape failure fails fast before start_ms/configmap"
+if run_gate 1 200 1 0 0; then
+	bad "pre-capture failure still runs authorize, remains sticky, and stops before startup/workload"
 else
-	if [ ! -s "$sched/date.log" ] && [ ! -s "$sched/kubectl.log" ]; then
-		ok "pre-scrape failure fails fast before start_ms/configmap"
+	gate_rc=$?
+	if [ "$gate_rc" -eq 1 ] && [ "$(cat "$gate/auth-count")" = 3 ] && [ "$(cat "$gate/captures")" = pre ] &&
+		grep -F 'failure-state' "$gate/events" >/dev/null &&
+		! grep -F 'isolation113-run' "$gate/kubectl.log" >/dev/null; then
+		ok "pre-capture failure still runs authorize, remains sticky, and stops before startup/workload"
 	else
-		bad "pre-scrape failure fails fast before start_ms/configmap"
+		bad "pre-capture failure still runs authorize, remains sticky, and stops before startup/workload"
 	fi
+fi
+
+if run_gate 0 503 0 1 0; then
+	bad "non-200 gate captures post once despite capture failure and preserves exit 1"
+	else
+	gate_rc=$?
+	if [ "$gate_rc" -eq 1 ] && [ "$(cat "$gate/auth-count")" = 1 ] && [ "$(cat "$gate/captures")" = "$(printf 'pre\npost')" ] &&
+		grep -F 'within the shared 60-second startup window' "$gate/stderr" >/dev/null; then
+		ok "non-200 gate captures post once despite capture failure and preserves exit 1"
+	else
+		bad "non-200 gate captures post once despite capture failure and preserves exit 1"
+	fi
+fi
+
+if run_gate 1 200 0 0 0; then
+	if [ "$(cat "$gate/auth-count")" = 3 ] && [ "$(cat "$gate/captures")" = pre ] &&
+		! grep -F 'isolation113-run' "$gate/kubectl.log" >/dev/null; then
+		ok "startup-only still captures pre, passes functional readiness, and exits before workload scheduling"
+	else
+		bad "startup-only still captures pre, passes functional readiness, and exits before workload scheduling"
+	fi
+else
+	bad "startup-only still captures pre, passes functional readiness, and exits before workload scheduling"
 fi
 
 # ---------------------------------------------------------------------------
