@@ -515,6 +515,7 @@ ISOLATION113_EVIDENCE_DIR=$HARNESS/evidence
 context=kind-test
 namespace=goauthy
 job_status=0
+startup_only=0
 collect_auth_stage_metrics() {
 	case "$MOCK_PRE_MODE" in
 		delayed) sleep 1; touch "$MOCK_PRE_DONE"; job_status=0 ;;
