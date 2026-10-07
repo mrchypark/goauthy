@@ -998,7 +998,7 @@ checkRateLimit:
 	if h.policy != nil {
 		checkStart := time.Now()
 		status, err := h.policy.Check(r.Context(), peerIP, h.now().UTC())
-		tracing.ObserveAuthStage(r.Context(), "policy_check", checkStart)
+		h.recordAuthStage(r.Context(), metrics.AuthStagePolicyCheck, checkStart)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 			return identity.Authentication{}, "", time.Time{}, false
@@ -1009,7 +1009,7 @@ checkRateLimit:
 		}
 		allowStart := time.Now()
 		allowed, err := h.policy.Allow(r.Context(), peerIP, h.now().UTC())
-		tracing.ObserveAuthStage(r.Context(), "policy_allow", allowStart)
+		h.recordAuthStage(r.Context(), metrics.AuthStagePolicyAllow, allowStart)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 			return identity.Authentication{}, "", time.Time{}, false
@@ -1023,7 +1023,7 @@ checkRateLimit:
 	if h.policy != nil {
 		lockStart := time.Now()
 		locked, remaining, lockErr := h.policy.CheckAccountLock(r.Context(), accountHash, h.now().UTC())
-		tracing.ObserveAuthStage(r.Context(), "policy_account_lock", lockStart)
+		h.recordAuthStage(r.Context(), metrics.AuthStagePolicyAccountLock, lockStart)
 		if lockErr != nil {
 			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 			return identity.Authentication{}, "", time.Time{}, false
@@ -1952,7 +1952,7 @@ func (h *Handler) recordSuccessfulAuthentication(ctx context.Context, peerIP str
 	}
 	successStart := time.Now()
 	successErr := h.policy.Success(ctx, peerIP, elapsed)
-	tracing.ObserveAuthStage(ctx, "policy_success", successStart)
+	h.recordAuthStage(ctx, metrics.AuthStagePolicySuccess, successStart)
 	return successErr
 }
 

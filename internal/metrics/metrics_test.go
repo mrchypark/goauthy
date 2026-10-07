@@ -1108,6 +1108,7 @@ func TestAuthStageDurationKnownStagesObserved(t *testing.T) {
 		AuthStageCredentialLookup, AuthStagePasswordVerify, AuthStageSubjectRevalidate,
 		AuthStageInteractionConsume, AuthStageSessionRotate, AuthStageOAuthIssue,
 		AuthStageAuthorizeValidate, AuthStageAuthorizeSession,
+		AuthStagePolicyCheck, AuthStagePolicyAllow, AuthStagePolicyAccountLock, AuthStagePolicySuccess,
 	}
 	for _, s := range stages {
 		reg.AuthStageDuration(s, 0.01)

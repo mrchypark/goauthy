@@ -4,7 +4,7 @@
 # bounded collector records from a diagnostic directory and emits safe JSON on
 # stdout. It never reads raw exposition text, logs, credentials, or container
 # identifiers. Every collector record must match the exact bounded schema and
-# the fixed eight-stage allowlist; otherwise the result is a fixed-reason
+# the fixed twelve-stage allowlist; otherwise the result is a fixed-reason
 # unavailable marker. Only fixed reason enums are ever emitted.
 set -eu
 umask 077
@@ -43,7 +43,7 @@ def is_int: type == "number" and isfinite and . >= 0 and (floor == .) and . <= 9
 def is_num: type == "number" and isfinite and . >= 0 and . <= 9007199254740991;
 def le_key: if . == "+Inf" then 1e300 else (. | tonumber) end;
 def le_finite: . == "+Inf" or ((type == "string") and (test("^[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?$")) and ((. | tonumber) | isfinite) and ((. | tonumber) >= 0));
-def stage_names: ["credential_lookup","password_verify","subject_revalidate","interaction_consume","session_rotate","oauth_issue","authorize_validate","authorize_session"];
+def stage_names: ["credential_lookup","password_verify","subject_revalidate","interaction_consume","session_rotate","oauth_issue","authorize_validate","authorize_session","policy_check","policy_allow","policy_account_lock","policy_success"];
 def valid_stage_value($v):
 	($v | keys | sort) == ["buckets","count","sum"]
 	and ($v.count | is_int)
@@ -72,7 +72,7 @@ emit_unavailable() {
 		available: false,
 		reason: $reason,
 		family: "goauthy_auth_stage_duration_seconds",
-		known_stages: ["credential_lookup","password_verify","subject_revalidate","interaction_consume","session_rotate","oauth_issue","authorize_validate","authorize_session"],
+		known_stages: ["credential_lookup","password_verify","subject_revalidate","interaction_consume","session_rotate","oauth_issue","authorize_validate","authorize_session","policy_check","policy_allow","policy_account_lock","policy_success"],
 		observed_stages: [],
 		pods: [],
 		totals: []

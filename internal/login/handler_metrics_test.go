@@ -1,6 +1,7 @@
 package login
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,8 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/metrics"
+	"github.com/mrchypark/goauthy/internal/tracing"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -225,7 +228,17 @@ func TestLoginMetricsNilRegistryNoPanic(t *testing.T) {
 
 func TestLoginMetricsAuthStagesObservedAndBounded(t *testing.T) {
 	t.Parallel()
+	_, span := tracing.NewTracer("goauthy/login-metrics-test").Start(context.Background(), "non-recording")
+	if span.IsRecording() {
+		span.End()
+		t.Fatal("test requires tracing to be off")
+	}
+	span.End()
+
 	h := testHandler(t)
+	if h.policy == nil {
+		t.Fatal("test requires the real login policy store")
+	}
 	reg := metrics.NewRegistry()
 	h.SetMetrics(reg)
 	// Production wires the identity store to the same registry; the three
@@ -247,12 +260,45 @@ func TestLoginMetricsAuthStagesObservedAndBounded(t *testing.T) {
 		t.Fatalf("login status=%d", completed.Code)
 	}
 
-	// Observation must not alter the login outcome, and the stage series must
-	// stay bounded by the fixed allowlist. A full password login observes all
-	// eight fixed stages: two authorize gates plus six login stages.
+	// Observation must not alter the login outcome. The real policy path reaches
+	// Check, Allow, CheckAccountLock, and Success with tracing disabled.
 	got := testutil.CollectAndCount(reg.AuthStageDurationCollector(), "goauthy_auth_stage_duration_seconds")
-	if got != 8 {
-		t.Fatalf("auth stage series=%d, want 8", got)
+	if got != 12 {
+		t.Fatalf("auth stage series=%d, want 12", got)
+	}
+
+	metricsRegistry := prometheus.NewRegistry()
+	if err := metricsRegistry.Register(reg.AuthStageDurationCollector()); err != nil {
+		t.Fatalf("register auth-stage collector: %v", err)
+	}
+	families, err := metricsRegistry.Gather()
+	if err != nil {
+		t.Fatalf("gather auth-stage metrics: %v", err)
+	}
+	policyStageCounts := map[string]uint64{
+		"policy_check":        0,
+		"policy_allow":        0,
+		"policy_account_lock": 0,
+		"policy_success":      0,
+	}
+	for _, family := range families {
+		if family.GetName() != "goauthy_auth_stage_duration_seconds" {
+			continue
+		}
+		for _, sample := range family.GetMetric() {
+			labels := sample.GetLabel()
+			if len(labels) != 1 || labels[0].GetName() != "stage" {
+				t.Fatalf("auth-stage metric has non-stage labels: %v", labels)
+			}
+			if _, ok := policyStageCounts[labels[0].GetValue()]; ok {
+				policyStageCounts[labels[0].GetValue()] = sample.GetHistogram().GetSampleCount()
+			}
+		}
+	}
+	for stage, count := range policyStageCounts {
+		if count != 1 {
+			t.Errorf("stage %q count=%d, want 1", stage, count)
+		}
 	}
 }
 

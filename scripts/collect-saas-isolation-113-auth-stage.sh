@@ -39,7 +39,9 @@ function allowed_stage(s) {
 	return (s == "credential_lookup" || s == "password_verify" ||
 		s == "subject_revalidate" || s == "interaction_consume" ||
 		s == "session_rotate" || s == "oauth_issue" ||
-		s == "authorize_validate" || s == "authorize_session")
+		s == "authorize_validate" || s == "authorize_session" ||
+		s == "policy_check" || s == "policy_allow" ||
+		s == "policy_account_lock" || s == "policy_success")
 }
 function split_labels(labels, segs,   i, n, c, inq, esc, cnt, cur) {
 	n = length(labels); cnt = 0; cur = ""; inq = 0; esc = 0
@@ -151,7 +153,7 @@ awk -f "$tmp/filter.awk" >"$tmp/rows.tsv" || {
 jq -R -s --argjson pod "$pod_index" --argjson captured "$captured_at" '
 	def nonneg: type == "number" and isfinite and . >= 0;
 	def is_int: type == "number" and isfinite and . >= 0 and (floor == .) and . <= 9007199254740991;
-	def allowed: ["credential_lookup","password_verify","subject_revalidate","interaction_consume","session_rotate","oauth_issue","authorize_validate","authorize_session"];
+	def allowed: ["credential_lookup","password_verify","subject_revalidate","interaction_consume","session_rotate","oauth_issue","authorize_validate","authorize_session","policy_check","policy_allow","policy_account_lock","policy_success"];
 	split("\n") | map(select(length > 0)) | map(split("\t")) |
 	map({stage: .[0], kind: .[1], le: .[2], value: (.[3] | tonumber)}) |
 	if (map(select((.stage as $s | allowed | index($s)) == null)) | length) > 0

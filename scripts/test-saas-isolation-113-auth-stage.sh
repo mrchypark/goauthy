@@ -26,7 +26,7 @@ done
 [ -x "$collector" ] || { echo "collector not executable: $collector" >&2; exit 1; }
 [ -x "$summarizer" ] || { echo "summarizer not executable: $summarizer" >&2; exit 1; }
 
-stages="credential_lookup password_verify subject_revalidate interaction_consume session_rotate oauth_issue authorize_validate authorize_session"
+stages="credential_lookup password_verify subject_revalidate interaction_consume session_rotate oauth_issue authorize_validate authorize_session policy_check policy_allow policy_account_lock policy_success"
 
 # One complete histogram for a single stage with integer bucket/count values.
 hist() {
@@ -41,19 +41,19 @@ hist() {
 collect() { "$collector" "$1" "$2" <"$3"; }
 
 # ---------------------------------------------------------------------------
-# Collector: exact family, all eight fixed stages, privacy redaction.
+# Collector: exact family, all twelve fixed stages, privacy redaction.
 # ---------------------------------------------------------------------------
-all8_in=$tmp/all8.txt
-: >"$all8_in"
+all12_in=$tmp/all12.txt
+: >"$all12_in"
 n=1
 for s in $stages; do
-	hist "$s" "$n" "$((n + 1))" "0.0$n" "$((n + 1))" >>"$all8_in"
+	hist "$s" "$n" "$((n + 1))" "0.0$n" "$((n + 1))" >>"$all12_in"
 	n=$((n + 1))
 done
-printf '# HELP goauthy_http_requests_total nope\n' >>"$all8_in"
-printf 'goauthy_http_requests_total{method="GET",route_class="authorize",status_class="2xx",tenant="SECRET_TENANT_CANARY"} 42\n' >>"$all8_in"
-if out=$(collect 0 1700000000000 "$all8_in") &&
-	printf '%s' "$out" | jq -e --argjson n 8 '
+printf '# HELP goauthy_http_requests_total nope\n' >>"$all12_in"
+printf 'goauthy_http_requests_total{method="GET",route_class="authorize",status_class="2xx",tenant="SECRET_TENANT_CANARY"} 42\n' >>"$all12_in"
+if out=$(collect 0 1700000000000 "$all12_in") &&
+	printf '%s' "$out" | jq -e --argjson n 12 '
 		.schema_version == 1
 		and .family == "goauthy_auth_stage_duration_seconds"
 		and .pod_index == 0
@@ -61,10 +61,14 @@ if out=$(collect 0 1700000000000 "$all8_in") &&
 		and .stages.credential_lookup.count == 2
 		and .stages.authorize_validate.count == 8
 		and .stages.authorize_session.count == 9
+		and .stages.policy_check.count == 10
+		and .stages.policy_allow.count == 11
+		and .stages.policy_account_lock.count == 12
+		and .stages.policy_success.count == 13
 	' >/dev/null; then
-	ok "collector extracts all eight fixed stages"
+	ok "collector extracts all twelve fixed stages"
 else
-	bad "collector extracts all eight fixed stages"
+	bad "collector extracts all twelve fixed stages"
 fi
 
 if ! printf '%s' "$out" | grep -q 'SECRET_TENANT_CANARY' &&
@@ -99,6 +103,15 @@ expect_collect_fail "collector rejects an invalid bucket bound" "$tmp/bad-le.txt
 
 printf 'goauthy_auth_stage_duration_seconds_count{stage="bogus"} 1\n' >"$tmp/unknown.txt"
 expect_collect_fail "collector rejects an unknown stage label" "$tmp/unknown.txt"
+
+printf 'goauthy_auth_stage_duration_seconds_count{stage="policy_check_PRIVATE_STAGE_CANARY"} 1\n' >"$tmp/unknown-canary.txt"
+if out=$(collect 0 1 "$tmp/unknown-canary.txt" 2>&1); then
+	bad "collector rejects an arbitrary policy-stage suffix without disclosure"
+elif printf '%s' "$out" | grep -q 'PRIVATE_STAGE_CANARY'; then
+	bad "collector rejects an arbitrary policy-stage suffix without disclosure"
+else
+	ok "collector rejects an arbitrary policy-stage suffix without disclosure"
+fi
 
 printf 'goauthy_auth_stage_duration_seconds_count{stage="consume_rotate_issue"} 1\n' >"$tmp/removed.txt"
 expect_collect_fail "collector rejects the removed consume_rotate_issue label" "$tmp/removed.txt"
@@ -152,7 +165,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Summarizer: capture-interval deltas over a realistic eight-stage fixture.
+# Summarizer: capture-interval deltas over a realistic twelve-stage fixture.
 # ---------------------------------------------------------------------------
 build_pair() { # DIR PRE_BASE POST_BASE
 	dir=$1; pre_base=$2; post_base=$3
@@ -173,19 +186,20 @@ build_pair() { # DIR PRE_BASE POST_BASE
 evidence=$tmp/evidence
 build_pair "$evidence" 2 7
 if out=$("$summarizer" "$evidence") &&
-	printf '%s' "$out" | jq -e --argjson n 8 '
+	printf '%s' "$out" | jq -e --argjson n 12 '
 		.available == true and .captured == true
 		and (.known_stages | length) == $n
 		and (.observed_stages | length) == $n
 		and ([.pods[].pod_index] | sort) == [0, 1, 2]
 		and ([.pods[] | select(.pod_index == 0)][0].stages[] | select(.stage == "credential_lookup") | .count_delta) == 9
 		and ([.pods[] | select(.pod_index == 0)][0].stages[] | select(.stage == "authorize_session") | .count_delta) == 9
+		and (([.pods[] | select(.pod_index == 0)][0].stages | map(select(.stage == "policy_check" or .stage == "policy_allow" or .stage == "policy_account_lock" or .stage == "policy_success"))) | (length == 4 and all(.[]; .count_delta == 9)))
 		and ([.totals[] | select(.stage == "credential_lookup")][0].count_delta) == 27
 		and ([.pods[] | select(.pod_index == 0)][0].span_ms) == 1000
 	' >/dev/null; then
-	ok "summarizer reports eight-stage capture-interval deltas"
+	ok "summarizer reports twelve-stage capture-interval deltas"
 else
-	bad "summarizer reports eight-stage capture-interval deltas"
+	bad "summarizer reports twelve-stage capture-interval deltas"
 	printf '%s\n' "$out" >&2 || true
 fi
 

@@ -10,7 +10,7 @@
 # claim, and it never attributes latency to a workload phase: the two endpoints
 # bound the whole diagnostic interval, so the output is a capture-interval
 # delta keyed by timestamp and pod index, not phase alignment evidence.
-def allowed_stages: ["credential_lookup","password_verify","subject_revalidate","interaction_consume","session_rotate","oauth_issue","authorize_validate","authorize_session"];
+def allowed_stages: ["credential_lookup","password_verify","subject_revalidate","interaction_consume","session_rotate","oauth_issue","authorize_validate","authorize_session","policy_check","policy_allow","policy_account_lock","policy_success"];
 def le_key: if . == "+Inf" then 1e300 else (. | tonumber) end;
 def bucket_value($buckets; $le): ([$buckets[] | select(.le == $le)][0].value // 0);
 
@@ -77,6 +77,6 @@ else {
       sum_delta: (if any(.[]; .reset) then null else ([.[].sum_delta] | add) end)
     }
   )),
-  notes: "Per-pod cumulative histogram deltas between the pre-run and post-run native metrics listener captures, bound to the pod index observed through the per-pod port-forward. Only the exact goauthy_auth_stage_duration_seconds family and the fixed eight-stage label set are read. Counts, sums, and bucket deltas are reported with both capture timestamps and the interval span. The two endpoints bound the whole diagnostic interval, so this is capture-interval evidence, not workload-phase alignment, and no percentile, average, or causal claim is derived."
+  notes: "Per-pod cumulative histogram deltas between the pre-run and post-run native metrics listener captures, bound to the pod index observed through the per-pod port-forward. Only the exact goauthy_auth_stage_duration_seconds family and the fixed twelve-stage label set are read. Counts, sums, and bucket deltas are reported with both capture timestamps and the interval span. The two endpoints bound the whole diagnostic interval, so this is capture-interval evidence, not workload-phase alignment, and no percentile, average, or causal claim is derived."
 }
 end

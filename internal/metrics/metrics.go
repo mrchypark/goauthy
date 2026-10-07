@@ -106,6 +106,10 @@ const (
 	AuthStageOAuthIssue         AuthStage = "oauth_issue"
 	AuthStageAuthorizeValidate  AuthStage = "authorize_validate"
 	AuthStageAuthorizeSession   AuthStage = "authorize_session"
+	AuthStagePolicyCheck        AuthStage = "policy_check"
+	AuthStagePolicyAllow        AuthStage = "policy_allow"
+	AuthStagePolicyAccountLock  AuthStage = "policy_account_lock"
+	AuthStagePolicySuccess      AuthStage = "policy_success"
 )
 
 var allowedAuthStages = map[AuthStage]bool{
@@ -117,6 +121,10 @@ var allowedAuthStages = map[AuthStage]bool{
 	AuthStageOAuthIssue:         true,
 	AuthStageAuthorizeValidate:  true,
 	AuthStageAuthorizeSession:   true,
+	AuthStagePolicyCheck:        true,
+	AuthStagePolicyAllow:        true,
+	AuthStagePolicyAccountLock:  true,
+	AuthStagePolicySuccess:      true,
 }
 
 // ------------------------------------------------------------------
