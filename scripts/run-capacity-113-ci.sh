@@ -168,13 +168,14 @@ probe_events_summary() {
 		probe_unavailable capture-status-invalid
 	elif [ "$events_exit" != 0 ]; then
 		probe_unavailable capture-status-failed
-	elif ! jq -e 'if type == "object" then (.items|type) == "array" and all(.items[]; type == "object") else false end' "$events" >/dev/null 2>&1; then
+	elif ! jq -se 'if length == 1 then (.[0] | if type == "object" then (.items|type) == "array" and all(.items[]; type == "object") else false end) else false end' "$events" >/dev/null 2>&1; then
 		probe_unavailable capture-invalid
 	else
-		jq --argjson code "$events_exit" --arg note "$probe_note" '
+		jq -s --argjson code "$events_exit" --arg note "$probe_note" '
 			def kubelet:
 				(if (.source|type) == "object" then .source.component == "kubelet" else false end)
 				or .reportingComponent == "kubelet";
+			.[0] |
 			[.items[] | select((.involvedObject|type) == "object")
 				| select(.involvedObject.kind == "Pod" and .involvedObject.namespace == "goauthy"
 					and .involvedObject.fieldPath == "spec.containers{goauthy}" and .reason == "Killing" and kubelet)] as $kills
