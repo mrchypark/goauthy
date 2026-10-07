@@ -235,17 +235,26 @@ summarize_results() {
 	# or copied into any safe artifact. Unrecognized or missing diagnostics stay
 	# unknown; they are never treated as success or as cause proof.
 	: >"$temp_dir/iam-fatal.tsv"
+	: >"$temp_dir/setup-checkpoints.tsv"
 	for f in "$stage_dir"/driver-isolation113-driver-*.log; do
 		[ -f "$f" ] || continue
 		fidx=$(basename "$f" | sed -nE 's/.*goauthy-([0-9]+)-.*/\1/p')
 		[ -n "$fidx" ] || continue
-		awk -v di="$fidx" '
+		awk -v di="$fidx" -v checkpoints="$temp_dir/setup-checkpoints.tsv" '
 			{
 				line = $0
+				if (line ~ /^[[:space:]]*connection_use_grant_test\.go:[0-9]+:[[:space:]]+isolation113-setup-checkpoint stage=(config_ready|initial_login_complete|provider_created|collection_created|connection_created|api_key_bound|consumer_created|grant_created|invoke_scope_ready|invoke_token_issued|invoke_prechecks_complete|diagnostic_entered)$/) {
+					checkpoint = line
+					sub(/^[[:space:]]*connection_use_grant_test\.go:[0-9]+:[[:space:]]+/, "", checkpoint)
+					sub(/^isolation113-setup-checkpoint stage=/, "", checkpoint)
+					print di "\t" checkpoint >> checkpoints
+					next
+				}
 				if (line !~ /^[[:space:]]*connection_use_grant_test\.go:[0-9]+:/) next
 				sub(/^[[:space:]]*connection_use_grant_test\.go:[0-9]+:[[:space:]]*/, "", line)
 				if (line ~ /^isolation113 /) next
 				if (line ~ /^isolation113-stage /) next
+				if (line ~ /^isolation113-setup-checkpoint([[:space:]]|$)/) next
 				if (line ~ /^waiting [0-9]+ seconds for the login attempt window$/) next
 				reason = ""; status = ""
 				if (line ~ /^authorize status = [0-9]+, want login form:/) {
@@ -278,6 +287,22 @@ summarize_results() {
 			}
 		' "$f" >>"$temp_dir/iam-fatal.tsv"
 	done
+	jq -Rn --rawfile seen "$seen_idx" --rawfile observations "$temp_dir/setup-checkpoints.tsv" '
+		def lines: split("\n") | map(select(length > 0));
+		($seen | lines) as $seen_indexes |
+		($observations | lines | map(split("\t"))) as $checkpoints |
+		{
+			coverage: "recognized checkpoints observed in collected driver logs only; null does not prove absence or cause",
+			drivers: [range(0; 3) as $i |
+				([$checkpoints[] | select(.[0] == ($i | tostring)) | .[1]]) as $stages |
+				{
+					driver_index: $i,
+					log_available: (($seen_indexes | index($i | tostring)) != null),
+					observed_stages: (if ($stages | length) > 0 then $stages else null end)
+				}
+			]
+		}
+	' >"$temp_dir/setup-checkpoints.json" || fail 'failed to derive setup checkpoint diagnostics'
 	if [ -s "$temp_dir/iam-fatal.tsv" ]; then
 		jq -R -s 'split("\n") | map(select(length > 0)) | map(split("\t")) | map({
 			driver_index: (.[0] | tonumber),
@@ -420,9 +445,9 @@ summarize_results() {
 
 	startup=$(startup_summary) || fail 'failed to derive startup observability'
 	probe_events=$(probe_events_summary) || fail 'failed to derive probe event observability'
-	jq --argjson startup "$startup" --argjson events "$probe_events" '. + {startup: ($startup + {probe_events:$events})}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
+	jq --argjson startup "$startup" --argjson events "$probe_events" --slurpfile checkpoints "$temp_dir/setup-checkpoints.json" '. + {startup: ($startup + {probe_events:$events}), setup_checkpoints: $checkpoints[0]}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
 		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
-		fail 'failed to add startup observability to the resource summary'
+		fail 'failed to add startup and setup checkpoint diagnostics to the resource summary'
 
 	# Optional diagnostic authentication-stage summary. It is added only when
 	# the privacy-safe summarizer validates the bounded per-pod pre/post

@@ -246,6 +246,17 @@ fi
 noobservations=$tmp/noobservations
 mkcase "$noobservations" 100 110 90
 for f in "$noobservations"/driver-isolation113-driver-*.log; do printf 'PRIVATE_ANALYZER_CANARY\n' >"$f"; done
+driver0=$noobservations/driver-isolation113-driver-0-abcde.log
+for stage in config_ready initial_login_complete provider_created collection_created connection_created api_key_bound consumer_created grant_created invoke_scope_ready invoke_token_issued invoke_prechecks_complete diagnostic_entered; do
+	printf '    connection_use_grant_test.go:42: isolation113-setup-checkpoint stage=%s\n' "$stage" >>"$driver0"
+done
+printf '%s\n' \
+	'    other_test.go:42: isolation113-setup-checkpoint stage=config_ready' \
+	'    connection_use_grant_test.go:x: isolation113-setup-checkpoint stage=config_ready' \
+	'    connection_use_grant_test.go:42: isolation113-setup-checkpoint stage=unknown_stage' \
+	'    connection_use_grant_test.go:42: isolation113-setup-checkpoint stage=diagnostic_entered PRIVATE_CHECKPOINT_CANARY' \
+	>>"$noobservations/driver-isolation113-driver-1-abcde.log"
+rm "$noobservations/driver-isolation113-driver-2-abcde.log"
 artifacts_ready() {
 	for artifact do
 		[ -f "$artifact" ] && [ -s "$artifact" ] && [ -r "$artifact" ] || return 1
@@ -256,10 +267,18 @@ known_artifacts_ready=false
 if "$wrapper" --summarize "$noobservations" "$results" >"$tmp/out" 2>"$tmp/err"; then
 	bad "known analyzer failure code (expected nonzero exit)"
 elif jq -e '.schema_version == 1 and .error.failure_code == "no_observation_records" and .error.analyzer_status == 1 and .error.reason == "analyzer unavailable or malformed (exit status 1)" and .overall.correctness == "fail" and .overall.performance == "inconclusive" and .criterion_pass == false' "$results/criterion.json" >/dev/null 2>&1 &&
-	jq -e '.failure_code == "no_observation_records" and .available == false' "$results/resource-summary.json" >/dev/null 2>&1 &&
+	jq -e '
+		.failure_code == "no_observation_records" and .available == false
+		and .setup_checkpoints.coverage == "recognized checkpoints observed in collected driver logs only; null does not prove absence or cause"
+		and .setup_checkpoints.drivers == [
+			{driver_index:0,log_available:true,observed_stages:["config_ready","initial_login_complete","provider_created","collection_created","connection_created","api_key_bound","consumer_created","grant_created","invoke_scope_ready","invoke_token_issued","invoke_prechecks_complete","diagnostic_entered"]},
+			{driver_index:1,log_available:true,observed_stages:null},
+			{driver_index:2,log_available:false,observed_stages:null}
+		]
+	' "$results/resource-summary.json" >/dev/null 2>&1 &&
 	artifacts_ready "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md"; then
 	known_artifacts_ready=true
-	if grep -q PRIVATE_ANALYZER_CANARY "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md"; then
+	if grep -Eq 'PRIVATE_(ANALYZER|CHECKPOINT)_CANARY' "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md"; then
 		bad "known analyzer failure code (canary disclosed)"
 	else
 		grep_status=$?
