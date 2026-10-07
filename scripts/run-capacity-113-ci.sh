@@ -537,6 +537,33 @@ summarize_results() {
 		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
 		fail 'failed to add object-store counter diagnostics to the resource summary'
 
+	readiness_file=$evidence_dir/authorize-readiness.tsv
+	if [ ! -f "$readiness_file" ]; then
+		readiness_summary=$(jq -n '{schema_version:1,available:false,reason:"capture-missing",successful_pod_indices:null}')
+	elif [ ! -r "$readiness_file" ]; then
+		readiness_summary=$(jq -n '{schema_version:1,available:false,reason:"capture-invalid",successful_pod_indices:null}')
+	elif readiness_count=$(LC_ALL=C awk -F '\t' '
+		BEGIN { expected = 0; invalid = 0 }
+		{
+			if (NF != 3 || $1 !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/ ||
+				expected >= 3 || $2 != ("goauthy-" expected) || $3 != "200") {
+				invalid = 1
+			} else {
+				expected++
+			}
+		}
+		END { if (invalid) exit 1; print expected }
+	' "$readiness_file" 2>/dev/null); then
+		readiness_summary=$(jq -n --argjson count "$readiness_count" \
+			'{schema_version:1,available:true,reason:null,successful_pod_indices:[range(0; $count)]}')
+	else
+		readiness_summary=$(jq -n '{schema_version:1,available:false,reason:"capture-invalid",successful_pod_indices:null}')
+	fi
+	jq --argjson readiness "$readiness_summary" '. + {authorize_readiness: $readiness}' \
+		"$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
+		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
+		fail 'failed to add authorize-readiness diagnostics to the resource summary'
+
 	# Optional startup fatal summary. It is added only when the privacy-safe
 	# summarizer validates the bounded per-pod current/previous anchored fatal
 	# records; otherwise a fixed-reason unavailable marker is recorded. Only the

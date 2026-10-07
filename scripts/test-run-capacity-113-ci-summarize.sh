@@ -12,7 +12,6 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 pass=0
 fail=0
-case_n=0
 ok() { pass=$((pass + 1)); echo "ok: $1" >&2; }
 bad() { fail=$((fail + 1)); echo "not ok: $1" >&2; }
 
@@ -73,10 +72,7 @@ mkcase() {
 }
 
 new_results() {
-	case_n=$((case_n + 1))
-	results=$tmp/results-$case_n
-	mkdir -p "$results"
-	printf '%s' "$results"
+	mktemp -d "$tmp/results.XXXXXX"
 }
 
 expect_summary() {
@@ -1191,6 +1187,131 @@ for probe_state in missing malformed shape scalar absent duplicate failed extra 
 		bad "probe events eligibility $probe_state"
 	fi
 done
+
+# The readiness file records only successful, ordered HTTP 200 probes. Pair its
+# safe prefix projection with the existing pre/post capture result to separate
+# a gate that stopped early from one that completed; never infer a failed status.
+readiness_no_private_data() {
+	if grep -Eq 'PRIVATE_READINESS_CANARY|NOT_A_TIMESTAMP|2099-12-31T23:59:59Z|goauthy-00|500' "$@"; then
+		return 1
+	else
+		grep_status=$?
+		[ "$grep_status" -eq 1 ] && return 0
+		return "$grep_status"
+	fi
+}
+
+readiness_base=$tmp/authorize-readiness-base
+mkcase "$readiness_base" 100 110 90
+rm "$readiness_base"/fixture-metrics-*.json
+for phase in pre post; do
+	value=0
+	[ "$phase" = pre ] || value=1
+	for pod in 0 1 2; do
+		jq -nc --argjson pod "$pod" --argjson value "$value" \
+			'{schema_version:1,available:true,reason:null,pod_index:$pod,incarnation_stable:true,counters:{http_requests:$value,http_failures:0,sdk_retries:0,transport_failures:0,condition_conflicts:0,dedup_hits:0,http_4xx_unexpected:0,http_5xx:0}}' \
+			>"$readiness_base/object-store-$phase-$pod.json"
+	done
+done
+readiness_partial=$tmp/authorize-readiness-partial
+readiness_full=$tmp/authorize-readiness-full
+cp -R "$readiness_base" "$readiness_partial"
+cp -R "$readiness_base" "$readiness_full"
+printf '2099-12-31T23:59:59Z\tgoauthy-0\t200\n' >"$readiness_partial/authorize-readiness.tsv"
+printf '2026-10-08T00:00:01Z\tgoauthy-0\t200\n2026-10-08T00:00:02Z\tgoauthy-1\t200\n2026-10-08T00:00:03Z\tgoauthy-2\t200\n' \
+	>"$readiness_full/authorize-readiness.tsv"
+partial_results=$(new_results)
+full_results=$(new_results)
+if [ "$partial_results" = "$full_results" ] || [ -e "$partial_results/criterion.json" ] || [ -e "$partial_results/resource-summary.json" ] ||
+	[ -e "$full_results/criterion.json" ] || [ -e "$full_results/resource-summary.json" ]; then
+	bad "authorize readiness partial/full result directories are distinct and empty"
+else
+	ok "authorize readiness partial/full result directories are distinct and empty"
+fi
+"$wrapper" --summarize "$readiness_partial" "$partial_results" >/dev/null 2>"$tmp/err" || true
+"$wrapper" --summarize "$readiness_full" "$full_results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.overall.correctness == "fail" and .criterion_pass == false' "$partial_results/criterion.json" >/dev/null 2>&1 &&
+	jq -e '.overall.correctness == "fail" and .criterion_pass == false' "$full_results/criterion.json" >/dev/null 2>&1 &&
+	jq -e '.authorize_readiness.available and .authorize_readiness.successful_pod_indices == [0] and .object_store.available and (.object_store.pods | map(.pod_index) == [0,1,2]) and all(.object_store.pods[]; .available)' "$partial_results/resource-summary.json" >/dev/null 2>&1 &&
+	jq -e '.authorize_readiness.available and .authorize_readiness.successful_pod_indices == [0,1,2] and .object_store.available and (.object_store.pods | map(.pod_index) == [0,1,2]) and all(.object_store.pods[]; .available)' "$full_results/resource-summary.json" >/dev/null 2>&1 &&
+	[ "$(jq -cS . "$partial_results/criterion.json")" = "$(jq -cS . "$full_results/criterion.json")" ] &&
+	[ "$(jq -cS 'del(.authorize_readiness)' "$partial_results/resource-summary.json")" = "$(jq -cS 'del(.authorize_readiness)' "$full_results/resource-summary.json")" ]; then
+	if readiness_no_private_data "$partial_results/resource-summary.json"; then
+		ok "authorize readiness prefix distinguishes partial/full with post captures and unchanged fail-closed criterion"
+	else
+		privacy_status=$?
+		if [ "$privacy_status" -eq 1 ]; then
+			bad "authorize readiness prefix privacy check (timestamp disclosed)"
+		else
+			bad "authorize readiness prefix privacy check (artifact grep failed)"
+		fi
+	fi
+else
+	bad "authorize readiness prefix distinguishes partial/full with post captures and unchanged fail-closed criterion"
+fi
+
+readiness_case=$tmp/authorize-readiness-validation
+cp -R "$readiness_base" "$readiness_case"
+previous_readiness_results=$full_results
+for readiness_mode in empty missing malformed out-of-order duplicate extra-field noncanonical-index non-200 extra-row; do
+	readiness_file=$readiness_case/authorize-readiness.tsv
+	case "$readiness_mode" in
+		empty) : >"$readiness_file"; want_available=true; want_reason=null; want_indices='[]' ;;
+		missing) rm -f "$readiness_file"; want_available=false; want_reason=capture-missing; want_indices=null ;;
+		malformed) printf 'NOT_A_TIMESTAMP\tgoauthy-0\t200\n' >"$readiness_file"; want_available=false; want_reason=capture-invalid; want_indices=null ;;
+		out-of-order) printf '2026-10-08T00:00:01Z\tgoauthy-1\t200\n' >"$readiness_file"; want_available=false; want_reason=capture-invalid; want_indices=null ;;
+		duplicate) printf '2026-10-08T00:00:01Z\tgoauthy-0\t200\n2026-10-08T00:00:02Z\tgoauthy-0\t200\n' >"$readiness_file"; want_available=false; want_reason=capture-invalid; want_indices=null ;;
+		extra-field) printf '2026-10-08T00:00:01Z\tgoauthy-0\t200\tPRIVATE_READINESS_CANARY\n' >"$readiness_file"; want_available=false; want_reason=capture-invalid; want_indices=null ;;
+		noncanonical-index) printf '2026-10-08T00:00:01Z\tgoauthy-00\t200\n' >"$readiness_file"; want_available=false; want_reason=capture-invalid; want_indices=null ;;
+		non-200) printf '2026-10-08T00:00:01Z\tgoauthy-0\t500\n' >"$readiness_file"; want_available=false; want_reason=capture-invalid; want_indices=null ;;
+		extra-row) printf '2026-10-08T00:00:01Z\tgoauthy-0\t200\n2026-10-08T00:00:02Z\tgoauthy-1\t200\n2026-10-08T00:00:03Z\tgoauthy-2\t200\n2026-10-08T00:00:04Z\tgoauthy-2\t200\n' >"$readiness_file"; want_available=false; want_reason=capture-invalid; want_indices=null ;;
+	esac
+	results=$(new_results)
+	if [ "$results" = "$previous_readiness_results" ] || [ -e "$results/criterion.json" ] || [ -e "$results/resource-summary.json" ]; then
+		bad "authorize readiness $readiness_mode result directory is not fresh"
+	else
+		ok "authorize readiness $readiness_mode result directory is fresh"
+	fi
+	previous_readiness_results=$results
+	"$wrapper" --summarize "$readiness_case" "$results" >/dev/null 2>"$tmp/err" || true
+	if jq -e --argjson available "$want_available" --arg reason "$want_reason" --argjson indices "$want_indices" '
+		.authorize_readiness.available == $available
+		and .authorize_readiness.reason == (if $reason == "null" then null else $reason end)
+		and .authorize_readiness.successful_pod_indices == $indices
+		and .object_store.available
+		and (.object_store.pods | map(.pod_index) == [0,1,2])
+	' "$results/resource-summary.json" >/dev/null 2>&1 &&
+		jq -e '.overall.correctness == "fail" and .criterion_pass == false' "$results/criterion.json" >/dev/null 2>&1 &&
+		[ "$(jq -cS . "$full_results/criterion.json")" = "$(jq -cS . "$results/criterion.json")" ]; then
+		if readiness_no_private_data "$results/resource-summary.json"; then
+			ok "authorize readiness $readiness_mode validation and fail-closed criterion"
+		else
+			privacy_status=$?
+			if [ "$privacy_status" -eq 1 ]; then bad "authorize readiness $readiness_mode privacy check (canary disclosed)"
+			else bad "authorize readiness $readiness_mode privacy check (artifact grep failed)"; fi
+		fi
+	else
+		bad "authorize readiness $readiness_mode validation and fail-closed criterion"
+	fi
+done
+
+missing_pod_summary=$tmp/authorize-readiness-missing-pod.json
+jq 'del(.object_store.pods[1])' "$full_results/resource-summary.json" >"$missing_pod_summary"
+if jq -e '.authorize_readiness.available and .authorize_readiness.successful_pod_indices == [0,1,2] and .object_store.available and (.object_store.pods | map(.pod_index) == [0,1,2]) and all(.object_store.pods[]; .available)' \
+	"$missing_pod_summary" >/dev/null 2>&1; then
+	bad "authorize readiness exact object-store pod set accepts a missing pod"
+else
+	ok "authorize readiness exact object-store pod set rejects a missing pod"
+fi
+
+grep() { return 2; }
+if readiness_no_private_data "$partial_results/resource-summary.json"; then
+	bad "authorize readiness privacy guard accepts grep error"
+else
+	privacy_status=$?
+	if [ "$privacy_status" -eq 2 ]; then ok "authorize readiness privacy guard rejects grep error"
+	else bad "authorize readiness privacy guard unexpected error status $privacy_status"; fi
+fi
 
 echo "passed=$pass failed=$fail" >&2
 [ "$fail" -eq 0 ]
