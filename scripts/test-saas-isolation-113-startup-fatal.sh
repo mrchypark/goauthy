@@ -600,5 +600,91 @@ else
 	bad "typed source rejects unquoted, unterminated, forged and malformed prefixes"
 fi
 
+recovery_fields='caller_canceled_after_execute=false caller_deadline_after_execute=true original_commit_unknown=true original_node_not_ready=false original_quorum_unavailable=false original_durability_unavailable=true original_deadline=false original_canceled=false reconciliation_commit_unknown=false reconciliation_node_not_ready=false reconciliation_quorum_unavailable=false reconciliation_durability_unavailable=false reconciliation_deadline=false reconciliation_canceled=true'
+recovery_line() {
+	printf '2026-01-01T00:00:00Z 2026/01/01 00:00:00 ERROR Rhiza mutation recovery failed stage=%s %s\n' "$2" "$3" >>"$1"
+}
+c=$tmp/migration-recovery
+build_capture "$c"
+f=$c/failure-capture/goauthy-0-current.log
+g=$c/failure-capture/goauthy-2-previous.log
+append_typed "$f" write_outcome_unknown 'migrate schema v57: PRIVATE_CANARY'
+append_legacy "$g" 'migrate schema v110: PRIVATE_CANARY'
+recovery_line "$f" request_status "$recovery_fields"
+recovery_line "$g" same_request_replay "$recovery_fields"
+if out=$("$summarizer" "$c") && printf '%s' "$out" | jq -e '
+	.schema_version == 2 and .totals.fatal_n == 2
+	and .pods[0].current.migration_versions == {"v57":1}
+	and .pods[2].previous.migration_versions == {"v110":1}
+	and .totals.migration_versions == {"v57":1,"v110":1}
+	and .totals.recovery.records_n == 2
+	and .totals.recovery.stage_request_status == 1
+	and .totals.recovery.stage_same_request_replay == 1
+	and .totals.recovery.caller_deadline_after_execute == 2
+	and .totals.recovery.original_durability_unavailable == 2
+	and .totals.recovery.reconciliation_durability_unavailable == 0
+	and .totals.recovery.reconciliation_canceled == 2
+	and (.recovery_coverage_note | contains("do not prove cause absence"))
+' >/dev/null 2>&1 && ! printf '%s' "$out" | grep -q 'PRIVATE_CANARY'; then
+	ok "bounded migration and recovery counts preserve labels and all captures"
+else
+	bad "bounded migration and recovery counts preserve labels and all captures"
+fi
+
+d=$tmp/invalid-versions
+build_capture "$d"
+for raw in '"migrate schema v0: private"' '"migrate schema v111: private"' \
+	'"migrate schema v057: private"' '"migrate schema vX: private"' \
+	'migrate schema v57: private' '"migrate schema v57: private\"' \
+	'"migrate schema v57: private" injected=1'; do
+	append_typed_raw "$d/failure-capture/goauthy-0-current.log" write_outcome_unknown "$raw"
+done
+if out=$("$summarizer" "$d") && printf '%s' "$out" | jq -e '
+	.totals.migration_versions == {}
+	and .totals.recovery.records_n == 0
+' >/dev/null 2>&1; then ok "invalid, unquoted and forged versions cannot be exposed"
+else bad "invalid, unquoted and forged versions cannot be exposed"; fi
+
+d=$tmp/invalid-recovery
+build_capture "$d"
+f=$d/failure-capture/goauthy-0-current.log
+recovery_line "$f" unknown "$recovery_fields"
+recovery_line "$f" request_status "$recovery_fields injected=PRIVATE_CANARY"
+recovery_line "$f" request_status "$(printf '%s' "$recovery_fields" | sed 's/reconciliation_canceled=true/reconciliation_canceled=yes/')"
+recovery_line "$f" request_status "$(printf '%s' "$recovery_fields" | sed 's/ reconciliation_canceled=true//')"
+recovery_line "$f" request_status "$(printf '%s' "$recovery_fields" | sed 's/caller_canceled_after_execute=false caller_deadline_after_execute=true/caller_deadline_after_execute=true caller_canceled_after_execute=false/')"
+if out=$("$summarizer" "$d") && printf '%s' "$out" | jq -e '
+	.totals.fatal_n == 0 and .totals.recovery.records_n == 0
+	and .totals.recovery.unparsed == 5
+	and ([.totals.recovery | to_entries[] | select(.key != "unparsed") | .value] | all(. == 0))
+' >/dev/null 2>&1 && ! printf '%s' "$out" | grep -q 'PRIVATE_CANARY'; then
+	ok "malformed recovery records never move a stage or cause count"
+else bad "malformed recovery records never move a stage or cause count"; fi
+
+sed 's/goauthy-0-current.log_exit=0/goauthy-0-current.log_exit=1/' "$c/failure-capture/capture-status.txt" >"$tmp/status"
+mv "$tmp/status" "$c/failure-capture/capture-status.txt"
+if out=$("$summarizer" "$c") && printf '%s' "$out" | jq -e '
+	.pods[0].current.available == false
+	and .pods[0].current.migration_versions == null
+	and .pods[0].current.recovery == null
+	and .totals.partial == true
+	and .totals.migration_versions == {"v110":1}
+	and .totals.recovery.records_n == 1
+' >/dev/null 2>&1; then ok "unavailable captures remain null and cannot affect new totals"
+else bad "unavailable captures remain null and cannot affect new totals"; fi
+
+append_typed "$c17/failure-capture/goauthy-0-current.log" write_outcome_unknown 'migrate schema v1: PRIVATE_CANARY'
+recovery_line "$c17/failure-capture/goauthy-0-current.log" request_status "$recovery_fields"
+results_additive=$tmp/additive-results
+mkdir -p "$results_additive"
+if sh "$wrapper" --summarize "$c17" "$results_additive" >/dev/null 2>"$tmp/integration.err"; then rc=0; else rc=$?; fi
+if [ "$rc" -ne 0 ] && jq -e '
+	.startup_fatal.totals.migration_versions == {"v1":1}
+	and .startup_fatal.totals.recovery.stage_request_status == 1
+	and .startup_fatal.totals.recovery.original_durability_unavailable == 1
+	and .startup_fatal.schema_version == 2
+' "$results_additive/resource-summary.json" >/dev/null 2>&1; then ok "wrapper carries additive diagnostics without admitting a workload"
+else bad "wrapper carries additive diagnostics without admitting a workload"; fi
+
 echo "passed=$pass failed=$fail" >&2
 [ "$fail" -eq 0 ]
