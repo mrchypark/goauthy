@@ -367,11 +367,11 @@ c8=$tmp/schema
 build_capture "$c8"
 append_typed "$c8/failure-capture/goauthy-0-current.log" 'deadline' 'private'
 if out=$("$summarizer" "$c8") && printf '%s' "$out" | jq -e '
-	(.classes | length) == 9
+	(.classes | length) == 10
 	and (.error_classes | length) == 7
 	and (.pods | length) == 3
 	and ([.pods[].index] | sort) == [0, 1, 2]
-	and ([.pods[].current.counts | keys[]] | unique | sort) == (["api_key_bootstrap","bootstrap_client","bootstrap_rbac","dcr_trust","rhiza_open","rhiza_readiness","scim_runtime","storage_config","unknown"] | sort)
+	and ([.pods[].current.counts | keys[]] | unique | sort) == (["api_key_bootstrap","bootstrap_client","bootstrap_rbac","dcr_trust","rhiza_open","rhiza_readiness","schema_migrate","scim_runtime","storage_config","unknown"] | sort)
 	and ([.pods[].current.error_class_counts | keys[]] | unique | sort) == (["ack_durability_unavailable","canceled","deadline","node_not_ready","quorum_unavailable","unknown","write_outcome_unknown"] | sort)
 	and ([.pods[].current.counts[] | type] | all(. == "number"))
 	and ([.pods[].current.error_class_counts[] | type] | all(. == "number"))
@@ -519,7 +519,7 @@ fi
 if [ "$rc" -ne 0 ] && jq -e '
 	.startup_fatal.available == true
 	and .startup_fatal.complete == true
-	and (.startup_fatal.classes | length) == 9
+	and (.startup_fatal.classes | length) == 10
 	and (.startup_fatal.error_classes | length) == 7
 	and ([.startup_fatal.pods[].index] | sort) == [0, 1, 2]
 	and (first(.startup_fatal.pods[] | select(.index == 0)).current.fatal_n) == 1
@@ -551,6 +551,53 @@ if [ "$rc" -ne 0 ] && jq -e '
 else
 	bad "an unavailable startup fatal does not remove the mandatory resource gates"
 	sed -n '1,3p' "$tmp/integration18.err" >&2 || true
+fi
+
+# Typed records expose only verified source prefixes and count each fatal once.
+c=$tmp/typed-source
+build_capture "$c"
+f=$c/failure-capture/goauthy-0-current.log
+append_typed "$f" write_outcome_unknown 'open rhiza: private'
+append_typed "$f" write_outcome_unknown 'migrate schema v57: private'
+append_typed "$f" node_not_ready 'configure SCIM runtime: private'
+if out=$("$summarizer" "$c") && printf '%s' "$out" | jq -e '
+	.pods[0].current.fatal_n == 3 and .totals.fatal_n == 3
+	and .pods[0].current.error_class_counts.write_outcome_unknown == 2
+	and .pods[0].current.error_class_counts.node_not_ready == 1
+	and .pods[0].current.counts.rhiza_open == 1
+	and .pods[0].current.counts.schema_migrate == 1
+	and .pods[0].current.counts.scim_runtime == 1
+	and .totals.counts.schema_migrate == 1
+	and .totals.error_class_counts.write_outcome_unknown == 2
+' >/dev/null 2>&1; then
+	ok "typed source prefixes and error classes count each fatal once"
+else
+	bad "typed source prefixes and error classes count each fatal once"
+fi
+
+c=$tmp/typed-source-unknown
+build_capture "$c"
+f=$c/failure-capture/goauthy-0-current.log
+append_typed "$f" write_outcome_unknown 'open rhiza: private'
+append_typed_raw "$f" unknown EOF
+append_typed_raw "$f" unknown 'open rhiza: private'
+append_typed_raw "$f" deadline '"migrate schema v9: private\"'
+append_typed_raw "$f" quorum_unavailable '"open rhiza: private" injected=1'
+append_typed "$f" canceled 'migrate schema version: private'
+append_typed_raw "$f" deadline '"open rhiza: unterminated'
+if out=$("$summarizer" "$c") && printf '%s' "$out" | jq -e '
+	.pods[0].current.fatal_n == 6 and .totals.fatal_n == 6
+	and .pods[0].current.counts.unknown == 5
+	and .pods[0].current.counts.rhiza_open == 1
+	and .pods[0].current.counts.schema_migrate == 0
+	and .pods[0].current.error_class_counts.unknown == 2
+	and .pods[0].current.error_class_counts.deadline == 1
+	and .pods[0].current.error_class_counts.quorum_unavailable == 1
+	and .pods[0].current.error_class_counts.canceled == 1
+' >/dev/null 2>&1; then
+	ok "typed source rejects unquoted, unterminated, forged and malformed prefixes"
+else
+	bad "typed source rejects unquoted, unterminated, forged and malformed prefixes"
 fi
 
 echo "passed=$pass failed=$fail" >&2

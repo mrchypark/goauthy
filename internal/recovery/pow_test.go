@@ -163,9 +163,16 @@ func TestProofOfWorkIssueCrossStoreContentionHonorsActiveBound(t *testing.T) {
 	}
 	other.now = pow.now
 	other.random = &counterReader{next: 1_000}
+	// Keep the boundary race below Rhiza's 128-mutation admission limit.
+	seeded := proofActiveLimit - 32
+	for i := 0; i < seeded; i++ {
+		if _, err := pow.Issue(context.Background(), 10, time.Minute); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
 	start := make(chan struct{})
-	errs := make(chan error, proofActiveLimit+1)
-	for i := 0; i < proofActiveLimit+1; i++ {
+	errs := make(chan error, proofActiveLimit+1-seeded)
+	for i := seeded; i < proofActiveLimit+1; i++ {
 		issuer := pow
 		if i%2 != 0 {
 			issuer = other
@@ -178,8 +185,8 @@ func TestProofOfWorkIssueCrossStoreContentionHonorsActiveBound(t *testing.T) {
 		}()
 	}
 	close(start)
-	successes := 0
-	for range proofActiveLimit + 1 {
+	successes := seeded
+	for range proofActiveLimit + 1 - seeded {
 		err := <-errs
 		if err == nil {
 			successes++
@@ -260,7 +267,6 @@ func powIssuePeerCount(t *testing.T, pow *ProofOfWork) int {
 
 func testProofOfWork(t *testing.T) *ProofOfWork {
 	t.Helper()
-	// The cross-store barrier submits proofActiveLimit+1 callers at once.
 	// Keep the application-capacity oracle independent of DB read admission.
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "pow-test", DataDir: t.TempDir(), MaxConcurrentReads: proofActiveLimit + 1})
 	if err != nil {

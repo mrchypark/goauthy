@@ -11,8 +11,8 @@
 #   typed-first:  ... ERROR goauthy stopped error_class=<CLASS> error="..."
 #   legacy:       ... ERROR goauthy stopped error="..."
 # The native default slog handler is not a TextHandler, so no msg= field is
-# expected. Typed records are classified only by the fixed error_class enum;
-# legacy records are classified only by the fixed source prefixes. Anything
+# expected. Typed records retain the fixed error_class enum and also classify
+# the verified quoted error value by fixed source prefixes, as legacy records do. Anything
 # else is "unknown". A missing, failed, or malformed capture is never treated
 # as proof of no fatal.
 set -eu
@@ -34,7 +34,7 @@ esac
 capture_dir=$dir/failure-capture
 status_file=$capture_dir/capture-status.txt
 
-classes_json='["rhiza_open","rhiza_readiness","scim_runtime","bootstrap_client","bootstrap_rbac","api_key_bootstrap","dcr_trust","storage_config","unknown"]'
+classes_json='["rhiza_open","rhiza_readiness","scim_runtime","bootstrap_client","bootstrap_rbac","api_key_bootstrap","dcr_trust","storage_config","schema_migrate","unknown"]'
 eclasses_json='["write_outcome_unknown","node_not_ready","quorum_unavailable","ack_durability_unavailable","deadline","canceled","unknown"]'
 
 emit_unavailable() {
@@ -96,12 +96,12 @@ invalid_n=0
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 : >"$tmp/fatal.tsv"
-neg17="-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1"
+neg18="-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1"
 
 # Bounded scan of one private per-pod log. Only the exact anchored record
 # start is matched; typed records are classified by the fixed error_class enum
-# and legacy records by the fixed source prefixes. No raw characters are
-# printed. Output is one row: fatal_n, nine legacy counts in fixed class order,
+# and both record shapes by the fixed source prefixes. No raw characters are
+# printed. Output is one row: fatal_n, ten source counts in fixed class order,
 # seven typed counts in fixed class order.
 scan_jq='
 	function typed_class(v) {
@@ -114,6 +114,7 @@ scan_jq='
 		return "unknown"
 	}
 	function legacy_class(rest) {
+		if (rest ~ /^migrate schema v[0-9]+: /) return "schema_migrate"
 		if (index(rest, "open rhiza: ") == 1) return "rhiza_open"
 		if (index(rest, "wait for rhiza readiness: ") == 1) return "rhiza_readiness"
 		if (index(rest, "configure SCIM runtime: ") == 1) return "scim_runtime"
@@ -156,6 +157,7 @@ scan_jq='
 	# partial or forged value is ever accepted as a known class. Returns the
 	# fixed class, "unknown" for an unsupported label, or "" when malformed.
 	function typed_parse(rest,   after, cq, sp, val, tail, ev) {
+		g_ev = ""
 		if (index(rest, "error_class=") != 1) return ""
 		after = substr(rest, length("error_class=") + 1)
 		if (substr(after, 1, 1) == "\"") {
@@ -176,6 +178,7 @@ scan_jq='
 		} else {
 			if (ev == "") return ""
 		}
+		g_ev = ev
 		return typed_class(val)
 	}
 	function parse_name(   b, rest, a, n) {
@@ -194,7 +197,7 @@ scan_jq='
 	BEGIN {
 		g_valid = 0
 		re = "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9](\\.[0-9]+)?(Z|[+-][0-9][0-9]:[0-9][0-9])[[:space:]]+[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9][[:space:]]+[0-9][0-9]:[0-9][0-9]:[0-9][0-9][[:space:]]+ERROR goauthy stopped "
-		split("rhiza_open rhiza_readiness scim_runtime bootstrap_client bootstrap_rbac api_key_bootstrap dcr_trust storage_config unknown", order, " ")
+		split("rhiza_open rhiza_readiness scim_runtime bootstrap_client bootstrap_rbac api_key_bootstrap dcr_trust storage_config schema_migrate unknown", order, " ")
 		split("write_outcome_unknown node_not_ready quorum_unavailable ack_durability_unavailable deadline canceled unknown", eorder, " ")
 	}
 	FNR == 1 { parse_name() }
@@ -208,6 +211,8 @@ scan_jq='
 			if (cls != "") {
 				ecounts[g_idx, g_phase, cls]++
 				etotal++
+				val = quoted_legacy(g_ev)
+				counts[g_idx, g_phase, g_qok ? legacy_class(val) : "unknown"]++
 			}
 		} else if (index(rest, "error=") == 1) {
 			ev = substr(rest, length("error=") + 1)
@@ -225,7 +230,7 @@ scan_jq='
 		parse_name()
 		if (!g_valid) exit
 		printf "%d", total + etotal
-		for (j = 1; j <= 9; j++) {
+		for (j = 1; j <= 10; j++) {
 			c = order[j]
 			k = g_idx SUBSEP g_phase SUBSEP c
 			printf "\t%d", (k in counts ? counts[k] : 0)
@@ -261,7 +266,7 @@ for idx in 0 1 2; do
 			printf '%s\t%s\t1\t\t0\t%s\n' "$idx" "$phase" "$row" >>"$tmp/fatal.tsv"
 		else
 			reason=$(per_reason "$st" "$has_file")
-			printf '%s\t%s\t0\t%s\t-1\t%s\n' "$idx" "$phase" "$reason" "$neg17" >>"$tmp/fatal.tsv"
+			printf '%s\t%s\t0\t%s\t-1\t%s\n' "$idx" "$phase" "$reason" "$neg18" >>"$tmp/fatal.tsv"
 		fi
 	done
 done
@@ -286,8 +291,8 @@ jq -n --argjson classes "$classes_json" --argjson eclasses "$eclasses_json" --ra
 				available: true,
 				exit: ($r[4] | tonumber),
 				fatal_n: ($r[5] | tonumber),
-				counts: (reduce range(0; 9) as $i ({}; .[classes[$i]] = ($r[6 + $i] | tonumber))),
-				error_class_counts: (reduce range(0; 7) as $i ({}; .[eclasses[$i]] = ($r[15 + $i] | tonumber)))
+				counts: (reduce range(0; 10) as $i ({}; .[classes[$i]] = ($r[6 + $i] | tonumber))),
+				error_class_counts: (reduce range(0; 7) as $i ({}; .[eclasses[$i]] = ($r[16 + $i] | tonumber)))
 			}
 		else
 			{
@@ -321,8 +326,8 @@ jq -n --argjson classes "$classes_json" --argjson eclasses "$eclasses_json" --ra
 			fatal_n: ([$rows[] | select(.[2] == "1") | (.[5] | tonumber)] | add // 0),
 			observed_n: ([$rows[] | select(.[2] == "1")] | length),
 			partial: (([$rows[] | select(.[2] == "1")] | length) < 6),
-			counts: (reduce ($rows[] | select(.[2] == "1")) as $r (reduce range(0; 9) as $i ({}; .[classes[$i]] = 0); reduce range(0; 9) as $i (.; .[classes[$i]] += ($r[6 + $i] | tonumber)))),
-			error_class_counts: (reduce ($rows[] | select(.[2] == "1")) as $r (reduce range(0; 7) as $i ({}; .[eclasses[$i]] = 0); reduce range(0; 7) as $i (.; .[eclasses[$i]] += ($r[15 + $i] | tonumber))))
+			counts: (reduce ($rows[] | select(.[2] == "1")) as $r (reduce range(0; 10) as $i ({}; .[classes[$i]] = 0); reduce range(0; 10) as $i (.; .[classes[$i]] += ($r[6 + $i] | tonumber)))),
+			error_class_counts: (reduce ($rows[] | select(.[2] == "1")) as $r (reduce range(0; 7) as $i ({}; .[eclasses[$i]] = 0); reduce range(0; 7) as $i (.; .[eclasses[$i]] += ($r[16 + $i] | tonumber))))
 		},
 		complete: (([$rows[] | select(.[2] == "1")] | length) == 6)
 	}
