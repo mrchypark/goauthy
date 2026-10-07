@@ -139,7 +139,25 @@ func validMethod(method string) bool {
 }
 func excludedRoute(path string) bool {
 	// Health endpoints are root-only bypasses, outside the issuer API server URL.
-	return path == "/livez" || path == "/readyz" || path == "/metrics" || strings.HasPrefix(path, "/auth/v1/docs") || strings.HasSuffix(path, "/{$}")
+	// The object-store metrics endpoint is mounted on the separate opt-in metrics mux.
+	return path == "/livez" || path == "/readyz" || path == "/metrics" || path == "/metrics/object-store" || strings.HasPrefix(path, "/auth/v1/docs") || strings.HasSuffix(path, "/{$}")
+}
+
+func TestExcludedRouteDoesNotHideOtherMetricsPaths(t *testing.T) {
+	for _, test := range []struct {
+		path     string
+		excluded bool
+	}{
+		{path: "/metrics", excluded: true},
+		{path: "/metrics/object-store", excluded: true},
+		{path: "/metrics/object-store/extra", excluded: false},
+		{path: "/metrics/object-store-extra", excluded: false},
+		{path: "/metrics/custom", excluded: false},
+	} {
+		if got := excludedRoute(test.path); got != test.excluded {
+			t.Errorf("excludedRoute(%q) = %t, want %t", test.path, got, test.excluded)
+		}
+	}
 }
 func repoRoot(t *testing.T) string {
 	_, file, _, ok := runtime.Caller(0)
