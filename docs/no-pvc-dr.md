@@ -1,11 +1,19 @@
 # No-PVC and object-store DR contract
 
 The project default is no GoAuthy PVC. The greenfield candidate uses Rhiza
-v0.18.0 with a fresh local `DataDir` (`emptyDir` in Kubernetes), an unused
+v0.19.0 with a fresh local `DataDir` (`emptyDir` in Kubernetes), an unused
 cluster ID, and an unused object-store namespace. Object-store durability stays
 fixed at `before-ack`, and periodic GC stays disabled. Master keys, issuer, and
 node/member identities must be configured consistently. A local-directory
 backup is not the default DR mechanism.
+
+The [v0.19.0 release](https://github.com/mrchypark/rhiza/releases/tag/v0.19.0)
+resolves to source `abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8` and uses
+`latticedb-go v0.11.3`. It requires Go 1.27 or newer and changes SQL execution
+policy from 4 to 7. Earlier materializers, checkpoints and history are rejected;
+mixed-version peers and downgrade are unsupported. GoAuthy's Go 1.27 build
+already meets the requirement. Earlier acceptance results below remain
+historical evidence and do not qualify this candidate.
 
 ## Historical Rhiza v0.12.3 contract
 
@@ -41,8 +49,8 @@ paired recovery pins; they do not qualify the node's periodic GC loop.
 Issue [#105](https://github.com/mrchypark/goauthy/issues/105) remains open:
 the greenfield candidate and this source review do not qualify periodic GC.
 The 2026-10-02 review below concerns the v0.12.3 deployment and remains
-historical. The latest
-[released Rhiza version is v0.18.0](https://github.com/mrchypark/rhiza/releases/tag/v0.18.0)
+historical. The following startup assessment concerns
+[Rhiza v0.18.0](https://github.com/mrchypark/rhiza/releases/tag/v0.18.0)
 (source commit
 [`ff38548`](https://github.com/mrchypark/rhiza/tree/ff38548cd9561f27dd474a1151f0c6dd5da79b9b)).
 In that release, startup pins the selected checkpoint root but closes its
@@ -57,9 +65,10 @@ Rhiza `main` at
 contains later recovery work, including
 [Local WAL reclamation](https://github.com/mrchypark/rhiza/commit/e67a67b191adc89ea92374fbc4b86a64ded3de19)
 and [learner checkpoint-adoption/GC-floor hardening](https://github.com/mrchypark/rhiza/commit/9d40786e49b7fe24db47c1441b1a8ab11ae6eebc),
-but these commits are not part of a released candidate and do not qualify
-periodic GC. These are source-derived compatibility gaps, not a demonstrated
-data-loss event.
+which was unreleased at that review. These historical findings describe the
+v0.18.0 assessment, not a v0.19.0 defect or a demonstrated data-loss event.
+The v0.19.0 release includes later recovery and GC hardening, but source changes
+alone do not qualify GoAuthy's periodic GC.
 
 Keep GC disabled until the periodic-GC gate passes. This document does not set
 an operational SLO or claim production qualification.
