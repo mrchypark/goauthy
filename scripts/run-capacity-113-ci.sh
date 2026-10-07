@@ -290,12 +290,20 @@ summarize_results() {
 
 	analyzer_status=0
 	analyzer_ok=false
+	analyzer_failure_code=unknown
 	if [ ! -x "$analyzer" ]; then
 		analyzer_status=127
+		analyzer_failure_code=unavailable
 	else
 		"$analyzer" "$stage_dir" >"$temp_dir/analyzer.json" 2>"$temp_dir/analyzer.stderr" || analyzer_status=$?
 		if [ "$analyzer_status" -eq 0 ] && jq -e . "$temp_dir/analyzer.json" >/dev/null 2>&1; then
 			analyzer_ok=true
+		fi
+		if [ "$analyzer_status" -ne 0 ]; then
+			analyzer_failure_code=$(awk '
+				NR == 1 && $0 == "no observation records parsed" { known = 1 }
+				END { if (NR == 1 && known) print "no_observation_records"; else print "unknown" }
+			' "$temp_dir/analyzer.stderr")
 		fi
 	fi
 
@@ -379,11 +387,11 @@ summarize_results() {
 		jq '.resources + {available: true}' "$temp_dir/analyzer.json" >"$results_dir/resource-summary.json" || fail 'failed to derive the resource summary'
 	else
 		analyzer_reason="analyzer unavailable or malformed (exit status $analyzer_status)"
-		jq -n --arg reason "$analyzer_reason" --argjson status "$analyzer_status" '{
+		jq -n --arg reason "$analyzer_reason" --arg code "$analyzer_failure_code" --argjson status "$analyzer_status" '{
 			schema_version: 1,
 			analyzer: "scripts/summarize-e2e-kind-saas-isolation-113.sh",
 			diagnostic_directory_basename: "unavailable",
-			error: {reason: $reason, analyzer_status: $status},
+			error: {reason: $reason, analyzer_status: $status, failure_code: $code},
 			iam_failure_diagnostics: {
 				criterion: "every protected IAM error must carry an anchored connection_use_grant_test.go t.Helper diagnostic; recognized count must equal total errors exactly with no unrecognized or excess diagnostics, otherwise incomplete, never success or cause proof",
 				source: "unavailable",
@@ -400,9 +408,10 @@ summarize_results() {
 			criterion_pass: false,
 			criterion_status: "inconclusive"
 		}' >"$results_dir/criterion.json"
-		jq -n --arg reason "$analyzer_reason" '{
+		jq -n --arg reason "$analyzer_reason" --arg code "$analyzer_failure_code" '{
 			available: false,
 			reason: $reason,
+			failure_code: $code,
 			ceiling: {status: "missing", result: "inconclusive", reason: "no approved local resource ceiling; analyzer unavailable"},
 			series: [],
 			evidence: {unavailable_non_rss_count: null, complete: false}

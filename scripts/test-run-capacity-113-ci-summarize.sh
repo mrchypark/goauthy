@@ -231,12 +231,72 @@ else
 	if jq -e '.overall.correctness == "fail" and .criterion_pass == false
 		and (.iam_failure_diagnostics | keys == ["anchored", "complete", "criterion", "errors", "excess", "groups", "missing", "source", "status", "unrecognized"])
 		and (.iam_failure_diagnostics | .errors == null and .anchored == null and .unrecognized == null and .excess == null and .missing == null and .complete == false and .status == "unavailable" and .source == "unavailable" and .groups == [])' "$results/criterion.json" >/dev/null 2>&1 &&
+		jq -e '.schema_version == 1 and .error.failure_code == "unknown" and .error.analyzer_status == 1 and .error.reason == "analyzer unavailable or malformed (exit status 1)"' "$results/criterion.json" >/dev/null 2>&1 &&
 		jq -e '.available == false' "$results/resource-summary.json" >/dev/null 2>&1 &&
+		jq -e '.failure_code == "unknown" and .reason == "analyzer unavailable or malformed (exit status 1)"' "$results/resource-summary.json" >/dev/null 2>&1 &&
 		[ -s "$results/pins.json" ] && [ -s "$results/runner-environment.json" ] && [ -s "$results/report.md" ] && [ -s "$results/resource-summary.json" ]; then
 		ok "analyzer failure"
 	else
 		bad "analyzer failure (unexpected error report)"
 	fi
+fi
+
+# A whole known analyzer message gets a fixed code; source text and unknown
+# path-bearing errors remain undisclosed in safe artifacts.
+noobservations=$tmp/noobservations
+mkcase "$noobservations" 100 110 90
+for f in "$noobservations"/driver-isolation113-driver-*.log; do printf 'PRIVATE_ANALYZER_CANARY\n' >"$f"; done
+artifacts_ready() {
+	for artifact do
+		[ -f "$artifact" ] && [ -s "$artifact" ] && [ -r "$artifact" ] || return 1
+	done
+}
+results=$(new_results)
+known_artifacts_ready=false
+if "$wrapper" --summarize "$noobservations" "$results" >"$tmp/out" 2>"$tmp/err"; then
+	bad "known analyzer failure code (expected nonzero exit)"
+elif jq -e '.schema_version == 1 and .error.failure_code == "no_observation_records" and .error.analyzer_status == 1 and .error.reason == "analyzer unavailable or malformed (exit status 1)" and .overall.correctness == "fail" and .overall.performance == "inconclusive" and .criterion_pass == false' "$results/criterion.json" >/dev/null 2>&1 &&
+	jq -e '.failure_code == "no_observation_records" and .available == false' "$results/resource-summary.json" >/dev/null 2>&1 &&
+	artifacts_ready "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md"; then
+	known_artifacts_ready=true
+	if grep -q PRIVATE_ANALYZER_CANARY "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md"; then
+		bad "known analyzer failure code (canary disclosed)"
+	else
+		grep_status=$?
+		if [ "$grep_status" -eq 1 ]; then ok "known analyzer failure code"; else bad "known analyzer failure code (artifact grep failed)"; fi
+	fi
+else
+	bad "known analyzer failure code (unexpected error report)"
+fi
+
+if [ "$known_artifacts_ready" = true ]; then
+	rm "$results/report.md"
+	if artifacts_ready "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md"; then
+		bad "missing analyzer report artifact accepted"
+	else
+		ok "missing analyzer report artifact rejected"
+	fi
+else
+	bad "missing analyzer report artifact check not exercised"
+fi
+
+unknownmessage=$tmp/unknownmessage
+mkcase "$unknownmessage" 100 110 90
+printf '{"unexpected":true}\n' >"$unknownmessage/fixture-metrics-0-PRIVATE_ANALYZER_CANARY.json"
+results=$(new_results)
+if "$wrapper" --summarize "$unknownmessage" "$results" >"$tmp/out" 2>"$tmp/err"; then
+	bad "unknown analyzer failure code (expected nonzero exit)"
+elif jq -e '.error.failure_code == "unknown" and .overall.correctness == "fail" and .overall.performance == "inconclusive" and .criterion_pass == false' "$results/criterion.json" >/dev/null 2>&1 &&
+	jq -e '.failure_code == "unknown" and .available == false' "$results/resource-summary.json" >/dev/null 2>&1 &&
+	artifacts_ready "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md"; then
+	if grep -q PRIVATE_ANALYZER_CANARY "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md"; then
+		bad "unknown analyzer failure code (canary disclosed)"
+	else
+		grep_status=$?
+		if [ "$grep_status" -eq 1 ]; then ok "unknown analyzer failure code and canary redaction"; else bad "unknown analyzer failure code (artifact grep failed)"; fi
+	fi
+else
+	bad "unknown analyzer failure code and canary redaction (unexpected error report)"
 fi
 
 # Baseline multi-document transform regression (offline; no kubectl/Kind).

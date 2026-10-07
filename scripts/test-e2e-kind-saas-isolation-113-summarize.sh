@@ -142,30 +142,40 @@ expect_status "protected error" "$protected" "fail" "pass" "fail"
 
 # The driver emits status=0 when no HTTP response was received. Keep that
 # observation in the denominator and fail correctness, rather than crashing.
-for operation in account slow-headers; do
-	transport=$tmp/transport-$operation
+for case_operation in account slow-headers; do
+	transport=$tmp/transport-$case_operation
 	mkcase "$transport" 100 110 90
 	f=$transport/driver-isolation113-driver-goauthy-0-0-test.log
-	awk -v op="$operation" 'BEGIN{done=0} {
+	awk -v op="$case_operation" 'BEGIN{done=0} {
 		if (!done && index($0, "operation=" op " ")) {
 			sub(/outcome=[^ ]+ status=[0-9]+/, "outcome=transport-error status=0"); done=1
 		} print
 	}' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
-	expect_status "transport without HTTP response: $operation" "$transport" "fail" "pass" "fail"
-	if out=$("$analyzer" "$transport" 2>"$tmp/err") && printf '%s' "$out" | jq -e '
+	expect_status "transport without HTTP response: $case_operation" "$transport" "fail" "pass" "fail"
+	if out=$("$analyzer" "$transport" 2>"$tmp/err") && printf '%s' "$out" | jq -e --arg op "$case_operation" '
 		([.groups[].n] | add) == 78 and
-		([.groups[].statuses[] | select(.status == 0) | .n] | add) == 1
-	' >/dev/null; then ok "transport observation retained: $operation"
-	else bad "transport observation retained: $operation"; fi
+		([.groups[].statuses[] | select(.status == 0) | .n] | add) == 1 and
+		([.groups[] | select(.route == "api-key" and .operation == $op) | .statuses[] | select(.status == 0) | .n] | add) == 1 and
+		(if $op == "account" then
+			.protected.errors == 1 and (.fault_routes.mismatches | length) == 0
+		else
+			.protected.errors == 0 and
+			([.fault_routes.mismatches[] | select(.operation == $op and .wrong_status == 1 and .wrong_outcome == 1)] | length) == 1
+		end)
+	' >/dev/null; then ok "transport observation retained: $case_operation"
+	else bad "transport observation retained: $case_operation"; fi
 done
-for outcome in success http-error; do
-	zero=$tmp/invalid-zero-$outcome
+for case_outcome in success http-error; do
+	zero=$tmp/invalid-zero-$case_outcome
 	mkcase "$zero" 100 110 90
 	f=$zero/driver-isolation113-driver-goauthy-0-0-test.log
-	awk -v o="$outcome" 'BEGIN{done=0} {
+	awk -v o="$case_outcome" 'BEGIN{done=0} {
 		if (!done && /operation=account /) {sub(/outcome=[^ ]+ status=[0-9]+/, "outcome=" o " status=0"); done=1} print
 	}' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
-	expect_fail "zero status rejected for $outcome" "$zero"
+	if [ "$(grep -Fc "operation=account outcome=$case_outcome status=0 " "$f")" -eq 1 ]; then
+		ok "zero status fixture: $case_outcome"
+	else bad "zero status fixture: $case_outcome"; fi
+	expect_fail "zero status rejected for $case_outcome" "$zero"
 done
 
 # Missing denominator: drop one baseline iam record.
