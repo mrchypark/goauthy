@@ -38,6 +38,8 @@ status_file=$capture_dir/capture-status.txt
 classes_json='["rhiza_open","rhiza_readiness","scim_runtime","bootstrap_client","bootstrap_rbac","api_key_bootstrap","dcr_trust","storage_config","schema_migrate","unknown"]'
 eclasses_json='["write_outcome_unknown","node_not_ready","quorum_unavailable","ack_durability_unavailable","deadline","canceled","unknown"]'
 recovery_note='Counts of validated recovery failure records only; terminal unknown-or-expired emits no record. Zero observations do not prove cause absence; original and reconciliation flags overlap.'
+cause_note='Fixed inner error strings following a durability marker in validated migration fatal records, one bucket per record. Labels are observations, not causal proof; publication exhaustion can mask provider errors. Zero observations do not establish absence.'
+causes_json='["publication_conflict_exhausted","publication_refresh_regressed","archive_busy","inner_deadline","inner_canceled","unknown"]'
 
 emit_unavailable() {
 	jq -n --arg reason "$1" --arg note "$recovery_note" --argjson classes "$classes_json" --argjson eclasses "$eclasses_json" '{
@@ -114,6 +116,21 @@ scan_jq='
 		sub(/^migrate schema v/, "", v)
 		sub(/: .*$/, "", v)
 		return length(v) <= 3 && v + 0 <= 110 ? v + 0 : 0
+	}
+	function cause_count(val,   p, tail, cut, label) {
+		if (migration_version(val) <= 0) return
+		p = index(val, "object-store durability unavailable: ")
+		if (p == 0) return
+		tail = substr(val, p + length("object-store durability unavailable: "))
+		cut = index(tail, "\\n")
+		if (cut > 0) tail = substr(tail, 1, cut - 1)
+		label = "unknown"
+		if (tail == "shared archive publication conflicted too many times") label = "publication_conflict_exhausted"
+		else if (tail == "published archive head regressed") label = "publication_refresh_regressed"
+		else if (tail == "archive maintenance is active") label = "archive_busy"
+		else if (tail == "context deadline exceeded") label = "inner_deadline"
+		else if (tail == "context canceled") label = "inner_canceled"
+		causes[label]++
 	}
 	function typed_class(v) {
 		if (v == "write_outcome_unknown") return "write_outcome_unknown"
@@ -213,6 +230,7 @@ scan_jq='
 		rrec = re
 		sub(/ERROR goauthy stopped $/, "ERROR Rhiza mutation recovery failed ", rrec)
 		split("request_status same_request_replay", rorder, " ")
+		split("publication_conflict_exhausted publication_refresh_regressed archive_busy inner_deadline inner_canceled unknown", corder, " ")
 		split("caller_canceled_after_execute caller_deadline_after_execute original_commit_unknown original_node_not_ready original_quorum_unavailable original_durability_unavailable original_deadline original_canceled reconciliation_commit_unknown reconciliation_node_not_ready reconciliation_quorum_unavailable reconciliation_durability_unavailable reconciliation_deadline reconciliation_canceled", bkeys, " ")
 	}
 	FNR == 1 { parse_name() }
@@ -242,6 +260,7 @@ scan_jq='
 				val = quoted_legacy(g_ev)
 				counts[g_idx, g_phase, g_qok ? legacy_class(val) : "unknown"]++
 				if (g_qok && (v = migration_version(val)) > 0) versions[v]++
+				if (g_qok) cause_count(val)
 			}
 		} else if (index(rest, "error=") == 1) {
 			ev = substr(rest, length("error=") + 1)
@@ -249,6 +268,7 @@ scan_jq='
 			if (g_qok) {
 				cls = legacy_class(val)
 				if ((v = migration_version(val)) > 0) versions[v]++
+				cause_count(val)
 			} else {
 				cls = "unknown"
 			}
@@ -277,6 +297,8 @@ scan_jq='
 		printf "}\t{\"records_n\":%d,\"unparsed\":%d", rec_n, rec_unparsed
 		for (j = 1; j <= 2; j++) printf ",\"stage_%s\":%d", rorder[j], rstage["stage=" rorder[j]]
 		for (j = 1; j <= 14; j++) printf ",\"%s\":%d", bkeys[j], rflags[bkeys[j]]
+		printf "}\t{"
+		for (j = 1; j <= 6; j++) printf "%s\"%s\":%d", (j > 1 ? "," : ""), corder[j], causes[corder[j]]
 		printf "}\n"
 	}
 '
@@ -303,7 +325,7 @@ for idx in 0 1 2; do
 			printf '%s\t%s\t1\t\t0\t%s\n' "$idx" "$phase" "$row" >>"$tmp/fatal.tsv"
 		else
 			reason=$(per_reason "$st" "$has_file")
-			printf '%s\t%s\t0\t%s\t-1\t%s\t-1\t-1\n' "$idx" "$phase" "$reason" "$neg18" >>"$tmp/fatal.tsv"
+			printf '%s\t%s\t0\t%s\t-1\t%s\t-1\t-1\t-1\n' "$idx" "$phase" "$reason" "$neg18" >>"$tmp/fatal.tsv"
 		fi
 	done
 done
@@ -319,7 +341,7 @@ if [ "$eligible_n" -eq 0 ]; then
 	exit 0
 fi
 
-jq -n --arg note "$recovery_note" --argjson classes "$classes_json" --argjson eclasses "$eclasses_json" --rawfile raw "$tmp/fatal.tsv" '
+jq -n --arg note "$recovery_note" --arg cnote "$cause_note" --argjson causes "$causes_json" --argjson classes "$classes_json" --argjson eclasses "$eclasses_json" --rawfile raw "$tmp/fatal.tsv" '
 	def classes: $classes;
 	def eclasses: $eclasses;
 	def addcounts($a; $b): reduce ($b | to_entries[]) as $e ($a; .[$e.key] = ((.[$e.key] // 0) + $e.value));
@@ -332,7 +354,8 @@ jq -n --arg note "$recovery_note" --argjson classes "$classes_json" --argjson ec
 				counts: (reduce range(0; 10) as $i ({}; .[classes[$i]] = ($r[6 + $i] | tonumber))),
 				error_class_counts: (reduce range(0; 7) as $i ({}; .[eclasses[$i]] = ($r[16 + $i] | tonumber))),
 				migration_versions: ($r[23] | fromjson),
-				recovery: ($r[24] | fromjson)
+				recovery: ($r[24] | fromjson),
+				cause_counts: ($r[25] | fromjson)
 			}
 		else
 			{
@@ -343,7 +366,8 @@ jq -n --arg note "$recovery_note" --argjson classes "$classes_json" --argjson ec
 				counts: null,
 				error_class_counts: null,
 				migration_versions: null,
-				recovery: null
+				recovery: null,
+				cause_counts: null
 			}
 		end;
 	($raw | split("\n") | map(select(length > 0)) | map(split("\t"))) as $rows |
@@ -356,6 +380,7 @@ jq -n --arg note "$recovery_note" --argjson classes "$classes_json" --argjson ec
 		classes: classes,
 		error_classes: eclasses,
 		recovery_coverage_note: $note,
+		cause_coverage_note: $cnote,
 		pods: [range(0; 3) as $i |
 			([$rows[] | select(.[0] == ($i | tostring) and .[1] == "current")][0]) as $cur |
 			([$rows[] | select(.[0] == ($i | tostring) and .[1] == "previous")][0]) as $prev |
@@ -372,7 +397,8 @@ jq -n --arg note "$recovery_note" --argjson classes "$classes_json" --argjson ec
 			counts: (reduce ($rows[] | select(.[2] == "1")) as $r (reduce range(0; 10) as $i ({}; .[classes[$i]] = 0); reduce range(0; 10) as $i (.; .[classes[$i]] += ($r[6 + $i] | tonumber)))),
 			error_class_counts: (reduce ($rows[] | select(.[2] == "1")) as $r (reduce range(0; 7) as $i ({}; .[eclasses[$i]] = 0); reduce range(0; 7) as $i (.; .[eclasses[$i]] += ($r[16 + $i] | tonumber)))),
 			migration_versions: (reduce ($rows[] | select(.[2] == "1")) as $r ({}; addcounts(.; ($r[23] | fromjson)))),
-			recovery: (reduce ($rows[] | select(.[2] == "1")) as $r ({}; addcounts(.; ($r[24] | fromjson))))
+			recovery: (reduce ($rows[] | select(.[2] == "1")) as $r ({}; addcounts(.; ($r[24] | fromjson)))),
+			cause_counts: (reduce ($rows[] | select(.[2] == "1")) as $r (reduce $causes[] as $c ({}; .[$c] = 0); addcounts(.; ($r[25] | fromjson))))
 		},
 		complete: (([$rows[] | select(.[2] == "1")] | length) == 6)
 	}

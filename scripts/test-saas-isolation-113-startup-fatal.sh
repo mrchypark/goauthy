@@ -686,5 +686,48 @@ if [ "$rc" -ne 0 ] && jq -e '
 ' "$results_additive/resource-summary.json" >/dev/null 2>&1; then ok "wrapper carries additive diagnostics without admitting a workload"
 else bad "wrapper carries additive diagnostics without admitting a workload"; fi
 
+# Observe only exact inner tails, once per fatal, across eligible captures.
+build_capture "$tmp/cause"; f=$tmp/cause/failure-capture/goauthy-0-current.log
+append_typed "$f" write_outcome_unknown 'migrate schema v84: object-store durability unavailable: context canceled'
+append_typed "$f" write_outcome_unknown 'migrate schema v84: object-store durability unavailable: context canceled'
+append_typed "$f" write_outcome_unknown 'migrate schema v85: object-store durability unavailable: archive maintenance is active'
+append_typed "$f" write_outcome_unknown 'migrate schema v85: object-store durability unavailable: shared archive publication conflicted too many times'
+append_legacy "$f" 'migrate schema v86: object-store durability unavailable: published archive head regressed'
+append_typed "$f" write_outcome_unknown 'migrate schema v85: object-store durability unavailable: provider said no PRIVATE_CANARY'
+append_typed "$f" write_outcome_unknown 'migrate schema v85: object-store durability unavailable: context canceled\nobject-store durability unavailable: context canceled'
+append_typed "$tmp/cause/failure-capture/goauthy-1-current.log" write_outcome_unknown 'migrate schema v86: object-store durability unavailable: context deadline exceeded'
+if out=$("$summarizer" "$tmp/cause") && printf '%s' "$out" | jq -e '
+	.schema_version == 2 and .pods[0].current.fatal_n == 7
+	and .pods[0].current.migration_versions == {"v84":2,"v85":4,"v86":1}
+	and .pods[0].current.cause_counts == {publication_conflict_exhausted:1,publication_refresh_regressed:1,archive_busy:1,inner_deadline:0,inner_canceled:3,unknown:1}
+	and .totals.cause_counts.inner_deadline == 1
+	and ([.totals.cause_counts[]] | add) == 8
+	and (.cause_coverage_note | contains("not causal proof"))' >/dev/null 2>&1 &&
+	! printf '%s' "$out" | grep -q PRIVATE_CANARY; then ok "exact inner tails aggregate once without raw values"
+else bad "exact inner tails aggregate once without raw values"; fi
+
+build_capture "$tmp/cause-reject"; f=$tmp/cause-reject/failure-capture/goauthy-0-current.log
+append_typed_raw "$f" write_outcome_unknown 'migrate schema v85: object-store durability unavailable: context canceled'
+append_typed_raw "$f" write_outcome_unknown '"migrate schema v85: object-store durability unavailable: context canceled" injected=1'
+append_typed_raw "$f" write_outcome_unknown '"migrate schema v85: object-store durability unavailable: context canceled'
+append_typed "$f" write_outcome_unknown 'reserve bootstrap client: object-store durability unavailable: context canceled'
+append_typed "$f" write_outcome_unknown 'migrate schema v84: context deadline exceeded'
+append_typed "$f" write_outcome_unknown 'migrate schema v85: object-store durability unavailable: context deadline exceeded: extra suffix'
+if out=$("$summarizer" "$tmp/cause-reject") && printf '%s' "$out" | jq -e '
+	.pods[0].current.fatal_n == 5 and .pods[0].current.counts.unknown == 2
+	and .pods[0].current.migration_versions == {"v84":1,"v85":1}
+	and .totals.cause_counts == {publication_conflict_exhausted:0,publication_refresh_regressed:0,archive_busy:0,inner_deadline:0,inner_canceled:0,unknown:1}
+' >/dev/null 2>&1; then ok "malformed, markerless and suffixed values never match fixed inner labels"
+else bad "malformed, markerless and suffixed values never match fixed inner labels"; fi
+
+sed 's/^goauthy-1-current\.log_exit=0$/goauthy-1-current.log_exit=1/' "$tmp/cause/failure-capture/capture-status.txt" >"$tmp/cause-status"
+mv "$tmp/cause-status" "$tmp/cause/failure-capture/capture-status.txt"
+if out=$("$summarizer" "$tmp/cause") && printf '%s' "$out" | jq -e '
+	.pods[1].current.available == false and .pods[1].current.cause_counts == null
+	and .totals.partial == true and .totals.cause_counts.inner_deadline == 0
+	and ([.totals.cause_counts[]] | add) == 7
+' >/dev/null 2>&1; then ok "unavailable captures retain null and are excluded from inner labels"
+else bad "unavailable captures retain null and are excluded from inner labels"; fi
+
 echo "passed=$pass failed=$fail" >&2
 [ "$fail" -eq 0 ]
