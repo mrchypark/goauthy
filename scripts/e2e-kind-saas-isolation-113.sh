@@ -19,6 +19,12 @@ case "$GOAUTHY_IMAGE" in
 esac
 . "$(dirname -- "$0")/e2e-kind-saas-isolation-113-node-pins.sh"
 
+startup_only=${GOAUTHY_113_STARTUP_ONLY:-0}
+case "$startup_only" in
+	0|1) ;;
+	*) echo 'GOAUTHY_113_STARTUP_ONLY must be 0 or 1' >&2; exit 1 ;;
+esac
+
 namespace=goauthy
 fixture_image=goauthy-saas-isolation-fixture:e2e
 driver_image=goauthy-saas-isolation-driver:e2e
@@ -368,6 +374,17 @@ if [ "$job_status" -ne 0 ]; then
 	capture_failure_state || true
 	exit "$job_status"
 fi
+# Diagnose boot under the same profile without launching a performance workload.
+if [ "$startup_only" -eq 1 ]; then
+	capture_failure_state
+	kubectl --request-timeout=5s --context "$context" -n "$namespace" get pod goauthy-0 goauthy-1 goauthy-2 -o json |
+		jq -e '.items | length == 3 and all(.[]; [.status.containerStatuses[]? | select(.name == "goauthy")] | length == 1 and all(.[]; .ready == true and .restartCount == 0))' >/dev/null ||
+		{ echo 'startup-only: app readiness or zero-restart invariant failed' >&2; exit 1; }
+	runner_completed=true
+	echo 'startup-only: three apps ready with zero restarts; no workload executed; not a qualification result'
+	exit 0
+fi
+
 # The synchronized start time is computed after the pre-scrape so a slow
 # pre-scrape retry cannot consume the driver's fixed 30-second schedule slack.
 start_ms=$(( $(date +%s) * 1000 + 30000 ))

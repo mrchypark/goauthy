@@ -27,6 +27,11 @@ on:
         required: false
         type: boolean
         default: false
+      startup_only:
+        description: Boot diagnosis only; no workload or performance qualification
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -131,6 +136,7 @@ jobs:
           sh scripts/test-run-capacity-113-ci-summarize.sh
           sh scripts/test-saas-isolation-113-auth-stage.sh
           sh scripts/test-saas-isolation-113-startup-fatal.sh
+          sh scripts/test-saas-isolation-113-startup-mode.sh
 
       - name: Log in to GHCR (read-only)
         if: ${{ !inputs.local_build }}
@@ -146,8 +152,15 @@ jobs:
           CANDIDATE_IMAGE: ${{ inputs.candidate_image }}
           CANDIDATE_SOURCE: ${{ inputs.candidate_source }}
           LOCAL_BUILD: ${{ inputs.local_build }}
+          STARTUP_ONLY: ${{ inputs.startup_only }}
         run: |
           set -eu
+          case "$STARTUP_ONLY" in
+            true) GOAUTHY_113_STARTUP_ONLY=1 ;;
+            false) GOAUTHY_113_STARTUP_ONLY=0 ;;
+            *) echo "startup_only must be a boolean" >&2; exit 1 ;;
+          esac
+          export GOAUTHY_113_STARTUP_ONLY
           evidence_dir="$RUNNER_TEMP/capacity-113-evidence"
           results_dir="$RUNNER_TEMP/capacity-113-results"
           mkdir -p "$results_dir"
@@ -165,8 +178,12 @@ jobs:
         if: always()
         env:
           RESULTS_DIR: ${{ runner.temp }}/capacity-113-results
+          STARTUP_ONLY: ${{ inputs.startup_only }}
         run: |
           set -eu
+          if [ "$STARTUP_ONLY" = "true" ]; then
+            echo "Startup-only diagnosis: no IAM/API workload or performance qualification." >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [ -f "$RESULTS_DIR/report.md" ]; then
             cat "$RESULTS_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"
           else
