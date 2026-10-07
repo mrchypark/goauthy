@@ -150,6 +150,45 @@ startup_summary() {
 	fi
 }
 
+probe_events_summary() {
+	events=$evidence_dir/failure-capture/events.json
+	events_exit=$(awk -F= '
+		$1 == "events.json_exit" { n++; v = (NF == 2 ? $2 : "") }
+		END { if (n == 1 && v ~ /^[0-9]+$/ && v + 0 <= 255) print v + 0 }
+	' "$evidence_dir/failure-capture/capture-status.txt" 2>/dev/null || true)
+	[ -n "$events_exit" ] || events_exit=null
+	probe_note='Retained kubelet Killing event objects, not occurrences or boot attempts. Exact fixed probe messages only; other kills are unattributed. No timing or fatal-log correlation; zero observations do not prove absence.'
+	probe_unavailable() {
+		jq -n --arg reason "$1" --argjson code "$events_exit" --arg note "$probe_note" \
+			'{source:"failure-capture/events.json",available:false,reason:$reason,events_json_exit:$code,pods:[],coverage_note:$note}'
+	}
+	if [ ! -f "$events" ]; then
+		probe_unavailable capture-missing
+	elif [ "$events_exit" = null ]; then
+		probe_unavailable capture-status-invalid
+	elif [ "$events_exit" != 0 ]; then
+		probe_unavailable capture-status-failed
+	elif ! jq -e 'if type == "object" then (.items|type) == "array" and all(.items[]; type == "object") else false end' "$events" >/dev/null 2>&1; then
+		probe_unavailable capture-invalid
+	else
+		jq --argjson code "$events_exit" --arg note "$probe_note" '
+			def kubelet:
+				(if (.source|type) == "object" then .source.component == "kubelet" else false end)
+				or .reportingComponent == "kubelet";
+			[.items[] | select((.involvedObject|type) == "object")
+				| select(.involvedObject.kind == "Pod" and .involvedObject.namespace == "goauthy"
+					and .involvedObject.fieldPath == "spec.containers{goauthy}" and .reason == "Killing" and kubelet)] as $kills
+			| {source:"failure-capture/events.json",available:true,reason:null,events_json_exit:$code,coverage_note:$note,
+				pods:[range(0;3) as $i | [$kills[] | select(.involvedObject.name == ("goauthy-" + ($i|tostring)))] as $p
+					| {index:$i,
+						startup_probe_kill_records:([$p[] | select(.message == "Container goauthy failed startup probe, will be restarted")]|length),
+						liveness_probe_kill_records:([$p[] | select(.message == "Container goauthy failed liveness probe, will be restarted")]|length),
+						other_kill_records:([$p[] | select(.message != "Container goauthy failed startup probe, will be restarted"
+							and .message != "Container goauthy failed liveness probe, will be restarted")]|length)}]}
+		' "$events" 2>/dev/null || probe_unavailable projection-error
+	fi
+}
+
 summarize_results() {
 	analyzer=$root/scripts/summarize-e2e-kind-saas-isolation-113.sh
 	stage_dir=$temp_dir/analyzer-stage
@@ -370,7 +409,8 @@ summarize_results() {
 	fi
 
 	startup=$(startup_summary) || fail 'failed to derive startup observability'
-	jq --argjson startup "$startup" '. + {startup: $startup}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
+	probe_events=$(probe_events_summary) || fail 'failed to derive probe event observability'
+	jq --argjson startup "$startup" --argjson events "$probe_events" '. + {startup: ($startup + {probe_events:$events})}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
 		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
 		fail 'failed to add startup observability to the resource summary'
 

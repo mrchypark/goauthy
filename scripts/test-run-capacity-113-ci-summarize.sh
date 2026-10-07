@@ -1038,5 +1038,71 @@ else
 	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
 fi
 
+# Probe evidence is an optional projection of retained events, not attempt counts.
+probe_case=$tmp/probe-events
+mkdir -p "$probe_case/failure-capture"
+base_results=$tmp/probe-events-baseline
+mkdir -p "$base_results"
+"$wrapper" --summarize "$probe_case" "$base_results" >/dev/null 2>"$tmp/err" || true
+jq -n '
+	def event($i; $m): {involvedObject:{kind:"Pod",namespace:"goauthy",name:("goauthy-"+($i|tostring)),fieldPath:"spec.containers{goauthy}"},
+		source:{component:"kubelet"},reason:"Killing",message:$m,count:99,metadata:{uid:"PRIVATE_EVENT_CANARY"},series:{count:88}};
+	"Container goauthy failed startup probe, will be restarted" as $s
+	| "Container goauthy failed liveness probe, will be restarted" as $l
+	| {items:[event(0;$s), (event(1;$l)|del(.source)|.reportingComponent="kubelet"),
+		event(2;($s+" PRIVATE_EVENT_CANARY")),
+		(event(0;$s)|.involvedObject.namespace="other"), (event(0;$s)|.involvedObject.kind="Node"),
+		(event(0;$s)|.involvedObject.name="goauthy-9"), (event(0;$s)|.involvedObject.fieldPath="spec.containers{sidecarfixture}"),
+		(event(0;$s)|.source.component="scheduler"), (event(0;$s)|.reason="Unhealthy")]}
+' >"$probe_case/failure-capture/events.json"
+printf 'events.json_exit=0\n' >"$probe_case/failure-capture/capture-status.txt"
+results=$tmp/probe-events-observed
+mkdir -p "$results"
+"$wrapper" --summarize "$probe_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.startup.probe_events.available and .startup.probe_events.events_json_exit == 0
+	and [.startup.probe_events.pods[] | [.index,.startup_probe_kill_records,.liveness_probe_kill_records,.other_kill_records]]
+		== [[0,1,0,0],[1,0,1,0],[2,0,0,1]]
+' "$results/resource-summary.json" >/dev/null 2>&1 &&
+	! grep -Eq 'PRIVATE_EVENT_CANARY|involvedObject|will be restarted' "$results/resource-summary.json" &&
+	[ "$base_results" != "$results" ] &&
+	jq -e 'type == "object"' "$base_results/criterion.json" >/dev/null 2>&1 &&
+	jq -e 'type == "object"' "$results/criterion.json" >/dev/null 2>&1 &&
+	[ "$(jq -cS . "$base_results/criterion.json")" = "$(jq -cS . "$results/criterion.json")" ] &&
+	[ "$(jq -cS '.startup|del(.probe_events)' "$base_results/resource-summary.json")" = "$(jq -cS '.startup|del(.probe_events)' "$results/resource-summary.json")" ]; then
+	ok "probe events exact messages, scope, privacy, record counts and unchanged gates"
+else
+	bad "probe events exact messages, scope, privacy, record counts and unchanged gates"
+fi
+# Missing/invalid/failed captures must be unavailable rather than observed zeros.
+for probe_state in missing malformed shape scalar absent duplicate failed extra range empty; do
+	printf '{"items":[]}\n' >"$probe_case/failure-capture/events.json"
+	printf 'events.json_exit=0\n' >"$probe_case/failure-capture/capture-status.txt"
+	case "$probe_state" in
+		missing) rm "$probe_case/failure-capture/events.json" ; want=capture-missing ;;
+		malformed) printf 'PRIVATE_EVENT_CANARY' >"$probe_case/failure-capture/events.json"; want=capture-invalid ;;
+		shape) printf '{"items":[1]}' >"$probe_case/failure-capture/events.json"; want=capture-invalid ;;
+		scalar) printf '"PRIVATE_EVENT_CANARY"' >"$probe_case/failure-capture/events.json"; want=capture-invalid ;;
+		absent) : >"$probe_case/failure-capture/capture-status.txt"; want=capture-status-invalid ;;
+		duplicate) printf 'events.json_exit=0\nevents.json_exit=0\n' >"$probe_case/failure-capture/capture-status.txt"; want=capture-status-invalid ;;
+		failed) printf 'events.json_exit=1\n' >"$probe_case/failure-capture/capture-status.txt"; want=capture-status-failed ;;
+		extra) printf 'events.json_exit=0=PRIVATE_EVENT_CANARY\n' >"$probe_case/failure-capture/capture-status.txt"; want=capture-status-invalid ;;
+		range) printf 'events.json_exit=999\n' >"$probe_case/failure-capture/capture-status.txt"; want=capture-status-invalid ;;
+		empty) want=empty ;;
+	esac
+	results=$(new_results)
+	"$wrapper" --summarize "$probe_case" "$results" >/dev/null 2>"$tmp/err" || true
+	if jq -e --arg want "$want" '
+		.startup.probe_events as $p
+		| if $want == "empty" then $p.available and ($p.pods|length) == 3
+			and all($p.pods[]; .startup_probe_kill_records == 0 and .liveness_probe_kill_records == 0 and .other_kill_records == 0)
+		  else $p.available == false and $p.reason == $want and $p.pods == [] end
+	' "$results/resource-summary.json" >/dev/null 2>&1 && ! grep -q PRIVATE_EVENT_CANARY "$results/resource-summary.json"; then
+		ok "probe events eligibility $probe_state"
+	else
+		bad "probe events eligibility $probe_state"
+	fi
+done
+
 echo "passed=$pass failed=$fail" >&2
 [ "$fail" -eq 0 ]
