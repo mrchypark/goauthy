@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -159,6 +160,38 @@ func run() (err error) {
 	}
 	dbCloseAllowed := false
 	defer func() { err = closeRhizaAfterStartupComplete(db, dbCloseAllowed, err) }()
+	// Probes must reach liveness while schema and application state initialize.
+	// Opening storage retains the existing startup-probe bound. Until activation,
+	// readiness and every application route stay closed.
+	gate := &startupGate{}
+	server := &http.Server{
+		Addr:              env("GOAUTHY_LISTEN_ADDR", ":8080"),
+		Handler:           gate,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      serverWriteTimeout,
+		IdleTimeout:       30 * time.Second,
+		MaxHeaderBytes:    16 << 10,
+		TLSConfig:         tlsConfig,
+	}
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", server.Addr, err)
+	}
+	defer func() { _ = server.Close() }()
+	drain := newRequestDrain(ctx, server)
+	defer drain.cancel()
+	if tlsReloader != nil {
+		go reloadTLS(ctx, tlsReloader)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		if tlsReloader != nil {
+			errCh <- server.ServeTLS(listener, "", "")
+			return
+		}
+		errCh <- server.Serve(listener)
+	}()
 	startupCtx, cancelStartup := context.WithTimeout(ctx, 30*time.Second)
 	defer cancelStartup()
 	for !db.Ready() {
@@ -1411,32 +1444,10 @@ func run() (err error) {
 		}()
 	}
 
-	server := &http.Server{
-		Addr:              env("GOAUTHY_LISTEN_ADDR", ":8080"),
-		Handler:           healthBypass(issuerPathMiddleware(peerIPMiddleware(appHandler, trustedProxies), issuer), handler),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      serverWriteTimeout,
-		IdleTimeout:       30 * time.Second,
-		MaxHeaderBytes:    16 << 10,
-		TLSConfig:         tlsConfig,
-	}
-	drain := newRequestDrain(ctx, server)
-	defer drain.cancel()
-	if tlsReloader != nil {
-		go reloadTLS(ctx, tlsReloader)
-	}
+	gate.activate(healthBypass(issuerPathMiddleware(peerIPMiddleware(appHandler, trustedProxies), issuer), handler))
 	// No startup path below this point can fail before the server lifecycle
 	// owns shutdown, so it is now safe to close Rhiza on return.
 	dbCloseAllowed = true
-	errCh := make(chan error, 1)
-	go func() {
-		if tlsReloader != nil {
-			errCh <- server.ListenAndServeTLS("", "")
-			return
-		}
-		errCh <- server.ListenAndServe()
-	}()
 
 	dbCloseAllowed, err = drain.runLifecycle(ctx, server, metricsServer, errCh, metricsErrCh, func() {
 		providerStore.CloseConnections()
@@ -2800,6 +2811,25 @@ func validateGeoblockRuntime(config geoblockConfig, trustedProxies []netip.Prefi
 		return errors.New("GOAUTHY_GEOBLOCK_COUNTRY_HEADER requires GOAUTHY_TRUSTED_PROXIES when no MaxMind database is configured")
 	}
 	return nil
+}
+
+// startupGate publishes the complete handler only after initialization.
+type startupGate struct {
+	active atomic.Pointer[http.Handler]
+}
+
+func (g *startupGate) activate(handler http.Handler) { g.active.Store(&handler) }
+
+func (g *startupGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if handler := g.active.Load(); handler != nil {
+		(*handler).ServeHTTP(w, r)
+		return
+	}
+	if r.Method == http.MethodGet && r.URL.RawPath == "" && r.URL.Path == "/livez" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 }
 
 func healthBypass(next, health http.Handler) http.Handler {

@@ -6,8 +6,13 @@ object-store namespace. Existing-data migration is out of scope and unsupported.
 Rhiza's SQL execution policy changes from 4 to 7; earlier materializers,
 checkpoints and history are rejected. Mixed-version peers and downgrade are
 unsupported. See the [v0.19.0 release](https://github.com/mrchypark/rhiza/releases/tag/v0.19.0).
-During startup, `cmd/goauthy` waits up to 30 seconds for `DB.Ready()` before
-running GoAuthy's application migrations or starting the HTTP server.
+After Rhiza opens, `cmd/goauthy` starts the existing HTTP listener and answers
+canonical `GET /livez` while waiting up to 30 seconds for `DB.Ready()` and then
+initializing the schema and application. `/readyz` and all application routes
+return 503 until initialization finishes; the complete existing handler is then
+published atomically. TLS and request draining apply from the first accepted
+connection. Rhiza opening itself retains the existing startup-probe bound;
+probe budgets and storage durability are unchanged.
 
 The startup defer intentionally does not call `DB.Close()` until all startup
 initialization has succeeded and the server lifecycle is about to begin. This
