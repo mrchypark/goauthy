@@ -2330,13 +2330,104 @@ func TestLoadMetricsTokenRejectsFileAtMaxSizePlusOne(t *testing.T) {
 
 // --- Metrics handler path / method restrictions ----------------------------
 
-// newProductionMetricsMux builds the exact production mux: a single
-// "GET /metrics" pattern with Bearer token auth.
+// newProductionMetricsMux builds the production mux with no native API routes.
 func newProductionMetricsMux(token string) *http.ServeMux {
 	reg := metrics.NewRegistry()
-	mux := http.NewServeMux()
-	mux.Handle("GET /metrics", reg.Handler(token))
-	return mux
+	return newMetricsMux(reg, token, http.NotFoundHandler())
+}
+
+func TestMetricsMuxServesOnlyProtectedNativeObjectStoreCounters(t *testing.T) {
+	db, err := rhiza.Open(context.Background(), rhiza.Config{
+		NodeID: "metrics-object-store", DataDir: t.TempDir(),
+		ObjStoreProvider: rhiza.ObjectStoreProviderFilesystem, ObjStoreDir: t.TempDir(),
+		ObjStoreDurability: rhiza.ObjectStoreDurabilityBeforeAck,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	const token = "metrics-test-token"
+	mux := newMetricsMux(metrics.NewRegistry(), token, db.Handler())
+	request := httptest.NewRequest(http.MethodGet, "/metrics/object-store", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /metrics/object-store with valid bearer returned %d, want 200", response.Code)
+	}
+	var counters map[string]uint64
+	if err := json.Unmarshal(response.Body.Bytes(), &counters); err != nil {
+		t.Fatalf("decode fixed native counters: %v", err)
+	}
+	if len(counters) == 0 {
+		t.Fatal("native object-store counter map is empty")
+	}
+	if _, ok := counters["http_requests"]; !ok {
+		t.Fatal("native object-store response is missing the fixed http_requests counter")
+	}
+
+	for _, headers := range [][]string{
+		nil,
+		{"Bearer wrong"},
+		{"Bearer bad,token"},
+		{"Bearer " + token, "Bearer other"},
+	} {
+		request := httptest.NewRequest(http.MethodGet, "/metrics/object-store", nil)
+		for _, value := range headers {
+			request.Header.Add("Authorization", value)
+		}
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("GET /metrics/object-store with headers %q returned %d, want 401", headers, response.Code)
+		}
+	}
+
+	for _, method := range []string{http.MethodPost, http.MethodHead} {
+		request := httptest.NewRequest(method, "/metrics/object-store", nil)
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("%s /metrics/object-store returned %d, want 405", method, response.Code)
+		}
+	}
+
+	for _, path := range []string{"/sql/query", "/membership/status", "/ready", "/metrics/object-store/extra"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("GET %s escaped exact metrics routes: status %d, want 404", path, response.Code)
+		}
+	}
+}
+
+func TestMetricsMuxPreservesNativeObjectStoreDisabledNotFound(t *testing.T) {
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "metrics-no-object-store", DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	request := httptest.NewRequest(http.MethodGet, "/metrics/object-store", nil)
+	request.Header.Set("Authorization", "Bearer metrics-test-token")
+	response := httptest.NewRecorder()
+	newMetricsMux(metrics.NewRegistry(), "metrics-test-token", db.Handler()).ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("disabled native object-store route returned %d, want 404", response.Code)
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode native disabled response: %v", err)
+	}
+	if body.Code != "object_store_disabled" {
+		t.Fatalf("native disabled response code %q, want object_store_disabled", body.Code)
+	}
 }
 
 func TestMetricsMuxRejectsNonGETMethods(t *testing.T) {

@@ -245,6 +245,49 @@ func TestHandlerAcceptsCorrectToken(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedHandlerProtectsDelegateWithBearerContract(t *testing.T) {
+	called := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+	h := AuthenticatedHandler(inner, "test-token")
+	for _, headers := range [][]string{
+		nil,
+		{"Bearer wrong"},
+		{"Bearer bad,token"},
+		{"Bearer test-token", "Bearer other"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		for _, value := range headers {
+			req.Header.Add("Authorization", value)
+		}
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, req)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("headers %q: status %d, want %d", headers, response.Code, http.StatusUnauthorized)
+		}
+		if called {
+			t.Fatalf("headers %q: protected delegate was called", headers)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("Authorization", "Bearer test-token")
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || !called {
+		t.Fatalf("valid bearer: status=%d delegateCalled=%t, want 204 and true", response.Code, called)
+	}
+
+	called = false
+	response = httptest.NewRecorder()
+	AuthenticatedHandler(inner, "").ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	if response.Code != http.StatusNoContent || !called {
+		t.Fatalf("empty token: status=%d delegateCalled=%t, want unauthenticated delegation", response.Code, called)
+	}
+}
+
 func TestHandlerRejectsShortHeader(t *testing.T) {
 	reg := NewRegistry()
 	h := reg.Handler("s3cret")

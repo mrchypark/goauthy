@@ -1421,8 +1421,7 @@ func run() (err error) {
 		identityStore.SetMetrics(registry)
 		appHandler = registry.Instrument(appHandler)
 
-		metricsMux := http.NewServeMux()
-		metricsMux.Handle("GET /metrics", registry.Handler(metricsToken))
+		metricsMux := newMetricsMux(registry, metricsToken, db.Handler())
 		metricsServer = &http.Server{
 			Addr:              metricsAddr,
 			Handler:           metricsMux,
@@ -1455,6 +1454,16 @@ func run() (err error) {
 		closeSaaSProviders()
 	})
 	return err
+}
+
+// newMetricsMux keeps the opt-in metrics listener limited to its two exact
+// routes. The native handler is mounted only beneath the protected
+// object-store path; its other Rhiza API routes remain unreachable here.
+func newMetricsMux(registry *metrics.Registry, token string, objectStoreHandler http.Handler) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", registry.Handler(token))
+	mux.Handle("GET /metrics/object-store", metrics.AuthenticatedHandler(objectStoreHandler, token))
+	return mux
 }
 
 // metricsListenAddrFromEnv validates the optional metrics TCP bind address

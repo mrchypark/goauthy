@@ -1,9 +1,8 @@
 #!/bin/sh
-# Focused offline tests for the privacy-safe authentication-stage collector and
-# capture-interval summarizer used by the issue #113 native per-pod metrics
-# path. Self-contained: builds synthetic Prometheus exposition text, bounded
-# collector records, and one direct --summarize integration control. It never
-# runs a cluster, build, campaign, or dispatch.
+# Focused offline tests for issue #113's privacy-safe auth-stage and native
+# object-store counter captures. Builds synthetic producer documents and
+# bounded records, then exercises the existing --summarize path. It never runs
+# a cluster, build, campaign, or dispatch.
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -721,8 +720,206 @@ gen_evidence() { # DIR WITH_AUTH(0/1)
 	fi
 }
 
+# Exercise the runner's actual fixed native-counter capture and wrapper
+# projection with synthetic inputs. Identity values exist only in mock command
+# output and shell comparisons; evidence contains only the fixed projection.
+no_canary() {
+	if grep -F "$1" "$2" >/dev/null; then
+		return 1
+	else
+		grep_status=$?
+	fi
+	[ "$grep_status" -eq 1 ]
+}
+object_store_funcs=$tmp/object-store-functions.sh
+awk '/^object_store_pod_identity\(\) \{/{copy=1} copy{print} copy && /^\}$/{functions++; if(functions==3) exit}' "$runner" >"$object_store_funcs"
+if [ -s "$object_store_funcs" ]; then
+	# shellcheck disable=SC1090
+	. "$object_store_funcs"
+	object_store_source_ready=true
+else
+	object_store_source_ready=false
+	bad "runner exposes the source-executed native counter capture"
+fi
+
+write_native_stats() {
+	value=$1 gauge=${2:-$1}
+	jq -n --argjson n "$value" --argjson g "$gauge" '{
+		replay_grouping_enabled:0, uploads:$n, gets:$n, lists:$n, heads:$n, deletes:$n, failures:$n,
+		bytes_uploaded:$n, bytes_downloaded:$n, s3_http_requests:$n, s3_http_failures:$n,
+		http_requests:$n, http_failures:$n, http_get_requests:$n, http_put_requests:$n,
+		http_head_requests:$n, http_delete_requests:$n, http_other_requests:$n,
+		condition_conflicts:$n, dedup_hits:$n, sdk_retries:$n, transport_failures:$n,
+		http_4xx_unexpected:$n, http_5xx:$n, observed_request_identities:$n,
+		observed_request_repeats:$n, request_grouping_unknown:$n,
+		replay_tracker_capacity_misses:$n, replay_identity_capacity_misses:$n,
+		replay_incomplete_operations:$n, replay_tracked_operations_active:$n, replay_open_readers:$g
+	}' >"$tmp/native-stats.json"
+}
+
+mkdir -p "$tmp/native-bin" "$tmp/native-evidence"
+cat >"$tmp/native-bin/kubectl" <<'MOCK'
+#!/bin/sh
+case " $* " in
+	*" get pod/goauthy-"*)
+		case " $* " in
+			*" --request-timeout=5s "*) ;;
+			*) printf 'missing bounded identity timeout\n' >"$MOCK_TIMEOUT_ASSERT"; exit 97 ;;
+		esac
+		;;
+esac
+pod_index=
+for arg do
+	case "$arg" in pod/goauthy-[012]) pod_index=${arg##*-} ;; esac
+done
+case " $* " in *" get pod/goauthy-"*) ;; *) exit 0 ;; esac
+calls_file=$MOCK_ID_CALLS_DIR/$pod_index
+count=0
+if [ -r "$calls_file" ]; then count=$(cat "$calls_file"); fi
+count=$((count + 1))
+printf '%s\n' "$count" >"$calls_file"
+case "$MOCK_ID_MODE" in
+	unknown) exit 1 ;;
+	timeout) exit 124 ;;
+	within-change) uid=synthetic-uid-$count; restart=0 ;;
+	replace) if [ "$count" -le 2 ]; then uid=synthetic-uid-a; else uid=synthetic-uid-b; fi; restart=0 ;;
+	restart) uid=synthetic-uid-a; if [ "$count" -le 2 ]; then restart=0; else restart=1; fi ;;
+	*) uid=synthetic-uid-a; restart=0 ;;
+esac
+jq -nc --arg uid "$uid" --argjson restart "$restart" '{metadata:{uid:$uid},status:{containerStatuses:[{name:"goauthy",restartCount:$restart}]}}'
+MOCK
+cat >"$tmp/native-bin/curl" <<'MOCK'
+#!/bin/sh
+route=auth
+for arg do case "$arg" in */metrics/object-store) route=native ;; esac; done
+if [ "$route" = native ]; then printf 'native\n' >>"$MOCK_NATIVE_CALLS"; fi
+if [ "${MOCK_FETCH_FAIL:-0}" = 1 ]; then
+	echo 'SYNTHETIC_RAW_ERROR_CANARY' >&2
+	exit 22
+fi
+cat "$MOCK_STATS"
+MOCK
+chmod +x "$tmp/native-bin/kubectl" "$tmp/native-bin/curl"
+
+native_capture() {
+	phase=$1 index=$2 mode=$3 fetch_fail=$4 stats=$5
+	MOCK_ID_CALLS_DIR=$tmp/native-id-calls MOCK_ID_MODE=$mode MOCK_FETCH_FAIL=$fetch_fail MOCK_STATS=$stats \
+		MOCK_TIMEOUT_ASSERT=$tmp/missing-timeout-flag MOCK_NATIVE_CALLS=$tmp/native-curl-calls \
+		PATH="$tmp/native-bin:$PATH" capture_object_store_snapshot "$phase" "$index" 19090
+}
+
+gen_native_snapshots() { # evidence pre-value post-value failure-mode
+	dir=$1 pre_value=$2 post_value=$3 mode=$4
+	ISOLATION113_EVIDENCE_DIR=$dir context=synthetic namespace=synthetic metrics_token=synthetic
+	rm -f "$tmp/native-id-calls"/*
+	for idx in 0 1 2; do
+		write_native_stats "$pre_value" "$pre_value"
+		native_capture pre "$idx" "$mode" 0 "$tmp/native-stats.json"
+		write_native_stats "$post_value" 0
+		native_capture post "$idx" "$mode" 0 "$tmp/native-stats.json"
+	done
+}
+
+if [ "$object_store_source_ready" = true ]; then
+	mkdir -p "$tmp/native-cases" "$tmp/native-id-calls" "$tmp/mock-auth-scripts"
+	ISOLATION113_EVIDENCE_DIR=$tmp/native-cases context=synthetic namespace=synthetic metrics_token=synthetic
+	: >"$tmp/native-curl-calls"
+	: >"$tmp/mock-auth-scripts/collect-saas-isolation-113-auth-stage.sh"
+	cat >"$tmp/mock-auth-scripts/collect-saas-isolation-113-auth-stage.sh" <<'MOCK'
+#!/bin/sh
+printf '{"stages":{"policy_check":{"count":1}}}\n'
+MOCK
+	chmod +x "$tmp/mock-auth-scripts/collect-saas-isolation-113-auth-stage.sh"
+	rm -f "$tmp/native-id-calls"/*
+	write_native_stats 0
+	native_capture pre 0 stable 0 "$tmp/native-stats.json"
+	if jq -e '.available == true and ([.counters[]] | all(. == 0))' "$tmp/native-cases/object-store-pre-0.json" >/dev/null; then
+		if no_canary 'synthetic-uid-' "$tmp/native-cases/object-store-pre-0.json"; then
+			ok "native capture accepts zero counters without persisting pod identity"
+		else
+			bad "native capture accepts zero counters without persisting pod identity"
+		fi
+	else
+		bad "native capture accepts a valid all-zero 32-counter producer document"
+	fi
+
+	for invalid_case in missing extra bad-type overflow multiple; do
+		rm -f "$tmp/native-id-calls"/*
+		write_native_stats 1
+		case "$invalid_case" in
+			missing) jq 'del(.replay_open_readers)' "$tmp/native-stats.json" >"$tmp/native-invalid.json" ;;
+			extra) jq '. + {unapproved_label:"SYNTHETIC_PRIVATE_CANARY"}' "$tmp/native-stats.json" >"$tmp/native-invalid.json" ;;
+			bad-type) jq '.replay_open_readers="SYNTHETIC_PRIVATE_CANARY"' "$tmp/native-stats.json" >"$tmp/native-invalid.json" ;;
+			overflow) jq '.http_requests=9007199254740992' "$tmp/native-stats.json" >"$tmp/native-invalid.json" ;;
+			multiple) cat "$tmp/native-stats.json" "$tmp/native-stats.json" >"$tmp/native-invalid.json" ;;
+		esac
+		native_capture pre 0 stable 0 "$tmp/native-invalid.json"
+		if jq -e '.available == false and .reason == "capture-invalid" and .counters == null' "$tmp/native-cases/object-store-pre-0.json" >/dev/null &&
+			no_canary 'SYNTHETIC_PRIVATE_CANARY' "$tmp/native-cases/object-store-pre-0.json"; then
+			ok "native capture rejects $invalid_case input without projecting raw fields"
+		else
+			bad "native capture rejects $invalid_case input without projecting raw fields"
+		fi
+	done
+
+	write_native_stats 1
+	native_capture pre 0 within-change 0 "$tmp/native-stats.json"
+	if jq -e '.available == false and .reason == "identity-unstable" and .counters == null' "$tmp/native-cases/object-store-pre-0.json" >/dev/null; then
+		ok "native capture rejects identity changes within one fetch"
+	else
+		bad "native capture rejects identity changes within one fetch"
+	fi
+	native_capture pre 0 unknown 0 "$tmp/native-stats.json"
+	if jq -e '.available == false and .reason == "identity-unknown" and .counters == null' "$tmp/native-cases/object-store-pre-0.json" >/dev/null; then
+		ok "native capture keeps unknown pod identity unavailable"
+	else
+		bad "native capture keeps unknown pod identity unavailable"
+	fi
+	native_capture pre 0 stable 1 "$tmp/native-stats.json"
+	if jq -e '.available == false and .reason == "capture-unavailable" and .counters == null' "$tmp/native-cases/object-store-pre-0.json" >/dev/null; then
+		ok "native endpoint failure remains unavailable"
+	else
+		bad "native endpoint failure remains unavailable"
+	fi
+	: >"$tmp/native-id-calls/0"
+	: >"$tmp/native-id-calls/1"
+	: >"$tmp/native-id-calls/2"
+	: >"$tmp/native-curl-calls"
+	: >"$tmp/missing-timeout-flag"
+	rm "$tmp/missing-timeout-flag"
+	script_dir=$tmp/mock-auth-scripts
+	temp_dir=$tmp/native-auth-temp
+	mkdir -p "$temp_dir" "$tmp/native-auth-evidence"
+	ISOLATION113_EVIDENCE_DIR=$tmp/native-auth-evidence
+	context=synthetic namespace=synthetic metrics_token=synthetic job_status=0 forward_pid=
+	export MOCK_ID_CALLS_DIR=$tmp/native-id-calls MOCK_ID_MODE=timeout MOCK_STATS=$tmp/native-stats.json
+	export MOCK_TIMEOUT_ASSERT=$tmp/missing-timeout-flag MOCK_NATIVE_CALLS=$tmp/native-curl-calls
+	export MOCK_FETCH_FAIL=0 PATH=$tmp/native-bin:$PATH
+	collect_auth_stage_metrics pre
+	script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+	if [ "$job_status" -eq 0 ] && [ "$(wc -l <"$tmp/native-curl-calls" | tr -d ' ')" -eq 3 ] &&
+		[ "$(wc -l <"$tmp/native-auth-evidence/auth-stage-pre-0.json" | tr -d ' ')" -eq 1 ] &&
+		[ "$(wc -l <"$tmp/native-auth-evidence/auth-stage-pre-1.json" | tr -d ' ')" -eq 1 ] &&
+		[ "$(wc -l <"$tmp/native-auth-evidence/auth-stage-pre-2.json" | tr -d ' ')" -eq 1 ] &&
+		jq -s -e 'length == 3 and all(.[]; .available == false and .reason == "identity-unknown" and .counters == null)' \
+			"$tmp/native-auth-evidence/object-store-pre-0.json" "$tmp/native-auth-evidence/object-store-pre-1.json" "$tmp/native-auth-evidence/object-store-pre-2.json" >/dev/null &&
+		[ ! -s "$tmp/missing-timeout-flag" ]; then
+		ok "timed-out identity lookups stay unavailable while actual pre auth capture continues"
+	else
+		bad "timed-out identity lookups stay unavailable while actual pre auth capture continues"
+	fi
+	if no_canary 'SYNTHETIC_RAW_ERROR_CANARY' "$tmp/native-cases/object-store-pre-0.json"; then
+		ok "native capture never persists raw endpoint errors"
+	else
+		bad "native capture never persists raw endpoint errors"
+	fi
+fi
+
 integration=$tmp/integration
 gen_evidence "$integration" 1
+if [ "$object_store_source_ready" = true ]; then
+	gen_native_snapshots "$integration" 10 14 stable
+fi
 results=$tmp/integration-results
 mkdir -p "$results"
 if sh "$wrapper" --summarize "$integration" "$results" >/dev/null 2>"$tmp/integration.err"; then
@@ -731,15 +928,131 @@ if sh "$wrapper" --summarize "$integration" "$results" >/dev/null 2>"$tmp/integr
 		and (.series | length) == 6
 		and .auth_stage.available == true
 		and .auth_stage.captured == true
+		and .object_store.available == true
+		and (.object_store.pods | map(.pod_index)) == [0,1,2]
+		and all(.object_store.pods[]; .available == true and .counters_delta.http_requests == 4 and .counters_delta.sdk_retries == 4 and ((.counters_delta | keys | sort) == ["condition_conflicts","dedup_hits","http_4xx_unexpected","http_5xx","http_failures","http_requests","sdk_retries","transport_failures"]))
 	' "$results/resource-summary.json" >/dev/null 2>&1 &&
-		jq -e '.criterion_pass == true and .overall.correctness == "pass"' "$results/criterion.json" >/dev/null 2>&1; then
-		ok "direct integration keeps resource gates with a validated auth summary"
+		jq -e '.criterion_pass == true and .overall.correctness == "pass"' "$results/criterion.json" >/dev/null 2>&1 &&
+		no_canary 'synthetic-uid-' "$results/resource-summary.json"; then
+		ok "direct integration projects only eight deltas and ignores gauge drops"
 	else
-		bad "direct integration keeps resource gates with a validated auth summary"
+		bad "direct integration projects only eight deltas and ignores gauge drops"
 	fi
 else
-	bad "direct integration keeps resource gates with a validated auth summary (summarize failed)"
+	bad "direct integration projects only eight deltas and ignores gauge drops (summarize failed)"
 	sed -n '1,3p' "$tmp/integration.err" >&2 || true
+fi
+
+if [ "$object_store_source_ready" = true ]; then
+	gen_native_snapshots "$integration" 10 10 stable
+	zero_results=$tmp/integration-zero-results
+	mkdir -p "$zero_results"
+	if sh "$wrapper" --summarize "$integration" "$zero_results" >/dev/null 2>"$tmp/integration-zero.err" &&
+		jq -e '.object_store.available == true and (.object_store.pods | map(.pod_index)) == [0,1,2] and all(.object_store.pods[]; .available == true and ([.counters_delta[]] | all(. == 0)))' "$zero_results/resource-summary.json" >/dev/null; then
+		ok "three correctly indexed unchanged captures produce observed zero deltas"
+	else
+		bad "three correctly indexed unchanged captures produce observed zero deltas"
+	fi
+
+	gen_native_snapshots "$integration" 10 9 stable
+	reset_results=$tmp/integration-reset-results
+	mkdir -p "$reset_results"
+	if sh "$wrapper" --summarize "$integration" "$reset_results" >/dev/null 2>"$tmp/integration-reset.err" &&
+		jq -e '
+			def all_three_reset:
+				.object_store.available == false
+				and (.object_store.pods | map(.pod_index)) == [0,1,2]
+				and all(.object_store.pods[]; .available == false and .reason == "counter-reset" and .counters_delta == null)
+				and .available == true and (.series | length) == 6;
+			. as $actual |
+			($actual | all_three_reset)
+			and (($actual | del(.object_store.pods[1]) | all_three_reset) | not)
+			and (($actual | .object_store.pods[1].pod_index = 7 | all_three_reset) | not)
+		' "$reset_results/resource-summary.json" >/dev/null &&
+		jq -e '.criterion_pass == true and .overall.correctness == "pass"' "$reset_results/criterion.json" >/dev/null; then
+		ok "all three indexed counter resets are required; omitted/wrong pod controls fail"
+	else
+		bad "all three indexed counter resets are required; omitted/wrong pod controls fail"
+	fi
+
+	gen_native_snapshots "$integration" 10 14 stable
+	mkdir -p "$tmp/per-file-records"
+	for name in object-store-pre-0.json object-store-pre-1.json object-store-pre-2.json object-store-post-0.json object-store-post-1.json object-store-post-2.json; do
+		cp "$integration/$name" "$tmp/per-file-records/$name"
+	done
+	printf ' \n' >"$integration/object-store-pre-0.json"
+	cat "$tmp/per-file-records/object-store-pre-0.json" "$tmp/per-file-records/object-store-pre-1.json" >"$integration/object-store-pre-1.json"
+	perfile_same_results=$tmp/integration-perfile-same-results
+	mkdir -p "$perfile_same_results"
+	if sh "$wrapper" --summarize "$integration" "$perfile_same_results" >/dev/null 2>"$tmp/integration-perfile-same.err" &&
+		jq -e '.object_store.available == false and .object_store.reason == "capture-invalid" and (.object_store.pods | length) == 0 and .available == true and (.series | length) == 6' "$perfile_same_results/resource-summary.json" >/dev/null &&
+		jq -n -e --slurpfile before "$results/criterion.json" --slurpfile after "$perfile_same_results/criterion.json" '$before[0] == $after[0]' >/dev/null; then
+		ok "per-file validation rejects a blank pre capture compensated within pre files"
+	else
+		bad "per-file validation rejects a blank pre capture compensated within pre files"
+		jq -c '.object_store | {available,reason,pod_indexes:(.pods | map(.pod_index))}' "$perfile_same_results/resource-summary.json" >&2 2>/dev/null || true
+	fi
+
+	printf ' \n' >"$integration/object-store-pre-0.json"
+	cp "$tmp/per-file-records/object-store-pre-0.json" "$integration/object-store-pre-1.json"
+	cp "$tmp/per-file-records/object-store-pre-1.json" "$integration/object-store-pre-2.json"
+	cat "$tmp/per-file-records/object-store-pre-2.json" "$tmp/per-file-records/object-store-post-0.json" >"$integration/object-store-post-0.json"
+	cp "$tmp/per-file-records/object-store-post-1.json" "$integration/object-store-post-1.json"
+	cp "$tmp/per-file-records/object-store-post-2.json" "$integration/object-store-post-2.json"
+	perfile_cross_results=$tmp/integration-perfile-cross-results
+	mkdir -p "$perfile_cross_results"
+	if sh "$wrapper" --summarize "$integration" "$perfile_cross_results" >/dev/null 2>"$tmp/integration-perfile-cross.err" &&
+		jq -e '.object_store.available == false and .object_store.reason == "capture-invalid" and (.object_store.pods | length) == 0 and .available == true and (.series | length) == 6' "$perfile_cross_results/resource-summary.json" >/dev/null &&
+		jq -n -e --slurpfile before "$results/criterion.json" --slurpfile after "$perfile_cross_results/criterion.json" '$before[0] == $after[0]' >/dev/null; then
+		ok "per-file validation rejects a blank pre capture compensated across the pre/post boundary"
+	else
+		bad "per-file validation rejects a blank pre capture compensated across the pre/post boundary"
+		jq -c '.object_store | {available,reason,pod_indexes:(.pods | map(.pod_index))}' "$perfile_cross_results/resource-summary.json" >&2 2>/dev/null || true
+	fi
+
+	gen_native_snapshots "$integration" 10 14 replace
+	replace_results=$tmp/integration-replace-results
+	mkdir -p "$replace_results"
+	if sh "$wrapper" --summarize "$integration" "$replace_results" >/dev/null 2>"$tmp/integration-replace.err" &&
+		jq -e '.object_store.available == false and .object_store.pods[0].reason == "identity-unstable"' "$replace_results/resource-summary.json" >/dev/null &&
+		jq -e '.criterion_pass == true and .overall.correctness == "pass"' "$replace_results/criterion.json" >/dev/null; then
+		ok "pod replacement makes native deltas unavailable without changing criterion"
+	else
+		bad "pod replacement makes native deltas unavailable without changing criterion"
+	fi
+	gen_native_snapshots "$integration" 10 14 restart
+	restart_results=$tmp/integration-restart-results
+	mkdir -p "$restart_results"
+	if sh "$wrapper" --summarize "$integration" "$restart_results" >/dev/null 2>"$tmp/integration-restart.err" &&
+		jq -e '.object_store.available == false and .object_store.pods[0].reason == "identity-unstable"' "$restart_results/resource-summary.json" >/dev/null &&
+		jq -e '.criterion_pass == true and .overall.correctness == "pass"' "$restart_results/criterion.json" >/dev/null; then
+		ok "container restart makes native deltas unavailable without changing criterion"
+	else
+		bad "container restart makes native deltas unavailable without changing criterion"
+	fi
+	rm -f "$integration/object-store-pre-2.json"
+	missing_results=$tmp/integration-missing-results
+	mkdir -p "$missing_results"
+	if sh "$wrapper" --summarize "$integration" "$missing_results" >/dev/null 2>"$tmp/integration-missing.err" &&
+		jq -e '.object_store.available == false and .object_store.reason == "capture-missing"' "$missing_results/resource-summary.json" >/dev/null &&
+		jq -e '.criterion_pass == true and .overall.correctness == "pass"' "$missing_results/criterion.json" >/dev/null; then
+		ok "missing native capture is unavailable and leaves criterion unchanged"
+	else
+		bad "missing native capture is unavailable and leaves criterion unchanged"
+	fi
+	gen_native_snapshots "$integration" 10 14 stable
+	jq '. + {unapproved_label:"SYNTHETIC_PRIVATE_CANARY"}' "$integration/object-store-post-1.json" >"$tmp/object-store-invalid.json"
+	mv "$tmp/object-store-invalid.json" "$integration/object-store-post-1.json"
+	invalid_results=$tmp/integration-invalid-results
+	mkdir -p "$invalid_results"
+	if sh "$wrapper" --summarize "$integration" "$invalid_results" >/dev/null 2>"$tmp/integration-invalid.err" &&
+		jq -e '.object_store.available == false and .object_store.reason == "capture-invalid"' "$invalid_results/resource-summary.json" >/dev/null &&
+		jq -e '.criterion_pass == true and .overall.correctness == "pass"' "$invalid_results/criterion.json" >/dev/null &&
+		no_canary 'SYNTHETIC_PRIVATE_CANARY' "$invalid_results/resource-summary.json"; then
+		ok "invalid native snapshot is rejected without exposing fields or changing criterion"
+	else
+		bad "invalid native snapshot is rejected without exposing fields or changing criterion"
+	fi
 fi
 
 integration_noauth=$tmp/integration-noauth

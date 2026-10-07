@@ -36,6 +36,9 @@ forward_pid=
 failure_capture_done=false
 runner_completed=false
 job_status=0
+object_store_pre_identity_0=
+object_store_pre_identity_1=
+object_store_pre_identity_2=
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 capture_failure_state() {
@@ -91,6 +94,108 @@ capture_failure_state() {
 # body is never logged or uploaded and only the extractor's bounded JSON is
 # written to the evidence directory. A missing endpoint, a rejected series, or
 # a wired-but-unobserved stage is a hard failure for the run.
+object_store_pod_identity() {
+	object_store_identity_index=$1
+	kubectl --request-timeout=5s --context "$context" -n "$namespace" get "pod/goauthy-$object_store_identity_index" -o json 2>/dev/null |
+		jq -er '
+			def counter: type == "number" and isfinite and . >= 0 and floor == . and . <= 9007199254740991;
+			.metadata.uid as $uid |
+			[.status.containerStatuses[]? | select(.name == "goauthy")] as $containers |
+			if (($uid | type) == "string" and ($uid | length) > 0 and ($containers | length) == 1 and ($containers[0].restartCount | counter))
+			then [$uid, ($containers[0].restartCount | tostring)] | @tsv
+			else error("identity unavailable") end
+		' 2>/dev/null
+}
+
+# Best-effort native counter snapshot. Pod identity is compared only in shell
+# memory; neither the UID nor restart count is written to evidence or logs.
+# The raw response is held only in a shell variable and only the selected
+# fixed counters are written to the evidence directory.
+capture_object_store_snapshot() {
+	object_store_phase=$1
+	object_store_index=$2
+	object_store_port=$3
+	case "$object_store_phase:$object_store_index" in
+		pre:0|pre:1|pre:2|post:0|post:1|post:2) ;;
+		*) return 0 ;;
+	esac
+	object_store_output=$ISOLATION113_EVIDENCE_DIR/object-store-$object_store_phase-$object_store_index.json
+	object_store_before=$(object_store_pod_identity "$object_store_index" 2>/dev/null) || object_store_before=
+	object_store_fetch_ok=true
+	object_store_raw=$(curl --silent --show-error --fail --connect-timeout 1 --max-time 2 \
+		--header "Authorization: Bearer $metrics_token" \
+		"http://127.0.0.1:$object_store_port/metrics/object-store" 2>/dev/null) || {
+		object_store_raw=
+		object_store_fetch_ok=false
+	}
+	object_store_after=$(object_store_pod_identity "$object_store_index" 2>/dev/null) || object_store_after=
+	object_store_stable=true
+	object_store_reason=
+	if [ -z "$object_store_before" ] || [ -z "$object_store_after" ]; then
+		object_store_stable=false
+		object_store_reason=identity-unknown
+	elif [ "$object_store_before" != "$object_store_after" ]; then
+		object_store_stable=false
+		object_store_reason=identity-unstable
+	fi
+	if [ "$object_store_stable" = true ]; then
+		case "$object_store_phase:$object_store_index" in
+			pre:0) object_store_pre_identity_0=$object_store_before ;;
+			pre:1) object_store_pre_identity_1=$object_store_before ;;
+			pre:2) object_store_pre_identity_2=$object_store_before ;;
+			post:0) [ -n "$object_store_pre_identity_0" ] && [ "$object_store_pre_identity_0" = "$object_store_before" ] || { object_store_stable=false; object_store_reason=identity-unstable; } ;;
+			post:1) [ -n "$object_store_pre_identity_1" ] && [ "$object_store_pre_identity_1" = "$object_store_before" ] || { object_store_stable=false; object_store_reason=identity-unstable; } ;;
+			post:2) [ -n "$object_store_pre_identity_2" ] && [ "$object_store_pre_identity_2" = "$object_store_before" ] || { object_store_stable=false; object_store_reason=identity-unstable; } ;;
+		esac
+	fi
+	if [ "$object_store_stable" = true ] && [ "$object_store_fetch_ok" = true ]; then
+		if object_store_counters=$(printf '%s' "$object_store_raw" | jq -es --argjson pod "$object_store_index" '
+			def counter: type == "number" and isfinite and . >= 0 and floor == . and . <= 9007199254740991;
+			def expected_keys: [
+				"replay_grouping_enabled","uploads","gets","lists","heads","deletes","failures",
+				"bytes_uploaded","bytes_downloaded","s3_http_requests","s3_http_failures",
+				"http_requests","http_failures","http_get_requests","http_put_requests",
+				"http_head_requests","http_delete_requests","http_other_requests",
+				"condition_conflicts","dedup_hits","sdk_retries","transport_failures",
+				"http_4xx_unexpected","http_5xx","observed_request_identities",
+				"observed_request_repeats","request_grouping_unknown",
+				"replay_tracker_capacity_misses","replay_identity_capacity_misses",
+				"replay_incomplete_operations","replay_tracked_operations_active","replay_open_readers"
+			];
+		if length != 1 then error("expected one object") else .[0] as $stats |
+			if ($stats | type) != "object" or (($stats | keys | sort) != (expected_keys | sort))
+			then error("unknown or missing keys")
+			elif ([$stats[] | select((. | counter) | not)] | length) != 0
+			then error("invalid counter")
+			else {
+				schema_version: 1, available: true, reason: null, pod_index: $pod,
+				incarnation_stable: true,
+				counters: {
+					http_requests: $stats.http_requests,
+					http_failures: $stats.http_failures,
+					sdk_retries: $stats.sdk_retries,
+					transport_failures: $stats.transport_failures,
+					condition_conflicts: $stats.condition_conflicts,
+					dedup_hits: $stats.dedup_hits,
+					http_4xx_unexpected: $stats.http_4xx_unexpected,
+					http_5xx: $stats.http_5xx
+				}
+			} end end
+		' 2>/dev/null); then
+			printf '%s\n' "$object_store_counters" >"$object_store_output" 2>/dev/null || true
+			return 0
+		else
+			object_store_reason=capture-invalid
+		fi
+	elif [ "$object_store_stable" = true ]; then
+		object_store_reason=capture-unavailable
+	fi
+	jq -n --argjson pod "$object_store_index" --arg reason "$object_store_reason" \
+		'{schema_version:1,available:false,reason:$reason,pod_index:$pod,incarnation_stable:false,counters:null}' \
+		>"$object_store_output" 2>/dev/null || true
+	return 0
+}
+
 collect_auth_stage_metrics() {
 	auth_phase=$1
 	for auth_index in 0 1 2; do
@@ -108,6 +213,7 @@ collect_auth_stage_metrics() {
 			fi
 			sleep 0.2
 		done
+		capture_object_store_snapshot "$auth_phase" "$auth_index" "$auth_port" || true
 		kill -TERM "$forward_pid" >/dev/null 2>&1 || true
 		wait "$forward_pid" 2>/dev/null || true
 		forward_pid=

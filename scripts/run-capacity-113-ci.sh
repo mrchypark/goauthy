@@ -472,6 +472,71 @@ summarize_results() {
 		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
 		fail 'failed to add authentication-stage diagnostics to the resource summary'
 
+	object_store_reason=capture-invalid
+	if [ -s "$evidence_dir/object-store-pre-0.json" ] && [ -s "$evidence_dir/object-store-pre-1.json" ] &&
+		[ -s "$evidence_dir/object-store-pre-2.json" ] && [ -s "$evidence_dir/object-store-post-0.json" ] &&
+		[ -s "$evidence_dir/object-store-post-1.json" ] && [ -s "$evidence_dir/object-store-post-2.json" ]; then
+		if object_store_summary=$(jq -n -e \
+			--slurpfile pre0 "$evidence_dir/object-store-pre-0.json" \
+			--slurpfile pre1 "$evidence_dir/object-store-pre-1.json" \
+			--slurpfile pre2 "$evidence_dir/object-store-pre-2.json" \
+			--slurpfile post0 "$evidence_dir/object-store-post-0.json" \
+			--slurpfile post1 "$evidence_dir/object-store-post-1.json" \
+			--slurpfile post2 "$evidence_dir/object-store-post-2.json" '
+			def counter: type == "number" and isfinite and . >= 0 and floor == . and . <= 9007199254740991;
+			def counter_keys: ["http_requests","http_failures","sdk_retries","transport_failures","condition_conflicts","dedup_hits","http_4xx_unexpected","http_5xx"];
+			def valid_capture($pod):
+				(keys | sort) == ["available","counters","incarnation_stable","pod_index","reason","schema_version"]
+				and .schema_version == 1 and .pod_index == $pod
+				and (
+					(.available == true and .reason == null and .incarnation_stable == true
+						and (.counters | type) == "object" and ((.counters | keys | sort) == (counter_keys | sort))
+						and ([.counters[] | select((. | counter) | not)] | length) == 0)
+					or
+					(.available == false and .incarnation_stable == false and .counters == null
+						and (.reason as $reason | (["capture-unavailable","capture-invalid","identity-unknown","identity-unstable"] | index($reason)) != null))
+				);
+			if ([$pre0,$pre1,$pre2,$post0,$post1,$post2] | map(length) | all(. == 1) | not)
+			then error("expected one object-store capture per file")
+			else [$pre0[0],$pre1[0],$pre2[0],$post0[0],$post1[0],$post2[0]] as $captures |
+				if ([range(0; 3) as $pod | ($captures[$pod] | valid_capture($pod)) and ($captures[$pod + 3] | valid_capture($pod))] | all) | not
+				then error("invalid object-store capture")
+				else
+					[range(0; 3) as $pod |
+						$captures[$pod] as $pre | $captures[$pod + 3] as $post |
+						if ($pre.available | not) then {pod_index:$pod,available:false,reason:$pre.reason,incarnation_stable:false,counters_delta:null}
+						elif ($post.available | not) then {pod_index:$pod,available:false,reason:$post.reason,incarnation_stable:false,counters_delta:null}
+						else
+							(([$pre.counters | to_entries[] as $entry | select($post.counters[$entry.key] < $entry.value)] | length) > 0) as $reset |
+							if $reset then {pod_index:$pod,available:false,reason:"counter-reset",incarnation_stable:true,counters_delta:null}
+							else {pod_index:$pod,available:true,reason:null,incarnation_stable:true,
+								counters_delta:([$pre.counters | to_entries[] as $entry | {key:$entry.key,value:($post.counters[$entry.key] - $entry.value)}] | from_entries)} end
+						end
+					] as $pods |
+					{
+						schema_version: 1,
+						available: ([$pods[].available] | all),
+						reason: ([$pods[] | select(.available | not) | .reason][0] // null),
+						pods: $pods,
+						notes: "Per-pod deltas of fixed cumulative Rhiza object-store counters between pre and post captures. Capture-interval evidence only; counters provide no latency, request-level correlation, or causal attribution."
+					}
+				end
+			end
+		' 2>/dev/null); then
+			object_store_reason=
+		fi
+	else
+		object_store_reason=capture-missing
+	fi
+	if [ -z "$object_store_reason" ]; then
+		:
+	else
+		object_store_summary=$(jq -n --arg reason "$object_store_reason" '{schema_version:1,available:false,reason:$reason,pods:[],notes:"Per-pod Rhiza object-store counter capture was unavailable; no counter values were inferred."}')
+	fi
+	jq --argjson object_store "$object_store_summary" '. + {object_store: $object_store}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
+		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
+		fail 'failed to add object-store counter diagnostics to the resource summary'
+
 	# Optional startup fatal summary. It is added only when the privacy-safe
 	# summarizer validates the bounded per-pod current/previous anchored fatal
 	# records; otherwise a fixed-reason unavailable marker is recorded. Only the

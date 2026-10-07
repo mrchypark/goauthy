@@ -352,11 +352,17 @@ func newRegistry(clk clock) *Registry {
 // constant-time comparison on fixed-size digests, preventing timing
 // side-channels.
 func (r *Registry) Handler(token string) http.Handler {
+	return AuthenticatedHandler(promhttp.HandlerFor(r.reg, promhttp.HandlerOpts{}), token)
+}
+
+// AuthenticatedHandler applies the metrics Bearer-token contract to next.
+// An empty token leaves the handler unauthenticated, matching Registry.Handler.
+func AuthenticatedHandler(next http.Handler, token string) http.Handler {
 	if token == "" {
-		return promhttp.HandlerFor(r.reg, promhttp.HandlerOpts{})
+		return next
 	}
 	return &authHandler{
-		inner:  promhttp.HandlerFor(r.reg, promhttp.HandlerOpts{}),
+		inner:  next,
 		digest: sha256.Sum256([]byte(token)),
 	}
 }
