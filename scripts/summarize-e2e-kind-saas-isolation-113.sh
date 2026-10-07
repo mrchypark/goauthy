@@ -51,7 +51,7 @@ cat >"$tmp/parse.awk" <<'AWK'
 	if (route == "iam" && (operation != "" || status != "")) { print "iam record carries operation/status" > "/dev/stderr"; exit 1 }
 	if (route == "api-key") {
 		if (operation == "") { print "api-key record missing operation" > "/dev/stderr"; exit 1 }
-		if (status !~ /^[0-9]+$/ || status + 0 < 100 || status + 0 > 599) { print "invalid status" > "/dev/stderr"; exit 1 }
+		if (status !~ /^[0-9]+$/ || ((status + 0 < 100 || status + 0 > 599) && !(status == "0" && outcome == "transport-error"))) { print "invalid status" > "/dev/stderr"; exit 1 }
 	}
 	if (outcome != "success" && outcome != "failed" && outcome != "transport-error" && outcome != "http-error") { print "invalid outcome" > "/dev/stderr"; exit 1 }
 	if (sched != "" && sched !~ /^[0-9]+$/) { print "invalid scheduled_unix_ms" > "/dev/stderr"; exit 1 }

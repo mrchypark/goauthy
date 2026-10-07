@@ -140,6 +140,34 @@ f=$protected/driver-isolation113-driver-goauthy-0-0-test.log
 awk 'BEGIN{done=0} { if(!done && /phase=baseline route=iam outcome=success/){ sub(/outcome=success/,"outcome=failed"); done=1 } print }' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
 expect_status "protected error" "$protected" "fail" "pass" "fail"
 
+# The driver emits status=0 when no HTTP response was received. Keep that
+# observation in the denominator and fail correctness, rather than crashing.
+for operation in account slow-headers; do
+	transport=$tmp/transport-$operation
+	mkcase "$transport" 100 110 90
+	f=$transport/driver-isolation113-driver-goauthy-0-0-test.log
+	awk -v op="$operation" 'BEGIN{done=0} {
+		if (!done && index($0, "operation=" op " ")) {
+			sub(/outcome=[^ ]+ status=[0-9]+/, "outcome=transport-error status=0"); done=1
+		} print
+	}' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
+	expect_status "transport without HTTP response: $operation" "$transport" "fail" "pass" "fail"
+	if out=$("$analyzer" "$transport" 2>"$tmp/err") && printf '%s' "$out" | jq -e '
+		([.groups[].n] | add) == 78 and
+		([.groups[].statuses[] | select(.status == 0) | .n] | add) == 1
+	' >/dev/null; then ok "transport observation retained: $operation"
+	else bad "transport observation retained: $operation"; fi
+done
+for outcome in success http-error; do
+	zero=$tmp/invalid-zero-$outcome
+	mkcase "$zero" 100 110 90
+	f=$zero/driver-isolation113-driver-goauthy-0-0-test.log
+	awk -v o="$outcome" 'BEGIN{done=0} {
+		if (!done && /operation=account /) {sub(/outcome=[^ ]+ status=[0-9]+/, "outcome=" o " status=0"); done=1} print
+	}' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
+	expect_fail "zero status rejected for $outcome" "$zero"
+done
+
 # Missing denominator: drop one baseline iam record.
 missing=$tmp/missing
 mkcase "$missing" 100 110 90
