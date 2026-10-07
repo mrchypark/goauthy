@@ -2,9 +2,109 @@ package loginpolicy
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/mrchypark/rhiza"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
+
+func TestClearAccountLockSubmitsOnlyForExistingRows(t *testing.T) {
+	// This test changes the global tracer provider and must not run in parallel.
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSampler(sdktrace.AlwaysSample()), sdktrace.WithSpanProcessor(recorder))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	defer func() {
+		otel.SetTracerProvider(previous)
+		_ = provider.Shutdown(context.Background())
+	}()
+	ctx, parent := otel.Tracer("goauthy/test").Start(t.Context(), "clear")
+	defer parent.End()
+	count := func() int {
+		n := 0
+		for _, span := range recorder.Ended() {
+			if span.InstrumentationScope().Name == "goauthy/auth-stage" && span.Name() == "storage_submit" {
+				n++
+			}
+		}
+		return n
+	}
+	db := testDB(t)
+	store := NewStore(db)
+	now := time.UnixMilli(1_700_000_000_000).UTC()
+	seed := func(subject string, until time.Time) string {
+		account := AccountStuffingDigest(subject)
+		if _, err := db.Execute(t.Context(), rhiza.ExecuteRequest{
+			RequestID: "clear-seed-" + subject,
+			SQL:       `INSERT INTO login_account_locks(account_hash, locked_until_unix_ms, reason, created_at_unix_ms) VALUES (?, ?, 'clear_test', ?)`,
+			Args:      []any{account, until.UnixMilli(), now.UnixMilli()},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return account
+	}
+	rows := func(account string) int {
+		result, err := db.Query(t.Context(), rhiza.QueryRequest{
+			SQL:  `SELECT locked_until_unix_ms FROM login_account_locks WHERE account_hash = ?`,
+			Args: []any{account}, Consistency: rhiza.ConsistencyLinearizable,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(result.Rows)
+	}
+	clear := func(account string, want int) {
+		t.Helper()
+		before := count()
+		if err := store.ClearAccountLock(ctx, account); err != nil {
+			t.Fatal(err)
+		}
+		if got := count() - before; got != want {
+			t.Fatalf("clear submitted %d mutations, want %d", got, want)
+		}
+		if got := rows(account); got != 0 {
+			t.Fatalf("lock row survived: %d", got)
+		}
+	}
+	account := AccountStuffingDigest("absent")
+	if rows(account) != 0 {
+		t.Fatal("absent account already has a lock")
+	}
+	clear(account, 0)
+	// Reuse the same account: an earlier absence cannot be cached. This also
+	// positively verifies that the recorder observes real mutation submissions.
+	clear(seed("absent", now.Add(AccountLockDuration)), 1)
+	stale := seed("stale", now.Add(-time.Minute))
+	if locked, _, err := store.CheckAccountLock(t.Context(), stale, now); err != nil || locked || rows(stale) != 1 {
+		t.Fatalf("expired physical lock precondition: locked=%v err=%v", locked, err)
+	}
+	clear(stale, 1)
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	before := count()
+	if err := store.ClearAccountLock(canceled, account); err == nil || count() != before {
+		t.Fatalf("canceled clear: err=%v submissions=%d", err, count()-before)
+	}
+	for _, invalid := range []struct {
+		store   *Store
+		account string
+	}{{nil, account}, {NewStore(nil), account}, {store, ""}} {
+		if err := invalid.store.ClearAccountLock(ctx, invalid.account); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("invalid clear: %v", err)
+		}
+	}
+	if _, err := db.Execute(t.Context(), rhiza.ExecuteRequest{RequestID: "clear-drop", SQL: `DROP TABLE login_account_locks`}); err != nil {
+		t.Fatal(err)
+	}
+	before = count()
+	if err := store.ClearAccountLock(ctx, account); err == nil || count() != before {
+		t.Fatalf("failed query: err=%v submissions=%d", err, count()-before)
+	}
+}
 
 func TestRecordAccountFailureTracksDistinctIPs(t *testing.T) {
 	t.Parallel()

@@ -178,6 +178,19 @@ func (s *Store) ClearAccountLock(ctx context.Context, accountHash string) error 
 	if s == nil || s.db == nil || accountHash == "" {
 		return ErrInvalid
 	}
+	// An absent lock linearizes at this fresh read; a present lock still clears
+	// through the existing durable delete. Read errors must not imply absence.
+	result, err := s.db.Query(ctx, rhiza.QueryRequest{
+		SQL:         `SELECT locked_until_unix_ms FROM login_account_locks WHERE account_hash = ?`,
+		Args:        []any{accountHash},
+		Consistency: rhiza.ConsistencyLinearizable,
+	})
+	if err != nil {
+		return err
+	}
+	if len(result.Rows) == 0 {
+		return nil
+	}
 	requestID, err := randomRequestID("stuffing-unlock")
 	if err != nil {
 		return err
