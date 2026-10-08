@@ -236,25 +236,38 @@ summarize_results() {
 	# unknown; they are never treated as success or as cause proof.
 	: >"$temp_dir/iam-fatal.tsv"
 	: >"$temp_dir/setup-checkpoints.tsv"
+	: >"$temp_dir/setup-failure.tsv"
 	for f in "$stage_dir"/driver-isolation113-driver-*.log; do
 		[ -f "$f" ] || continue
 		fidx=$(basename "$f" | sed -nE 's/.*goauthy-([0-9]+)-.*/\1/p')
 		[ -n "$fidx" ] || continue
-		awk -v di="$fidx" -v checkpoints="$temp_dir/setup-checkpoints.tsv" '
+		awk -v di="$fidx" -v checkpoints="$temp_dir/setup-checkpoints.tsv" -v fatals="$temp_dir/iam-fatal.tsv" -v setup_failures="$temp_dir/setup-failure.tsv" '
+			BEGIN { phase = "before" }
 			{
 				line = $0
-				if (line ~ /^[[:space:]]*connection_use_grant_test\.go:[0-9]+:[[:space:]]+isolation113-setup-checkpoint stage=(config_ready|initial_login_complete|provider_created|collection_created|connection_created|api_key_bound|consumer_created|grant_created|invoke_scope_ready|invoke_token_issued|invoke_prechecks_complete|diagnostic_entered)$/) {
+				if (line ~ /^[[:space:]]*[^[:space:]]+\.go:[0-9]+:[[:space:]]*isolation113-setup-checkpoint([[:space:]]|$)/) {
+					if (line !~ /^[[:space:]]*connection_use_grant_test\.go:[0-9]+:[[:space:]]+isolation113-setup-checkpoint stage=(config_ready|initial_login_complete|provider_created|collection_created|connection_created|api_key_bound|consumer_created|grant_created|invoke_scope_ready|invoke_token_issued|invoke_prechecks_complete|diagnostic_entered)$/) {
+						invalid = 1
+						next
+					}
 					checkpoint = line
 					sub(/^[[:space:]]*connection_use_grant_test\.go:[0-9]+:[[:space:]]+/, "", checkpoint)
 					sub(/^isolation113-setup-checkpoint stage=/, "", checkpoint)
 					print di "\t" checkpoint >> checkpoints
+					if (checkpoint == "config_ready") {
+						if (phase == "before") { phase = "active"; config_ordinal = NR } else { invalid = 1 }
+					} else if (checkpoint == "initial_login_complete") {
+						if (phase == "active" && NR > config_ordinal && fatal_count == 0) { phase = "complete"; completion_ordinal = NR } else { invalid = 1 }
+					} else if (phase != "complete") {
+						invalid = 1
+					}
 					next
 				}
 				if (line !~ /^[[:space:]]*connection_use_grant_test\.go:[0-9]+:/) next
 				sub(/^[[:space:]]*connection_use_grant_test\.go:[0-9]+:[[:space:]]*/, "", line)
 				if (line ~ /^isolation113 /) next
 				if (line ~ /^isolation113-stage /) next
-				if (line ~ /^isolation113-setup-checkpoint([[:space:]]|$)/) next
+				if (line ~ /^isolation113-setup-checkpoint([[:space:]]|$)/) { invalid = 1; next }
 				if (line ~ /^waiting [0-9]+ seconds for the login attempt window$/) next
 				reason = ""; status = ""
 				if (line ~ /^authorize status = [0-9]+, want login form:/) {
@@ -283,9 +296,28 @@ summarize_results() {
 					if (n != line && n ~ /Client\.Timeout|^context deadline exceeded/) reason = "transport_timeout"
 				}
 				if (reason == "") reason = "unknown"
-				print di "\t" reason "\t" status
+				print di "\t" reason "\t" status >> fatals
+				if (phase == "before") {
+					preconfig_fatal = 1
+				} else if (phase == "active" && NR > config_ordinal) {
+					fatal_count++
+					if (fatal_count == 1) { setup_reason = reason; setup_status = status }
+				} else if (phase == "complete" && NR > completion_ordinal) {
+					# A later fatal belongs after the completed initial-login interval.
+				}
 			}
-		' "$f" >>"$temp_dir/iam-fatal.tsv"
+			END {
+				state = "incomplete"; reason = ""; status = ""
+				if (!invalid && !preconfig_fatal) {
+					if (phase == "complete") {
+						state = "completed"
+					} else if (phase == "active" && fatal_count == 1 && setup_reason != "unknown") {
+						state = "classified"; reason = setup_reason; status = setup_status
+					}
+				}
+				print di "\t" state "\t" reason "\t" status >> setup_failures
+			}
+		' "$f"
 	done
 	jq -Rn --rawfile seen "$seen_idx" --rawfile observations "$temp_dir/setup-checkpoints.tsv" '
 		def lines: split("\n") | map(select(length > 0));
@@ -312,6 +344,21 @@ summarize_results() {
 	else
 		printf '[]' >"$temp_dir/iam-fatal.json"
 	fi
+	jq -Rn --rawfile failures "$temp_dir/setup-failure.tsv" '
+		def lines: split("\n") | map(select(length > 0));
+		($failures | lines | map(split("\t"))) as $failure_rows |
+		{
+			criterion: "only one recognized anchored helper fatal between an exact config_ready and initial_login_complete interval is classified; contradictory or missing evidence is incomplete, not cause proof",
+			drivers: [range(0;3) as $i |
+				([$failure_rows[] | select(.[0] == ($i | tostring))]) as $matches |
+				(if ($matches | length) == 1 then $matches[0] else null end) as $row |
+				{
+					driver_index:$i, state:($row[1] // "incomplete"),
+					reason:(if $row[1] == "classified" then $row[2] else null end),
+					http_status:(if $row[1] == "classified" and $row[3] != "" then ($row[3] | tonumber) else null end)
+				}
+			]
+		}' >"$temp_dir/setup-failure-diagnostics.json" || fail 'failed to derive setup failure diagnostics'
 
 	analyzer_status=0
 	analyzer_ok=false
@@ -445,9 +492,9 @@ summarize_results() {
 
 	startup=$(startup_summary) || fail 'failed to derive startup observability'
 	probe_events=$(probe_events_summary) || fail 'failed to derive probe event observability'
-	jq --argjson startup "$startup" --argjson events "$probe_events" --slurpfile checkpoints "$temp_dir/setup-checkpoints.json" '. + {startup: ($startup + {probe_events:$events}), setup_checkpoints: $checkpoints[0]}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
+	jq --argjson startup "$startup" --argjson events "$probe_events" --slurpfile checkpoints "$temp_dir/setup-checkpoints.json" --slurpfile setup_failures "$temp_dir/setup-failure-diagnostics.json" '. + {startup: ($startup + {probe_events:$events}), setup_checkpoints: $checkpoints[0], setup_failure_diagnostics: $setup_failures[0]}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
 		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
-		fail 'failed to add startup and setup checkpoint diagnostics to the resource summary'
+		fail 'failed to add startup and setup diagnostics to the resource summary'
 
 	# Optional diagnostic authentication-stage summary. It is added only when
 	# the privacy-safe summarizer validates the bounded per-pod pre/post

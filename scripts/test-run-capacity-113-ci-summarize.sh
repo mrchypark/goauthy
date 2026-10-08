@@ -295,6 +295,148 @@ else
 	bad "missing analyzer report artifact check not exercised"
 fi
 
+setup_control=$tmp/setup-control
+mkcase "$setup_control" 100 110 90
+setup_control_results=$(new_results)
+"$wrapper" --summarize "$setup_control" "$setup_control_results" >"$tmp/out" 2>"$tmp/err"
+setup_observed=$tmp/setup-observed
+mkcase "$setup_observed" 100 110 90
+setup_driver0=$setup_observed/driver-isolation113-driver-0-abcde.log
+setup_driver1=$setup_observed/driver-isolation113-driver-1-abcde.log
+setup_driver2=$setup_observed/driver-isolation113-driver-2-abcde.log
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:52: authorize status = 503, want login form: PRIVATE_SETUP_FATAL_CANARY isolation113-setup-checkpoint' >>"$setup_driver0"
+printf '%s\n' 'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' >>"$setup_driver1"
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=initial_login_complete' \
+	'connection_use_grant_test.go:92: login status = 401, want redirect' >>"$setup_driver2"
+setup_observed_results=$(new_results)
+if "$wrapper" --summarize "$setup_observed" "$setup_observed_results" >"$tmp/out" 2>"$tmp/err" &&
+	jq -e '.protected.errors == 0 and .criterion_pass == true' "$setup_observed_results/criterion.json" >/dev/null 2>&1 &&
+	jq -e '
+		.setup_failure_diagnostics.drivers == [
+			{driver_index:0,state:"classified",reason:"authorize_status",http_status:503},
+			{driver_index:1,state:"incomplete",reason:null,http_status:null},
+			{driver_index:2,state:"completed",reason:null,http_status:null}
+		]
+	' "$setup_observed_results/resource-summary.json" >/dev/null 2>&1 &&
+	cmp -s "$setup_control_results/criterion.json" "$setup_observed_results/criterion.json"; then
+	if grep -Eq 'PRIVATE_SETUP_FATAL_CANARY' "$setup_observed_results/criterion.json" "$setup_observed_results/resource-summary.json"; then
+		bad "setup fatal projection (canary disclosed)"
+	else
+		setup_grep_status=$?
+		if [ "$setup_grep_status" -eq 1 ]; then ok "setup fatal projection and criterion invariance"; else bad "setup fatal projection privacy check failed"; fi
+	fi
+else
+	bad "setup fatal projection and criterion invariance"
+fi
+
+setup_unclassified=$tmp/setup-unclassified
+mkcase "$setup_unclassified" 100 110 90
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:52: synthetic fatal PRIVATE_SETUP_FATAL_CANARY' >>"$setup_unclassified/driver-isolation113-driver-0-abcde.log"
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:52: authorize status = 503, want login form: PRIVATE_SETUP_FATAL_CANARY' \
+	'connection_use_grant_test.go:52: login status = 401, want redirect' >>"$setup_unclassified/driver-isolation113-driver-1-abcde.log"
+setup_unclassified_results=$(new_results)
+if "$wrapper" --summarize "$setup_unclassified" "$setup_unclassified_results" >"$tmp/out" 2>"$tmp/err" &&
+	jq -e '
+		.setup_failure_diagnostics.drivers == [
+			{driver_index:0,state:"incomplete",reason:null,http_status:null},
+			{driver_index:1,state:"incomplete",reason:null,http_status:null},
+			{driver_index:2,state:"incomplete",reason:null,http_status:null}
+		]
+	' "$setup_unclassified_results/resource-summary.json" >/dev/null 2>&1; then
+	ok "setup fatal projection fails closed for unrecognized and ambiguous fatals"
+else
+	bad "setup fatal projection fails closed for unrecognized and ambiguous fatals"
+fi
+
+setup_ordered=$tmp/setup-ordered
+mkcase "$setup_ordered" 100 110 90
+printf '%s\n' \
+	'connection_use_grant_test.go:52: authorize status = 503, want login form: PRIVATE_SETUP_FATAL_CANARY' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:57: isolation113-setup-checkpoint stage=initial_login_complete' >>"$setup_ordered/driver-isolation113-driver-0-abcde.log"
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:52: authorize status = 503, want login form: PRIVATE_SETUP_FATAL_CANARY' \
+	'connection_use_grant_test.go:57: isolation113-setup-checkpoint stage=initial_login_complete' >>"$setup_ordered/driver-isolation113-driver-1-abcde.log"
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:52: authorize status = 503, want login form: PRIVATE_SETUP_FATAL_CANARY' \
+	'connection_use_grant_test.go:57: isolation113-setup-checkpoint stage=initial_login_complete EXTRA' \
+	'other_test.go:57: isolation113-setup-checkpoint stage=initial_login_complete' >>"$setup_ordered/driver-isolation113-driver-2-abcde.log"
+setup_ordered_results=$(new_results)
+if "$wrapper" --summarize "$setup_ordered" "$setup_ordered_results" >"$tmp/out" 2>"$tmp/err" &&
+	jq -e '
+		.setup_failure_diagnostics.drivers == [
+			{driver_index:0,state:"incomplete",reason:null,http_status:null},
+			{driver_index:1,state:"incomplete",reason:null,http_status:null},
+			{driver_index:2,state:"incomplete",reason:null,http_status:null}
+		]
+	' "$setup_ordered_results/resource-summary.json" >/dev/null 2>&1; then
+	ok "setup fatal projection rejects out-of-interval and malformed checkpoints"
+else
+	bad "setup fatal projection rejects out-of-interval and malformed checkpoints"
+fi
+
+setup_wrong_anchor=$tmp/setup-wrong-anchor
+mkcase "$setup_wrong_anchor" 100 110 90
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'other_test.go:57: isolation113-setup-checkpoint stage=initial_login_complete' \
+	'connection_use_grant_test.go:92: authorize status = 503, want login form:' >>"$setup_wrong_anchor/driver-isolation113-driver-0-abcde.log"
+setup_wrong_anchor_results=$(new_results)
+if "$wrapper" --summarize "$setup_wrong_anchor" "$setup_wrong_anchor_results" >"$tmp/out" 2>"$tmp/err" &&
+	jq -e '.setup_failure_diagnostics.drivers[0] == {driver_index:0,state:"incomplete",reason:null,http_status:null}' \
+		"$setup_wrong_anchor_results/resource-summary.json" >/dev/null 2>&1; then
+	ok "setup fatal projection rejects wrong-anchor checkpoint"
+else
+	bad "setup fatal projection rejects wrong-anchor checkpoint"
+fi
+
+setup_no_separator=$tmp/setup-no-separator
+mkcase "$setup_no_separator" 100 110 90
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:57:isolation113-setup-checkpoint stage=initial_login_complete' \
+	'connection_use_grant_test.go:92: login status = 401, want redirect' >>"$setup_no_separator/driver-isolation113-driver-0-abcde.log"
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'other_test.go:57:isolation113-setup-checkpoint stage=initial_login_complete' \
+	'connection_use_grant_test.go:92: login status = 401, want redirect' >>"$setup_no_separator/driver-isolation113-driver-1-abcde.log"
+setup_no_separator_results=$(new_results)
+if "$wrapper" --summarize "$setup_no_separator" "$setup_no_separator_results" >"$tmp/out" 2>"$tmp/err" &&
+	jq -e '
+		.setup_failure_diagnostics.drivers[0] == {driver_index:0,state:"incomplete",reason:null,http_status:null}
+		and .setup_failure_diagnostics.drivers[1] == {driver_index:1,state:"incomplete",reason:null,http_status:null}
+	' \
+		"$setup_no_separator_results/resource-summary.json" >/dev/null 2>&1; then
+	ok "setup fatal projection rejects correct- and wrong-anchor checkpoints without separator"
+else
+	bad "setup fatal projection rejects correct- and wrong-anchor checkpoints without separator"
+fi
+
+setup_preconfig_ambiguous=$tmp/setup-preconfig-ambiguous
+mkcase "$setup_preconfig_ambiguous" 100 110 90
+printf '%s\n' \
+	'connection_use_grant_test.go:52: authorize status = 503, want login form: PRIVATE_SETUP_FATAL_CANARY' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:52: login status = 401, want redirect' >>"$setup_preconfig_ambiguous/driver-isolation113-driver-0-abcde.log"
+setup_preconfig_ambiguous_results=$(new_results)
+if "$wrapper" --summarize "$setup_preconfig_ambiguous" "$setup_preconfig_ambiguous_results" >"$tmp/out" 2>"$tmp/err" &&
+	jq -e '.setup_failure_diagnostics.drivers[0] == {driver_index:0,state:"incomplete",reason:null,http_status:null}' \
+		"$setup_preconfig_ambiguous_results/resource-summary.json" >/dev/null 2>&1; then
+	ok "setup fatal projection keeps pre-config and interval fatals ambiguous"
+else
+	bad "setup fatal projection keeps pre-config and interval fatals ambiguous"
+fi
+
 unknownmessage=$tmp/unknownmessage
 mkcase "$unknownmessage" 100 110 90
 printf '{"unexpected":true}\n' >"$unknownmessage/fixture-metrics-0-PRIVATE_ANALYZER_CANARY.json"
@@ -641,7 +783,7 @@ mkcase "$diag_case" 100 110 90
 canary='PRIVATE_BODY_CANARY_9f3c7a'
 flip_recovery_iam "$diag_case/driver-isolation113-driver-1-abcde.log"
 flip_recovery_iam "$diag_case/driver-isolation113-driver-2-abcde.log"
-append_fatal "$diag_case/driver-isolation113-driver-1-abcde.log" "authorize status = 502, want login form: \"$canary connection_use_grant_test.go:337: session_cookie_unsafe https://private.example.test/secret?token=$canary\""
+append_fatal "$diag_case/driver-isolation113-driver-1-abcde.log" "authorize status = 502, want login form: \"$canary connection_use_grant_test.go:337: session_cookie_unsafe https://private.example.test/secret?token=$canary\" isolation113-setup-checkpoint"
 append_fatal "$diag_case/driver-isolation113-driver-2-abcde.log" "login status=403, want redirect, category=invalid_login_request"
 results=$(new_results)
 if "$wrapper" --summarize "$diag_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
@@ -681,7 +823,8 @@ unk_case=$tmp/iam-unknown
 mkcase "$unk_case" 100 110 90
 flip_recovery_iam "$unk_case/driver-isolation113-driver-1-abcde.log"
 flip_recovery_iam "$unk_case/driver-isolation113-driver-2-abcde.log"
-append_fatal "$unk_case/driver-isolation113-driver-2-abcde.log" "some unrecognized helper failure that is not a known reason"
+append_fatal "$unk_case/driver-isolation113-driver-1-abcde.log" "some unrecognized helper failure isolation113-setup-checkpoint"
+append_fatal "$unk_case/driver-isolation113-driver-2-abcde.log" "some unrecognized helper failure isolation113-setup-checkpointX"
 results=$(new_results)
 if "$wrapper" --summarize "$unk_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
 if [ "$rc" -eq 0 ]; then
@@ -691,12 +834,12 @@ elif jq -e '
 	and .criterion_pass == false
 	and .iam_failure_diagnostics.errors == 2
 	and .iam_failure_diagnostics.anchored == 0
-	and .iam_failure_diagnostics.unrecognized == 1
+	and .iam_failure_diagnostics.unrecognized == 2
 	and .iam_failure_diagnostics.excess == 0
 	and .iam_failure_diagnostics.missing == 2
 	and .iam_failure_diagnostics.complete == false
 	and .iam_failure_diagnostics.status == "incomplete"
-	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "unknown" and .status == null)] | length) == 1
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "unknown" and .status == null)] | length) == 2
 ' "$results/criterion.json" >/dev/null 2>&1; then
 	ok "unrecognized or missing IAM diagnostics incomplete"
 else
