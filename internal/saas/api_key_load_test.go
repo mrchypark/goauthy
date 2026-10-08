@@ -45,6 +45,50 @@ func TestLoadAPIKeyEnforcesCurrentParentAndReturnsLatest(t *testing.T) {
 	}
 }
 
+func TestLoadAPIKeyForDispatchUsesOneSnapshotAndFencesResolvedBinding(t *testing.T) {
+	t.Parallel()
+	ctx, store, db, b, connector := registeredAPIKeyFixture(t, "provider")
+	if _, err := store.PutBoundAPIKey(ctx, b.Owner, b.CollectionID, b.ConnectionID, 0, "synthetic-key", connector, connector.Digest(), credentialAuthority()); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := store.APIKeyConnector(ctx, b.Owner, b.CollectionID, b.ConnectionID, credentialAuthority())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One linearizable read builds exactly one authority predicate, so this is
+	// the snapshot count for the dispatch load: provider metadata and the ready
+	// credential must be read together.
+	reads := 0
+	binding, value, err := store.loadAPIKeyForDispatch(ctx, b.Owner, b.CollectionID, b.ConnectionID, func() (string, []any) { reads++; return "1", nil }, &resolved.registered)
+	if err != nil || reads != 1 || binding.TokenVersion != 1 || binding.ProviderID != "provider" || value.APIKey != "synthetic-key" {
+		t.Fatalf("snapshot binding=%+v value=%+v reads=%d err=%v", binding, value, reads, err)
+	}
+	// A provider revision change invalidates the caller's resolved binding even
+	// though the connector config and credential are otherwise unchanged.
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "load-dispatch-revision", SQL: `UPDATE saas_providers SET revision=revision+1 WHERE id='provider'`}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.loadAPIKeyForDispatch(ctx, b.Owner, b.CollectionID, b.ConnectionID, credentialAuthority(), &resolved.registered); !errors.Is(err, ErrCredentialUnauthorized) {
+		t.Fatalf("stale resolved binding err=%v", err)
+	}
+}
+
+func TestLoadAPIKeyForDispatchFailsClosedOnConnectionGenerationChange(t *testing.T) {
+	t.Parallel()
+	ctx, store, db, b, connector := registeredAPIKeyFixture(t, "provider")
+	if _, err := store.PutBoundAPIKey(ctx, b.Owner, b.CollectionID, b.ConnectionID, 0, "synthetic-key", connector, connector.Digest(), credentialAuthority()); err != nil {
+		t.Fatal(err)
+	}
+	// A reconnect changes the connection generation and orphans the credential
+	// stored under the previous generation in the same merged read.
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "load-dispatch-generation", SQL: `UPDATE auth_collection_connections SET generation='generation-2' WHERE id=?`, Args: []any{b.ConnectionID}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.loadAPIKey(ctx, b.Owner, b.CollectionID, b.ConnectionID, credentialAuthority()); !errors.Is(err, ErrCredentialNotFound) {
+		t.Fatalf("connection generation change err=%v", err)
+	}
+}
+
 func TestLoadAPIKeyFailsClosedForDisabledAndCorruptCiphertext(t *testing.T) {
 	t.Parallel()
 	ctx, store, db, b := credentialStoreFixture(t)

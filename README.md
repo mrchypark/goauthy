@@ -4,26 +4,27 @@
 features are Qualified, Preview, Experimental, or Unsupported. The dated execution ledger
 remains in [docs/status.md](docs/status.md), while Rauthy parity is tracked separately.
 
-[**Qualification (2026-09-17):**](docs/status.md) All six audit gates PASS — normal, race, vet, Kind pre/post pod replacement, schema v97→v102 upgrade, and real MinIO v98–102 fresh-dir recovery. Full pinned Rauthy goal remains incomplete; see [docs/status.md](docs/status.md) for current ledger.
+[**Historical qualification (2026-09-17):**](docs/status.md) All six audit gates PASS — normal, race, vet, Kind pre/post pod replacement, schema v97→v102 upgrade, and real MinIO v98–102 fresh-dir recovery. These earlier-version results do not qualify the current Rhiza candidate. Full pinned Rauthy goal remains incomplete; see [docs/status.md](docs/status.md) for current ledger.
 
 [프로젝트 목표·진행 현황·남은 작업](docs/status.md)
 
 GoAuthy uses Rauthy `v0.36.2` as a fixed behavior baseline while also providing
 GoAuthy-specific external-connection and credential-delegation capabilities. Rauthy parity
 is a compatibility ledger rather than the sole product roadmap. GoAuthy uses
-official Rhiza `v0.12.3` (commit `97a9d18aadc66d3b5390f6fa64de2d65dd9f0d48`) as its only database. Rhiza
+official Rhiza `v0.19.0` (commit `abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8`) as its only database. Rhiza
 `v0.9.0` is retracted because its published proxy-cached commit was wrong.
 v0.10.0 remains the historical baseline for earlier recorded runs.
 Rhiza v0.10.0 introduced bounded graph reachability APIs; GoAuthy does not need or
-use them. Existing `Open`/`Ready`/`Query`/`Execute` APIs remain compatible,
-as covered by successful local tests.
+use them. The v0.19.0 candidate supports only fresh physical state; mixed-version
+peers, downgrade and existing-data migration are unsupported. See the
+[greenfield upgrade contract](docs/no-pvc-dr.md).
 
 The default deployment goal is **no GoAuthy PVC**, with object-store disaster
 recovery. Local QLog/SQLite/LatticeDB files are disposable recovery state;
 acknowledged writes require Rhiza `before-ack` publication. Master keys and
 cluster identity are supplied independently. See [the storage contract](docs/no-pvc-dr.md).
 
-The current database stack also uses official LatticeDB v0.6.0 through `latticedb-go`.
+The current database stack uses `github.com/mrchypark/latticedb-go v0.11.3`.
 The Go integration does not require cgo, and no Rust SDK is required.
 
 ## Status reconciliation (2026-09-05)

@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -79,8 +80,55 @@ func main() {
 		err = run()
 	}
 	if err != nil {
-		slog.Error("goauthy stopped", "error", err)
+		slog.Error("goauthy stopped", "error_class", startupErrorClass(err), "error", err)
 		os.Exit(1)
+	}
+}
+
+func startupErrorClass(err error) string {
+	switch {
+	case errors.Is(err, rhiza.ErrCommitUnknown):
+		return "write_outcome_unknown"
+	case errors.Is(err, rhiza.ErrNotReady):
+		return "node_not_ready"
+	case errors.Is(err, rhiza.ErrQuorumUnavailable):
+		return "quorum_unavailable"
+	case errors.Is(err, rhiza.ErrDurabilityUnavailable):
+		return "ack_durability_unavailable"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "deadline"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		if err == nil {
+			return "unknown"
+		}
+		const openPrefix = "open rhiza: "
+		message := err.Error()
+		if !strings.HasPrefix(message, openPrefix) {
+			return "unknown"
+		}
+		if errors.Is(err, rhiza.ErrVoterStateLost) || errors.Is(err, rhiza.ErrVoterEnrollmentRequired) {
+			return "voter_state"
+		}
+		message = strings.TrimPrefix(message, openPrefix)
+		switch {
+		case strings.HasPrefix(message, "open WAL: "):
+			return "wal_open"
+		case strings.HasPrefix(message, "open object store: "):
+			return "object_store_open"
+		case strings.HasPrefix(message, "load checkpoint manifest: "):
+			return "checkpoint_manifest_load"
+		case strings.HasPrefix(message, "load shared decision archive: "):
+			return "shared_archive_load"
+		case strings.HasPrefix(message, "pin startup recovery evidence: "),
+			strings.HasPrefix(message, "pin certified checkpoint recovery root: "),
+			strings.HasPrefix(message, "pin generation recovery root: "):
+			return "startup_recovery_pin"
+		case strings.HasPrefix(message, "listen peer QUIC: "):
+			return "peer_listener"
+		}
+		return "unknown"
 	}
 }
 
@@ -140,6 +188,38 @@ func run() (err error) {
 	}
 	dbCloseAllowed := false
 	defer func() { err = closeRhizaAfterStartupComplete(db, dbCloseAllowed, err) }()
+	// Probes must reach liveness while schema and application state initialize.
+	// Opening storage retains the existing startup-probe bound. Until activation,
+	// readiness and every application route stay closed.
+	gate := &startupGate{}
+	server := &http.Server{
+		Addr:              env("GOAUTHY_LISTEN_ADDR", ":8080"),
+		Handler:           gate,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      serverWriteTimeout,
+		IdleTimeout:       30 * time.Second,
+		MaxHeaderBytes:    16 << 10,
+		TLSConfig:         tlsConfig,
+	}
+	listener, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", server.Addr, err)
+	}
+	defer func() { _ = server.Close() }()
+	drain := newRequestDrain(ctx, server)
+	defer drain.cancel()
+	if tlsReloader != nil {
+		go reloadTLS(ctx, tlsReloader)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		if tlsReloader != nil {
+			errCh <- server.ServeTLS(listener, "", "")
+			return
+		}
+		errCh <- server.Serve(listener)
+	}()
 	startupCtx, cancelStartup := context.WithTimeout(ctx, 30*time.Second)
 	defer cancelStartup()
 	for !db.Ready() {
@@ -1366,10 +1446,10 @@ func run() (err error) {
 		}
 		oauthServer.SetMetrics(registry)
 		loginHandler.SetMetrics(registry)
+		identityStore.SetMetrics(registry)
 		appHandler = registry.Instrument(appHandler)
 
-		metricsMux := http.NewServeMux()
-		metricsMux.Handle("GET /metrics", registry.Handler(metricsToken))
+		metricsMux := newMetricsMux(registry, metricsToken, db.Handler(), newArchiveStatsHandler(db))
 		metricsServer = &http.Server{
 			Addr:              metricsAddr,
 			Handler:           metricsMux,
@@ -1391,32 +1471,10 @@ func run() (err error) {
 		}()
 	}
 
-	server := &http.Server{
-		Addr:              env("GOAUTHY_LISTEN_ADDR", ":8080"),
-		Handler:           healthBypass(issuerPathMiddleware(peerIPMiddleware(appHandler, trustedProxies), issuer), handler),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      serverWriteTimeout,
-		IdleTimeout:       30 * time.Second,
-		MaxHeaderBytes:    16 << 10,
-		TLSConfig:         tlsConfig,
-	}
-	drain := newRequestDrain(ctx, server)
-	defer drain.cancel()
-	if tlsReloader != nil {
-		go reloadTLS(ctx, tlsReloader)
-	}
+	gate.activate(healthBypass(issuerPathMiddleware(peerIPMiddleware(appHandler, trustedProxies), issuer), handler))
 	// No startup path below this point can fail before the server lifecycle
 	// owns shutdown, so it is now safe to close Rhiza on return.
 	dbCloseAllowed = true
-	errCh := make(chan error, 1)
-	go func() {
-		if tlsReloader != nil {
-			errCh <- server.ListenAndServeTLS("", "")
-			return
-		}
-		errCh <- server.ListenAndServe()
-	}()
 
 	dbCloseAllowed, err = drain.runLifecycle(ctx, server, metricsServer, errCh, metricsErrCh, func() {
 		providerStore.CloseConnections()
@@ -1424,6 +1482,28 @@ func run() (err error) {
 		closeSaaSProviders()
 	})
 	return err
+}
+
+// newMetricsMux keeps the opt-in metrics listener limited to its exact routes.
+// The native handler is mounted only beneath the protected object-store path;
+// its other Rhiza API routes remain unreachable here.
+func newMetricsMux(registry *metrics.Registry, token string, objectStoreHandler, archiveStatsHandler http.Handler) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", registry.Handler(token))
+	mux.Handle("GET /metrics/object-store", metrics.AuthenticatedHandler(objectStoreHandler, token))
+	mux.Handle("GET /metrics/archive/v1", metrics.AuthenticatedHandler(archiveStatsHandler, token))
+	return mux
+}
+
+func newArchiveStatsHandler(db *rhiza.DB) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(db.ArchiveStats())
+	})
 }
 
 // metricsListenAddrFromEnv validates the optional metrics TCP bind address
@@ -2780,6 +2860,25 @@ func validateGeoblockRuntime(config geoblockConfig, trustedProxies []netip.Prefi
 		return errors.New("GOAUTHY_GEOBLOCK_COUNTRY_HEADER requires GOAUTHY_TRUSTED_PROXIES when no MaxMind database is configured")
 	}
 	return nil
+}
+
+// startupGate publishes the complete handler only after initialization.
+type startupGate struct {
+	active atomic.Pointer[http.Handler]
+}
+
+func (g *startupGate) activate(handler http.Handler) { g.active.Store(&handler) }
+
+func (g *startupGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if handler := g.active.Load(); handler != nil {
+		(*handler).ServeHTTP(w, r)
+		return
+	}
+	if r.Method == http.MethodGet && r.URL.RawPath == "" && r.URL.Path == "/livez" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 }
 
 func healthBypass(next, health http.Handler) http.Handler {

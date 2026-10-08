@@ -1,14 +1,18 @@
 package login
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/metrics"
+	"github.com/mrchypark/goauthy/internal/tracing"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -220,6 +224,143 @@ func TestLoginMetricsNilRegistryNoPanic(t *testing.T) {
 	h.Login(completed, postLogin(init, interaction, "alice", "correct password"))
 	if completed.Code != http.StatusSeeOther {
 		t.Fatalf("status=%d", completed.Code)
+	}
+}
+
+func TestLoginMetricsAuthStagesObservedAndBounded(t *testing.T) {
+	t.Parallel()
+	_, span := tracing.NewTracer("goauthy/login-metrics-test").Start(context.Background(), "non-recording")
+	if span.IsRecording() {
+		span.End()
+		t.Fatal("test requires tracing to be off")
+	}
+	span.End()
+
+	h := testHandler(t)
+	if h.policy == nil {
+		t.Fatal("test requires the real login policy store")
+	}
+	reg := metrics.NewRegistry()
+	h.SetMetrics(reg)
+	// Production wires the identity store to the same registry; the three
+	// credential stages are recorded there, not on the handler.
+	h.identity.SetMetrics(reg)
+
+	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
+	page := httptest.NewRecorder()
+	h.Authorize(page, get)
+	if page.Code != http.StatusOK {
+		t.Fatalf("authorize status=%d", page.Code)
+	}
+	init := page.Result().Cookies()[0]
+	interaction := interactionToken(t, page.Body.String())
+
+	completed := httptest.NewRecorder()
+	h.Login(completed, postLogin(init, interaction, "alice", "correct password"))
+	if completed.Code != http.StatusSeeOther {
+		t.Fatalf("login status=%d", completed.Code)
+	}
+
+	// Observation must not alter the login outcome. The real policy path reaches
+	// Check, Allow, CheckAccountLock, and Success with tracing disabled.
+	got := testutil.CollectAndCount(reg.AuthStageDurationCollector(), "goauthy_auth_stage_duration_seconds")
+	if got != 12 {
+		t.Fatalf("auth stage series=%d, want 12", got)
+	}
+
+	metricsRegistry := prometheus.NewRegistry()
+	if err := metricsRegistry.Register(reg.AuthStageDurationCollector()); err != nil {
+		t.Fatalf("register auth-stage collector: %v", err)
+	}
+	families, err := metricsRegistry.Gather()
+	if err != nil {
+		t.Fatalf("gather auth-stage metrics: %v", err)
+	}
+	policyStageCounts := map[string]uint64{
+		"policy_check":        0,
+		"policy_allow":        0,
+		"policy_account_lock": 0,
+		"policy_success":      0,
+	}
+	for _, family := range families {
+		if family.GetName() != "goauthy_auth_stage_duration_seconds" {
+			continue
+		}
+		for _, sample := range family.GetMetric() {
+			labels := sample.GetLabel()
+			if len(labels) != 1 || labels[0].GetName() != "stage" {
+				t.Fatalf("auth-stage metric has non-stage labels: %v", labels)
+			}
+			if _, ok := policyStageCounts[labels[0].GetValue()]; ok {
+				policyStageCounts[labels[0].GetValue()] = sample.GetHistogram().GetSampleCount()
+			}
+		}
+	}
+	for stage, count := range policyStageCounts {
+		if count != 1 {
+			t.Errorf("stage %q count=%d, want 1", stage, count)
+		}
+	}
+}
+
+func TestLoginMetricsCanceledStageCompletions(t *testing.T) {
+	root, span := tracing.NewTracer("goauthy/canceled-stage-metrics-test").Start(context.Background(), "non-recording")
+	defer span.End()
+	if span.IsRecording() {
+		t.Fatal("test requires tracing to be off")
+	}
+
+	h := &Handler{}
+	reg := metrics.NewRegistry()
+	h.SetMetrics(reg)
+
+	canceled, cancel := context.WithCancel(root)
+	cancel()
+	h.recordAuthStage(canceled, metrics.AuthStagePolicyCheck, time.Now())
+	h.recordAuthStage(canceled, metrics.AuthStagePolicyAllow, time.Now())
+	h.recordAuthStage(root, metrics.AuthStagePolicySuccess, time.Now())
+
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	response := httptest.NewRecorder()
+	reg.Handler("").ServeHTTP(response, request)
+	text := response.Body.String()
+	for _, want := range []string{
+		`goauthy_auth_stage_canceled_completions_total{stage="policy_check"} 1`,
+		`goauthy_auth_stage_canceled_completions_total{stage="policy_allow"} 1`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("metrics output missing %q", want)
+		}
+	}
+	if strings.Contains(text, `goauthy_auth_stage_canceled_completions_total{stage="policy_success"}`) {
+		t.Fatal("live-context stage emitted a cancellation completion")
+	}
+
+	metricsRegistry := prometheus.NewRegistry()
+	if err := metricsRegistry.Register(reg.AuthStageDurationCollector()); err != nil {
+		t.Fatal(err)
+	}
+	families, err := metricsRegistry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	durations := make(map[string]uint64)
+	for _, family := range families {
+		if family.GetName() != "goauthy_auth_stage_duration_seconds" {
+			continue
+		}
+		for _, sample := range family.GetMetric() {
+			for _, label := range sample.GetLabel() {
+				if label.GetName() == "stage" {
+					durations[label.GetValue()] = sample.GetHistogram().GetSampleCount()
+				}
+			}
+		}
+	}
+	for _, stage := range []string{"policy_check", "policy_allow", "policy_success"} {
+		if durations[stage] != 1 {
+			t.Errorf("duration observations for %s=%d, want 1", stage, durations[stage])
+		}
 	}
 }
 

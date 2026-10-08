@@ -12,7 +12,6 @@ trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 
 pass=0
 fail=0
-case_n=0
 ok() { pass=$((pass + 1)); echo "ok: $1" >&2; }
 bad() { fail=$((fail + 1)); echo "not ok: $1" >&2; }
 
@@ -73,10 +72,7 @@ mkcase() {
 }
 
 new_results() {
-	case_n=$((case_n + 1))
-	results=$tmp/results-$case_n
-	mkdir -p "$results"
-	printf '%s' "$results"
+	mktemp -d "$tmp/results.XXXXXX"
 }
 
 expect_summary() {
@@ -110,8 +106,93 @@ expect_summary() {
 }
 
 base=$tmp/base
+
+# Wrapper safe output carries numeric fixture diagnosis for a real skew pass and
+# for a wrong-route failure, so the failure explains itself.
+skewwrap=$tmp/skewwrap
+mkcase "$skewwrap" 100 110 90
+jq -nc '{healthy:{started:0,completed:0,active:0},"slow-headers":{started:0,completed:0,active:0},"slow-body":{started:0,completed:0,active:0},fail:{started:0,completed:0,active:0}}' >"$skewwrap/fixture-metrics-2.json"
+jq -nc '{healthy:{started:10,completed:10,active:0},"slow-headers":{started:4,completed:4,active:0},"slow-body":{started:4,completed:4,active:0},fail:{started:2,completed:2,active:0}}' >"$skewwrap/fixture-metrics-0.json"
+skewres=$(new_results)
+if "$wrapper" --summarize "$skewwrap" "$skewres" >"$tmp/out" 2>"$tmp/err" &&
+	jq -e '
+		.overall.correctness == "pass" and .fixture.complete == true and (.fixture.mismatches | length) == 0 and
+		.fixture.aggregate.started == 30 and .fixture.aggregate.completed == 30 and .fixture.aggregate.active == 0 and
+		.fixture.index_completeness.observed == [0, 1, 2] and
+		([.fixture.route_check[] | select(.route == "healthy" and .observed_started == 15)] | length) == 1 and
+		([.fixture.per_index[] | select(.index == 2 and .complete == true)] | length) == 1
+	' "$skewres/criterion.json" >/dev/null 2>&1; then
+	ok "wrapper numeric fixture diagnosis on skew pass"
+else
+	bad "wrapper numeric fixture diagnosis on skew pass (unexpected criterion)"
+	jq -c '{correctness:.overall.correctness,complete:.fixture.complete,mismatches:.fixture.mismatches}' "$skewres/criterion.json" >&2 || true
+fi
+
+failwrap=$tmp/failwrap
+mkcase "$failwrap" 100 110 90
+jq -nc '{healthy:{started:6,completed:6,active:0},"slow-headers":{started:2,completed:2,active:0},"slow-body":{started:2,completed:2,active:0},fail:{started:0,completed:0,active:0}}' >"$failwrap/fixture-metrics-0.json"
+failres=$(new_results)
+if "$wrapper" --summarize "$failwrap" "$failres" >"$tmp/out" 2>"$tmp/err"; then wrc=0; else wrc=$?; fi
+if [ "$wrc" -eq 0 ]; then
+	bad "wrapper numeric fixture diagnosis on route failure (expected nonzero exit)"
+elif jq -e '
+	.overall.correctness == "fail" and .fixture.complete == false and
+	.fixture.aggregate.started == 30 and
+	([.fixture.mismatches[] | select(.route == "healthy" and .expected_started == 15 and .observed_started == 16)] | length) == 1 and
+	([.fixture.mismatches[] | select(.route == "fail" and .expected_started == 3 and .observed_started == 2)] | length) == 1 and
+	.fixture.index_completeness.complete == true
+' "$failres/criterion.json" >/dev/null 2>&1; then
+	ok "wrapper numeric fixture diagnosis on route failure"
+else
+	bad "wrapper numeric fixture diagnosis on route failure (unexpected criterion)"
+	jq -c '{correctness:.overall.correctness,complete:.fixture.complete,mismatches:.fixture.mismatches}' "$failres/criterion.json" >&2 || true
+fi
 mkcase "$base" 100 110 90
 expect_summary "positive" "$base" pass pass true true
+
+# Source-build pin projection (offline). The released-image default keeps the
+# candidate digests null; the source-build mode records the OCI manifest and
+# config digests as separate fields and never conflates them.
+sb_default=$(new_results)
+if "$wrapper" --summarize "$base" "$sb_default" >/dev/null 2>"$tmp/err" &&
+	jq -e '.candidate.mode == "released-image" and .candidate.manifest_digest == null and .candidate.config_digest == null' "$sb_default/pins.json" >/dev/null 2>&1; then
+	ok "released-image pin projection"
+else
+	bad "released-image pin projection"
+fi
+sb_manifest=sha256:$(printf '%064d' 6)
+sb_config=sha256:$(printf '%064d' 3)
+sb_local=$(new_results)
+if GOAUTHY_LOCAL_BUILD=1 GOAUTHY_CANDIDATE_MANIFEST_DIGEST="$sb_manifest" GOAUTHY_CANDIDATE_CONFIG_DIGEST="$sb_config" \
+	"$wrapper" --summarize "$base" "$sb_local" >/dev/null 2>"$tmp/err" &&
+	jq -e --arg m "$sb_manifest" --arg c "$sb_config" '.candidate.mode == "source-build" and .candidate.manifest_digest == $m and .candidate.config_digest == $c and .candidate.manifest_digest != .candidate.config_digest' "$sb_local/pins.json" >/dev/null 2>&1; then
+	ok "source-build pin projection"
+else
+	bad "source-build pin projection"
+	jq -c '.candidate' "$sb_local/pins.json" >&2 || true
+fi
+
+# Privacy/ownership: a raw or malformed env digest must never leak into the
+# safe aggregate; each field is emitted only as a strict sha256 digest or null.
+sb_raw=$(new_results)
+if GOAUTHY_LOCAL_BUILD=1 GOAUTHY_CANDIDATE_MANIFEST_DIGEST='not-a-digest' GOAUTHY_CANDIDATE_CONFIG_DIGEST='sha256:short' \
+	"$wrapper" --summarize "$base" "$sb_raw" >/dev/null 2>"$tmp/err" &&
+	jq -e '.candidate.mode == "source-build" and .candidate.manifest_digest == null and .candidate.config_digest == null' "$sb_raw/pins.json" >/dev/null 2>&1 &&
+	! grep -q 'not-a-digest' "$sb_raw/pins.json"; then
+	ok "source-build pin projection rejects raw digests"
+else
+	bad "source-build pin projection rejects raw digests"
+	jq -c '.candidate' "$sb_raw/pins.json" >&2 || true
+fi
+sb_mixed=$(new_results)
+if GOAUTHY_LOCAL_BUILD=1 GOAUTHY_CANDIDATE_MANIFEST_DIGEST="$sb_manifest" GOAUTHY_CANDIDATE_CONFIG_DIGEST='raw-value' \
+	"$wrapper" --summarize "$base" "$sb_mixed" >/dev/null 2>"$tmp/err" &&
+	jq -e --arg m "$sb_manifest" '.candidate.mode == "source-build" and .candidate.manifest_digest == $m and .candidate.config_digest == null' "$sb_mixed/pins.json" >/dev/null 2>&1; then
+	ok "source-build pin projection keeps valid manifest only"
+else
+	bad "source-build pin projection keeps valid manifest only"
+	jq -c '.candidate' "$sb_mixed/pins.json" >&2 || true
+fi
 
 explicit=$tmp/explicit
 mkcase "$explicit" 100 110 90
@@ -146,12 +227,233 @@ else
 	if jq -e '.overall.correctness == "fail" and .criterion_pass == false
 		and (.iam_failure_diagnostics | keys == ["anchored", "complete", "criterion", "errors", "excess", "groups", "missing", "source", "status", "unrecognized"])
 		and (.iam_failure_diagnostics | .errors == null and .anchored == null and .unrecognized == null and .excess == null and .missing == null and .complete == false and .status == "unavailable" and .source == "unavailable" and .groups == [])' "$results/criterion.json" >/dev/null 2>&1 &&
+		jq -e '.schema_version == 1 and .error.failure_code == "unknown" and .error.analyzer_status == 1 and .error.reason == "analyzer unavailable or malformed (exit status 1)"' "$results/criterion.json" >/dev/null 2>&1 &&
 		jq -e '.available == false' "$results/resource-summary.json" >/dev/null 2>&1 &&
+		jq -e '.failure_code == "unknown" and .reason == "analyzer unavailable or malformed (exit status 1)"' "$results/resource-summary.json" >/dev/null 2>&1 &&
 		[ -s "$results/pins.json" ] && [ -s "$results/runner-environment.json" ] && [ -s "$results/report.md" ] && [ -s "$results/resource-summary.json" ]; then
 		ok "analyzer failure"
 	else
 		bad "analyzer failure (unexpected error report)"
 	fi
+fi
+
+# A whole known analyzer message gets a fixed code; source text and unknown
+# path-bearing errors remain undisclosed in safe artifacts.
+noobservations=$tmp/noobservations
+mkcase "$noobservations" 100 110 90
+for f in "$noobservations"/driver-isolation113-driver-*.log; do printf 'PRIVATE_ANALYZER_CANARY\n' >"$f"; done
+driver0=$noobservations/driver-isolation113-driver-0-abcde.log
+for stage in config_ready initial_login_complete provider_created collection_created connection_created api_key_bound consumer_created grant_created invoke_scope_ready invoke_token_issued invoke_prechecks_complete diagnostic_entered; do
+	printf '    connection_use_grant_test.go:42: isolation113-setup-checkpoint stage=%s\n' "$stage" >>"$driver0"
+done
+printf '%s\n' \
+	'    other_test.go:42: isolation113-setup-checkpoint stage=config_ready' \
+	'    connection_use_grant_test.go:x: isolation113-setup-checkpoint stage=config_ready' \
+	'    connection_use_grant_test.go:42: isolation113-setup-checkpoint stage=unknown_stage' \
+	'    connection_use_grant_test.go:42: isolation113-setup-checkpoint stage=diagnostic_entered PRIVATE_CHECKPOINT_CANARY' \
+	>>"$noobservations/driver-isolation113-driver-1-abcde.log"
+rm "$noobservations/driver-isolation113-driver-2-abcde.log"
+artifacts_ready() {
+	for artifact do
+		[ -f "$artifact" ] && [ -s "$artifact" ] && [ -r "$artifact" ] || return 1
+	done
+}
+results=$(new_results)
+known_artifacts_ready=false
+if "$wrapper" --summarize "$noobservations" "$results" >"$tmp/out" 2>"$tmp/err"; then
+	bad "known analyzer failure code (expected nonzero exit)"
+elif jq -e '.schema_version == 1 and .error.failure_code == "no_observation_records" and .error.analyzer_status == 1 and .error.reason == "analyzer unavailable or malformed (exit status 1)" and .overall.correctness == "fail" and .overall.performance == "inconclusive" and .criterion_pass == false' "$results/criterion.json" >/dev/null 2>&1 &&
+	jq -e '
+		.failure_code == "no_observation_records" and .available == false
+		and .setup_checkpoints.coverage == "recognized checkpoints observed in collected driver logs only; null does not prove absence or cause"
+		and .setup_checkpoints.drivers == [
+			{driver_index:0,log_available:true,observed_stages:["config_ready","initial_login_complete","provider_created","collection_created","connection_created","api_key_bound","consumer_created","grant_created","invoke_scope_ready","invoke_token_issued","invoke_prechecks_complete","diagnostic_entered"]},
+			{driver_index:1,log_available:true,observed_stages:null},
+			{driver_index:2,log_available:false,observed_stages:null}
+		]
+	' "$results/resource-summary.json" >/dev/null 2>&1 &&
+	artifacts_ready "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md"; then
+	known_artifacts_ready=true
+	if grep -Eq 'PRIVATE_(ANALYZER|CHECKPOINT)_CANARY' "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md"; then
+		bad "known analyzer failure code (canary disclosed)"
+	else
+		grep_status=$?
+		if [ "$grep_status" -eq 1 ]; then ok "known analyzer failure code"; else bad "known analyzer failure code (artifact grep failed)"; fi
+	fi
+else
+	bad "known analyzer failure code (unexpected error report)"
+fi
+
+if [ "$known_artifacts_ready" = true ]; then
+	rm "$results/report.md"
+	if artifacts_ready "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md"; then
+		bad "missing analyzer report artifact accepted"
+	else
+		ok "missing analyzer report artifact rejected"
+	fi
+else
+	bad "missing analyzer report artifact check not exercised"
+fi
+
+setup_control=$tmp/setup-control
+mkcase "$setup_control" 100 110 90
+setup_control_results=$(new_results)
+"$wrapper" --summarize "$setup_control" "$setup_control_results" >"$tmp/out" 2>"$tmp/err"
+setup_observed=$tmp/setup-observed
+mkcase "$setup_observed" 100 110 90
+setup_driver0=$setup_observed/driver-isolation113-driver-0-abcde.log
+setup_driver1=$setup_observed/driver-isolation113-driver-1-abcde.log
+setup_driver2=$setup_observed/driver-isolation113-driver-2-abcde.log
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:52: authorize status = 503, want login form: PRIVATE_SETUP_FATAL_CANARY isolation113-setup-checkpoint' >>"$setup_driver0"
+printf '%s\n' 'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' >>"$setup_driver1"
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=initial_login_complete' \
+	'connection_use_grant_test.go:92: login status = 401, want redirect' >>"$setup_driver2"
+setup_observed_results=$(new_results)
+if "$wrapper" --summarize "$setup_observed" "$setup_observed_results" >"$tmp/out" 2>"$tmp/err" &&
+	jq -e '.protected.errors == 0 and .criterion_pass == true' "$setup_observed_results/criterion.json" >/dev/null 2>&1 &&
+	jq -e '
+		.setup_failure_diagnostics.drivers == [
+			{driver_index:0,state:"classified",reason:"authorize_status",http_status:503},
+			{driver_index:1,state:"incomplete",reason:null,http_status:null},
+			{driver_index:2,state:"completed",reason:null,http_status:null}
+		]
+	' "$setup_observed_results/resource-summary.json" >/dev/null 2>&1 &&
+	cmp -s "$setup_control_results/criterion.json" "$setup_observed_results/criterion.json"; then
+	if grep -Eq 'PRIVATE_SETUP_FATAL_CANARY' "$setup_observed_results/criterion.json" "$setup_observed_results/resource-summary.json"; then
+		bad "setup fatal projection (canary disclosed)"
+	else
+		setup_grep_status=$?
+		if [ "$setup_grep_status" -eq 1 ]; then ok "setup fatal projection and criterion invariance"; else bad "setup fatal projection privacy check failed"; fi
+	fi
+else
+	bad "setup fatal projection and criterion invariance"
+fi
+
+setup_unclassified=$tmp/setup-unclassified
+mkcase "$setup_unclassified" 100 110 90
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:52: synthetic fatal PRIVATE_SETUP_FATAL_CANARY' >>"$setup_unclassified/driver-isolation113-driver-0-abcde.log"
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:52: authorize status = 503, want login form: PRIVATE_SETUP_FATAL_CANARY' \
+	'connection_use_grant_test.go:52: login status = 401, want redirect' >>"$setup_unclassified/driver-isolation113-driver-1-abcde.log"
+setup_unclassified_results=$(new_results)
+if "$wrapper" --summarize "$setup_unclassified" "$setup_unclassified_results" >"$tmp/out" 2>"$tmp/err" &&
+	jq -e '
+		.setup_failure_diagnostics.drivers == [
+			{driver_index:0,state:"incomplete",reason:null,http_status:null},
+			{driver_index:1,state:"incomplete",reason:null,http_status:null},
+			{driver_index:2,state:"incomplete",reason:null,http_status:null}
+		]
+	' "$setup_unclassified_results/resource-summary.json" >/dev/null 2>&1; then
+	ok "setup fatal projection fails closed for unrecognized and ambiguous fatals"
+else
+	bad "setup fatal projection fails closed for unrecognized and ambiguous fatals"
+fi
+
+setup_ordered=$tmp/setup-ordered
+mkcase "$setup_ordered" 100 110 90
+printf '%s\n' \
+	'connection_use_grant_test.go:52: authorize status = 503, want login form: PRIVATE_SETUP_FATAL_CANARY' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:57: isolation113-setup-checkpoint stage=initial_login_complete' >>"$setup_ordered/driver-isolation113-driver-0-abcde.log"
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:52: authorize status = 503, want login form: PRIVATE_SETUP_FATAL_CANARY' \
+	'connection_use_grant_test.go:57: isolation113-setup-checkpoint stage=initial_login_complete' >>"$setup_ordered/driver-isolation113-driver-1-abcde.log"
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:52: authorize status = 503, want login form: PRIVATE_SETUP_FATAL_CANARY' \
+	'connection_use_grant_test.go:57: isolation113-setup-checkpoint stage=initial_login_complete EXTRA' \
+	'other_test.go:57: isolation113-setup-checkpoint stage=initial_login_complete' >>"$setup_ordered/driver-isolation113-driver-2-abcde.log"
+setup_ordered_results=$(new_results)
+if "$wrapper" --summarize "$setup_ordered" "$setup_ordered_results" >"$tmp/out" 2>"$tmp/err" &&
+	jq -e '
+		.setup_failure_diagnostics.drivers == [
+			{driver_index:0,state:"incomplete",reason:null,http_status:null},
+			{driver_index:1,state:"incomplete",reason:null,http_status:null},
+			{driver_index:2,state:"incomplete",reason:null,http_status:null}
+		]
+	' "$setup_ordered_results/resource-summary.json" >/dev/null 2>&1; then
+	ok "setup fatal projection rejects out-of-interval and malformed checkpoints"
+else
+	bad "setup fatal projection rejects out-of-interval and malformed checkpoints"
+fi
+
+setup_wrong_anchor=$tmp/setup-wrong-anchor
+mkcase "$setup_wrong_anchor" 100 110 90
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'other_test.go:57: isolation113-setup-checkpoint stage=initial_login_complete' \
+	'connection_use_grant_test.go:92: authorize status = 503, want login form:' >>"$setup_wrong_anchor/driver-isolation113-driver-0-abcde.log"
+setup_wrong_anchor_results=$(new_results)
+if "$wrapper" --summarize "$setup_wrong_anchor" "$setup_wrong_anchor_results" >"$tmp/out" 2>"$tmp/err" &&
+	jq -e '.setup_failure_diagnostics.drivers[0] == {driver_index:0,state:"incomplete",reason:null,http_status:null}' \
+		"$setup_wrong_anchor_results/resource-summary.json" >/dev/null 2>&1; then
+	ok "setup fatal projection rejects wrong-anchor checkpoint"
+else
+	bad "setup fatal projection rejects wrong-anchor checkpoint"
+fi
+
+setup_no_separator=$tmp/setup-no-separator
+mkcase "$setup_no_separator" 100 110 90
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:57:isolation113-setup-checkpoint stage=initial_login_complete' \
+	'connection_use_grant_test.go:92: login status = 401, want redirect' >>"$setup_no_separator/driver-isolation113-driver-0-abcde.log"
+printf '%s\n' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'other_test.go:57:isolation113-setup-checkpoint stage=initial_login_complete' \
+	'connection_use_grant_test.go:92: login status = 401, want redirect' >>"$setup_no_separator/driver-isolation113-driver-1-abcde.log"
+setup_no_separator_results=$(new_results)
+if "$wrapper" --summarize "$setup_no_separator" "$setup_no_separator_results" >"$tmp/out" 2>"$tmp/err" &&
+	jq -e '
+		.setup_failure_diagnostics.drivers[0] == {driver_index:0,state:"incomplete",reason:null,http_status:null}
+		and .setup_failure_diagnostics.drivers[1] == {driver_index:1,state:"incomplete",reason:null,http_status:null}
+	' \
+		"$setup_no_separator_results/resource-summary.json" >/dev/null 2>&1; then
+	ok "setup fatal projection rejects correct- and wrong-anchor checkpoints without separator"
+else
+	bad "setup fatal projection rejects correct- and wrong-anchor checkpoints without separator"
+fi
+
+setup_preconfig_ambiguous=$tmp/setup-preconfig-ambiguous
+mkcase "$setup_preconfig_ambiguous" 100 110 90
+printf '%s\n' \
+	'connection_use_grant_test.go:52: authorize status = 503, want login form: PRIVATE_SETUP_FATAL_CANARY' \
+	'connection_use_grant_test.go:52: isolation113-setup-checkpoint stage=config_ready' \
+	'connection_use_grant_test.go:52: login status = 401, want redirect' >>"$setup_preconfig_ambiguous/driver-isolation113-driver-0-abcde.log"
+setup_preconfig_ambiguous_results=$(new_results)
+if "$wrapper" --summarize "$setup_preconfig_ambiguous" "$setup_preconfig_ambiguous_results" >"$tmp/out" 2>"$tmp/err" &&
+	jq -e '.setup_failure_diagnostics.drivers[0] == {driver_index:0,state:"incomplete",reason:null,http_status:null}' \
+		"$setup_preconfig_ambiguous_results/resource-summary.json" >/dev/null 2>&1; then
+	ok "setup fatal projection keeps pre-config and interval fatals ambiguous"
+else
+	bad "setup fatal projection keeps pre-config and interval fatals ambiguous"
+fi
+
+unknownmessage=$tmp/unknownmessage
+mkcase "$unknownmessage" 100 110 90
+printf '{"unexpected":true}\n' >"$unknownmessage/fixture-metrics-0-PRIVATE_ANALYZER_CANARY.json"
+results=$(new_results)
+if "$wrapper" --summarize "$unknownmessage" "$results" >"$tmp/out" 2>"$tmp/err"; then
+	bad "unknown analyzer failure code (expected nonzero exit)"
+elif jq -e '.error.failure_code == "unknown" and .overall.correctness == "fail" and .overall.performance == "inconclusive" and .criterion_pass == false' "$results/criterion.json" >/dev/null 2>&1 &&
+	jq -e '.failure_code == "unknown" and .available == false' "$results/resource-summary.json" >/dev/null 2>&1 &&
+	artifacts_ready "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md"; then
+	if grep -q PRIVATE_ANALYZER_CANARY "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md"; then
+		bad "unknown analyzer failure code (canary disclosed)"
+	else
+		grep_status=$?
+		if [ "$grep_status" -eq 1 ]; then ok "unknown analyzer failure code and canary redaction"; else bad "unknown analyzer failure code (artifact grep failed)"; fi
+	fi
+else
+	bad "unknown analyzer failure code and canary redaction (unexpected error report)"
 fi
 
 # Baseline multi-document transform regression (offline; no kubectl/Kind).
@@ -325,6 +627,86 @@ for shape in '{}' '{"items":null}' '{"items":"notanarray"}'; do
 	fi
 done
 
+# lastState.terminated projection: OOMKilled previous preserved while current Waiting CrashLoop.
+laststate_case=$tmp/laststate-startup
+mkdir -p "$laststate_case/failure-capture"
+jq -nc '{
+	kind: "PodList",
+	items: [
+		{metadata: {name: "goauthy-0", namespace: "goauthy"},
+		 spec: {containers: [{name: "goauthy"}]},
+		 status: {phase: "Pending",
+		       containerStatuses: [{name: "goauthy", ready: false, restartCount: 2,
+		                         state: {waiting: {reason: "CrashLoopBackOff"}},
+		                         lastState: {terminated: {reason: "OOMKilled", exitCode: 137, signal: 9}}}]}}
+	]
+}' >"$laststate_case/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$laststate_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.startup.available == true
+	and ([.startup.pods[].containers[] | select(.name == "app" and .waiting == "CrashLoopBackOff" and .last_terminated == "OOMKilled" and .last_exit_code == 137 and .last_signal == 9)] | length) == 1
+' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup lastState OOMKilled preserved"
+else
+	bad "startup lastState OOMKilled preserved (unexpected view)"
+	jq -c '.startup' "$results/resource-summary.json" >&2 || true
+fi
+
+# lastState arbitrary reason canary -> other (never the raw private reason).
+lastreason_case=$tmp/lastreason-startup
+mkdir -p "$lastreason_case/failure-capture"
+last_reason_canary='PRIVATE_LAST_REASON_CANARY_7d2e'
+jq -nc --arg r "$last_reason_canary" '{
+	kind: "PodList",
+	items: [
+		{metadata: {name: "goauthy-0", namespace: "goauthy"},
+		 spec: {containers: [{name: "goauthy"}]},
+		 status: {phase: "Running",
+		       containerStatuses: [{name: "goauthy", ready: false, restartCount: 0,
+		                         state: {running: {}},
+		                         lastState: {terminated: {reason: $r, exitCode: 1}}}]}}
+	]
+}' >"$lastreason_case/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$lastreason_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.startup.available == true
+	and ([.startup.pods[].containers[] | select(.name == "app" and .last_terminated == "other" and .last_exit_code == 1)] | length) == 1
+' "$results/resource-summary.json" >/dev/null 2>&1 &&
+	! grep -q "$last_reason_canary" "$results/resource-summary.json"; then
+	ok "startup lastState arbitrary reason canary -> other"
+else
+	bad "startup lastState arbitrary reason canary -> other (leak or wrong value)"
+	jq -c '.startup' "$results/resource-summary.json" >&2 || true
+fi
+
+# lastState malformed exit code / signal -> null (no passthrough).
+lastmalformed_case=$tmp/lastmalformed-startup
+mkdir -p "$lastmalformed_case/failure-capture"
+jq -nc '{
+	kind: "PodList",
+	items: [
+		{metadata: {name: "goauthy-0", namespace: "goauthy"},
+		 spec: {containers: [{name: "goauthy"}]},
+		 status: {phase: "Running",
+		       containerStatuses: [{name: "goauthy", ready: false, restartCount: 0,
+		                         state: {running: {}},
+		                         lastState: {terminated: {reason: "Error", exitCode: 999, signal: "abc"}}}]}}
+	]
+}' >"$lastmalformed_case/failure-capture/pods.json"
+results=$(new_results)
+"$wrapper" --summarize "$lastmalformed_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.startup.available == true
+	and ([.startup.pods[].containers[] | select(.name == "app" and .last_terminated == "Error" and .last_exit_code == null and .last_signal == null)] | length) == 1
+' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "startup lastState malformed codes -> null"
+else
+	bad "startup lastState malformed codes -> null (unexpected view)"
+	jq -c '.startup' "$results/resource-summary.json" >&2 || true
+fi
+
 # capture-status pods.json_exit signal (null-or-0..255 integer, no passthrough).
 exit_case=$tmp/exit-case
 mkdir -p "$exit_case/failure-capture"
@@ -401,7 +783,7 @@ mkcase "$diag_case" 100 110 90
 canary='PRIVATE_BODY_CANARY_9f3c7a'
 flip_recovery_iam "$diag_case/driver-isolation113-driver-1-abcde.log"
 flip_recovery_iam "$diag_case/driver-isolation113-driver-2-abcde.log"
-append_fatal "$diag_case/driver-isolation113-driver-1-abcde.log" "authorize status = 502, want login form: \"$canary connection_use_grant_test.go:337: session_cookie_unsafe https://private.example.test/secret?token=$canary\""
+append_fatal "$diag_case/driver-isolation113-driver-1-abcde.log" "authorize status = 502, want login form: \"$canary connection_use_grant_test.go:337: session_cookie_unsafe https://private.example.test/secret?token=$canary\" isolation113-setup-checkpoint"
 append_fatal "$diag_case/driver-isolation113-driver-2-abcde.log" "login status=403, want redirect, category=invalid_login_request"
 results=$(new_results)
 if "$wrapper" --summarize "$diag_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
@@ -441,7 +823,8 @@ unk_case=$tmp/iam-unknown
 mkcase "$unk_case" 100 110 90
 flip_recovery_iam "$unk_case/driver-isolation113-driver-1-abcde.log"
 flip_recovery_iam "$unk_case/driver-isolation113-driver-2-abcde.log"
-append_fatal "$unk_case/driver-isolation113-driver-2-abcde.log" "some unrecognized helper failure that is not a known reason"
+append_fatal "$unk_case/driver-isolation113-driver-1-abcde.log" "some unrecognized helper failure isolation113-setup-checkpoint"
+append_fatal "$unk_case/driver-isolation113-driver-2-abcde.log" "some unrecognized helper failure isolation113-setup-checkpointX"
 results=$(new_results)
 if "$wrapper" --summarize "$unk_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
 if [ "$rc" -eq 0 ]; then
@@ -451,12 +834,12 @@ elif jq -e '
 	and .criterion_pass == false
 	and .iam_failure_diagnostics.errors == 2
 	and .iam_failure_diagnostics.anchored == 0
-	and .iam_failure_diagnostics.unrecognized == 1
+	and .iam_failure_diagnostics.unrecognized == 2
 	and .iam_failure_diagnostics.excess == 0
 	and .iam_failure_diagnostics.missing == 2
 	and .iam_failure_diagnostics.complete == false
 	and .iam_failure_diagnostics.status == "incomplete"
-	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "unknown" and .status == null)] | length) == 1
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "unknown" and .status == null)] | length) == 2
 ' "$results/criterion.json" >/dev/null 2>&1; then
 	ok "unrecognized or missing IAM diagnostics incomplete"
 else
@@ -618,6 +1001,459 @@ if [ "$rc" -ne 0 ] && jq -e '
 	ok "private URL cannot classify a transport timeout"
 else
 	bad "private URL cannot classify a transport timeout"
+fi
+
+rec_stage() {
+	log=$1; phase=$2; stage=$3; outcome=$4; status=$5; elapsed=$6; sched=$7
+	printf 'connection_use_grant_test.go:1: isolation113-stage phase=%s route=iam stage=%s outcome=%s status=%s elapsed_ms=%s scheduled_unix_ms=%s\n' \
+		"$phase" "$stage" "$outcome" "$status" "$elapsed" "$sched" >>"$log"
+}
+
+gen_samples_cfs() {
+	dir=$1; mode=$2
+	: >"$dir/container-samples.jsonl"
+	for pod in 0 1 2; do
+		for cont in goauthy sidecarfixture; do
+			for t in 1 2 3; do
+				case "$mode" in
+					valid) periods=$((t * 100)); throttled=$((t * 10)); seconds=$t ;;
+					missing) periods=null; throttled=null; seconds=null ;;
+					reset) periods=$((300 - t * 100)); throttled=0; seconds=0 ;;
+				esac
+				jq -nc --arg ts "2026-01-01T00:00:0${t}Z" --argjson p "$pod" --arg c "$cont" --arg cid "containerd://cfs-${pod}-${cont}" \
+					--argjson periods "$periods" --argjson throttled "$throttled" --argjson seconds "$seconds" \
+					'{hostTimestampUTC:$ts,pod:("goauthy-"+($p|tostring)),container:$c,containerID:$cid,cpuUsageCoreNanoSeconds:1000,memoryWorkingSetBytes:1000000,memoryRSSBytes:900000,unavailable:[],cpuCfsPeriodsTotal:$periods,cpuCfsThrottledPeriodsTotal:$throttled,cpuCfsThrottledSecondsTotal:$seconds,cpuCfsUnavailable:[]}' \
+					>>"$dir/container-samples.jsonl"
+			done
+		done
+	done
+}
+
+stage_case=$tmp/iam-stage
+mkcase "$stage_case" 100 110 90
+rec_stage "$stage_case/driver-isolation113-driver-0-abcde.log" baseline authorize-get none 200 3000.000 1
+rec_stage "$stage_case/driver-isolation113-driver-0-abcde.log" baseline login-post none 302 1000.000 1
+rec_stage "$stage_case/driver-isolation113-driver-0-abcde.log" mixed authorize-get timeout 0 10000.000 7
+stage_canary='PRIVATE_STAGE_CANARY_9f3c7a'
+printf '%s\n' "$stage_canary" >> "$stage_case/driver-isolation113-driver-0-abcde.log"
+results=$(new_results)
+if "$wrapper" --summarize "$stage_case" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -ne 0 ]; then
+	bad "stage survives wrapper (unexpected nonzero exit)"
+elif jq -e '
+	.iam_stages.timeout_n == 1
+	and ([.iam_stages.stage_outcomes[] | select(.stage == "authorize-get" and .outcome == "timeout" and .n == 1 and .elapsed_ms_max == 10000)] | length) == 1
+	and (.iam_stages.stage_outcomes | length) == 3
+' "$results/criterion.json" >/dev/null 2>&1 &&
+	! grep -q "$stage_canary" "$results/criterion.json" "$results/resource-summary.json" "$results/pins.json" "$results/runner-environment.json" "$results/report.md" 2>/dev/null; then
+	ok "stage survives wrapper 5 allowlist"
+else
+	bad "stage survives wrapper 5 allowlist"
+	jq -c '.iam_stages' "$results/criterion.json" >&2 || true
+fi
+
+missing_stage=$tmp/iam-missing-stage
+mkcase "$missing_stage" 100 110 90
+results=$(new_results)
+"$wrapper" --summarize "$missing_stage" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.iam_stages.complete == false
+	and .iam_stages.attempt_complete == false
+	and ([.iam_stages.attempt_coverage[] | select(.stage_n == 0)] | length) == 48
+	and (.iam_stages.timeout_n == 0)
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "per-attempt missing stage evidence"
+else
+	bad "per-attempt missing stage evidence"
+	jq -c '.iam_stages | {attempt_complete, timeout_n, coverage_n: (.attempt_coverage | length)}' "$results/criterion.json" >&2 || true
+fi
+
+unk_stage=$tmp/iam-unknown-stage
+mkcase "$unk_stage" 100 110 90
+printf 'connection_use_grant_test.go:1: isolation113-stage phase=baseline route=iam stage=bogus outcome=none status=200 elapsed_ms=1.000 scheduled_unix_ms=1\n' >> "$unk_stage/driver-isolation113-driver-0-abcde.log"
+results=$(new_results)
+if "$wrapper" --summarize "$unk_stage" "$results" >"$tmp/out" 2>"$tmp/err"; then
+	bad "unknown stage rejected (expected nonzero exit)"
+else
+	ok "unknown stage rejected"
+fi
+
+for mode in valid missing reset; do
+	cfs_case=$tmp/cfs-$mode
+	mkdir -p "$cfs_case"
+	for idx in 0 1 2; do gen_driver_log "$cfs_case" "$idx" 100 110 90; done
+	gen_samples_cfs "$cfs_case" "$mode"
+	gen_fixture "$cfs_case"
+	results=$(new_results)
+	"$wrapper" --summarize "$cfs_case" "$results" >/dev/null 2>"$tmp/err" || true
+	if [ "$mode" = valid ]; then want_complete=true; want_delta=200; else want_complete=false; want_delta=null; fi
+	if jq -e --argjson wc "$want_complete" --argjson wd "$want_delta" '
+		([.series[] | select(.container == "goauthy")] | length) == 3
+		and ([.series[] | select(.container == "goauthy") | .cfs_periods.complete] | all(. == $wc))
+		and ([.series[] | select(.container == "goauthy") | .cfs_periods.delta] | all(. == $wd))
+		' "$results/resource-summary.json" >/dev/null 2>&1; then
+		ok "cfs $mode"
+	else
+		bad "cfs $mode"
+		jq -c '.series[] | select(.container == "goauthy") | .cfs_periods' "$results/resource-summary.json" >&2 || true
+	fi
+done
+
+gen_samples_cfs_bad() {
+	dir=$1; mode=$2
+	: >"$dir/container-samples.jsonl"
+	for pod in 0 1 2; do
+		for cont in goauthy sidecarfixture; do
+			for t in 1 2; do
+				case "$mode" in
+					fractional) periods=100.5; throttled=10; seconds=1 ;;
+					oversize) periods=9007199254740992; throttled=10; seconds=1 ;;
+				esac
+				jq -nc --arg ts "2026-01-01T00:00:0${t}Z" --argjson p "$pod" --arg c "$cont" --arg cid "containerd://bad-${pod}-${cont}" \
+					--argjson periods "$periods" --argjson throttled "$throttled" --argjson seconds "$seconds" \
+					'{hostTimestampUTC:$ts,pod:("goauthy-"+($p|tostring)),container:$c,containerID:$cid,cpuUsageCoreNanoSeconds:1000,memoryWorkingSetBytes:1000000,memoryRSSBytes:900000,unavailable:[],cpuCfsPeriodsTotal:$periods,cpuCfsThrottledPeriodsTotal:$throttled,cpuCfsThrottledSecondsTotal:$seconds,cpuCfsUnavailable:[]}' \
+					>>"$dir/container-samples.jsonl"
+			done
+		done
+	done
+}
+
+for mode in fractional oversize; do
+	bad_case=$tmp/cfs-bad-$mode
+	mkdir -p "$bad_case"
+	for idx in 0 1 2; do gen_driver_log "$bad_case" "$idx" 100 110 90; done
+	gen_samples_cfs_bad "$bad_case" "$mode"
+	gen_fixture "$bad_case"
+	results=$(new_results)
+	if "$wrapper" --summarize "$bad_case" "$results" >"$tmp/out" 2>"$tmp/err"; then
+		bad "cfs $mode rejected (expected nonzero exit)"
+	else
+		ok "cfs $mode rejected"
+	fi
+done
+
+series_case=$tmp/cfs-series
+mkdir -p "$series_case"
+for idx in 0 1 2; do gen_driver_log "$series_case" "$idx" 100 110 90; done
+gen_samples_cfs "$series_case" valid
+gen_fixture "$series_case"
+results=$(new_results)
+"$wrapper" --summarize "$series_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	([.series[] | select(.container == "goauthy")] | length) == 3
+	and ([.series[] | select(.container == "sidecarfixture")] | length) == 3
+' "$results/resource-summary.json" >/dev/null 2>&1; then
+	ok "cfs three goauthy series"
+else
+	bad "cfs three goauthy series"
+	jq -c '[.series[] | .container] | group_by(.) | map({container: .[0], n: length})' "$results/resource-summary.json" >&2 || true
+fi
+
+gen_samples_cfs_edge() {
+	dir=$1; mode=$2
+	: >"$dir/container-samples.jsonl"
+	for pod in 0 1 2; do
+		for cont in goauthy sidecarfixture; do
+			for t in 1 2 3; do
+				cid_null=false; cid="containerd://edge-${mode}-${pod}-${cont}"; periods=$((t * 100))
+				case "$mode" in
+					instance) cid="containerd://edge-${mode}-${pod}-${cont}-${t}" ;;
+					missing-id) cid_null=true; cid="" ;;
+					gap) if [ "$t" = 2 ]; then periods=null; fi ;;
+				esac
+				jq -nc --arg ts "2026-01-01T00:00:0${t}Z" --argjson p "$pod" --arg c "$cont" --argjson cid_null "$cid_null" --arg cid "$cid" \
+					--argjson periods "$periods" --argjson throttled "$((t * 10))" --argjson seconds "$t" \
+					'{hostTimestampUTC:$ts,pod:("goauthy-"+($p|tostring)),container:$c,containerID:(if $cid_null then null else $cid end),cpuUsageCoreNanoSeconds:1000,memoryWorkingSetBytes:1000000,memoryRSSBytes:900000,unavailable:[],cpuCfsPeriodsTotal:$periods,cpuCfsThrottledPeriodsTotal:$throttled,cpuCfsThrottledSecondsTotal:$seconds,cpuCfsUnavailable:[]}' \
+					>>"$dir/container-samples.jsonl"
+		done
+	done
+	done
+}
+
+for mode in instance missing-id gap; do
+	edge_case=$tmp/cfs-edge-$mode
+	mkdir -p "$edge_case"
+	for idx in 0 1 2; do gen_driver_log "$edge_case" "$idx" 100 110 90; done
+	gen_samples_cfs_edge "$edge_case" "$mode"
+	gen_fixture "$edge_case"
+	results=$(new_results)
+	"$wrapper" --summarize "$edge_case" "$results" >/dev/null 2>"$tmp/err" || true
+	if jq -e '
+		([.series[] | select(.container == "goauthy")] | length) == 3
+		and ([.series[] | select(.container == "goauthy") | .cfs_periods.complete] | all(. == false))
+		and ([.series[] | select(.container == "goauthy") | .cfs_periods.delta] | all(. == null))
+	' "$results/resource-summary.json" >/dev/null 2>&1; then
+		ok "cfs $mode incomplete"
+	else
+		bad "cfs $mode incomplete"
+		jq -c '.series[] | select(.container == "goauthy") | .cfs_periods' "$results/resource-summary.json" >&2 || true
+	fi
+done
+
+wrong_phase=$tmp/iam-wrong-phase
+mkcase "$wrong_phase" 100 110 90
+rec_stage "$wrong_phase/driver-isolation113-driver-0-abcde.log" mixed authorize-get none 200 3000.000 1
+results=$(new_results)
+"$wrapper" --summarize "$wrong_phase" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.iam_stages.complete == false
+	and .iam_stages.attempt_complete == false
+	and ([.iam_stages.attempt_coverage[] | select(.scheduled_unix_ms == 1 and .stage_n == 0)] | length) == 1
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "wrong-phase stage join fail closed"
+else
+	bad "wrong-phase stage join fail closed"
+	jq -c '.iam_stages | {complete, attempt_complete}' "$results/criterion.json" >&2 || true
+fi
+
+mixed_stage=$tmp/iam-mixed-stage
+mkcase "$mixed_stage" 100 110 90
+flip_recovery_iam "$mixed_stage/driver-isolation113-driver-1-abcde.log"
+failed_sched=$(awk '/phase=recovery route=iam outcome=failed/ {for(i=1;i<=NF;i++) if($i ~ /^scheduled_unix_ms=/) {sub(/^scheduled_unix_ms=/,"",$i); print $i; exit}}' "$mixed_stage/driver-isolation113-driver-1-abcde.log")
+append_fatal "$mixed_stage/driver-isolation113-driver-1-abcde.log" 'Post "https://private.example.test/oidc/authorize?token=SECRET": context deadline exceeded (Client.Timeout exceeded while awaiting headers)'
+rec_stage "$mixed_stage/driver-isolation113-driver-1-abcde.log" recovery authorize-get none 200 1000.000 "$failed_sched"
+rec_stage "$mixed_stage/driver-isolation113-driver-1-abcde.log" recovery login-post timeout 0 10000.000 "$failed_sched"
+results=$(new_results)
+if "$wrapper" --summarize "$mixed_stage" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "mixed stage + single timeout (expected nonzero exit)"
+elif jq -e --argjson fs "$failed_sched" '
+	.protected.errors == 1
+	and .criterion_pass == false
+	and .iam_failure_diagnostics.errors == 1
+	and .iam_failure_diagnostics.anchored == 1
+	and .iam_failure_diagnostics.unrecognized == 0
+	and .iam_failure_diagnostics.excess == 0
+	and .iam_failure_diagnostics.missing == 0
+	and .iam_failure_diagnostics.complete == true
+	and .iam_failure_diagnostics.status == "diagnosed"
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "unknown")] | length) == 0
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "transport_timeout" and .status == null)] | length) == 1
+	and ([.iam_stages.attempt_coverage[] | select(.driver_index == 1 and .phase == "recovery" and .scheduled_unix_ms == $fs and .stage_n == 2)] | length) == 1
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "mixed stage + single timeout no unknown pollution"
+else
+	bad "mixed stage + single timeout no unknown pollution"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+near_prefix=$tmp/iam-near-prefix
+mkcase "$near_prefix" 100 110 90
+flip_recovery_iam "$near_prefix/driver-isolation113-driver-1-abcde.log"
+printf '    connection_use_grant_test.go:1: isolation113-stageX bogus\n' >> "$near_prefix/driver-isolation113-driver-1-abcde.log"
+results=$(new_results)
+if "$wrapper" --summarize "$near_prefix" "$results" >"$tmp/out" 2>"$tmp/err"; then rc=0; else rc=$?; fi
+if [ "$rc" -eq 0 ]; then
+	bad "near-prefix stage unknown incomplete (expected nonzero exit)"
+elif jq -e '
+	.iam_failure_diagnostics.status == "incomplete"
+	and .iam_failure_diagnostics.unrecognized == 1
+	and ([.iam_failure_diagnostics.groups[].reasons[] | select(.reason == "unknown")] | length) == 1
+' "$results/criterion.json" >/dev/null 2>&1; then
+	ok "near-prefix stage unknown incomplete"
+else
+	bad "near-prefix stage unknown incomplete"
+	jq -c '.iam_failure_diagnostics' "$results/criterion.json" >&2 || true
+fi
+
+# Probe evidence is an optional projection of retained events, not attempt counts.
+probe_case=$tmp/probe-events
+mkdir -p "$probe_case/failure-capture"
+base_results=$tmp/probe-events-baseline
+mkdir -p "$base_results"
+"$wrapper" --summarize "$probe_case" "$base_results" >/dev/null 2>"$tmp/err" || true
+jq -n '
+	def event($i; $m): {involvedObject:{kind:"Pod",namespace:"goauthy",name:("goauthy-"+($i|tostring)),fieldPath:"spec.containers{goauthy}"},
+		source:{component:"kubelet"},reason:"Killing",message:$m,count:99,metadata:{uid:"PRIVATE_EVENT_CANARY"},series:{count:88}};
+	"Container goauthy failed startup probe, will be restarted" as $s
+	| "Container goauthy failed liveness probe, will be restarted" as $l
+	| {items:[event(0;$s), (event(1;$l)|del(.source)|.reportingComponent="kubelet"),
+		event(2;($s+" PRIVATE_EVENT_CANARY")),
+		(event(0;$s)|.involvedObject.namespace="other"), (event(0;$s)|.involvedObject.kind="Node"),
+		(event(0;$s)|.involvedObject.name="goauthy-9"), (event(0;$s)|.involvedObject.fieldPath="spec.containers{sidecarfixture}"),
+		(event(0;$s)|.source.component="scheduler"), (event(0;$s)|.reason="Unhealthy")]}
+' >"$probe_case/failure-capture/events.json"
+printf 'events.json_exit=0\n' >"$probe_case/failure-capture/capture-status.txt"
+results=$tmp/probe-events-observed
+mkdir -p "$results"
+"$wrapper" --summarize "$probe_case" "$results" >/dev/null 2>"$tmp/err" || true
+if jq -e '
+	.startup.probe_events.available and .startup.probe_events.events_json_exit == 0
+	and [.startup.probe_events.pods[] | [.index,.startup_probe_kill_records,.liveness_probe_kill_records,.other_kill_records]]
+		== [[0,1,0,0],[1,0,1,0],[2,0,0,1]]
+' "$results/resource-summary.json" >/dev/null 2>&1 &&
+	! grep -Eq 'PRIVATE_EVENT_CANARY|involvedObject|will be restarted' "$results/resource-summary.json" &&
+	[ "$base_results" != "$results" ] &&
+	jq -e 'type == "object"' "$base_results/criterion.json" >/dev/null 2>&1 &&
+	jq -e 'type == "object"' "$results/criterion.json" >/dev/null 2>&1 &&
+	[ "$(jq -cS . "$base_results/criterion.json")" = "$(jq -cS . "$results/criterion.json")" ] &&
+	[ "$(jq -cS '.startup|del(.probe_events)' "$base_results/resource-summary.json")" = "$(jq -cS '.startup|del(.probe_events)' "$results/resource-summary.json")" ]; then
+	ok "probe events exact messages, scope, privacy, record counts and unchanged gates"
+else
+	bad "probe events exact messages, scope, privacy, record counts and unchanged gates"
+fi
+# Missing/invalid/failed captures must be unavailable rather than observed zeros.
+for probe_state in missing malformed shape scalar absent duplicate failed extra range empty invalid_valid valid_invalid valid_valid zero_byte; do
+	printf '{"items":[]}\n' >"$probe_case/failure-capture/events.json"
+	printf 'events.json_exit=0\n' >"$probe_case/failure-capture/capture-status.txt"
+	case "$probe_state" in
+		missing) rm "$probe_case/failure-capture/events.json" ; want=capture-missing ;;
+		malformed) printf 'PRIVATE_EVENT_CANARY' >"$probe_case/failure-capture/events.json"; want=capture-invalid ;;
+		shape) printf '{"items":[1]}' >"$probe_case/failure-capture/events.json"; want=capture-invalid ;;
+		scalar) printf '"PRIVATE_EVENT_CANARY"' >"$probe_case/failure-capture/events.json"; want=capture-invalid ;;
+		absent) : >"$probe_case/failure-capture/capture-status.txt"; want=capture-status-invalid ;;
+		duplicate) printf 'events.json_exit=0\nevents.json_exit=0\n' >"$probe_case/failure-capture/capture-status.txt"; want=capture-status-invalid ;;
+		failed) printf 'events.json_exit=1\n' >"$probe_case/failure-capture/capture-status.txt"; want=capture-status-failed ;;
+		extra) printf 'events.json_exit=0=PRIVATE_EVENT_CANARY\n' >"$probe_case/failure-capture/capture-status.txt"; want=capture-status-invalid ;;
+		range) printf 'events.json_exit=999\n' >"$probe_case/failure-capture/capture-status.txt"; want=capture-status-invalid ;;
+		empty) want=empty ;;
+		invalid_valid) printf '{"items":[1]}\n{"items":[]}\n' >"$probe_case/failure-capture/events.json"; want=capture-invalid ;;
+		valid_invalid) printf '{"items":[]}\n{"items":[1]}\n' >"$probe_case/failure-capture/events.json"; want=capture-invalid ;;
+		valid_valid) printf '{"items":[]}\n{"items":[]}\n' >"$probe_case/failure-capture/events.json"; want=capture-invalid ;;
+		zero_byte) : >"$probe_case/failure-capture/events.json"; want=capture-invalid ;;
+	esac
+	results=$(new_results)
+	"$wrapper" --summarize "$probe_case" "$results" >/dev/null 2>"$tmp/err" || true
+	if jq -e --arg want "$want" '
+		.startup.probe_events as $p
+		| if $want == "empty" then $p.available and ($p.pods|length) == 3
+			and all($p.pods[]; .startup_probe_kill_records == 0 and .liveness_probe_kill_records == 0 and .other_kill_records == 0)
+		  else $p.available == false and $p.reason == $want and $p.pods == [] end
+	' "$results/resource-summary.json" >/dev/null 2>&1 && ! grep -q PRIVATE_EVENT_CANARY "$results/resource-summary.json" &&
+		[ "$base_results" != "$results" ] &&
+		jq -e 'type == "object"' "$base_results/criterion.json" >/dev/null 2>&1 &&
+		jq -e 'type == "object"' "$results/criterion.json" >/dev/null 2>&1 &&
+		[ "$(jq -cS . "$base_results/criterion.json")" = "$(jq -cS . "$results/criterion.json")" ] &&
+		[ "$(jq -cS '.startup|del(.probe_events)' "$base_results/resource-summary.json")" = "$(jq -cS '.startup|del(.probe_events)' "$results/resource-summary.json")" ]; then
+		ok "probe events eligibility $probe_state"
+	else
+		bad "probe events eligibility $probe_state"
+	fi
+done
+
+# The readiness file records only successful, ordered HTTP 200 probes. Pair its
+# safe prefix projection with the existing pre/post capture result to separate
+# a gate that stopped early from one that completed; never infer a failed status.
+readiness_no_private_data() {
+	if grep -Eq 'PRIVATE_READINESS_CANARY|NOT_A_TIMESTAMP|2099-12-31T23:59:59Z|goauthy-00|500' "$@"; then
+		return 1
+	else
+		grep_status=$?
+		[ "$grep_status" -eq 1 ] && return 0
+		return "$grep_status"
+	fi
+}
+
+readiness_base=$tmp/authorize-readiness-base
+mkcase "$readiness_base" 100 110 90
+rm "$readiness_base"/fixture-metrics-*.json
+for phase in pre post; do
+	value=0
+	[ "$phase" = pre ] || value=1
+	for pod in 0 1 2; do
+		jq -nc --argjson pod "$pod" --argjson value "$value" \
+			'{schema_version:1,available:true,reason:null,pod_index:$pod,incarnation_stable:true,counters:{http_requests:$value,http_failures:0,sdk_retries:0,transport_failures:0,condition_conflicts:0,dedup_hits:0,http_4xx_unexpected:0,http_5xx:0}}' \
+			>"$readiness_base/object-store-$phase-$pod.json"
+	done
+done
+readiness_partial=$tmp/authorize-readiness-partial
+readiness_full=$tmp/authorize-readiness-full
+cp -R "$readiness_base" "$readiness_partial"
+cp -R "$readiness_base" "$readiness_full"
+printf '2099-12-31T23:59:59Z\tgoauthy-0\t200\n' >"$readiness_partial/authorize-readiness.tsv"
+printf '2026-10-08T00:00:01Z\tgoauthy-0\t200\n2026-10-08T00:00:02Z\tgoauthy-1\t200\n2026-10-08T00:00:03Z\tgoauthy-2\t200\n' \
+	>"$readiness_full/authorize-readiness.tsv"
+partial_results=$(new_results)
+full_results=$(new_results)
+if [ "$partial_results" = "$full_results" ] || [ -e "$partial_results/criterion.json" ] || [ -e "$partial_results/resource-summary.json" ] ||
+	[ -e "$full_results/criterion.json" ] || [ -e "$full_results/resource-summary.json" ]; then
+	bad "authorize readiness partial/full result directories are distinct and empty"
+else
+	ok "authorize readiness partial/full result directories are distinct and empty"
+fi
+"$wrapper" --summarize "$readiness_partial" "$partial_results" >/dev/null 2>"$tmp/err" || true
+"$wrapper" --summarize "$readiness_full" "$full_results" >/dev/null 2>"$tmp/err" || true
+if jq -e '.overall.correctness == "fail" and .criterion_pass == false' "$partial_results/criterion.json" >/dev/null 2>&1 &&
+	jq -e '.overall.correctness == "fail" and .criterion_pass == false' "$full_results/criterion.json" >/dev/null 2>&1 &&
+	jq -e '.authorize_readiness.available and .authorize_readiness.successful_pod_indices == [0] and .object_store.available and (.object_store.pods | map(.pod_index) == [0,1,2]) and all(.object_store.pods[]; .available)' "$partial_results/resource-summary.json" >/dev/null 2>&1 &&
+	jq -e '.authorize_readiness.available and .authorize_readiness.successful_pod_indices == [0,1,2] and .object_store.available and (.object_store.pods | map(.pod_index) == [0,1,2]) and all(.object_store.pods[]; .available)' "$full_results/resource-summary.json" >/dev/null 2>&1 &&
+	[ "$(jq -cS . "$partial_results/criterion.json")" = "$(jq -cS . "$full_results/criterion.json")" ] &&
+	[ "$(jq -cS 'del(.authorize_readiness)' "$partial_results/resource-summary.json")" = "$(jq -cS 'del(.authorize_readiness)' "$full_results/resource-summary.json")" ]; then
+	if readiness_no_private_data "$partial_results/resource-summary.json"; then
+		ok "authorize readiness prefix distinguishes partial/full with post captures and unchanged fail-closed criterion"
+	else
+		privacy_status=$?
+		if [ "$privacy_status" -eq 1 ]; then
+			bad "authorize readiness prefix privacy check (timestamp disclosed)"
+		else
+			bad "authorize readiness prefix privacy check (artifact grep failed)"
+		fi
+	fi
+else
+	bad "authorize readiness prefix distinguishes partial/full with post captures and unchanged fail-closed criterion"
+fi
+
+readiness_case=$tmp/authorize-readiness-validation
+cp -R "$readiness_base" "$readiness_case"
+previous_readiness_results=$full_results
+for readiness_mode in empty missing malformed out-of-order duplicate extra-field noncanonical-index non-200 extra-row; do
+	readiness_file=$readiness_case/authorize-readiness.tsv
+	case "$readiness_mode" in
+		empty) : >"$readiness_file"; want_available=true; want_reason=null; want_indices='[]' ;;
+		missing) rm -f "$readiness_file"; want_available=false; want_reason=capture-missing; want_indices=null ;;
+		malformed) printf 'NOT_A_TIMESTAMP\tgoauthy-0\t200\n' >"$readiness_file"; want_available=false; want_reason=capture-invalid; want_indices=null ;;
+		out-of-order) printf '2026-10-08T00:00:01Z\tgoauthy-1\t200\n' >"$readiness_file"; want_available=false; want_reason=capture-invalid; want_indices=null ;;
+		duplicate) printf '2026-10-08T00:00:01Z\tgoauthy-0\t200\n2026-10-08T00:00:02Z\tgoauthy-0\t200\n' >"$readiness_file"; want_available=false; want_reason=capture-invalid; want_indices=null ;;
+		extra-field) printf '2026-10-08T00:00:01Z\tgoauthy-0\t200\tPRIVATE_READINESS_CANARY\n' >"$readiness_file"; want_available=false; want_reason=capture-invalid; want_indices=null ;;
+		noncanonical-index) printf '2026-10-08T00:00:01Z\tgoauthy-00\t200\n' >"$readiness_file"; want_available=false; want_reason=capture-invalid; want_indices=null ;;
+		non-200) printf '2026-10-08T00:00:01Z\tgoauthy-0\t500\n' >"$readiness_file"; want_available=false; want_reason=capture-invalid; want_indices=null ;;
+		extra-row) printf '2026-10-08T00:00:01Z\tgoauthy-0\t200\n2026-10-08T00:00:02Z\tgoauthy-1\t200\n2026-10-08T00:00:03Z\tgoauthy-2\t200\n2026-10-08T00:00:04Z\tgoauthy-2\t200\n' >"$readiness_file"; want_available=false; want_reason=capture-invalid; want_indices=null ;;
+	esac
+	results=$(new_results)
+	if [ "$results" = "$previous_readiness_results" ] || [ -e "$results/criterion.json" ] || [ -e "$results/resource-summary.json" ]; then
+		bad "authorize readiness $readiness_mode result directory is not fresh"
+	else
+		ok "authorize readiness $readiness_mode result directory is fresh"
+	fi
+	previous_readiness_results=$results
+	"$wrapper" --summarize "$readiness_case" "$results" >/dev/null 2>"$tmp/err" || true
+	if jq -e --argjson available "$want_available" --arg reason "$want_reason" --argjson indices "$want_indices" '
+		.authorize_readiness.available == $available
+		and .authorize_readiness.reason == (if $reason == "null" then null else $reason end)
+		and .authorize_readiness.successful_pod_indices == $indices
+		and .object_store.available
+		and (.object_store.pods | map(.pod_index) == [0,1,2])
+	' "$results/resource-summary.json" >/dev/null 2>&1 &&
+		jq -e '.overall.correctness == "fail" and .criterion_pass == false' "$results/criterion.json" >/dev/null 2>&1 &&
+		[ "$(jq -cS . "$full_results/criterion.json")" = "$(jq -cS . "$results/criterion.json")" ]; then
+		if readiness_no_private_data "$results/resource-summary.json"; then
+			ok "authorize readiness $readiness_mode validation and fail-closed criterion"
+		else
+			privacy_status=$?
+			if [ "$privacy_status" -eq 1 ]; then bad "authorize readiness $readiness_mode privacy check (canary disclosed)"
+			else bad "authorize readiness $readiness_mode privacy check (artifact grep failed)"; fi
+		fi
+	else
+		bad "authorize readiness $readiness_mode validation and fail-closed criterion"
+	fi
+done
+
+missing_pod_summary=$tmp/authorize-readiness-missing-pod.json
+jq 'del(.object_store.pods[1])' "$full_results/resource-summary.json" >"$missing_pod_summary"
+if jq -e '.authorize_readiness.available and .authorize_readiness.successful_pod_indices == [0,1,2] and .object_store.available and (.object_store.pods | map(.pod_index) == [0,1,2]) and all(.object_store.pods[]; .available)' \
+	"$missing_pod_summary" >/dev/null 2>&1; then
+	bad "authorize readiness exact object-store pod set accepts a missing pod"
+else
+	ok "authorize readiness exact object-store pod set rejects a missing pod"
+fi
+
+grep() { return 2; }
+if readiness_no_private_data "$partial_results/resource-summary.json"; then
+	bad "authorize readiness privacy guard accepts grep error"
+else
+	privacy_status=$?
+	if [ "$privacy_status" -eq 2 ]; then ok "authorize readiness privacy guard rejects grep error"
+	else bad "authorize readiness privacy guard unexpected error status $privacy_status"; fi
 fi
 
 echo "passed=$pass failed=$fail" >&2

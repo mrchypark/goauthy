@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/clients"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/loginpolicy"
@@ -933,6 +934,111 @@ func TestForceMFANoCredentialDoesNotConsumeInteraction(t *testing.T) {
 	}
 }
 
+// TestCompleteAuthenticationWithInteractionRejectsForceMFA proves the shared
+// completion rejects a password-only completion against a force-MFA target and
+// leaves the one-time interaction unconsumed.
+func TestCompleteAuthenticationWithInteractionRejectsForceMFA(t *testing.T) {
+	t.Parallel()
+	h, db := testHandlerWithDB(t, true)
+	page := httptest.NewRecorder()
+	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
+	if page.Code != http.StatusOK {
+		t.Fatalf("authorize status=%d", page.Code)
+	}
+	init := page.Result().Cookies()[0]
+	interaction := interactionToken(t, page.Body.String())
+	loaded, err := h.browser.LoadAuthorizationInteractionReadOnly(context.Background(), init.Value, interaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/auth/login", nil)
+	h.completeAuthenticationWithInteraction(response, request, init.Value, interaction, loaded, "user-1", "pwd", func() error { return nil })
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want=403", response.Code)
+	}
+	if response.Header().Get("Set-Cookie") != "" || response.Header().Get("Location") != "" {
+		t.Fatalf("force-MFA rejection emitted headers=%v", response.Header())
+	}
+	row, err := db.Query(context.Background(), rhiza.QueryRequest{SQL: `SELECT consumed_attempt FROM browser_authorization_interactions WHERE request_id=?`, Args: []any{loaded.RequestID}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(row.Rows) != 1 || row.Rows[0][0] != nil {
+		t.Fatalf("interaction consumed row=%v err=%v", row.Rows, err)
+	}
+}
+
+// TestCompleteAuthenticationWithInteractionRejectsForceMFACommittedAfterPassword
+// models the freshness boundary: the password step resolves a non-force-MFA
+// target, the client is then committed force-MFA, and the prepared completion
+// must re-resolve the current policy and reject before any consume, rotation,
+// or code issuance. The ForceMFA gate precedes the profile-update branch, so no
+// code is issued regardless of profile state.
+func TestCompleteAuthenticationWithInteractionRejectsForceMFACommittedAfterPassword(t *testing.T) {
+	t.Parallel()
+	h, db := testHandlerWithManagedClients(t, false)
+	authority := func() (string, []any) { return "1", nil }
+	profile := identity.UserValuesPolicy{RevalidateDuringLogin: true, GivenName: "required"}
+	if err := h.SetUserValuesPolicy(profile); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.oauth.SetUserValuesPolicy(profile, h.identity.NeedsProfileUpdate); err != nil {
+		t.Fatal(err)
+	}
+	client, err := clients.NewStore(db, testOIDCKeyring(t)).CreateWithGuard(context.Background(), clients.NewRequest{
+		ID: "force-mfa-client", RedirectURIs: []string{"https://localhost/callback"}, Scopes: []string{"goauthy.read", "offline_access"}, DefaultScopes: []string{"goauthy.read"}, GrantTypes: []string{"authorization_code"}, Audiences: []string{"https://localhost"}, Confidential: true,
+	}, authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := authorizeValues()
+	values.Set("client_id", client.ID)
+	values.Set("redirect_uri", "https://localhost/callback")
+	page := httptest.NewRecorder()
+	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+values.Encode(), nil))
+	if page.Code != http.StatusOK {
+		t.Fatalf("authorize status=%d", page.Code)
+	}
+	init := page.Result().Cookies()[0]
+	interaction := interactionToken(t, page.Body.String())
+	loaded, err := h.browser.LoadAuthorizationInteractionReadOnly(context.Background(), init.Value, interaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := h.resolveAuthenticationRequest(httptest.NewRequest(http.MethodGet, authorizePath, nil), loaded.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.policy.ForceMFA {
+		t.Fatal("expected force-MFA false before commit")
+	}
+	if _, err := clients.NewStore(db, testOIDCKeyring(t)).UpdateWithGuard(context.Background(), client.ID, client.Revision, clients.UpdateRequest{Confidential: true, Enabled: true, RedirectURIs: []string{"https://localhost/callback"}, Scopes: []string{"goauthy.read", "offline_access"}, DefaultScopes: []string{"goauthy.read"}, GrantTypes: []string{"authorization_code"}, Audiences: []string{"https://localhost"}, ForceMFA: true}, authority); err != nil {
+		t.Fatal(err)
+	}
+	after, err := h.resolveAuthenticationRequest(httptest.NewRequest(http.MethodGet, authorizePath, nil), loaded.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.policy.ForceMFA {
+		t.Fatal("expected force-MFA true after commit")
+	}
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/auth/login", nil)
+	h.completeAuthenticationWithInteraction(response, request, init.Value, interaction, loaded, "user-1", "pwd", func() error { return nil })
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status=%d want=403", response.Code)
+	}
+	if response.Header().Get("Set-Cookie") != "" || response.Header().Get("Location") != "" {
+		t.Fatalf("force-MFA rejection emitted headers=%v", response.Header())
+	}
+	row, err := db.Query(context.Background(), rhiza.QueryRequest{SQL: `SELECT consumed_attempt FROM browser_authorization_interactions WHERE request_id=?`, Args: []any{loaded.RequestID}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(row.Rows) != 1 || row.Rows[0][0] != nil {
+		t.Fatalf("interaction consumed row=%v err=%v", row.Rows, err)
+	}
+	session, err := h.browser.LoadSessionReadOnly(context.Background(), init.Value)
+	if err != nil || session.Authenticated() {
+		t.Fatalf("init session authenticated=%v err=%v", session.Authenticated(), err)
+	}
+}
+
 func TestWebAuthnStartRejectsInvalidBrowserAndPasswordlessCookies(t *testing.T) {
 	t.Parallel()
 	h := testHandler(t)
@@ -1187,6 +1293,17 @@ func testHandlerWithForce(t *testing.T, forceMFA bool) *Handler {
 }
 
 func testHandlerWithDB(t *testing.T, forceMFA bool) (*Handler, *rhiza.DB) {
+	return testHandlerWithDBAndManaged(t, forceMFA, false)
+}
+
+// testHandlerWithManagedClients wires a managed-client store into the OAuth
+// server so managed-client policy flips (for example force-MFA) are resolvable
+// in tests. The managed store uses the same testOIDCKeyring as client creation.
+func testHandlerWithManagedClients(t *testing.T, forceMFA bool) (*Handler, *rhiza.DB) {
+	return testHandlerWithDBAndManaged(t, forceMFA, true)
+}
+
+func testHandlerWithDBAndManaged(t *testing.T, forceMFA, managed bool) (*Handler, *rhiza.DB) {
 	t.Helper()
 	ctx := context.Background()
 	directory := t.TempDir()
@@ -1236,7 +1353,9 @@ func testHandlerWithDB(t *testing.T, forceMFA bool) (*Handler, *rhiza.DB) {
 	secret := make([]byte, 32)
 	secret[0] = 1
 	var oauthServer *oauth.Server
-	if forceMFA {
+	if managed {
+		oauthServer, err = oauth.NewServerWithOIDC(ctx, db, secret, "browser-client", "0123456789abcdef", "http://localhost/callback", nil, oauth.OIDCConfig{Issuer: "http://localhost", BootstrapForceMFA: forceMFA, ManagedClients: clients.NewStore(db, testOIDCKeyring(t)), LoadSigningKey: func(context.Context) (oidc.SigningKey, error) { return oidc.SigningKey{}, nil }})
+	} else if forceMFA {
 		oauthServer, err = oauth.NewServerWithOIDC(ctx, db, secret, "browser-client", "0123456789abcdef", "http://localhost/callback", nil, oauth.OIDCConfig{Issuer: "http://localhost", BootstrapForceMFA: true, LoadSigningKey: func(context.Context) (oidc.SigningKey, error) { return oidc.SigningKey{}, nil }})
 	} else {
 		oauthServer, err = oauth.NewServer(ctx, db, secret, "browser-client", "0123456789abcdef", "http://localhost/callback")
@@ -1759,5 +1878,70 @@ func TestSessionIPBindingDirectModeRejectsMismatchedPeer(t *testing.T) {
 		if c.Name == "goauthy_session" && c.Value == issued.Token {
 			t.Fatalf("mismatched direct-mode peer should not reuse bound session (value=%s)", c.Value)
 		}
+	}
+}
+
+// An unauthenticated init-session cookie must be reused rather than replaced.
+// The second authorize renders its own one-time interaction against the same
+// session, and no extra session is created.
+func TestAuthorizeReusesUnauthenticatedSessionCookieAcrossRequests(t *testing.T) {
+	t.Parallel()
+	h, db := testHandlerWithDB(t, false)
+	ctx := context.Background()
+	first := httptest.NewRecorder()
+	h.Authorize(first, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
+	if first.Code != http.StatusOK {
+		t.Fatalf("first authorize status=%d body=%q", first.Code, first.Body.String())
+	}
+	cookie := first.Result().Cookies()[0]
+	firstInteraction := interactionToken(t, first.Body.String())
+
+	reuse := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
+	reuse.AddCookie(cookie)
+	second := httptest.NewRecorder()
+	h.Authorize(second, reuse)
+	if second.Code != http.StatusOK {
+		t.Fatalf("reuse authorize status=%d body=%q", second.Code, second.Body.String())
+	}
+	reusedCookie := second.Result().Cookies()[0]
+	secondInteraction := interactionToken(t, second.Body.String())
+	if reusedCookie.Name != cookie.Name || reusedCookie.Value != cookie.Value {
+		t.Fatalf("session cookie changed across authorize requests: %v then %v", cookie, reusedCookie)
+	}
+	if firstInteraction == secondInteraction {
+		t.Fatal("each authorize request must render its own one-time interaction")
+	}
+	session, err := h.browser.LoadSessionReadOnly(ctx, cookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Subject != "" || session.AuthenticationMethod != "" || session.Authenticated() {
+		t.Fatalf("reused cookie must stay unauthenticated: %+v", session)
+	}
+	firstLoaded, err := h.browser.LoadAuthorizationInteractionReadOnly(ctx, cookie.Value, firstInteraction)
+	if err != nil {
+		t.Fatalf("first interaction must stay bound to the reused session: %v", err)
+	}
+	secondLoaded, err := h.browser.LoadAuthorizationInteractionReadOnly(ctx, cookie.Value, secondInteraction)
+	if err != nil {
+		t.Fatalf("second interaction must be bound to the reused session: %v", err)
+	}
+	if firstLoaded.RequestID == secondLoaded.RequestID {
+		t.Fatalf("distinct authorize requests must carry distinct request IDs: %q", firstLoaded.RequestID)
+	}
+	// The reuse branch must not create a second session.
+	result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(*) FROM browser_sessions`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
+		t.Fatalf("session count read: %+v %v", result.Rows, err)
+	}
+	if count := result.Rows[0][0].(int64); count != 1 {
+		t.Fatalf("browser_sessions=%d want 1", count)
+	}
+	// Both interactions stay independently usable against that one session.
+	if _, err := h.browser.ConsumeAuthorizationInteraction(ctx, cookie.Value, firstInteraction); err != nil {
+		t.Fatalf("first interaction must still be consumable: %v", err)
+	}
+	if _, err := h.browser.LoadAuthorizationInteractionReadOnly(ctx, cookie.Value, secondInteraction); err != nil {
+		t.Fatalf("consuming the first interaction must not disturb the second: %v", err)
 	}
 }

@@ -18,8 +18,10 @@ import (
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/eventlog"
 	"github.com/mrchypark/goauthy/internal/i18n"
+	"github.com/mrchypark/goauthy/internal/metrics"
 	"github.com/mrchypark/goauthy/internal/scim"
 	"github.com/mrchypark/goauthy/internal/storage"
+	"github.com/mrchypark/goauthy/internal/tracing"
 	"github.com/mrchypark/rhiza"
 )
 
@@ -140,6 +142,7 @@ type Store struct {
 	tombstoneProvidersMu     sync.Mutex
 	tombstoneProviders       []SCIMTombstoneProvider
 	tombstoneProvidersFrozen bool
+	metrics                  *metrics.Registry
 }
 
 type User struct {
@@ -205,6 +208,9 @@ type OpenRegistrationResult struct {
 	ExpiresAt time.Time
 	Created   bool
 }
+
+// SetMetrics attaches a metrics registry for authentication stage timing.
+func (s *Store) SetMetrics(reg *metrics.Registry) { s.metrics = reg }
 
 func NewStore(db *rhiza.DB) (*Store, error) {
 	hasher, err := credential.NewHasher(credential.DefaultPolicy())
@@ -781,11 +787,21 @@ func (s *Store) authenticate(ctx context.Context, username string, password []by
 		}
 		return Authentication{}, ErrInvalidCredentials
 	}
+	stageStart := time.Now()
 	user, passwordPHC, changedAt, passwordMode, found, expired, snapshot, err := s.lookupCredential(ctx, username)
+	if s.metrics != nil {
+		s.metrics.AuthStageDuration(metrics.AuthStageCredentialLookup, time.Since(stageStart).Seconds())
+	}
+	tracing.ObserveAuthStage(ctx, string(metrics.AuthStageCredentialLookup), stageStart)
 	if err != nil {
 		return Authentication{}, err
 	}
+	stageStart = time.Now()
 	valid, upgradeEligible, err := s.hasher.VerifyOrDummy(ctx, password, passwordPHC)
+	if s.metrics != nil {
+		s.metrics.AuthStageDuration(metrics.AuthStagePasswordVerify, time.Since(stageStart).Seconds())
+	}
+	tracing.ObserveAuthStage(ctx, string(metrics.AuthStagePasswordVerify), stageStart)
 	if err != nil {
 		return Authentication{}, err
 	}
@@ -802,12 +818,21 @@ func (s *Store) authenticate(ctx context.Context, username string, password []by
 	}
 	// Password work can cross the deadline: validate again before publishing
 	// an authenticated subject, keeping credential failures indistinguishable.
+	stageStart = time.Now()
 	if err := s.ValidateSubject(ctx, user.Subject); err != nil {
+		if s.metrics != nil {
+			s.metrics.AuthStageDuration(metrics.AuthStageSubjectRevalidate, time.Since(stageStart).Seconds())
+		}
+		tracing.ObserveAuthStage(ctx, string(metrics.AuthStageSubjectRevalidate), stageStart)
 		if errors.Is(err, ErrInactiveSubject) {
 			return Authentication{}, ErrInvalidCredentials
 		}
 		return Authentication{}, err
 	}
+	if s.metrics != nil {
+		s.metrics.AuthStageDuration(metrics.AuthStageSubjectRevalidate, time.Since(stageStart).Seconds())
+	}
+	tracing.ObserveAuthStage(ctx, string(metrics.AuthStageSubjectRevalidate), stageStart)
 	if expires := s.passwordExpiry(changedAt); expires != nil && s.now().UTC().After(*expires) {
 		var recoveryErr error
 		if onExpired != nil {

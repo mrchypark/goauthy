@@ -530,3 +530,170 @@ incompatibility in the wrapper fails fast without provisioning Kind.
     OPEN with #105 GC disabled, unapproved resource/SLO, and three logical
     members on one physical CI node. All thirteen prior failures (1-13) remain
     documented with their metrics and unconfirmed causes.
+15. [Run 37195769886](https://github.com/mrchypark/goauthy/actions/runs/37195769886),
+    job `111417190519`, FAILED `2026-10-04T10:40:10Z` before any workload.
+    This was the first source-build (`local_build=true`) calibration: the app
+    image built successfully with OCI manifest
+    `sha256:fc177b97c90d13a17b2d51d70ce42029a2d008450cb7761039f2d15a0879f406`
+    and config
+    `sha256:f8df4b1087b99381135b557c2227952782c8291ce7979f6f82c51a529181eba5`.
+    The host's classic Docker rejected the OCI archive on `docker load`
+    (missing blobs/json), so no candidate was ingested. No IAM, API-key,
+    fixture, or resource observations were produced and no aggregate artifact
+    exists. This is a runtime candidate-ingestion failure, not a performance
+    PASS/FAIL result. A wrapper correction is in progress to emit Docker-host
+    and OCI Kind archives from the same build and to bind the actual OCI
+    hashes/config/source against host/node identities without publication; it
+    is not claimed to have passed, to have repeated measurements, or to have
+    proved cleanup state. All fourteen prior failure histories and the
+    criteria are unchanged; issue #113 stays OPEN with #105 GC disabled,
+    resource/SLO unapproved, and three logical members on one physical CI
+    node.
+16. [Run 37197516289](https://github.com/mrchypark/goauthy/actions/runs/37197516289),
+    source `8091ca1112c1e579fd4f4b1864cd864f027b2fd5`, job `111422331261`,
+    FAILED before any workload after 4m50. The dual Docker/OCI exporters built
+    successfully and emitted the same actual image manifest
+    `sha256:d7bb1bedecc78c5540126a58b054aca575c70f04faa770483cee2ead199a33fe`
+    and config
+    `sha256:f16b142ca15538a846b65dff70d5a531d287455dd32d36b0be57cbe1368e7aa4`.
+    The host load and the host config/archive identity checks passed their
+    control flow. The failure was the canonical Kind CRI reference proof
+    observing unexpected content; the exact predicate cause is unobservable
+    and no raw CRI diagnostic was retained, so a config mismatch or absent CRI
+    `repoDigests` is not asserted as proven. No workload, IAM, API-key, or
+    resource observations and no safe artifacts were produced; no performance
+    PASS/FAIL or cleanup claim is made. Entry 15 is retained. Criteria are
+    unchanged; issue #113 stays OPEN with #105 GC disabled, resource/SLO
+    unapproved, and three logical members on one physical CI node.
+17. [Run 37198925168](https://github.com/mrchypark/goauthy/actions/runs/37198925168),
+    source/helper `1f593e6452a0943fb34ec5a4241e877ddde06792`, job `111426416713`,
+    FAILED after 12m57. This is the first source-build run whose candidate
+    pipeline is runtime-proven: the dual OCI/Docker exporters, host Docker
+    load, Kind canonical manifest/config identity, and runtime image pins all
+    passed. The actual OCI manifest
+    `sha256:b3850c6f56069c97785058c121aa62ba06088e7284e1d3d8b5c8f179b943dc61`
+    and config
+    `sha256:abec25ff18daa029fdecad48cbb1a37750c19b412047d402e74102d3f0be5d78`
+    were bound without publication. The workload ran and produced a safe
+    analyzer result: 48 IAM observations (38 success, 10 anchored
+    `transport_timeout`/`null` HTTP status; baseline 0 error), with per-phase
+    error observations d0 mixed 2 / recovery 2, d1 mixed 1 / recovery 2, d2
+    mixed 1 / recovery 2. Those per-phase counts are separate observations with
+    no raw-fatal-to-phase association; no fatal phase assertion is made. 2 of 6
+    relative IAM comparisons failed (d1 mixed and d1 recovery); d0 and d2
+    passed. All attempt denominators (6/6/4) were complete, but the percentiles
+    use successful observations only, so the run cannot be admitted. Successful-
+    observation nearest-rank IAM P95=P99 (ms):
+
+    | Driver | Baseline (n) | Mixed (n) | Recovery (n) |
+    | --- | --- | --- | --- |
+    | 0 | 13536.299 (6) | 10638.483 (6) | 7063.692 (4) |
+    | 1 | 5931.345 (6) | 10638.506 (6) | 12925.734 (4) |
+    | 2 | 11832.414 (6) | 11235.556 (6) | 9253.944 (4) |
+
+    API: account 15 all HTTP 200 / protected 0; fault 15 all actual HTTP 502.
+    Fixture 30 started/completed, active 0, drain true; all six resource series
+    complete. CPU throttling was not measured. Three logical GoAuthy members on
+    one Kind CI host with local Versity, 500m app / 100m sidecar; the zero-error
+    criterion is unchanged. The 9->7 source read-barrier optimization was
+    inadequate to pass the relative criterion; no query was instrumented and no
+    causal fix, SLO, GC, physical-three-host, or admission claim is made. Raw
+    logs are private and not uploaded; the five safe aggregates are private
+    run17-safe artifacts available to the parent. Entries 15 and 16 remain
+    pre-workload candidate-ingestion/reference histories and are not rewritten
+    as workload receipts. All sixteen prior failure histories are retained;
+    issue #113 stays OPEN with #105 GC disabled, resource/SLO unapproved, and
+    three logical members on one physical CI node.
+
+## Source-build measurement mode
+
+Runs 15 and 16 were the first attempts in this mode and failed before the
+workload (candidate ingestion and Kind CRI reference proof respectively; see
+entries 15 and 16). Run 17 proved the source-build candidate pipeline end to
+end — dual OCI/Docker export, host load, Kind canonical manifest/config
+identity, and runtime image pins — and ran the workload under the unchanged
+criteria (see entry 17); the mode is now runtime-proven, while the relative
+latency criterion still fails and no admission is claimed. A
+source-build run mode builds the candidate inside the workflow from a clean
+`candidate_source` commit on the branch workflow ref (`local_build=true`)
+instead of pulling a prebuilt immutable image. The image is ephemeral: it is
+built for one run and is neither a release artifact nor published to a
+registry. The measurement criteria are unchanged: three logical GoAuthy
+members on one Kind host with local Versity, the same shared analyzer, the
+same relative IAM P95/P99 criterion, and the same failure handling. The exact
+source commit, helper/fixture manifest digests, config, and runtime image
+pins are recorded as separate evidence and are not conflated.
+
+Dependency state: Lattice 0.11.1 is now the current candidate; run 14 measured
+release v0.2.0 with Lattice 0.10. The current candidate also carries a
+structural read-amplification reduction on the connection-use invoke path: the
+API provider metadata and the ready credential are read in one linearizable
+snapshot, reducing the per-invoke linearizable read count from 9 to 7. This is
+a structural estimate only; no causal fix claim is made until an actual
+measurement under the approved criteria.
+
+All sixteen prior failure histories and their uncertainty are preserved. This
+mode changes no timing, scheduler, security, or oracle behavior and adds no new
+test, build, or implementation files and no raw logs or caches. Issue #113
+stays OPEN until an actual approved-criteria proof is recorded and the
+resource/SLO scope is made explicit; no resource ceiling is invented here.
+
+## Further diagnostic campaign receipts
+
+- [Run 18](https://github.com/mrchypark/goauthy/actions/runs/37204522085)
+  failed in offline preflight: jq 1.7 rejected an unparenthesized object-value
+  expression. No candidate build, cluster or workload ran. Commit `c40efac`
+  corrects the grammar; the permanent controls pass with actual jq 1.7 and 1.8.1.
+- [Run 19](https://github.com/mrchypark/goauthy/actions/runs/37205285315)
+  was cancelled during offline preflight after actionable diagnostic review
+  findings. Its candidate build and calibration were skipped; it is neither a
+  runtime failure nor a performance receipt.
+- [Run 20](https://github.com/mrchypark/goauthy/actions/runs/37207196840)
+  at `e1af21eb88298d3834cee0e2ae9edadea7d2980d` ran the corrected diagnostic
+  source and failed the unchanged criteria: 37/48 IAM success, 11 anchored
+  transport timeouts and 6/6 relative comparisons failed. Complete per-attempt
+  header-stage coverage places three failed round trips at authorize GET and
+  eight at login POST; the stage enums are six `timeout` and five `transport`,
+  while all eleven outer fatal diagnostics classify as transport timeouts.
+  Account calls were 15×200, fault calls 15×expected502, and all 30 fixture
+  requests completed with zero active. Six resource series contain 174 samples
+  each (1,044 rows), with complete CFS deltas and no unavailable non-RSS data.
+  App throttled seconds increased by 0.340, 0.281 and 2.135 respectively over
+  the full capture; these aggregates have no phase alignment and establish no
+  CPU cause or exclusion. The analyzer succeeded, but correctness and relative
+  latency failed. No performance admission, capacity, SLO or issue closure is
+  claimed, and no unchanged-source rerun hides the failed receipt.
+- [Run 21](https://github.com/mrchypark/goauthy/actions/runs/37212047509),
+  candidate `2fab9d80ad39f0c997c161833baac07684c234c8`, ran the corrected
+  candidate source and failed the unchanged criteria: 47/48 IAM success, 1
+  anchored transport timeout (driver 2 mixed POST outer, 10000.298 ms). 96
+  header rounds / 48 attempts complete with 0 unknown/excess/missing. All 6
+  relative comparisons failed (success-only small-n quantiles). Nearest-rank
+  IAM P95=P99 (ms):
+
+  | Driver | Baseline (n) | Mixed (n) | Recovery (n) |
+  | --- | --- | --- | --- |
+  | 0 | 2868.487 (6) | 9568.004 (6) | 12370.402 (4) |
+  | 1 | 2960.564 (6) | 8338.476 (6) | 16894.167 (4) |
+  | 2 | 2859.972 (6) | 4158.526 (5 success, 1 error) | 16892.513 (4) |
+
+  Account calls were 15×200, fault calls 15×expected502, and all 30 fixture
+  requests completed with zero active. Six resource series contain 182 samples
+  each (1,092 rows), with complete CFS deltas and no unavailable non-RSS data.
+  The capture interval is wide only; no per-phase, per-request, or CPU causality
+  is established. The analyzer succeeded, but correctness and relative latency
+  failed. No performance admission, capacity, SLO or issue closure is claimed.
+- [Run 22](https://github.com/mrchypark/goauthy/actions/runs/37216878279),
+  exact `e0bfab2f6c1a855a17ed0cdbf3ee87bd789322dd`, SOURCEBUILD candidate
+  manifest `0a3446c05598b906fd81088462e003fb1519b7ba3469f17c7c463b790f77c59f`
+  and config `4f5396676046a0a102e1f392072be26a971a3bc9146f9c6fdae8e2bd5589a79d`,
+  failed BEFORE WORKLOAD during rollout. Safe app aggregate: pods 0 and 2 Running Ready
+  with restart 0; pod 1 Waiting/CrashLoopBackOff with restart 3-5. No IAM, auth
+  capture, or performance results were produced; performance is INCONCLUSIVE.
+  The actual start cause is unknown and no OOM claim is made. Five safe-only
+  artifacts were produced; raw pod logs were not uploaded and no private paths
+  or details are exposed. Public Run 22 comment
+  [5982361271](https://github.com/mrchypark/goauthy/issues/113#issuecomment-5982361271).
+  Collector review identified defects in multiple-document validation,
+  pre-capture scheduling, and incomplete histogram comparisons. Corrections
+  are pending in PR139; final validation and merge are not yet established.

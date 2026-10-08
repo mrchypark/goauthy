@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -22,18 +23,38 @@ import (
 
 const useGrantResource = "https://goauthy.connections.local.test"
 
+const (
+	isolation113SetupConfigReady        = "config_ready"
+	isolation113SetupInitialLogin       = "initial_login_complete"
+	isolation113SetupProviderCreated    = "provider_created"
+	isolation113SetupCollectionCreated  = "collection_created"
+	isolation113SetupConnectionCreated  = "connection_created"
+	isolation113SetupKeyBound           = "api_key_bound"
+	isolation113SetupConsumerCreated    = "consumer_created"
+	isolation113SetupGrantCreated       = "grant_created"
+	isolation113SetupScopeReady         = "invoke_scope_ready"
+	isolation113SetupInvokeTokenIssued  = "invoke_token_issued"
+	isolation113SetupInvokeChecksPassed = "invoke_prechecks_complete"
+	isolation113SetupDiagnosticEntered  = "diagnostic_entered"
+)
+
 func TestConnectionUseGrantLive(t *testing.T) {
+	isolation113Diagnostic := os.Getenv("GOAUTHY_E2E_USE_GRANTS") == "1" &&
+		os.Getenv("GOAUTHY_E2E_GRANT_INVOKE") == "1" &&
+		os.Getenv("GOAUTHY_E2E_ISOLATION113_FIXTURE_URL") != ""
 	if os.Getenv("GOAUTHY_E2E_USE_GRANTS") != "1" {
 		t.Skip("set GOAUTHY_E2E_USE_GRANTS=1 to run connection-use grant E2E")
 	}
 	connectorID := uniqueCollectionID(t)
 	primary, secondary, user, password, _ := browserE2EConfig(t)
 	client := newBrowserClient(t)
+	isolation113SetupCheckpoint(t, isolation113Diagnostic, isolation113SetupConfigReady)
 	_, cookie := loginForCode(t, client, primary, secondary, defaultRedirectURI, pkceChallenge(pkceVerifier(t)), user, password, "connection-use-grant")
 	csrf, err := browsersession.DeriveCSRFToken(cookie.Value)
 	if err != nil {
 		t.Fatal(err)
 	}
+	isolation113SetupCheckpoint(t, isolation113Diagnostic, isolation113SetupInitialLogin)
 	headers := map[string]string{"Content-Type": "application/json", "Sec-Fetch-Site": "same-origin", "X-CSRF-Token": csrf}
 	prefix := "Bearer "
 	if os.Getenv("GOAUTHY_E2E_RAW_AUTHORIZATION") == "1" {
@@ -74,17 +95,20 @@ func TestConnectionUseGrantLive(t *testing.T) {
 		r := do(t, client, http.MethodDelete, primary+"/auth/v1/saas/providers/"+connectorID, nil, sessionHeader(headers, "If-Match", `"1"`))
 		r.Body.Close()
 	})
+	isolation113SetupCheckpoint(t, isolation113Diagnostic, isolation113SetupProviderCreated)
 
 	collectionID := uniqueCollectionID(t)
 	collectionBody := `{"id":"` + collectionID + `","name":"Use grant E2E","auth_method":"api_key","enabled":true,"fields":[],"provider_ids":["` + connectorID + `"]}`
 	collection := do(t, client, http.MethodPost, primary+"/auth/v1/auth-collections", strings.NewReader(collectionBody), headers)
 	_, collectionRevision := readCollection(t, collection, http.StatusCreated)
+	isolation113SetupCheckpoint(t, isolation113Diagnostic, isolation113SetupCollectionCreated)
 	connection := do(t, client, http.MethodPost, primary+"/auth/v1/account/connections/"+collectionID, strings.NewReader(`{"definition_revision":1,"metadata":{}}`), headers)
 	connectionDoc, connectionRevision := readCollection(t, connection, http.StatusCreated)
 	connectionID, ok := connectionDoc["id"].(string)
 	if !ok || connectionID == "" {
 		t.Fatal("connection ID missing")
 	}
+	isolation113SetupCheckpoint(t, isolation113Diagnostic, isolation113SetupConnectionCreated)
 	connectionBase := primary + "/auth/v1/account/connections/" + collectionID + "/" + connectionID
 	connector := do(t, client, http.MethodGet, connectionBase+"/api-key/connector", nil, headers)
 	var connectorDoc struct {
@@ -127,6 +151,7 @@ func TestConnectionUseGrantLive(t *testing.T) {
 	if bound.StatusCode != http.StatusOK {
 		t.Fatalf("bound API key status=%d", bound.StatusCode)
 	}
+	isolation113SetupCheckpoint(t, isolation113Diagnostic, isolation113SetupKeyBound)
 
 	managedID := "use-grant-consumer-" + randomManagedUIID(t)
 	managedBody := `{"id":"` + managedID + `","name":"Use grant consumer","confidential":false,"redirect_uris":["https://rp.example.test/use-grant"],"audience":["` + useGrantResource + `"],"scopes":["goauthy.connections.use"],"default_scopes":["goauthy.connections.use"],"enabled_flows":["authorization_code"]}`
@@ -140,6 +165,7 @@ func TestConnectionUseGrantLive(t *testing.T) {
 		t.Fatalf("consumer create status=%d", managed.StatusCode)
 	}
 	managed.Body.Close()
+	isolation113SetupCheckpoint(t, isolation113Diagnostic, isolation113SetupConsumerCreated)
 	expires := time.Now().Add(time.Hour).UnixMilli()
 	grantBody := `{"consumer_client_id":"` + managedID + `","mode":"proxy","purpose":"sync","expires_at_unix_ms":` + strconv.FormatInt(expires, 10) + `}`
 	for _, tc := range []struct {
@@ -168,6 +194,7 @@ func TestConnectionUseGrantLive(t *testing.T) {
 		t.Fatalf("grant create status=%d", grant.StatusCode)
 	}
 	grant.Body.Close()
+	isolation113SetupCheckpoint(t, isolation113Diagnostic, isolation113SetupGrantCreated)
 	var checkGrantStatus func(bool)
 	if os.Getenv("GOAUTHY_E2E_GRANT_STATUS") == "1" {
 		checkGrantStatus = grantStatusObserver(t, client, primary, headers, collectionID, connectionID, grantDoc.ID, managedID)
@@ -176,7 +203,9 @@ func TestConnectionUseGrantLive(t *testing.T) {
 	var invokeToken string
 	if os.Getenv("GOAUTHY_E2E_GRANT_INVOKE") == "1" {
 		ensureResourcePermissionScope(t, client, primary, headers, "goauthy.connections.use")
+		isolation113SetupCheckpoint(t, isolation113Diagnostic, isolation113SetupScopeReady)
 		invokeToken = issueGrantInvokeToken(t, client, primary, managedID, useGrantResource)
+		isolation113SetupCheckpoint(t, isolation113Diagnostic, isolation113SetupInvokeTokenIssued)
 		if checkGrantStatus != nil {
 			r := do(t, newBrowserClient(t), http.MethodGet, primary+"/auth/v1/connections/"+collectionID+"/"+connectionID+"/grants/"+grantDoc.ID, nil, map[string]string{"Authorization": "Bearer " + invokeToken})
 			r.Body.Close()
@@ -190,6 +219,8 @@ func TestConnectionUseGrantLive(t *testing.T) {
 		wrongAudience := issueGrantInvokeToken(t, client, primary, managedID, "")
 		assertGrantInvokeStatus(t, primary, grantDoc.ID, wrongAudience, `{"operation":"account"}`, http.StatusUnauthorized)
 		if os.Getenv("GOAUTHY_E2E_ISOLATION113_FIXTURE_URL") != "" {
+			isolation113SetupCheckpoint(t, isolation113Diagnostic, isolation113SetupInvokeChecksPassed)
+			isolation113SetupCheckpoint(t, isolation113Diagnostic, isolation113SetupDiagnosticEntered)
 			runIsolation113Diagnostic(t, primary, secondary, user, password, grantDoc.ID, invokeToken)
 		}
 	}
@@ -301,6 +332,13 @@ func isolation113FixtureOperations(connectorID, prefix, fixtureURL string) ([]sa
 	return operations, nil
 }
 
+func isolation113SetupCheckpoint(t *testing.T, enabled bool, stage string) {
+	t.Helper()
+	if enabled {
+		t.Logf("isolation113-setup-checkpoint stage=%s", stage)
+	}
+}
+
 func runIsolation113Diagnostic(t *testing.T, primary, secondary, user, password, grant, token string) {
 	t.Helper()
 	invokeClient := isolation113InvokeClient(t)
@@ -331,10 +369,14 @@ func runIsolation113Diagnostic(t *testing.T, primary, secondary, user, password,
 				t.Run(phaseName+"-iam-"+strconv.FormatInt(scheduledAt.UnixNano(), 10), func(t *testing.T) {
 					requestStart := time.Now()
 					outcome := "failed"
+					trace := &isolation113StageTrace{}
 					defer func() {
 						t.Logf("isolation113 phase=%s route=iam outcome=%s scheduled_unix_ms=%d start_lag_ms=%.3f completion_latency_ms=%.3f", phaseName, outcome, scheduledAt.UnixMilli(), float64(requestStart.Sub(scheduledAt))/float64(time.Millisecond), float64(time.Since(requestStart))/float64(time.Millisecond))
+						for _, leg := range trace.snapshot() {
+							t.Logf("isolation113-stage phase=%s route=iam stage=%s outcome=%s status=%d elapsed_ms=%.3f scheduled_unix_ms=%d", phaseName, leg.Stage, leg.ErrorClass, leg.Status, leg.ElapsedMS, scheduledAt.UnixMilli())
+						}
 					}()
-					_, _ = loginForCode(t, newBrowserClient(t), primary, secondary, defaultRedirectURI, challenge, user, password, state)
+					_, _ = loginForCode(t, isolation113IAMClient(t, trace), primary, secondary, defaultRedirectURI, challenge, user, password, state)
 					outcome = "success"
 				})
 			}}
@@ -485,6 +527,83 @@ func invokeGrantMeasured(client *http.Client, base, grant, token, body string) (
 	defer r.Body.Close()
 	_, readErr := io.Copy(io.Discard, io.LimitReader(r.Body, 16<<10))
 	return time.Since(start), r.StatusCode, readErr
+}
+
+// isolation113StageTrace records per-HTTP-leg timing for the IAM login flow. It
+// keeps a fixed stage/outcome enum and numeric latency/status only: never a URL,
+// query string, header, token, credential, or response body.
+type isolation113StageTrace struct {
+	mu   sync.Mutex
+	legs []isolation113StageLeg
+}
+
+type isolation113StageLeg struct {
+	Stage      string
+	ElapsedMS  float64
+	Status     int
+	ErrorClass string
+}
+
+func (t *isolation113StageTrace) record(stage string, elapsed time.Duration, status int, err error) {
+	class := "none"
+	var networkError net.Error
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		class = "timeout"
+	case errors.As(err, &networkError) && networkError.Timeout():
+		class = "timeout"
+	case errors.Is(err, context.Canceled):
+		class = "canceled"
+	case err != nil:
+		class = "transport"
+	}
+	t.mu.Lock()
+	t.legs = append(t.legs, isolation113StageLeg{Stage: stage, ElapsedMS: float64(elapsed) / float64(time.Millisecond), Status: status, ErrorClass: class})
+	t.mu.Unlock()
+}
+
+func (t *isolation113StageTrace) snapshot() []isolation113StageLeg {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]isolation113StageLeg(nil), t.legs...)
+}
+
+// isolation113StageTransport classifies each IAM leg by a fixed method+path
+// enum and records time-to-response-headers only; the response body is read by
+// the caller after RoundTrip returns, so body time is not included. It never
+// inspects or retains request contents.
+type isolation113StageTransport struct {
+	base  http.RoundTripper
+	trace *isolation113StageTrace
+}
+
+func (t *isolation113StageTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	stage := "other"
+	switch {
+	case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/oidc/authorize"):
+		stage = "authorize-get"
+	case req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/auth/login"):
+		stage = "login-post"
+	}
+	start := time.Now()
+	response, err := t.base.RoundTrip(req)
+	status := 0
+	if response != nil {
+		status = response.StatusCode
+	}
+	t.trace.record(stage, time.Since(start), status, err)
+	return response, err
+}
+
+func isolation113IAMClient(t *testing.T, trace *isolation113StageTrace) *http.Client {
+	t.Helper()
+	client := newBrowserClient(t)
+	base := client.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	client.Transport = &isolation113StageTransport{base: base, trace: trace}
+	return client
 }
 
 func mustGrantList(t *testing.T, client *http.Client, base string, headers map[string]string) []byte {

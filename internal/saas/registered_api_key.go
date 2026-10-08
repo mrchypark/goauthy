@@ -31,7 +31,17 @@ func (s *CredentialStore) registeredAPIKeyInfo(ctx context.Context, owner, colle
 	if len(q.Rows) != 1 || len(q.Rows[0]) != 6 {
 		return registeredAPIKey{}, "", ErrCredentialNotFound
 	}
-	row := q.Rows[0]
+	return s.registeredAPIKeyFromRow(q.Rows[0])
+}
+
+// registeredAPIKeyFromRow parses the six generation/provider columns shared by
+// the standalone metadata read and the merged dispatch read. The legacy empty
+// provider sentinel returns no connector, so callers fall back to the api-key
+// provider ID and skip the connector-digest check.
+func (s *CredentialStore) registeredAPIKeyFromRow(row []any) (registeredAPIKey, string, error) {
+	if len(row) != 6 {
+		return registeredAPIKey{}, "", ErrCredentialNotFound
+	}
 	generation, ok := row[0].(string)
 	if !ok || !validText(generation) {
 		return registeredAPIKey{}, "", errCredential

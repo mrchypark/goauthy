@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -241,6 +242,49 @@ func TestHandlerAcceptsCorrectToken(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "# HELP") {
 		t.Fatal("authenticated response missing metrics")
+	}
+}
+
+func TestAuthenticatedHandlerProtectsDelegateWithBearerContract(t *testing.T) {
+	called := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	})
+	h := AuthenticatedHandler(inner, "test-token")
+	for _, headers := range [][]string{
+		nil,
+		{"Bearer wrong"},
+		{"Bearer bad,token"},
+		{"Bearer test-token", "Bearer other"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		for _, value := range headers {
+			req.Header.Add("Authorization", value)
+		}
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, req)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("headers %q: status %d, want %d", headers, response.Code, http.StatusUnauthorized)
+		}
+		if called {
+			t.Fatalf("headers %q: protected delegate was called", headers)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("Authorization", "Bearer test-token")
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || !called {
+		t.Fatalf("valid bearer: status=%d delegateCalled=%t, want 204 and true", response.Code, called)
+	}
+
+	called = false
+	response = httptest.NewRecorder()
+	AuthenticatedHandler(inner, "").ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	if response.Code != http.StatusNoContent || !called {
+		t.Fatalf("empty token: status=%d delegateCalled=%t, want unauthenticated delegation", response.Code, called)
 	}
 }
 
@@ -1071,6 +1115,126 @@ func TestNoGlobalMetricLeakage(t *testing.T) {
 		if strings.HasPrefix(mf.GetName(), "goauthy_") {
 			t.Errorf("goauthy_ metric %q leaked to global registry", mf.GetName())
 		}
+	}
+}
+
+// --- AuthStageDuration bounded stage label --------------------------------
+
+// collectHistogramLabelCounts returns per-label sample counts for a histogram.
+func collectHistogramLabelCounts(t *testing.T, reg *Registry, name, label string) map[string]uint64 {
+	t.Helper()
+	families, err := reg.reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	for _, mf := range families {
+		if mf.GetName() != name {
+			continue
+		}
+		out := make(map[string]uint64, len(mf.GetMetric()))
+		for _, m := range mf.GetMetric() {
+			for _, lp := range m.GetLabel() {
+				if lp.GetName() == label {
+					out[lp.GetValue()] += m.GetHistogram().GetSampleCount()
+				}
+			}
+		}
+		return out
+	}
+	t.Fatalf("metric %q not found", name)
+	return nil
+}
+
+func TestAuthStageDurationKnownStagesObserved(t *testing.T) {
+	reg := NewRegistry()
+	stages := []AuthStage{
+		AuthStageCredentialLookup, AuthStagePasswordVerify, AuthStageSubjectRevalidate,
+		AuthStageInteractionConsume, AuthStageSessionRotate, AuthStageOAuthIssue,
+		AuthStageAuthorizeValidate, AuthStageAuthorizeSession,
+		AuthStagePolicyCheck, AuthStagePolicyAllow, AuthStagePolicyAccountLock, AuthStagePolicySuccess,
+	}
+	for _, s := range stages {
+		reg.AuthStageDuration(s, 0.01)
+	}
+	got := collectHistogramLabelCounts(t, reg, "goauthy_auth_stage_duration_seconds", "stage")
+	if len(got) != len(stages) {
+		t.Fatalf("label cardinality=%d want=%d (%v)", len(got), len(stages), got)
+	}
+	for _, s := range stages {
+		if got[string(s)] != 1 {
+			t.Errorf("stage %q count=%d want=1", s, got[string(s)])
+		}
+	}
+}
+
+func TestAuthStageDurationRejectsUnknownAndInvalidValues(t *testing.T) {
+	reg := NewRegistry()
+	reg.AuthStageDuration(AuthStage("caller_supplied"), 0.01)
+	reg.AuthStageDuration(AuthStageCredentialLookup, -1)
+	reg.AuthStageDuration(AuthStageCredentialLookup, math.NaN())
+	reg.AuthStageDuration(AuthStageCredentialLookup, math.Inf(1))
+	reg.AuthStageDuration(AuthStageCredentialLookup, math.Inf(-1))
+
+	families, err := reg.reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	for _, mf := range families {
+		if mf.GetName() != "goauthy_auth_stage_duration_seconds" {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			if m.GetHistogram().GetSampleCount() != 0 {
+				t.Fatalf("invalid observation recorded: %v", m)
+			}
+		}
+	}
+	if text := gatherText(t, reg); strings.Contains(text, "caller_supplied") {
+		t.Fatalf("caller-supplied stage label leaked: %s", text)
+	}
+}
+
+func TestAuthStageDurationNilRegistryIsNoOp(t *testing.T) {
+	var reg *Registry
+	reg.AuthStageDuration(AuthStageCredentialLookup, 0.01)
+}
+
+func TestAuthStageDurationBoundedLabelsUnderVariedInput(t *testing.T) {
+	reg := NewRegistry()
+	inputs := []AuthStage{
+		AuthStageCredentialLookup, AuthStagePasswordVerify, "x", "", "credential_lookup ",
+		AuthStageCredentialLookup, AuthStageOAuthIssue, "oauth_issue_2",
+	}
+	for _, s := range inputs {
+		reg.AuthStageDuration(s, 0.005)
+	}
+	got := collectHistogramLabelCounts(t, reg, "goauthy_auth_stage_duration_seconds", "stage")
+	for label := range got {
+		if !allowedAuthStages[AuthStage(label)] {
+			t.Fatalf("unbounded stage label observed: %q", label)
+		}
+	}
+	if got[string(AuthStageCredentialLookup)] != 2 || got[string(AuthStagePasswordVerify)] != 1 || got[string(AuthStageOAuthIssue)] != 1 {
+		t.Fatalf("unexpected bounded counts: %v", got)
+	}
+}
+
+func TestAuthStageCanceledCompletionRejectsUnknownAndNilRegistry(t *testing.T) {
+	reg := NewRegistry()
+	reg.AuthStageCanceledCompletion(AuthStage("untrusted_value"))
+	reg.AuthStageCanceledCompletion(AuthStagePolicyCheck)
+	var nilRegistry *Registry
+	nilRegistry.AuthStageCanceledCompletion(AuthStagePolicyAllow)
+
+	text := gatherText(t, reg)
+	if strings.Contains(text, "untrusted_value") {
+		t.Fatalf("untrusted stage label leaked: %s", text)
+	}
+	if got := strings.Count(text, "goauthy_auth_stage_canceled_completions_total{stage="); got != 1 {
+		t.Fatalf("canceled-completion series=%d, want 1", got)
+	}
+	if !strings.Contains(text, `goauthy_auth_stage_canceled_completions_total{stage="policy_check"} 1`) {
+		t.Fatalf("known stage count missing: %s", text)
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -11,6 +12,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -1730,6 +1732,115 @@ func TestBootstrapPrincipalFromEnv(t *testing.T) {
 	}
 }
 
+func TestStartupGateFailsClosedUntilActivation(t *testing.T) {
+	t.Parallel()
+	gate := &startupGate{}
+	for _, test := range []struct {
+		method, target string
+		want           int
+	}{
+		{http.MethodGet, "/livez", http.StatusNoContent},
+		{http.MethodGet, "/readyz", http.StatusServiceUnavailable},
+		{http.MethodPost, "/livez", http.StatusServiceUnavailable},
+		{http.MethodGet, "/%6Civez", http.StatusServiceUnavailable},
+		{http.MethodGet, "/tenant/livez", http.StatusServiceUnavailable},
+		{http.MethodPost, "/oidc/token", http.StatusServiceUnavailable},
+	} {
+		recorder := httptest.NewRecorder()
+		gate.ServeHTTP(recorder, httptest.NewRequest(test.method, test.target, nil))
+		if recorder.Code != test.want {
+			t.Fatalf("%s %s = %d, want %d", test.method, test.target, recorder.Code, test.want)
+		}
+	}
+	gate.activate(healthBypass(
+		issuerPathMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusTeapot)
+		}), "https://id.example.test/tenant"),
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
+	))
+	for target, want := range map[string]int{
+		"/livez":             http.StatusNoContent,
+		"/readyz":            http.StatusNoContent,
+		"/tenant/oidc/token": http.StatusTeapot,
+		"/oidc/token":        http.StatusNotFound,
+	} {
+		recorder := httptest.NewRecorder()
+		gate.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, target, nil))
+		if recorder.Code != want {
+			t.Fatalf("activated %s = %d, want %d", target, recorder.Code, want)
+		}
+	}
+	concurrent := &startupGate{}
+	delegate := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
+	var group sync.WaitGroup
+	for worker := range 4 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for iteration := range 25 {
+				if worker == 0 && iteration == 10 {
+					concurrent.activate(delegate)
+				}
+				recorder := httptest.NewRecorder()
+				concurrent.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/oidc/token", nil))
+				if code := recorder.Code; code != http.StatusServiceUnavailable && code != http.StatusTeapot {
+					t.Errorf("partially initialized status=%d", code)
+					return
+				}
+			}
+		}()
+	}
+	group.Wait()
+}
+
+func TestStartupEarlyCloseReleasesPortAndKeepAlive(t *testing.T) {
+	t.Parallel()
+	server := &http.Server{Handler: &startupGate{}, ReadHeaderTimeout: 5 * time.Second}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	drain := newRequestDrain(context.Background(), server)
+	t.Cleanup(drain.cancel)
+	served := make(chan error, 1)
+	go func() { served <- server.Serve(listener) }()
+	t.Cleanup(func() { _ = server.Close(); <-served })
+	connection, err := net.DialTimeout("tcp", address, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if err := connection.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(connection, "GET /livez HTTP/1.1\r\nHost: localhost\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(connection)
+	response, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("early livez=%d", response.StatusCode)
+	}
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Reading the same accepted connection checks cleanup, without transport
+	// retries or an unread response body concealing an idle-connection leak.
+	if _, err := reader.ReadByte(); !errors.Is(err, io.EOF) {
+		t.Fatalf("accepted connection survived close: %v", err)
+	}
+	reopened, err := net.Listen("tcp", address)
+	if err != nil {
+		t.Fatalf("port not released: %v", err)
+	}
+	reopened.Close()
+}
+
 func TestTLSConfigFromEnvServesHTTPS(t *testing.T) {
 	t.Parallel()
 	directory := t.TempDir()
@@ -1752,15 +1863,32 @@ func TestTLSConfigFromEnvServesHTTPS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) }), TLSConfig: config}
+	gate := &startupGate{}
+	server := &http.Server{Handler: gate, TLSConfig: config}
+	drain := newRequestDrain(context.Background(), server)
+	t.Cleanup(drain.cancel)
 	done := make(chan error, 1)
 	go func() { done <- server.ServeTLS(listener, "", "") }()
 	t.Cleanup(func() {
 		_ = server.Close()
 		<-done
 	})
-	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} //nolint:gosec // local self-signed test certificate
-	response, err := client.Get("https://" + listener.Addr().String())
+	transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} //nolint:gosec // local self-signed test certificate
+	t.Cleanup(transport.CloseIdleConnections)
+	client := &http.Client{Timeout: 5 * time.Second, Transport: transport}
+	base := "https://" + listener.Addr().String()
+	for path, want := range map[string]int{"/livez": http.StatusNoContent, "/readyz": http.StatusServiceUnavailable, "/oidc/token": http.StatusServiceUnavailable} {
+		response, err := client.Get(base + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != want {
+			t.Fatalf("pre-activation TLS %s=%d, want %d", path, response.StatusCode, want)
+		}
+	}
+	gate.activate(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) }))
+	response, err := client.Get(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2202,13 +2330,136 @@ func TestLoadMetricsTokenRejectsFileAtMaxSizePlusOne(t *testing.T) {
 
 // --- Metrics handler path / method restrictions ----------------------------
 
-// newProductionMetricsMux builds the exact production mux: a single
-// "GET /metrics" pattern with Bearer token auth.
+// newProductionMetricsMux builds the production mux with no native API routes.
 func newProductionMetricsMux(token string) *http.ServeMux {
 	reg := metrics.NewRegistry()
-	mux := http.NewServeMux()
-	mux.Handle("GET /metrics", reg.Handler(token))
-	return mux
+	return newMetricsMux(reg, token, http.NotFoundHandler(), http.NotFoundHandler())
+}
+
+func TestMetricsMuxServesOnlyProtectedNativeObjectStoreCounters(t *testing.T) {
+	db, err := rhiza.Open(context.Background(), rhiza.Config{
+		NodeID: "metrics-object-store", DataDir: t.TempDir(),
+		ObjStoreProvider: rhiza.ObjectStoreProviderFilesystem, ObjStoreDir: t.TempDir(),
+		ObjStoreDurability: rhiza.ObjectStoreDurabilityBeforeAck,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	const token = "metrics-test-token"
+	mux := newMetricsMux(metrics.NewRegistry(), token, db.Handler(), newArchiveStatsHandler(db))
+	request := httptest.NewRequest(http.MethodGet, "/metrics/object-store", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /metrics/object-store with valid bearer returned %d, want 200", response.Code)
+	}
+	var counters map[string]uint64
+	if err := json.Unmarshal(response.Body.Bytes(), &counters); err != nil {
+		t.Fatalf("decode fixed native counters: %v", err)
+	}
+	if len(counters) == 0 {
+		t.Fatal("native object-store counter map is empty")
+	}
+	if _, ok := counters["http_requests"]; !ok {
+		t.Fatal("native object-store response is missing the fixed http_requests counter")
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/metrics/archive/v1", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("GET /metrics/archive/v1 with valid bearer returned status=%d content-type=%q", response.Code, response.Header().Get("Content-Type"))
+	}
+	var archiveStats rhiza.ArchiveStats
+	if err := json.Unmarshal(response.Body.Bytes(), &archiveStats); err != nil {
+		t.Fatalf("decode versioned archive stats: %v", err)
+	}
+	if archiveStats.SchemaVersion != rhiza.ArchiveStatsSchemaVersion || !archiveStats.Stages.PublicationAdmission.Available {
+		t.Fatalf("unexpected available archive stats: %+v", archiveStats)
+	}
+
+	for _, path := range []string{"/metrics/object-store", "/metrics/archive/v1"} {
+		for _, headers := range [][]string{
+			nil,
+			{"Bearer wrong"},
+			{"Bearer bad,token"},
+			{"Bearer " + token, "Bearer other"},
+		} {
+			request := httptest.NewRequest(http.MethodGet, path, nil)
+			for _, value := range headers {
+				request.Header.Add("Authorization", value)
+			}
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+			if response.Code != http.StatusUnauthorized {
+				t.Fatalf("GET %s with headers %q returned %d, want 401", path, headers, response.Code)
+			}
+		}
+
+		for _, method := range []string{http.MethodPost, http.MethodHead} {
+			request := httptest.NewRequest(method, path, nil)
+			request.Header.Set("Authorization", "Bearer "+token)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+			if response.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("%s %s returned %d, want 405", method, path, response.Code)
+			}
+		}
+	}
+
+	for _, path := range []string{"/sql/query", "/membership/status", "/ready", "/metrics/object-store/extra", "/metrics/archive/v1/extra"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("GET %s escaped exact metrics routes: status %d, want 404", path, response.Code)
+		}
+	}
+}
+
+func TestMetricsMuxPreservesNativeObjectStoreDisabledNotFound(t *testing.T) {
+	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "metrics-no-object-store", DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	request := httptest.NewRequest(http.MethodGet, "/metrics/object-store", nil)
+	request.Header.Set("Authorization", "Bearer metrics-test-token")
+	response := httptest.NewRecorder()
+	newMetricsMux(metrics.NewRegistry(), "metrics-test-token", db.Handler(), newArchiveStatsHandler(db)).ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("disabled native object-store route returned %d, want 404", response.Code)
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode native disabled response: %v", err)
+	}
+	if body.Code != "object_store_disabled" {
+		t.Fatalf("native disabled response code %q, want object_store_disabled", body.Code)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/metrics/archive/v1", nil)
+	request.Header.Set("Authorization", "Bearer metrics-test-token")
+	response = httptest.NewRecorder()
+	newMetricsMux(metrics.NewRegistry(), "metrics-test-token", db.Handler(), newArchiveStatsHandler(db)).ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("archive stats route without archive returned %d, want 200 with unavailable stages", response.Code)
+	}
+	var archiveStats rhiza.ArchiveStats
+	if err := json.Unmarshal(response.Body.Bytes(), &archiveStats); err != nil {
+		t.Fatalf("decode unavailable archive stats: %v", err)
+	}
+	if archiveStats.SchemaVersion != rhiza.ArchiveStatsSchemaVersion || archiveStats.Stages.PublicationAdmission.Available || archiveStats.Stages.PublicationAdmission.Count != nil || archiveStats.Stages.PublicationAdmission.DurationNSSum != nil {
+		t.Fatalf("archive stage without manager was not unavailable/null: %+v", archiveStats.Stages.PublicationAdmission)
+	}
 }
 
 func TestMetricsMuxRejectsNonGETMethods(t *testing.T) {

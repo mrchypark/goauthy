@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"time"
 
+	"github.com/mrchypark/goauthy/internal/tracing"
 	"github.com/mrchypark/rhiza"
 )
 
@@ -3082,11 +3084,19 @@ func schemaV2Request(requestID string) rhiza.ExecuteRequest {
 // Execute accepts a Rhiza SQL mutation only when it committed. Rhiza reports
 // deterministic SQL rejection in the receipt rather than as a Go error.
 func Execute(ctx context.Context, db *rhiza.DB, request rhiza.ExecuteRequest) (rhiza.ExecuteResponse, error) {
+	// Bounded timing only: the span carries the stage name and nothing else, so
+	// no SQL text, request ID, or error detail can leak into telemetry.
+	started := time.Now()
+	defer func() { tracing.ObserveAuthStage(ctx, "storage_execute", started) }()
 	if err := rhiza.ValidateExecuteRequest(request); err != nil {
 		return rhiza.ExecuteResponse{}, err
 	}
 	for attempt := 0; attempt < 2; attempt++ {
+		// Timing only, around the actual submit call. The enclosing storage_execute
+		// interval overlaps this one, so the two are never summed.
+		submitStarted := time.Now()
 		response, err := db.Execute(ctx, request)
+		tracing.ObserveAuthStage(ctx, "storage_submit", submitStarted)
 		if err == nil {
 			return validateReceipt(request.RequestID, response)
 		}
@@ -3094,7 +3104,10 @@ func Execute(ctx context.Context, db *rhiza.DB, request rhiza.ExecuteRequest) (r
 			return response, err
 		}
 		callerErrAfterExecute := ctx.Err()
+		// Timing only, around the actual status call. Enclosing interval overlaps.
+		statusStarted := time.Now()
 		status, statusErr := db.RequestStatus(ctx, rhiza.RequestStatusRequest{Kind: "sql", RequestID: request.RequestID})
+		tracing.ObserveAuthStage(ctx, "storage_status", statusStarted)
 		if statusErr != nil {
 			logExecuteRecoveryFailure("request_status", err, statusErr, callerErrAfterExecute)
 			return response, errors.Join(err, statusErr)
@@ -3107,7 +3120,10 @@ func Execute(ctx context.Context, db *rhiza.DB, request rhiza.ExecuteRequest) (r
 			response.MutationReceipt = *status.Receipt
 			// Status is an ID-only local lookup for either outcome. Replay the
 			// exact request to confirm its fingerprint and configured ACK durability.
+			// Timing only, around the actual replay call. Enclosing interval overlaps.
+			replayStarted := time.Now()
 			recovered, retryErr := db.Execute(ctx, request)
+			tracing.ObserveAuthStage(ctx, "storage_replay", replayStarted)
 			if retryErr != nil {
 				logExecuteRecoveryFailure("same_request_replay", err, retryErr, callerErrAfterExecute)
 				return response, errors.Join(err, retryErr)

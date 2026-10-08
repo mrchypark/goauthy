@@ -22,10 +22,19 @@ func TestUserExpiryBoundaryMatrix(t *testing.T) {
 		{"unlimited", 0, false}, {"before", -1, true}, {"equal", 0, true}, {"after", 1, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := testStore(t)
+			policy := credential.DefaultPolicy()
+			// Expiry assertions should not depend on scheduler time spent in the
+			// per-Hasher admission gate. Keep the production KDF parameters and
+			// isolate this fixture's hasher from the package-global default.
+			policy.WaitTimeout = -1
+			hasher, err := credential.NewHasher(policy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s := testStoreWithHasher(t, hasher)
 			now := time.UnixMilli(10_000)
 			s.now = func() time.Time { return now }
-			phc, err := credential.Hash([]byte("Password1!"))
+			phc, err := hasher.Hash(ctx, []byte("Password1!"))
 			if err != nil {
 				t.Fatal(err)
 			}

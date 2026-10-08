@@ -19,7 +19,7 @@ umask 077
 
 usage() {
 	echo "usage: $0 [--summarize] EVIDENCE_DIR RESULTS_DIR" >&2
-	echo "env: GOAUTHY_IMAGE GOAUTHY_CANDIDATE_SOURCE [KIND_CLUSTER] [KIND_NODE_IMAGE]" >&2
+	echo "env: GOAUTHY_IMAGE GOAUTHY_CANDIDATE_SOURCE [GOAUTHY_LOCAL_BUILD] [KIND_CLUSTER] [KIND_NODE_IMAGE]" >&2
 	exit 2
 }
 
@@ -61,12 +61,20 @@ startup_project_jq='
 				else "unknown" end)
 			else "unknown" end)
 		else "unknown" end;
+	def exit_code($c):
+		($c | type) as $ty |
+		if $ty == "number" and ($c | isfinite) and ($c | floor) == $c and $c >= 0 and $c <= 255 then $c else null end;
+	def signal_num($c):
+		($c | type) as $ty |
+		if $ty == "number" and ($c | isfinite) and ($c | floor) == $c and $c >= 0 and $c <= 64 then $c else null end;
 	def container_view($idx; $statuses; $c):
 		([$statuses[] | select(.name == $c.name)][0]) as $st |
 		($st.ready // false) as $ready |
 		($st.state // {}) as $state |
 		($state.waiting // null) as $waiting |
 		($state.terminated // null) as $terminated |
+		($st.lastState // {}) as $lastState |
+		($lastState.terminated // null) as $lastTerminated |
 		{
 			index: $idx,
 			name: known_name($c.name),
@@ -74,7 +82,10 @@ startup_project_jq='
 			ready: ($ready == true),
 			restart_bucket: restart_bucket($st.restartCount // null),
 			waiting: (if $waiting != null then reason_enum($waiting.reason) else null end),
-			terminated: (if $terminated != null then reason_enum($terminated.reason) else null end)
+			terminated: (if $terminated != null then reason_enum($terminated.reason) else null end),
+			last_terminated: (if $lastTerminated != null then reason_enum($lastTerminated.reason) else null end),
+			last_exit_code: (if $lastTerminated != null then exit_code($lastTerminated.exitCode) else null end),
+			last_signal: (if $lastTerminated != null then signal_num($lastTerminated.signal) else null end)
 		};
 	. as $pods |
 	(($pods | type) == "object") as $is_obj |
@@ -139,6 +150,46 @@ startup_summary() {
 	fi
 }
 
+probe_events_summary() {
+	events=$evidence_dir/failure-capture/events.json
+	events_exit=$(awk -F= '
+		$1 == "events.json_exit" { n++; v = (NF == 2 ? $2 : "") }
+		END { if (n == 1 && v ~ /^[0-9]+$/ && v + 0 <= 255) print v + 0 }
+	' "$evidence_dir/failure-capture/capture-status.txt" 2>/dev/null || true)
+	[ -n "$events_exit" ] || events_exit=null
+	probe_note='Retained kubelet Killing event objects, not occurrences or boot attempts. Exact fixed probe messages only; other kills are unattributed. No timing or fatal-log correlation; zero observations do not prove absence.'
+	probe_unavailable() {
+		jq -n --arg reason "$1" --argjson code "$events_exit" --arg note "$probe_note" \
+			'{source:"failure-capture/events.json",available:false,reason:$reason,events_json_exit:$code,pods:[],coverage_note:$note}'
+	}
+	if [ ! -f "$events" ]; then
+		probe_unavailable capture-missing
+	elif [ "$events_exit" = null ]; then
+		probe_unavailable capture-status-invalid
+	elif [ "$events_exit" != 0 ]; then
+		probe_unavailable capture-status-failed
+	elif ! jq -se 'if length == 1 then (.[0] | if type == "object" then (.items|type) == "array" and all(.items[]; type == "object") else false end) else false end' "$events" >/dev/null 2>&1; then
+		probe_unavailable capture-invalid
+	else
+		jq -s --argjson code "$events_exit" --arg note "$probe_note" '
+			def kubelet:
+				(if (.source|type) == "object" then .source.component == "kubelet" else false end)
+				or .reportingComponent == "kubelet";
+			.[0] |
+			[.items[] | select((.involvedObject|type) == "object")
+				| select(.involvedObject.kind == "Pod" and .involvedObject.namespace == "goauthy"
+					and .involvedObject.fieldPath == "spec.containers{goauthy}" and .reason == "Killing" and kubelet)] as $kills
+			| {source:"failure-capture/events.json",available:true,reason:null,events_json_exit:$code,coverage_note:$note,
+				pods:[range(0;3) as $i | [$kills[] | select(.involvedObject.name == ("goauthy-" + ($i|tostring)))] as $p
+					| {index:$i,
+						startup_probe_kill_records:([$p[] | select(.message == "Container goauthy failed startup probe, will be restarted")]|length),
+						liveness_probe_kill_records:([$p[] | select(.message == "Container goauthy failed liveness probe, will be restarted")]|length),
+						other_kill_records:([$p[] | select(.message != "Container goauthy failed startup probe, will be restarted"
+							and .message != "Container goauthy failed liveness probe, will be restarted")]|length)}]}
+		' "$events" 2>/dev/null || probe_unavailable projection-error
+	fi
+}
+
 summarize_results() {
 	analyzer=$root/scripts/summarize-e2e-kind-saas-isolation-113.sh
 	stage_dir=$temp_dir/analyzer-stage
@@ -184,16 +235,39 @@ summarize_results() {
 	# or copied into any safe artifact. Unrecognized or missing diagnostics stay
 	# unknown; they are never treated as success or as cause proof.
 	: >"$temp_dir/iam-fatal.tsv"
+	: >"$temp_dir/setup-checkpoints.tsv"
+	: >"$temp_dir/setup-failure.tsv"
 	for f in "$stage_dir"/driver-isolation113-driver-*.log; do
 		[ -f "$f" ] || continue
 		fidx=$(basename "$f" | sed -nE 's/.*goauthy-([0-9]+)-.*/\1/p')
 		[ -n "$fidx" ] || continue
-		awk -v di="$fidx" '
+		awk -v di="$fidx" -v checkpoints="$temp_dir/setup-checkpoints.tsv" -v fatals="$temp_dir/iam-fatal.tsv" -v setup_failures="$temp_dir/setup-failure.tsv" '
+			BEGIN { phase = "before" }
 			{
 				line = $0
+				if (line ~ /^[[:space:]]*[^[:space:]]+\.go:[0-9]+:[[:space:]]*isolation113-setup-checkpoint([[:space:]]|$)/) {
+					if (line !~ /^[[:space:]]*connection_use_grant_test\.go:[0-9]+:[[:space:]]+isolation113-setup-checkpoint stage=(config_ready|initial_login_complete|provider_created|collection_created|connection_created|api_key_bound|consumer_created|grant_created|invoke_scope_ready|invoke_token_issued|invoke_prechecks_complete|diagnostic_entered)$/) {
+						invalid = 1
+						next
+					}
+					checkpoint = line
+					sub(/^[[:space:]]*connection_use_grant_test\.go:[0-9]+:[[:space:]]+/, "", checkpoint)
+					sub(/^isolation113-setup-checkpoint stage=/, "", checkpoint)
+					print di "\t" checkpoint >> checkpoints
+					if (checkpoint == "config_ready") {
+						if (phase == "before") { phase = "active"; config_ordinal = NR } else { invalid = 1 }
+					} else if (checkpoint == "initial_login_complete") {
+						if (phase == "active" && NR > config_ordinal && fatal_count == 0) { phase = "complete"; completion_ordinal = NR } else { invalid = 1 }
+					} else if (phase != "complete") {
+						invalid = 1
+					}
+					next
+				}
 				if (line !~ /^[[:space:]]*connection_use_grant_test\.go:[0-9]+:/) next
 				sub(/^[[:space:]]*connection_use_grant_test\.go:[0-9]+:[[:space:]]*/, "", line)
 				if (line ~ /^isolation113 /) next
+				if (line ~ /^isolation113-stage /) next
+				if (line ~ /^isolation113-setup-checkpoint([[:space:]]|$)/) { invalid = 1; next }
 				if (line ~ /^waiting [0-9]+ seconds for the login attempt window$/) next
 				reason = ""; status = ""
 				if (line ~ /^authorize status = [0-9]+, want login form:/) {
@@ -222,10 +296,45 @@ summarize_results() {
 					if (n != line && n ~ /Client\.Timeout|^context deadline exceeded/) reason = "transport_timeout"
 				}
 				if (reason == "") reason = "unknown"
-				print di "\t" reason "\t" status
+				print di "\t" reason "\t" status >> fatals
+				if (phase == "before") {
+					preconfig_fatal = 1
+				} else if (phase == "active" && NR > config_ordinal) {
+					fatal_count++
+					if (fatal_count == 1) { setup_reason = reason; setup_status = status }
+				} else if (phase == "complete" && NR > completion_ordinal) {
+					# A later fatal belongs after the completed initial-login interval.
+				}
 			}
-		' "$f" >>"$temp_dir/iam-fatal.tsv"
+			END {
+				state = "incomplete"; reason = ""; status = ""
+				if (!invalid && !preconfig_fatal) {
+					if (phase == "complete") {
+						state = "completed"
+					} else if (phase == "active" && fatal_count == 1 && setup_reason != "unknown") {
+						state = "classified"; reason = setup_reason; status = setup_status
+					}
+				}
+				print di "\t" state "\t" reason "\t" status >> setup_failures
+			}
+		' "$f"
 	done
+	jq -Rn --rawfile seen "$seen_idx" --rawfile observations "$temp_dir/setup-checkpoints.tsv" '
+		def lines: split("\n") | map(select(length > 0));
+		($seen | lines) as $seen_indexes |
+		($observations | lines | map(split("\t"))) as $checkpoints |
+		{
+			coverage: "recognized checkpoints observed in collected driver logs only; null does not prove absence or cause",
+			drivers: [range(0; 3) as $i |
+				([$checkpoints[] | select(.[0] == ($i | tostring)) | .[1]]) as $stages |
+				{
+					driver_index: $i,
+					log_available: (($seen_indexes | index($i | tostring)) != null),
+					observed_stages: (if ($stages | length) > 0 then $stages else null end)
+				}
+			]
+		}
+	' >"$temp_dir/setup-checkpoints.json" || fail 'failed to derive setup checkpoint diagnostics'
 	if [ -s "$temp_dir/iam-fatal.tsv" ]; then
 		jq -R -s 'split("\n") | map(select(length > 0)) | map(split("\t")) | map({
 			driver_index: (.[0] | tonumber),
@@ -235,15 +344,38 @@ summarize_results() {
 	else
 		printf '[]' >"$temp_dir/iam-fatal.json"
 	fi
+	jq -Rn --rawfile failures "$temp_dir/setup-failure.tsv" '
+		def lines: split("\n") | map(select(length > 0));
+		($failures | lines | map(split("\t"))) as $failure_rows |
+		{
+			criterion: "only one recognized anchored helper fatal between an exact config_ready and initial_login_complete interval is classified; contradictory or missing evidence is incomplete, not cause proof",
+			drivers: [range(0;3) as $i |
+				([$failure_rows[] | select(.[0] == ($i | tostring))]) as $matches |
+				(if ($matches | length) == 1 then $matches[0] else null end) as $row |
+				{
+					driver_index:$i, state:($row[1] // "incomplete"),
+					reason:(if $row[1] == "classified" then $row[2] else null end),
+					http_status:(if $row[1] == "classified" and $row[3] != "" then ($row[3] | tonumber) else null end)
+				}
+			]
+		}' >"$temp_dir/setup-failure-diagnostics.json" || fail 'failed to derive setup failure diagnostics'
 
 	analyzer_status=0
 	analyzer_ok=false
+	analyzer_failure_code=unknown
 	if [ ! -x "$analyzer" ]; then
 		analyzer_status=127
+		analyzer_failure_code=unavailable
 	else
 		"$analyzer" "$stage_dir" >"$temp_dir/analyzer.json" 2>"$temp_dir/analyzer.stderr" || analyzer_status=$?
 		if [ "$analyzer_status" -eq 0 ] && jq -e . "$temp_dir/analyzer.json" >/dev/null 2>&1; then
 			analyzer_ok=true
+		fi
+		if [ "$analyzer_status" -ne 0 ]; then
+			analyzer_failure_code=$(awk '
+				NR == 1 && $0 == "no observation records parsed" { known = 1 }
+				END { if (NR == 1 && known) print "no_observation_records"; else print "unknown" }
+			' "$temp_dir/analyzer.stderr")
 		fi
 	fi
 
@@ -260,9 +392,17 @@ summarize_results() {
 				unexpected_groups: .denominators.unexpected_groups
 			},
 			groups: [.groups[] | {driver_index, phase, route, operation, n, success_n, error_n, outcomes, statuses, p95_ms, p99_ms}],
-			protected: .protected,
-			fault_routes: .fault_routes,
-			iam_failure_diagnostics: (
+		protected: .protected,
+		fault_routes: .fault_routes,
+		iam_stages: {
+			stage_outcomes: [.iam_stages.stage_outcomes[] | {driver_index, phase, stage, outcome, n, elapsed_ms_max, elapsed_ms_p95}],
+			timeout_n: .iam_stages.timeout_n,
+			coverage: [.iam_stages.coverage[] | {driver_index, phase, iam_attempts, stage_observations}],
+			attempt_coverage: [.iam_stages.attempt_coverage[] | {driver_index, phase, scheduled_unix_ms, stage_n}],
+			complete: .iam_stages.complete,
+			attempt_complete: .iam_stages.attempt_complete
+		},
+		iam_failure_diagnostics: (
 				([.protected.groups[] | select(.route == "iam" and .error_n > 0)]) as $ig |
 				([$ig[].error_n] | add // 0) as $ierr |
 				([$ig[] | .driver_index] | unique) as $drivers |
@@ -303,7 +443,14 @@ summarize_results() {
 				comparisons: [.performance.comparisons[] | {driver_index, phase, route, n, p95_ms, p99_ms, p95_limit_ms, p99_limit_ms, pass}]
 			},
 			resources: {ceiling: .resources.ceiling, evidence: .resources.evidence},
-			fixture: {aggregate: .fixture.aggregate},
+			fixture: {
+				aggregate: .fixture.aggregate,
+				complete: .fixture.complete,
+				per_index: .fixture.per_index,
+				route_check: .fixture.route_check,
+				index_completeness: .fixture.index_completeness,
+				mismatches: .fixture.mismatches
+			},
 			small_sample,
 			overall,
 			criterion_pass: (.overall.correctness == "pass" and .overall.performance == "pass"),
@@ -312,11 +459,11 @@ summarize_results() {
 		jq '.resources + {available: true}' "$temp_dir/analyzer.json" >"$results_dir/resource-summary.json" || fail 'failed to derive the resource summary'
 	else
 		analyzer_reason="analyzer unavailable or malformed (exit status $analyzer_status)"
-		jq -n --arg reason "$analyzer_reason" --argjson status "$analyzer_status" '{
+		jq -n --arg reason "$analyzer_reason" --arg code "$analyzer_failure_code" --argjson status "$analyzer_status" '{
 			schema_version: 1,
 			analyzer: "scripts/summarize-e2e-kind-saas-isolation-113.sh",
 			diagnostic_directory_basename: "unavailable",
-			error: {reason: $reason, analyzer_status: $status},
+			error: {reason: $reason, analyzer_status: $status, failure_code: $code},
 			iam_failure_diagnostics: {
 				criterion: "every protected IAM error must carry an anchored connection_use_grant_test.go t.Helper diagnostic; recognized count must equal total errors exactly with no unrecognized or excess diagnostics, otherwise incomplete, never success or cause proof",
 				source: "unavailable",
@@ -333,9 +480,10 @@ summarize_results() {
 			criterion_pass: false,
 			criterion_status: "inconclusive"
 		}' >"$results_dir/criterion.json"
-		jq -n --arg reason "$analyzer_reason" '{
+		jq -n --arg reason "$analyzer_reason" --arg code "$analyzer_failure_code" '{
 			available: false,
 			reason: $reason,
+			failure_code: $code,
 			ceiling: {status: "missing", result: "inconclusive", reason: "no approved local resource ceiling; analyzer unavailable"},
 			series: [],
 			evidence: {unavailable_non_rss_count: null, complete: false}
@@ -343,9 +491,148 @@ summarize_results() {
 	fi
 
 	startup=$(startup_summary) || fail 'failed to derive startup observability'
-	jq --argjson startup "$startup" '. + {startup: $startup}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
+	probe_events=$(probe_events_summary) || fail 'failed to derive probe event observability'
+	jq --argjson startup "$startup" --argjson events "$probe_events" --slurpfile checkpoints "$temp_dir/setup-checkpoints.json" --slurpfile setup_failures "$temp_dir/setup-failure-diagnostics.json" '. + {startup: ($startup + {probe_events:$events}), setup_checkpoints: $checkpoints[0], setup_failure_diagnostics: $setup_failures[0]}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
 		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
-		fail 'failed to add startup observability to the resource summary'
+		fail 'failed to add startup and setup diagnostics to the resource summary'
+
+	# Optional diagnostic authentication-stage summary. It is added only when
+	# the privacy-safe summarizer validates the bounded per-pod pre/post
+	# records; otherwise a fixed-reason unavailable marker is recorded. Only the
+	# three fixed capture reasons may enter the public safe JSON. This append
+	# never touches the mandatory resource series, the resource availability
+	# marker, or the overall criterion gates.
+	auth_stage_summary=$("$root/scripts/summarize-saas-isolation-113-auth-stage.sh" "$evidence_dir" 2>/dev/null || true)
+	if ! printf '%s' "$auth_stage_summary" | jq -e '.available == true' >/dev/null 2>&1; then
+		auth_reason=$(printf '%s' "$auth_stage_summary" | jq -r '
+			if .reason == "capture-invalid" then "capture-invalid"
+			elif .reason == "capture-incomplete" then "capture-incomplete"
+			else "capture-missing" end
+		' 2>/dev/null || true)
+		case "$auth_reason" in
+			capture-invalid|capture-incomplete|capture-missing) ;;
+			*) auth_reason=capture-missing ;;
+		esac
+		auth_stage_summary=$(jq -n --arg reason "$auth_reason" '{schema_version: 1, available: false, reason: $reason}')
+	fi
+	jq --argjson auth "$auth_stage_summary" '. + {auth_stage: $auth}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
+		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
+		fail 'failed to add authentication-stage diagnostics to the resource summary'
+
+	object_store_reason=capture-invalid
+	if [ -s "$evidence_dir/object-store-pre-0.json" ] && [ -s "$evidence_dir/object-store-pre-1.json" ] &&
+		[ -s "$evidence_dir/object-store-pre-2.json" ] && [ -s "$evidence_dir/object-store-post-0.json" ] &&
+		[ -s "$evidence_dir/object-store-post-1.json" ] && [ -s "$evidence_dir/object-store-post-2.json" ]; then
+		if object_store_summary=$(jq -n -e \
+			--slurpfile pre0 "$evidence_dir/object-store-pre-0.json" \
+			--slurpfile pre1 "$evidence_dir/object-store-pre-1.json" \
+			--slurpfile pre2 "$evidence_dir/object-store-pre-2.json" \
+			--slurpfile post0 "$evidence_dir/object-store-post-0.json" \
+			--slurpfile post1 "$evidence_dir/object-store-post-1.json" \
+			--slurpfile post2 "$evidence_dir/object-store-post-2.json" '
+			def counter: type == "number" and isfinite and . >= 0 and floor == . and . <= 9007199254740991;
+			def counter_keys: ["http_requests","http_failures","sdk_retries","transport_failures","condition_conflicts","dedup_hits","http_4xx_unexpected","http_5xx"];
+			def valid_capture($pod):
+				(keys | sort) == ["available","counters","incarnation_stable","pod_index","reason","schema_version"]
+				and .schema_version == 1 and .pod_index == $pod
+				and (
+					(.available == true and .reason == null and .incarnation_stable == true
+						and (.counters | type) == "object" and ((.counters | keys | sort) == (counter_keys | sort))
+						and ([.counters[] | select((. | counter) | not)] | length) == 0)
+					or
+					(.available == false and .incarnation_stable == false and .counters == null
+						and (.reason as $reason | (["capture-unavailable","capture-invalid","identity-unknown","identity-unstable"] | index($reason)) != null))
+				);
+			if ([$pre0,$pre1,$pre2,$post0,$post1,$post2] | map(length) | all(. == 1) | not)
+			then error("expected one object-store capture per file")
+			else [$pre0[0],$pre1[0],$pre2[0],$post0[0],$post1[0],$post2[0]] as $captures |
+				if ([range(0; 3) as $pod | ($captures[$pod] | valid_capture($pod)) and ($captures[$pod + 3] | valid_capture($pod))] | all) | not
+				then error("invalid object-store capture")
+				else
+					[range(0; 3) as $pod |
+						$captures[$pod] as $pre | $captures[$pod + 3] as $post |
+						if ($pre.available | not) then {pod_index:$pod,available:false,reason:$pre.reason,incarnation_stable:false,counters_delta:null}
+						elif ($post.available | not) then {pod_index:$pod,available:false,reason:$post.reason,incarnation_stable:false,counters_delta:null}
+						else
+							(([$pre.counters | to_entries[] as $entry | select($post.counters[$entry.key] < $entry.value)] | length) > 0) as $reset |
+							if $reset then {pod_index:$pod,available:false,reason:"counter-reset",incarnation_stable:true,counters_delta:null}
+							else {pod_index:$pod,available:true,reason:null,incarnation_stable:true,
+								counters_delta:([$pre.counters | to_entries[] as $entry | {key:$entry.key,value:($post.counters[$entry.key] - $entry.value)}] | from_entries)} end
+						end
+					] as $pods |
+					{
+						schema_version: 1,
+						available: ([$pods[].available] | all),
+						reason: ([$pods[] | select(.available | not) | .reason][0] // null),
+						pods: $pods,
+						notes: "Per-pod deltas of fixed cumulative Rhiza object-store counters between pre and post captures. Capture-interval evidence only; counters provide no latency, request-level correlation, or causal attribution."
+					}
+				end
+			end
+		' 2>/dev/null); then
+			object_store_reason=
+		fi
+	else
+		object_store_reason=capture-missing
+	fi
+	if [ -z "$object_store_reason" ]; then
+		:
+	else
+		object_store_summary=$(jq -n --arg reason "$object_store_reason" '{schema_version:1,available:false,reason:$reason,pods:[],notes:"Per-pod Rhiza object-store counter capture was unavailable; no counter values were inferred."}')
+	fi
+	jq --argjson object_store "$object_store_summary" '. + {object_store: $object_store}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
+		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
+		fail 'failed to add object-store counter diagnostics to the resource summary'
+
+	readiness_file=$evidence_dir/authorize-readiness.tsv
+	if [ ! -f "$readiness_file" ]; then
+		readiness_summary=$(jq -n '{schema_version:1,available:false,reason:"capture-missing",successful_pod_indices:null}')
+	elif [ ! -r "$readiness_file" ]; then
+		readiness_summary=$(jq -n '{schema_version:1,available:false,reason:"capture-invalid",successful_pod_indices:null}')
+	elif readiness_count=$(LC_ALL=C awk -F '\t' '
+		BEGIN { expected = 0; invalid = 0 }
+		{
+			if (NF != 3 || $1 !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/ ||
+				expected >= 3 || $2 != ("goauthy-" expected) || $3 != "200") {
+				invalid = 1
+			} else {
+				expected++
+			}
+		}
+		END { if (invalid) exit 1; print expected }
+	' "$readiness_file" 2>/dev/null); then
+		readiness_summary=$(jq -n --argjson count "$readiness_count" \
+			'{schema_version:1,available:true,reason:null,successful_pod_indices:[range(0; $count)]}')
+	else
+		readiness_summary=$(jq -n '{schema_version:1,available:false,reason:"capture-invalid",successful_pod_indices:null}')
+	fi
+	jq --argjson readiness "$readiness_summary" '. + {authorize_readiness: $readiness}' \
+		"$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
+		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
+		fail 'failed to add authorize-readiness diagnostics to the resource summary'
+
+	# Optional startup fatal summary. It is added only when the privacy-safe
+	# summarizer validates the bounded per-pod current/previous anchored fatal
+	# records; otherwise a fixed-reason unavailable marker is recorded. Only the
+	# three fixed capture reasons may enter the public safe JSON. This append
+	# never touches the mandatory resource series, the resource availability
+	# marker, or the overall criterion gates.
+	startup_fatal_summary=$("$root/scripts/summarize-saas-isolation-113-startup-fatal.sh" "$evidence_dir" 2>/dev/null || true)
+	if ! printf '%s' "$startup_fatal_summary" | jq -e '.available == true' >/dev/null 2>&1; then
+		startup_fatal_reason=$(printf '%s' "$startup_fatal_summary" | jq -r '
+			if .reason == "capture-invalid" then "capture-invalid"
+			elif .reason == "capture-incomplete" then "capture-incomplete"
+			else "capture-missing" end
+		' 2>/dev/null || true)
+		case "$startup_fatal_reason" in
+			capture-invalid|capture-incomplete|capture-missing) ;;
+			*) startup_fatal_reason=capture-missing ;;
+		esac
+		startup_fatal_summary=$(jq -n --arg reason "$startup_fatal_reason" '{schema_version: 1, available: false, reason: $reason}')
+	fi
+	jq --argjson sf "$startup_fatal_summary" '. + {startup_fatal: $sf}' "$results_dir/resource-summary.json" >"$temp_dir/resource-summary.json" &&
+		mv "$temp_dir/resource-summary.json" "$results_dir/resource-summary.json" ||
+		fail 'failed to add startup fatal diagnostics to the resource summary'
 
 	json_or_null() {
 		if [ -s "$1" ] && jq -e . "$1" >/dev/null 2>&1; then
@@ -361,8 +648,12 @@ summarize_results() {
 	helper_head=$(cat "$evidence_dir/helper-source-head.txt" 2>/dev/null || true)
 	jq -n --argjson helper "$helper_pins" --argjson fixture "$fixture_runtime" --argjson driver "$driver_runtime" --argjson candidate_node "$candidate_node_pins" \
 		--arg candidate_image "${GOAUTHY_IMAGE:-}" --arg candidate_source "${GOAUTHY_CANDIDATE_SOURCE:-}" \
-		--arg helper_source_head "$helper_head" '
+		--arg helper_source_head "$helper_head" \
+		--arg local_build "${GOAUTHY_LOCAL_BUILD:-0}" \
+		--arg candidate_manifest "${candidate_manifest_digest:-${GOAUTHY_CANDIDATE_MANIFEST_DIGEST:-}}" \
+		--arg candidate_config "${candidate_config_id:-${GOAUTHY_CANDIDATE_CONFIG_DIGEST:-}}" '
 		def runtime_digest: sub("^(containerd|docker-pullable)://"; "") | if contains("@sha256:") then sub("^.*@"; "") else . end;
+		def strict_digest: if (type) == "string" and (test("^sha256:[0-9a-f]{64}$")) then . else null end;
 		def runtime_pins($v): if ($v | type) == "array" then [$v[] | {image, digest: (.imageID | runtime_digest)}] else null end;
 		def node_pins($v):
 			try (if ($v | type) == "object"
@@ -371,7 +662,14 @@ summarize_results() {
 				and all($v.runtime_digests[]; type == "string" and test("^sha256:[0-9a-f]{64}$"))
 			then $v | {config_digest, runtime_digests} else null end) catch null;
 		{
-			candidate: {image: $candidate_image, source: $candidate_source, node_pins: node_pins($candidate_node)},
+			candidate: {
+				image: $candidate_image,
+				source: $candidate_source,
+			mode: (if $local_build == "1" then "source-build" else "released-image" end),
+			manifest_digest: (if $local_build == "1" then ($candidate_manifest | strict_digest) else null end),
+			config_digest: (if $local_build == "1" then ($candidate_config | strict_digest) else null end),
+				node_pins: node_pins($candidate_node)
+			},
 			helper_source_head: $helper_source_head,
 			helper_image_pins: (
 				if $helper == null then null else
@@ -480,6 +778,18 @@ summarize_results() {
 		jq '.fixture' "$results_dir/criterion.json" 2>/dev/null || true
 		echo '```'
 		echo
+		echo '## Authentication stage diagnostics (capture-interval deltas)'
+		echo
+		echo '```json'
+		jq '.auth_stage' "$results_dir/resource-summary.json" 2>/dev/null || true
+		echo '```'
+		echo
+		echo '## Startup fatal diagnostics (anchored native records)'
+		echo
+		echo '```json'
+		jq '.startup_fatal' "$results_dir/resource-summary.json" 2>/dev/null || true
+		echo '```'
+		echo
 		echo '## Runner environment'
 		echo
 		echo '```json'
@@ -516,15 +826,31 @@ results_dir=$2
 
 cd "$root"
 
-: "${GOAUTHY_IMAGE:?set GOAUTHY_IMAGE to the immutable candidate image reference}"
 : "${GOAUTHY_CANDIDATE_SOURCE:?set GOAUTHY_CANDIDATE_SOURCE to the reviewed source SHA}"
+: "${GOAUTHY_LOCAL_BUILD:=0}"
 : "${KIND_CLUSTER:=goauthy-capacity-113-ci}"
 : "${KIND_NODE_IMAGE:=kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5}"
 
-printf '%s' "$GOAUTHY_IMAGE" | grep -Eq '^ghcr\.io/mrchypark/goauthy@sha256:[0-9a-f]{64}$' || fail 'GOAUTHY_IMAGE must be ghcr.io/mrchypark/goauthy@sha256:<64 lowercase hex>'
+case "$GOAUTHY_LOCAL_BUILD" in 0|1) ;; *) fail 'GOAUTHY_LOCAL_BUILD must be 0 or 1' ;; esac
 printf '%s' "$GOAUTHY_CANDIDATE_SOURCE" | grep -Eq '^[0-9a-f]{40}$' || fail 'GOAUTHY_CANDIDATE_SOURCE must be a 40-character lowercase hex SHA'
 case "$KIND_CLUSTER" in ''|*[!a-z0-9-]*|-*|*-) fail 'KIND_CLUSTER must be a DNS label' ;; esac
 [ "${#KIND_CLUSTER}" -le 40 ] || fail 'KIND_CLUSTER is too long'
+if [ "$GOAUTHY_LOCAL_BUILD" = 1 ]; then
+	# Manual-CI-only ephemeral source build. No release, no registry
+	# publication, and no pull of any mutable tag: the candidate image is
+	# built from the reviewed source and bound to the actual imported OCI
+	# manifest and config digests before the diagnostic driver starts.
+	[ -z "${GOAUTHY_IMAGE:-}" ] || fail 'GOAUTHY_LOCAL_BUILD=1 must not be combined with a pre-set GOAUTHY_IMAGE'
+	[ "$(git -C "$root" rev-parse --verify HEAD 2>/dev/null || true)" = "$GOAUTHY_CANDIDATE_SOURCE" ] ||
+		fail 'source build requires the reviewed source SHA to equal the clean checkout HEAD'
+	[ -z "$(git -C "$root" status --porcelain --untracked-files=all)" ] ||
+		fail 'source build requires a clean committed checkout'
+	GOAUTHY_IMAGE="goauthy:ci-$KIND_CLUSTER"
+	export GOAUTHY_IMAGE
+else
+	: "${GOAUTHY_IMAGE:?set GOAUTHY_IMAGE to the immutable candidate image reference}"
+	printf '%s' "$GOAUTHY_IMAGE" | grep -Eq '^ghcr\.io/mrchypark/goauthy@sha256:[0-9a-f]{64}$' || fail 'GOAUTHY_IMAGE must be ghcr.io/mrchypark/goauthy@sha256:<64 lowercase hex>'
+fi
 case "$evidence_dir" in /*) ;; *) fail 'EVIDENCE_DIR must be absolute' ;; esac
 case "$results_dir" in /*) ;; *) fail 'RESULTS_DIR must be absolute' ;; esac
 case "$evidence_dir" in "$root"/*) fail 'EVIDENCE_DIR must be outside the repository' ;; esac
@@ -548,6 +874,8 @@ chmod 700 "$temp_dir"
 created=false
 inotify_original=
 load_alias=
+candidate_owned=0
+meta_config_digest=
 
 cleanup() {
 	status=$?
@@ -555,6 +883,23 @@ cleanup() {
 	cleanup_failed=false
 	if [ -n "$load_alias" ]; then
 		docker rmi "$load_alias" >/dev/null 2>&1 || cleanup_failed=true
+	fi
+	# Ownership is reserved before load, so a partial load that created the tag
+	# but returned nonzero is still cleaned up. Delete only when the current
+	# tag config equals the known built config: an absent tag is nothing to do,
+	# and a mismatched tag is preserved with a controlled cleanup failure
+	# rather than deleting an unexpected target. A fail before the reservation
+	# never deletes anything.
+	if [ "$candidate_owned" = 1 ]; then
+		current_tag_id=$(docker image inspect --format '{{.Id}}' "$GOAUTHY_IMAGE" 2>/dev/null || true)
+		if [ -n "$current_tag_id" ]; then
+			if [ "$current_tag_id" = "$meta_config_digest" ]; then
+				docker rmi "$GOAUTHY_IMAGE" >/dev/null 2>&1 || cleanup_failed=true
+			else
+				echo "capacity-113-ci: cleanup preserved an unexpected image tag: $GOAUTHY_IMAGE" >&2
+				cleanup_failed=true
+			fi
+		fi
 	fi
 	if [ "$created" = true ]; then
 		if [ -n "$inotify_original" ]; then
@@ -590,41 +935,213 @@ docker exec "$node" sysctl -w fs.inotify.max_user_instances=512 >/dev/null 2>&1 
 	docker exec "$node" sh -c 'echo 512 > /proc/sys/fs/inotify/max_user_instances'
 "$root/scripts/e2e-preflight.sh" kind-inotify --cluster "$KIND_CLUSTER"
 
-docker pull "$GOAUTHY_IMAGE"
+candidate_manifest_digest=
+candidate_build_mode=released-image
+if [ "$GOAUTHY_LOCAL_BUILD" = 1 ]; then
+	candidate_build_mode=source-build
+	candidate_oci=$temp_dir/candidate-oci.tar
+	candidate_docker=$temp_dir/candidate-docker.tar
+	# Refuse to touch a pre-existing host tag before any costly work.
+	if docker image inspect "$GOAUTHY_IMAGE" >/dev/null 2>&1; then
+		fail "refusing to overwrite a pre-existing host image tag: $GOAUTHY_IMAGE"
+	fi
+	# One build, two exporters: a real OCI image layout for the Kind node and a
+	# classic Docker archive for the host. The classic Docker archive is loaded
+	# into the host because the classic CI Docker store does not accept OCI
+	# layouts. Provenance/SBOM are disabled so each emission is a bounded
+	# single-platform manifest. No mutable tag is published or pulled and no
+	# registry is contacted.
+	docker buildx build \
+		--output "type=oci,dest=$candidate_oci,name=$GOAUTHY_IMAGE" \
+		--output "type=docker,dest=$candidate_docker" \
+		--label "org.opencontainers.image.revision=$GOAUTHY_CANDIDATE_SOURCE" \
+		--provenance=false --sbom=false \
+		-f "$root/Dockerfile" "$root"
+	# Derive the actual OCI manifest and config identity from the archive
+	# itself. The shared multi-exporter metadata key is not trusted because it
+	# merges exporter results.
+	. "$root/scripts/capacity-113-oci-archive-identity.sh"
+	oci_identity=$(oci_archive_identity "$candidate_oci" "$GOAUTHY_CANDIDATE_SOURCE") ||
+		fail 'source-build OCI archive identity verification failed'
+	candidate_manifest_digest=$(printf '%s\n' "$oci_identity" | awk -F'\t' 'NR==1{print $1}')
+	meta_config_digest=$(printf '%s\n' "$oci_identity" | awk -F'\t' 'NR==1{print $2}')
+	printf '%s' "$candidate_manifest_digest" | grep -Eq '^sha256:[0-9a-f]{64}$' ||
+		fail 'source-build OCI manifest digest is missing or malformed'
+	printf '%s' "$meta_config_digest" | grep -Eq '^sha256:[0-9a-f]{64}$' ||
+		fail 'source-build OCI config digest is missing or malformed'
+	# Reserve ownership after the absence check and known config, before the
+	# host load, so a partial load that creates the tag but returns nonzero is
+	# still cleaned up (cleanup re-verifies the tag config before deleting).
+	candidate_owned=1
+	docker load -i "$candidate_docker" >/dev/null ||
+		fail 'failed to load the source-build Docker archive into the host image store'
+	if ! docker image inspect "$GOAUTHY_IMAGE" >/dev/null 2>&1; then
+		docker tag "$meta_config_digest" "$GOAUTHY_IMAGE" >/dev/null ||
+			fail 'failed to tag the source-build candidate in the host image store'
+	fi
+else
+	docker pull "$GOAUTHY_IMAGE"
+fi
 revision=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$GOAUTHY_IMAGE" 2>/dev/null || true)
 [ "$revision" = "$GOAUTHY_CANDIDATE_SOURCE" ] || fail "candidate image revision label '$revision' does not match GOAUTHY_CANDIDATE_SOURCE '$GOAUTHY_CANDIDATE_SOURCE'"
 candidate_config_id=$(docker image inspect --format '{{.Id}}' "$GOAUTHY_IMAGE" 2>/dev/null || true)
 printf '%s' "$candidate_config_id" | grep -Eq '^sha256:[0-9a-f]{64}$' ||
 	fail 'candidate image config id is not a sha256 digest'
-# The sixth run failed with the app container ErrImageNeverPull. The importer
-# mechanism is inferred, not directly observed: Kind's docker-save importer may
-# not attach the original digest reference, so the canonical deployment
-# reference may not resolve. Check whether the canonical reference already
-# resolves; only attach it when absent, so a pre-registered identical image is
-# not disturbed. The config blob (config ID) is preserved; the packaging
-# manifest digest may differ from the original registry manifest and is not
-# claimed equal. The owned alias must be retained through every later host
-# candidate use and removed only once by the EXIT cleanup, because removing it
-# midrun can drop the image content the host still needs.
-proposed_alias="${GOAUTHY_IMAGE%%@*}:${KIND_CLUSTER}"
-if docker image inspect "$proposed_alias" >/dev/null 2>&1; then
-	fail "refusing to overwrite a pre-existing host image tag: $proposed_alias"
+if [ "$GOAUTHY_LOCAL_BUILD" = 1 ]; then
+	# Bind the host payload: the loaded image config must equal the build OCI
+	# config digest, and the saved archive must expose the same config blob.
+	[ "$candidate_config_id" = "$meta_config_digest" ] ||
+		fail 'source-build image config id differs from the build OCI config digest'
+	saved_config_blob=$(docker image save "$GOAUTHY_IMAGE" | tar -xOf - manifest.json | jq -er '.[0].Config | select(test("^blobs/sha256/[0-9a-f]{64}$"))') ||
+		fail 'source-build saved archive manifest is missing a strict config blob path'
+	[ "sha256:${saved_config_blob##*/}" = "$candidate_config_id" ] ||
+		fail 'source-build saved archive config digest differs from the image config id'
 fi
-load_alias=$proposed_alias
-docker tag "$GOAUTHY_IMAGE" "$proposed_alias"
-kind load docker-image "$proposed_alias" --name "$KIND_CLUSTER"
-if ! docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null; then
-	docker exec "$node" ctr --namespace k8s.io images tag "$proposed_alias" "$GOAUTHY_IMAGE" >/dev/null ||
-		fail 'failed to attach the canonical candidate reference in the Kind node'
+# Source-build node reference helpers. `ctr images inspect` prints a human
+# tree, not JSON, so the target manifest is read from the documented
+# `ctr images ls` columns (REF TYPE DIGEST ...) by exact REF match. Only strict
+# sha256 digests are ever printed; any other value becomes a sentinel.
+node_ls_digest() {
+	_rows=$(docker exec "$node" ctr --namespace k8s.io images ls 2>/dev/null |
+		awk -v ref="$1" '$1 == ref && $3 ~ /^sha256:[0-9a-f]{64}$/ { print $3 }')
+	[ "$(printf '%s\n' "$_rows" | awk 'NF {n++} END {print n+0}')" -eq 1 ] || return 1
+	printf '%s' "$_rows"
+}
+
+node_cri_config() {
+	_cfg=$(docker exec "$node" crictl inspecti -o json "$1" 2>/dev/null | jq -r '.status.id // ""' 2>/dev/null) || return 1
+	[ -n "$_cfg" ] || return 1
+	printf '%s' "$_cfg"
+}
+
+sanitize_digest() {
+	if printf '%s' "$1" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+		printf '%s' "$1"
+	else
+		printf 'invalid'
+	fi
+}
+
+if [ "$GOAUTHY_LOCAL_BUILD" = 1 ]; then
+	# Import the exact OCI layout archive, preserving the content-addressed
+	# manifest digest.
+	kind load image-archive "$candidate_oci" --name "$KIND_CLUSTER" ||
+		fail 'failed to import the source-build OCI archive into the Kind node'
+	# Resolve the actual registered containerd name(s) by target manifest digest
+	# from the documented `ctr images ls` columns.
+	imported_names=$(docker exec "$node" ctr --namespace k8s.io images ls 2>/dev/null |
+		awk -v manifest="$candidate_manifest_digest" '$3 == manifest { print $1 }' | sort)
+	[ -n "$imported_names" ] ||
+		fail "source-build candidate manifest $candidate_manifest_digest is not registered in the Kind node image store"
+	# Deterministic non-bare source name: prefer a canonical repo@sha256 name,
+	# else a mapped name. Never a bare digest.
+	imported_name=
+	for name in $imported_names; do
+		case "$name" in
+			*@sha256:*) imported_name=$name; break ;;
+		esac
+	done
+	if [ -z "$imported_name" ]; then
+		for name in $imported_names; do
+			case "$name" in
+				sha256:*) continue ;;
+				*) imported_name=$name; break ;;
+			esac
+		done
+	fi
+	[ -n "$imported_name" ] ||
+		fail 'source-build candidate has no non-bare registered image name in the Kind node'
+	imported_target=$(node_ls_digest "$imported_name") ||
+		fail 'source-build imported candidate registered name is not uniquely resolvable in the Kind node image store'
+	[ "$imported_target" = "$candidate_manifest_digest" ] ||
+		fail "source-build imported candidate target manifest $(sanitize_digest "$imported_target") differs from $candidate_manifest_digest"
+	imported_config=$(node_cri_config "$imported_name") || imported_config=
+	[ "$imported_config" = "$candidate_config_id" ] ||
+		fail "source-build imported candidate config $(sanitize_digest "$imported_config") differs from $candidate_config_id"
+	# Ensure the fully-qualified digest alias exists so CRI repoDigests carries
+	# the actual manifest for the final runtime proof. Attach only when absent;
+	# never --force.
+	candidate_repo=${GOAUTHY_IMAGE%%:*}
+	case "$candidate_repo" in
+		*/*) ;;
+		*) candidate_repo="docker.io/library/$candidate_repo" ;;
+	esac
+	candidate_alias="$candidate_repo@$candidate_manifest_digest"
+	alias_target=$(node_ls_digest "$candidate_alias") || alias_target=
+	if [ -n "$alias_target" ]; then
+		[ "$alias_target" = "$candidate_manifest_digest" ] ||
+			fail "source-build digest alias $candidate_alias target manifest $(sanitize_digest "$alias_target") differs from $candidate_manifest_digest"
+		alias_config=$(node_cri_config "$candidate_alias") || alias_config=
+		[ "$alias_config" = "$candidate_config_id" ] ||
+			fail "source-build digest alias $candidate_alias config $(sanitize_digest "$alias_config") differs from $candidate_config_id"
+	else
+		docker exec "$node" ctr --namespace k8s.io images tag "$imported_name" "$candidate_alias" >/dev/null ||
+			fail "failed to attach the source-build digest alias $candidate_alias in the Kind node"
+	fi
+	# Canonical runtime reference, using the normalized registered name.
+	canonical_name="docker.io/library/$GOAUTHY_IMAGE"
+	canonical_target=$(node_ls_digest "$canonical_name") || canonical_target=
+	if [ -n "$canonical_target" ]; then
+		[ "$canonical_target" = "$candidate_manifest_digest" ] ||
+			fail "source-build canonical reference $canonical_name target manifest $(sanitize_digest "$canonical_target") differs from $candidate_manifest_digest"
+		canonical_config=$(node_cri_config "$GOAUTHY_IMAGE") || canonical_config=
+		[ "$canonical_config" = "$candidate_config_id" ] ||
+			fail "source-build canonical reference $canonical_name config $(sanitize_digest "$canonical_config") differs from $candidate_config_id"
+	else
+		docker exec "$node" ctr --namespace k8s.io images tag "$imported_name" "$canonical_name" >/dev/null ||
+			fail 'failed to attach the canonical source-build candidate reference in the Kind node'
+	fi
+	# The newly attached digest alias must propagate into CRI repoDigests for
+	# the final strict runtime proof. Poll briefly for propagation only; target
+	# and config mismatches already failed above and are never retried.
+	cri_propagated=false
+	cri_attempt=0
+	while [ "$cri_attempt" -lt 10 ]; do
+		if docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null &&
+			jq -e --arg manifest "$candidate_manifest_digest" '[(.status.repoDigests // [])[] | sub("^.*@"; "")] | index($manifest) != null' "$temp_dir/cri-image.json" >/dev/null 2>&1; then
+			cri_propagated=true
+			break
+		fi
+		cri_attempt=$((cri_attempt + 1))
+		sleep 0.5
+	done
+	[ "$cri_propagated" = true ] ||
+		fail "source-build canonical reference $canonical_name CRI repoDigests does not carry manifest $candidate_manifest_digest after alias attachment"
+else
+	# The sixth run failed with the app container ErrImageNeverPull. The importer
+	# mechanism is inferred, not directly observed: Kind's docker-save importer may
+	# not attach the original digest reference, so the canonical deployment
+	# reference may not resolve. Check whether the canonical reference already
+	# resolves; only attach it when absent, so a pre-registered identical image is
+	# not disturbed. The config blob (config ID) is preserved; the packaging
+	# manifest digest may differ from the original registry manifest and is not
+	# claimed equal. The owned alias must be retained through every later host
+	# candidate use and removed only once by the EXIT cleanup, because removing it
+	# midrun can drop the image content the host still needs.
+	proposed_alias="${GOAUTHY_IMAGE%%@*}:${KIND_CLUSTER}"
+	if docker image inspect "$proposed_alias" >/dev/null 2>&1; then
+		fail "refusing to overwrite a pre-existing host image tag: $proposed_alias"
+	fi
+	load_alias=$proposed_alias
+	docker tag "$GOAUTHY_IMAGE" "$proposed_alias"
+	kind load docker-image "$proposed_alias" --name "$KIND_CLUSTER"
 	if ! docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null; then
-		fail 'candidate canonical reference does not resolve in the Kind node CRI'
+		docker exec "$node" ctr --namespace k8s.io images tag "$proposed_alias" "$GOAUTHY_IMAGE" >/dev/null ||
+			fail 'failed to attach the canonical candidate reference in the Kind node'
+		if ! docker exec "$node" crictl inspecti -o json "$GOAUTHY_IMAGE" >"$temp_dir/cri-image.json" 2>/dev/null; then
+			fail 'candidate canonical reference does not resolve in the Kind node CRI'
+		fi
 	fi
 fi
 node_config_id=$(jq -r '.status.id // empty' "$temp_dir/cri-image.json" 2>/dev/null || true)
 [ -n "$node_config_id" ] || fail 'candidate CRI image identity is empty'
 [ "$node_config_id" = "$candidate_config_id" ] ||
 	fail 'candidate image config identity differs between the host original and the Kind node'
-printf 'candidate image loaded: config_id=%s reference=%s\n' "$candidate_config_id" "$GOAUTHY_IMAGE" >&2
+if [ "$GOAUTHY_LOCAL_BUILD" = 1 ]; then
+	jq -e --arg manifest "$candidate_manifest_digest" '[(.status.repoDigests // [])[] | sub("^.*@"; "")] | index($manifest) != null' "$temp_dir/cri-image.json" >/dev/null ||
+		fail 'source-build candidate node manifest digest does not match the build OCI manifest digest'
+fi
+printf 'candidate image loaded: mode=%s config_id=%s manifest_digest=%s reference=%s\n' "$candidate_build_mode" "$candidate_config_id" "${candidate_manifest_digest:-none}" "$GOAUTHY_IMAGE" >&2
 
 browser_password=$(openssl rand -hex 16)
 client_secret=$(openssl rand -hex 32)
@@ -690,6 +1207,8 @@ runner_status=0
 KIND_CLUSTER="$KIND_CLUSTER" \
 GOAUTHY_IMAGE="$GOAUTHY_IMAGE" \
 GOAUTHY_CANDIDATE_SOURCE="$GOAUTHY_CANDIDATE_SOURCE" \
+GOAUTHY_LOCAL_CANDIDATE="$GOAUTHY_LOCAL_BUILD" \
+GOAUTHY_CANDIDATE_MANIFEST_DIGEST="$candidate_manifest_digest" \
 GOAUTHY_E2E_BROWSER_PASSWORD="$browser_password" \
 GOAUTHY_E2E_CLIENT_SECRET="$client_secret" \
 ISOLATION113_EVIDENCE_DIR="$evidence_dir" \

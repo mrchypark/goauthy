@@ -8,6 +8,7 @@ package metrics
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -88,6 +89,45 @@ func classifyStatus(code int) string {
 }
 
 // ------------------------------------------------------------------
+// Authentication stage allowlist — bounded, low-cardinality.
+// ------------------------------------------------------------------
+
+// AuthStage is a fixed, bounded authentication stage name. The set is closed:
+// AuthStageDuration rejects any value not declared here, keeping the stage
+// label cardinality constant and free of caller-supplied data.
+type AuthStage string
+
+const (
+	AuthStageCredentialLookup   AuthStage = "credential_lookup"
+	AuthStagePasswordVerify     AuthStage = "password_verify"
+	AuthStageSubjectRevalidate  AuthStage = "subject_revalidate"
+	AuthStageInteractionConsume AuthStage = "interaction_consume"
+	AuthStageSessionRotate      AuthStage = "session_rotate"
+	AuthStageOAuthIssue         AuthStage = "oauth_issue"
+	AuthStageAuthorizeValidate  AuthStage = "authorize_validate"
+	AuthStageAuthorizeSession   AuthStage = "authorize_session"
+	AuthStagePolicyCheck        AuthStage = "policy_check"
+	AuthStagePolicyAllow        AuthStage = "policy_allow"
+	AuthStagePolicyAccountLock  AuthStage = "policy_account_lock"
+	AuthStagePolicySuccess      AuthStage = "policy_success"
+)
+
+var allowedAuthStages = map[AuthStage]bool{
+	AuthStageCredentialLookup:   true,
+	AuthStagePasswordVerify:     true,
+	AuthStageSubjectRevalidate:  true,
+	AuthStageInteractionConsume: true,
+	AuthStageSessionRotate:      true,
+	AuthStageOAuthIssue:         true,
+	AuthStageAuthorizeValidate:  true,
+	AuthStageAuthorizeSession:   true,
+	AuthStagePolicyCheck:        true,
+	AuthStagePolicyAllow:        true,
+	AuthStagePolicyAccountLock:  true,
+	AuthStagePolicySuccess:      true,
+}
+
+// ------------------------------------------------------------------
 // Registry
 // ------------------------------------------------------------------
 
@@ -120,6 +160,9 @@ type Registry struct {
 	cacheHits      *prometheus.CounterVec
 	cacheMisses    *prometheus.CounterVec
 	cacheEvictions *prometheus.CounterVec
+
+	authStageDuration            *prometheus.HistogramVec
+	authStageCanceledCompletions *prometheus.CounterVec
 
 	clk clock
 }
@@ -265,6 +308,22 @@ func newRegistry(clk clock) *Registry {
 			},
 			[]string{"cache"},
 		),
+
+		authStageDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "goauthy_auth_stage_duration_seconds",
+				Help:    "Histogram of authentication stage latency in seconds.",
+				Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+			},
+			[]string{"stage"},
+		),
+		authStageCanceledCompletions: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "goauthy_auth_stage_canceled_completions_total",
+				Help: "Authentication stage completions observed after request-context cancellation.",
+			},
+			[]string{"stage"},
+		),
 	}
 
 	reg.MustRegister(
@@ -288,6 +347,8 @@ func newRegistry(clk clock) *Registry {
 		r.cacheHits,
 		r.cacheMisses,
 		r.cacheEvictions,
+		r.authStageDuration,
+		r.authStageCanceledCompletions,
 	)
 
 	return r
@@ -300,11 +361,17 @@ func newRegistry(clk clock) *Registry {
 // constant-time comparison on fixed-size digests, preventing timing
 // side-channels.
 func (r *Registry) Handler(token string) http.Handler {
+	return AuthenticatedHandler(promhttp.HandlerFor(r.reg, promhttp.HandlerOpts{}), token)
+}
+
+// AuthenticatedHandler applies the metrics Bearer-token contract to next.
+// An empty token leaves the handler unauthenticated, matching Registry.Handler.
+func AuthenticatedHandler(next http.Handler, token string) http.Handler {
 	if token == "" {
-		return promhttp.HandlerFor(r.reg, promhttp.HandlerOpts{})
+		return next
 	}
 	return &authHandler{
-		inner:  promhttp.HandlerFor(r.reg, promhttp.HandlerOpts{}),
+		inner:  next,
 		digest: sha256.Sum256([]byte(token)),
 	}
 }
@@ -479,6 +546,27 @@ func (r *Registry) DBQueryDuration(operation string, seconds float64) {
 	r.dbQueryDuration.WithLabelValues(operation).Observe(seconds)
 }
 
+// AuthStageDuration records an authentication stage duration. The stage must be
+// one of the fixed AuthStage values and the duration must be finite and
+// non-negative; anything else is dropped without observing, so the stage label
+// can never carry caller-supplied or invalid data. A nil Registry is a no-op.
+func (r *Registry) AuthStageDuration(stage AuthStage, seconds float64) {
+	if r == nil || !allowedAuthStages[stage] || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds < 0 {
+		return
+	}
+	r.authStageDuration.WithLabelValues(string(stage)).Observe(seconds)
+}
+
+// AuthStageCanceledCompletion records a stage completion observed after its
+// request context was canceled. The stage label uses the same closed allowlist
+// as AuthStageDuration. A nil Registry is a no-op.
+func (r *Registry) AuthStageCanceledCompletion(stage AuthStage) {
+	if r == nil || !allowedAuthStages[stage] {
+		return
+	}
+	r.authStageCanceledCompletions.WithLabelValues(string(stage)).Inc()
+}
+
 // CacheHit increments the cache hit counter for the given cache name.
 func (r *Registry) CacheHit(cache string) { r.cacheHits.WithLabelValues(cache).Inc() }
 
@@ -500,6 +588,9 @@ func (r *Registry) AuthFailureCounter() prometheus.Collector { return r.security
 
 // TokenOKCounter returns the token-validation-success counter for test inspection.
 func (r *Registry) TokenOKCounter() prometheus.Collector { return r.securityTokenOK }
+
+// AuthStageDurationCollector returns the auth-stage histogram for test inspection.
+func (r *Registry) AuthStageDurationCollector() prometheus.Collector { return r.authStageDuration }
 
 // TokenRejectCounter returns the token-validation-failure counter for test inspection.
 func (r *Registry) TokenRejectCounter() prometheus.Collector { return r.securityTokenReject }

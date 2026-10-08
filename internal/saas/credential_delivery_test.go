@@ -72,10 +72,13 @@ func TestDeliverAPIKeyRejectsInvalidConsentAndConsumers(t *testing.T) {
 }
 
 // Trigger real store mutations at the authorization callbacks, without sleeps
-// or scheduler races. Callback six is the final check after key decryption.
+// or scheduler races. Callback two is AuthorizeUseGrant's own check; callback
+// five is the final check after key decryption, because the merged dispatch
+// read now evaluates authority once instead of once per provider/credential
+// query.
 func TestDeliverAPIKeyRechecksBeforeReturningSecret(t *testing.T) {
 	t.Parallel()
-	for _, phase := range []int{2, 6} {
+	for _, phase := range []int{2, 5} {
 		for _, change := range []string{"revoke", "rotate"} {
 			t.Run(fmt.Sprintf("%s/check-%d", change, phase), func(t *testing.T) {
 				ctx, s, _, b, connector, consumer, grant := deliveryFixture(t)

@@ -118,7 +118,8 @@ func logoutOpenTestDB(t *testing.T, nodeID string) *rhiza.DB {
 func TestBackchannelLogoutHTTPRevokesOnlyExactUpstreamSession(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	now := time.Now().UTC().Truncate(time.Second)
+	// Fixture age must not consume the newly issued logout token's lifetime.
+	now := time.Now().UTC().Truncate(time.Second).Add(-2 * time.Minute)
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +198,8 @@ func TestBackchannelLogoutHTTPRevokesOnlyExactUpstreamSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := signedUpstreamLogoutToken(t, key, "upstream-key", issuer, clientID, "alice", "upstream-sid", "logout-http-1", now, now.Add(time.Minute))
+	issuedAt := time.Now().UTC().Truncate(time.Second)
+	raw := signedUpstreamLogoutToken(t, key, "upstream-key", issuer, clientID, "alice", "upstream-sid", "logout-http-1", issuedAt, issuedAt.Add(time.Minute))
 	h, err := upstreamprovider.NewHandler(configs, logoutHTTPStore{}, logoutHTTPExchanger{}, verifier, nil, nil)
 	if err != nil {
 		t.Fatal(err)

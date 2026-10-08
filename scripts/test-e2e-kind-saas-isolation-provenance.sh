@@ -191,6 +191,15 @@ jq -e --arg config "$fixture_config" --arg d8 "$d8" '
 MOCK_CRI_STATUS_ID=$fixture_config MOCK_CRI_REPO_DIGESTS='[]' \
   node_image_pin_snapshot goauthy-saas-isolation-fixture:e2e "$fixture_config" "$tmp/snapshot-empty.json"
 jq -e --arg config "$fixture_config" '.config_digest == $config and .runtime_digests == []' "$tmp/snapshot-empty.json" >/dev/null
+# Source-build digest alias: a fully-qualified repo@digest repoDigest must be
+# stripped to the bare manifest and satisfy the strict manifest binding.
+m6=sha256:$(printf '%064d' 6)
+c3=sha256:$(printf '%064d' 3)
+MOCK_CRI_STATUS_ID=$c3 \
+  MOCK_CRI_REPO_DIGESTS="[\"docker.io/library/goauthy@$m6\"]" \
+  node_image_pin_snapshot goauthy:ci-test-cluster "$c3" "$tmp/snapshot-alias.json"
+jq -e --arg m "$m6" '.runtime_digests == [$m]' "$tmp/snapshot-alias.json" >/dev/null
+assert_candidate_manifest_binding "$tmp/snapshot-alias.json" "$m6" || { echo 'manifest binding rejected a digest-alias runtime pin' >&2; exit 1; }
 set +e
 MOCK_CRI_STATUS_ID="sha256:$(printf '%064d' 9)" MOCK_CRI_REPO_DIGESTS='[]' \
   node_image_pin_snapshot goauthy-saas-isolation-fixture:e2e "$fixture_config" "$tmp/snapshot-wrong-config.json" 2>/dev/null
@@ -266,6 +275,18 @@ c3=$candidate_config_digest
 c6=$candidate_manifest_digest
 c8=$candidate_node_digests
 c9=sha256:$(printf '%064d' 9)
+
+# Source-build OCI manifest binding: the manifest digest must be present in
+# the node snapshot runtime_digests. A config-only snapshot is rejected and
+# the config digest is never substituted for the manifest digest.
+jq -nc --arg m "$c6" --arg c "$c3" '{config_digest:$c, runtime_digests:[$c,$m]}' >"$tmp/bind-ok.json"
+assert_candidate_manifest_binding "$tmp/bind-ok.json" "$c6" || { echo 'manifest binding rejected a present OCI manifest digest' >&2; exit 1; }
+jq -nc --arg c "$c3" '{config_digest:$c, runtime_digests:[$c]}' >"$tmp/bind-config-only.json"
+if assert_candidate_manifest_binding "$tmp/bind-config-only.json" "$c6" >/dev/null 2>&1; then echo 'manifest binding accepted a config-only snapshot' >&2; exit 1; fi
+jq -nc --arg c "$c3" '{config_digest:$c, runtime_digests:[]}' >"$tmp/bind-empty.json"
+if assert_candidate_manifest_binding "$tmp/bind-empty.json" "$c6" >/dev/null 2>&1; then echo 'manifest binding accepted an empty snapshot' >&2; exit 1; fi
+if assert_candidate_manifest_binding "$tmp/bind-ok.json" 'sha256:short' >/dev/null 2>&1; then echo 'manifest binding accepted a malformed expected digest' >&2; exit 1; fi
+if assert_candidate_manifest_binding "$tmp/bind-missing-file.json" "$c6" >/dev/null 2>&1; then echo 'manifest binding accepted a missing snapshot' >&2; exit 1; fi
 candidate_pod() {
 	printf '%s %s %s %s %s\n' "$1" "$2" "$3" "$4" "$GOAUTHY_IMAGE"
 }
