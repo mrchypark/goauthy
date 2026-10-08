@@ -100,6 +100,34 @@ func startupErrorClass(err error) string {
 	case errors.Is(err, context.Canceled):
 		return "canceled"
 	default:
+		if err == nil {
+			return "unknown"
+		}
+		const openPrefix = "open rhiza: "
+		message := err.Error()
+		if !strings.HasPrefix(message, openPrefix) {
+			return "unknown"
+		}
+		if errors.Is(err, rhiza.ErrVoterStateLost) || errors.Is(err, rhiza.ErrVoterEnrollmentRequired) {
+			return "voter_state"
+		}
+		message = strings.TrimPrefix(message, openPrefix)
+		switch {
+		case strings.HasPrefix(message, "open WAL: "):
+			return "wal_open"
+		case strings.HasPrefix(message, "open object store: "):
+			return "object_store_open"
+		case strings.HasPrefix(message, "load checkpoint manifest: "):
+			return "checkpoint_manifest_load"
+		case strings.HasPrefix(message, "load shared decision archive: "):
+			return "shared_archive_load"
+		case strings.HasPrefix(message, "pin startup recovery evidence: "),
+			strings.HasPrefix(message, "pin certified checkpoint recovery root: "),
+			strings.HasPrefix(message, "pin generation recovery root: "):
+			return "startup_recovery_pin"
+		case strings.HasPrefix(message, "listen peer QUIC: "):
+			return "peer_listener"
+		}
 		return "unknown"
 	}
 }

@@ -36,7 +36,7 @@ capture_dir=$dir/failure-capture
 status_file=$capture_dir/capture-status.txt
 
 classes_json='["rhiza_open","rhiza_readiness","scim_runtime","bootstrap_client","bootstrap_rbac","api_key_bootstrap","dcr_trust","storage_config","schema_migrate","unknown"]'
-eclasses_json='["write_outcome_unknown","node_not_ready","quorum_unavailable","ack_durability_unavailable","deadline","canceled","unknown"]'
+eclasses_json='["write_outcome_unknown","node_not_ready","quorum_unavailable","ack_durability_unavailable","deadline","canceled","wal_open","object_store_open","checkpoint_manifest_load","shared_archive_load","startup_recovery_pin","voter_state","peer_listener","unknown"]'
 recovery_note='Counts of validated recovery failure records only; terminal unknown-or-expired emits no record. Zero observations do not prove cause absence; original and reconciliation flags overlap.'
 cause_note='Fixed inner error strings following a durability marker in validated migration fatal records, one bucket per record. Labels are observations, not causal proof; publication exhaustion can mask provider errors. Zero observations do not establish absence.'
 causes_json='["publication_conflict_exhausted","publication_refresh_regressed","archive_busy","inner_deadline","inner_canceled","unknown"]'
@@ -101,13 +101,13 @@ invalid_n=0
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 : >"$tmp/fatal.tsv"
-neg18="-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1"
+neg25="-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1	-1"
 
 # Bounded scan of one private per-pod log. Only the exact anchored record
 # start is matched; typed records are classified by the fixed error_class enum
 # and both record shapes by the fixed source prefixes. No raw characters are
 # printed. Output is one row: fatal_n, ten source counts in fixed class order,
-# seven typed counts in fixed class order.
+# fourteen typed counts in fixed class order.
 scan_jq='
 	# ponytail: known GoAuthy schema versions 1..110; extend with a new migration.
 	function migration_version(val,   v) {
@@ -139,6 +139,13 @@ scan_jq='
 		if (v == "ack_durability_unavailable") return "ack_durability_unavailable"
 		if (v == "deadline") return "deadline"
 		if (v == "canceled") return "canceled"
+		if (v == "wal_open") return "wal_open"
+		if (v == "object_store_open") return "object_store_open"
+		if (v == "checkpoint_manifest_load") return "checkpoint_manifest_load"
+		if (v == "shared_archive_load") return "shared_archive_load"
+		if (v == "startup_recovery_pin") return "startup_recovery_pin"
+		if (v == "voter_state") return "voter_state"
+		if (v == "peer_listener") return "peer_listener"
 		return "unknown"
 	}
 	function legacy_class(rest) {
@@ -226,7 +233,7 @@ scan_jq='
 		g_valid = 0
 		re = "^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9](\\.[0-9]+)?(Z|[+-][0-9][0-9]:[0-9][0-9])[[:space:]]+[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9][[:space:]]+[0-9][0-9]:[0-9][0-9]:[0-9][0-9][[:space:]]+ERROR goauthy stopped "
 		split("rhiza_open rhiza_readiness scim_runtime bootstrap_client bootstrap_rbac api_key_bootstrap dcr_trust storage_config schema_migrate unknown", order, " ")
-		split("write_outcome_unknown node_not_ready quorum_unavailable ack_durability_unavailable deadline canceled unknown", eorder, " ")
+		split("write_outcome_unknown node_not_ready quorum_unavailable ack_durability_unavailable deadline canceled wal_open object_store_open checkpoint_manifest_load shared_archive_load startup_recovery_pin voter_state peer_listener unknown", eorder, " ")
 		rrec = re
 		sub(/ERROR goauthy stopped $/, "ERROR Rhiza mutation recovery failed ", rrec)
 		split("request_status same_request_replay", rorder, " ")
@@ -285,7 +292,7 @@ scan_jq='
 			k = g_idx SUBSEP g_phase SUBSEP c
 			printf "\t%d", (k in counts ? counts[k] : 0)
 		}
-		for (j = 1; j <= 7; j++) {
+		for (j = 1; j <= 14; j++) {
 			c = eorder[j]
 			k = g_idx SUBSEP g_phase SUBSEP c
 			printf "\t%d", (k in ecounts ? ecounts[k] : 0)
@@ -325,7 +332,7 @@ for idx in 0 1 2; do
 			printf '%s\t%s\t1\t\t0\t%s\n' "$idx" "$phase" "$row" >>"$tmp/fatal.tsv"
 		else
 			reason=$(per_reason "$st" "$has_file")
-			printf '%s\t%s\t0\t%s\t-1\t%s\t-1\t-1\t-1\n' "$idx" "$phase" "$reason" "$neg18" >>"$tmp/fatal.tsv"
+			printf '%s\t%s\t0\t%s\t-1\t%s\t-1\t-1\t-1\n' "$idx" "$phase" "$reason" "$neg25" >>"$tmp/fatal.tsv"
 		fi
 	done
 done
@@ -352,10 +359,10 @@ jq -n --arg note "$recovery_note" --arg cnote "$cause_note" --argjson causes "$c
 				exit: ($r[4] | tonumber),
 				fatal_n: ($r[5] | tonumber),
 				counts: (reduce range(0; 10) as $i ({}; .[classes[$i]] = ($r[6 + $i] | tonumber))),
-				error_class_counts: (reduce range(0; 7) as $i ({}; .[eclasses[$i]] = ($r[16 + $i] | tonumber))),
-				migration_versions: ($r[23] | fromjson),
-				recovery: ($r[24] | fromjson),
-				cause_counts: ($r[25] | fromjson)
+				error_class_counts: (reduce range(0; 14) as $i ({}; .[eclasses[$i]] = ($r[16 + $i] | tonumber))),
+				migration_versions: ($r[30] | fromjson),
+				recovery: ($r[31] | fromjson),
+				cause_counts: ($r[32] | fromjson)
 			}
 		else
 			{
@@ -395,10 +402,10 @@ jq -n --arg note "$recovery_note" --arg cnote "$cause_note" --argjson causes "$c
 			observed_n: ([$rows[] | select(.[2] == "1")] | length),
 			partial: (([$rows[] | select(.[2] == "1")] | length) < 6),
 			counts: (reduce ($rows[] | select(.[2] == "1")) as $r (reduce range(0; 10) as $i ({}; .[classes[$i]] = 0); reduce range(0; 10) as $i (.; .[classes[$i]] += ($r[6 + $i] | tonumber)))),
-			error_class_counts: (reduce ($rows[] | select(.[2] == "1")) as $r (reduce range(0; 7) as $i ({}; .[eclasses[$i]] = 0); reduce range(0; 7) as $i (.; .[eclasses[$i]] += ($r[16 + $i] | tonumber)))),
-			migration_versions: (reduce ($rows[] | select(.[2] == "1")) as $r ({}; addcounts(.; ($r[23] | fromjson)))),
-			recovery: (reduce ($rows[] | select(.[2] == "1")) as $r ({}; addcounts(.; ($r[24] | fromjson)))),
-			cause_counts: (reduce ($rows[] | select(.[2] == "1")) as $r (reduce $causes[] as $c ({}; .[$c] = 0); addcounts(.; ($r[25] | fromjson))))
+			error_class_counts: (reduce ($rows[] | select(.[2] == "1")) as $r (reduce range(0; 14) as $i ({}; .[eclasses[$i]] = 0); reduce range(0; 14) as $i (.; .[eclasses[$i]] += ($r[16 + $i] | tonumber)))),
+			migration_versions: (reduce ($rows[] | select(.[2] == "1")) as $r ({}; addcounts(.; ($r[30] | fromjson)))),
+			recovery: (reduce ($rows[] | select(.[2] == "1")) as $r ({}; addcounts(.; ($r[31] | fromjson)))),
+			cause_counts: (reduce ($rows[] | select(.[2] == "1")) as $r (reduce $causes[] as $c ({}; .[$c] = 0); addcounts(.; ($r[32] | fromjson))))
 		},
 		complete: (([$rows[] | select(.[2] == "1")] | length) == 6)
 	}

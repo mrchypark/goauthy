@@ -67,7 +67,7 @@ append_line() {
 }
 
 # ---------------------------------------------------------------------------
-# Typed-first records: all six fixed error_class enums plus unknown.
+# Typed-first records: all thirteen fixed error_class enums plus unknown.
 # ---------------------------------------------------------------------------
 c1=$tmp/typed
 build_capture "$c1"
@@ -79,25 +79,45 @@ append_typed "$f" 'ack_durability_unavailable' 'private'
 append_typed "$f" 'deadline' 'private'
 append_typed "$f" 'canceled' 'private'
 append_typed "$f" 'some_unsupported_label' 'private'
+private_marker=PRIVATE_STARTUP_ERROR_CANARY
+append_typed "$f" 'wal_open' "$private_marker"
+append_typed "$f" 'object_store_open' "$private_marker"
+append_typed "$f" 'checkpoint_manifest_load' "$private_marker"
+append_typed "$f" 'shared_archive_load' "$private_marker"
+append_typed "$f" 'startup_recovery_pin' "$private_marker"
+append_typed "$f" 'voter_state' "$private_marker"
+append_typed "$f" 'peer_listener' "$private_marker"
+append_typed "$f" 'object_store_open_suffix' "$private_marker"
 if out=$("$summarizer" "$c1") && printf '%s' "$out" | jq -e '
 	.available == true and .complete == true
 	and ([.pods[].index] | sort) == [0, 1, 2]
-	and (first(.pods[] | select(.index == 0)).current.fatal_n) == 7
+	and (first(.pods[] | select(.index == 0)).current.fatal_n) == 15
 	and (first(.pods[] | select(.index == 0)).current.error_class_counts.write_outcome_unknown) == 1
 	and (first(.pods[] | select(.index == 0)).current.error_class_counts.node_not_ready) == 1
 	and (first(.pods[] | select(.index == 0)).current.error_class_counts.quorum_unavailable) == 1
 	and (first(.pods[] | select(.index == 0)).current.error_class_counts.ack_durability_unavailable) == 1
 	and (first(.pods[] | select(.index == 0)).current.error_class_counts.deadline) == 1
 	and (first(.pods[] | select(.index == 0)).current.error_class_counts.canceled) == 1
-	and (first(.pods[] | select(.index == 0)).current.error_class_counts.unknown) == 1
-	and .totals.fatal_n == 7
+	and (first(.pods[] | select(.index == 0)).current.error_class_counts.wal_open) == 1
+	and (first(.pods[] | select(.index == 0)).current.error_class_counts.object_store_open) == 1
+	and (first(.pods[] | select(.index == 0)).current.error_class_counts.checkpoint_manifest_load) == 1
+	and (first(.pods[] | select(.index == 0)).current.error_class_counts.shared_archive_load) == 1
+	and (first(.pods[] | select(.index == 0)).current.error_class_counts.startup_recovery_pin) == 1
+	and (first(.pods[] | select(.index == 0)).current.error_class_counts.voter_state) == 1
+	and (first(.pods[] | select(.index == 0)).current.error_class_counts.peer_listener) == 1
+	and (first(.pods[] | select(.index == 0)).current.error_class_counts.unknown) == 2
+	and .totals.fatal_n == 15
 	and .totals.observed_n == 6
 	and .totals.partial == false
 ' >/dev/null 2>&1; then
+	case "$out" in
+		*"$private_marker"*) bad "typed startup classes never expose raw error text" ;;
+		*) ok "typed startup classes never expose raw error text" ;;
+	esac
 	ok "typed-first records classify by fixed error_class enum"
 else
 	bad "typed-first records classify by fixed error_class enum"
-	printf '%s\n' "$out" >&2 || true
+	echo 'startup fatal summary did not satisfy the fixed classification assertions' >&2
 fi
 
 # ---------------------------------------------------------------------------
@@ -361,18 +381,18 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Fixed counts schema: nine legacy keys, seven typed keys, numeric values.
+# Fixed counts schema: ten legacy keys, fourteen typed keys, numeric values.
 # ---------------------------------------------------------------------------
 c8=$tmp/schema
 build_capture "$c8"
 append_typed "$c8/failure-capture/goauthy-0-current.log" 'deadline' 'private'
 if out=$("$summarizer" "$c8") && printf '%s' "$out" | jq -e '
 	(.classes | length) == 10
-	and (.error_classes | length) == 7
+	and (.error_classes | length) == 14
 	and (.pods | length) == 3
 	and ([.pods[].index] | sort) == [0, 1, 2]
 	and ([.pods[].current.counts | keys[]] | unique | sort) == (["api_key_bootstrap","bootstrap_client","bootstrap_rbac","dcr_trust","rhiza_open","rhiza_readiness","schema_migrate","scim_runtime","storage_config","unknown"] | sort)
-	and ([.pods[].current.error_class_counts | keys[]] | unique | sort) == (["ack_durability_unavailable","canceled","deadline","node_not_ready","quorum_unavailable","unknown","write_outcome_unknown"] | sort)
+	and ([.pods[].current.error_class_counts | keys[]] | unique | sort) == (["ack_durability_unavailable","canceled","checkpoint_manifest_load","deadline","node_not_ready","object_store_open","peer_listener","quorum_unavailable","shared_archive_load","startup_recovery_pin","unknown","voter_state","wal_open","write_outcome_unknown"] | sort)
 	and ([.pods[].current.counts[] | type] | all(. == "number"))
 	and ([.pods[].current.error_class_counts[] | type] | all(. == "number"))
 	and ([.totals.counts[] | type] | all(. == "number"))
@@ -520,7 +540,7 @@ if [ "$rc" -ne 0 ] && jq -e '
 	.startup_fatal.available == true
 	and .startup_fatal.complete == true
 	and (.startup_fatal.classes | length) == 10
-	and (.startup_fatal.error_classes | length) == 7
+	and (.startup_fatal.error_classes | length) == 14
 	and ([.startup_fatal.pods[].index] | sort) == [0, 1, 2]
 	and (first(.startup_fatal.pods[] | select(.index == 0)).current.fatal_n) == 1
 	and (first(.startup_fatal.pods[] | select(.index == 0)).current.error_class_counts.node_not_ready) == 1
