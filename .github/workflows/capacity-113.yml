@@ -32,6 +32,11 @@ on:
         required: false
         type: boolean
         default: false
+      baseline_iam_only:
+        description: Baseline IAM-only diagnostic; not a qualification
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -153,6 +158,7 @@ jobs:
           CANDIDATE_SOURCE: ${{ inputs.candidate_source }}
           LOCAL_BUILD: ${{ inputs.local_build }}
           STARTUP_ONLY: ${{ inputs.startup_only }}
+          BASELINE_IAM_ONLY: ${{ inputs.baseline_iam_only }}
         run: |
           set -eu
           case "$STARTUP_ONLY" in
@@ -161,6 +167,16 @@ jobs:
             *) echo "startup_only must be a boolean" >&2; exit 1 ;;
           esac
           export GOAUTHY_113_STARTUP_ONLY
+          case "$BASELINE_IAM_ONLY" in
+            true) GOAUTHY_113_BASELINE_IAM_ONLY=1 ;;
+            false) GOAUTHY_113_BASELINE_IAM_ONLY=0 ;;
+            *) echo "baseline_iam_only must be a boolean" >&2; exit 1 ;;
+          esac
+          if [ "$GOAUTHY_113_STARTUP_ONLY" = 1 ] && [ "$GOAUTHY_113_BASELINE_IAM_ONLY" = 1 ]; then
+            echo 'startup_only and baseline_iam_only are mutually exclusive' >&2
+            exit 1
+          fi
+          export GOAUTHY_113_BASELINE_IAM_ONLY
           evidence_dir="$RUNNER_TEMP/capacity-113-evidence"
           results_dir="$RUNNER_TEMP/capacity-113-results"
           mkdir -p "$results_dir"
@@ -179,10 +195,14 @@ jobs:
         env:
           RESULTS_DIR: ${{ runner.temp }}/capacity-113-results
           STARTUP_ONLY: ${{ inputs.startup_only }}
+          BASELINE_IAM_ONLY: ${{ inputs.baseline_iam_only }}
         run: |
           set -eu
           if [ "$STARTUP_ONLY" = "true" ]; then
             echo "Startup-only diagnosis: no IAM/API workload or performance qualification." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ "$BASELINE_IAM_ONLY" = "true" ]; then
+            echo "Baseline IAM-only diagnostic; not a qualification. The mandatory analyzer and full denominator/criterion remain in force." >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ -f "$RESULTS_DIR/report.md" ]; then
             cat "$RESULTS_DIR/report.md" >> "$GITHUB_STEP_SUMMARY"

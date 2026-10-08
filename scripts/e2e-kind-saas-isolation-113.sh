@@ -24,6 +24,15 @@ case "$startup_only" in
 	0|1) ;;
 	*) echo 'GOAUTHY_113_STARTUP_ONLY must be 0 or 1' >&2; exit 1 ;;
 esac
+baseline_iam_only=${GOAUTHY_113_BASELINE_IAM_ONLY:-0}
+case "$baseline_iam_only" in
+	0|1) ;;
+	*) echo 'GOAUTHY_113_BASELINE_IAM_ONLY must be 0 or 1' >&2; exit 1 ;;
+esac
+if [ "$startup_only" -eq 1 ] && [ "$baseline_iam_only" -eq 1 ]; then
+	echo 'startup-only and baseline-IAM-only modes are mutually exclusive' >&2
+	exit 1
+fi
 
 namespace=goauthy
 fixture_image=goauthy-saas-isolation-fixture:e2e
@@ -500,15 +509,40 @@ fi
 
 # The synchronized start time is computed after the pre-scrape so a slow
 # pre-scrape retry cannot consume the driver's fixed 30-second schedule slack.
+[ "$baseline_iam_only" -eq 0 ] || echo 'baseline IAM-only diagnostic mode: selected subset is not a qualification'
 start_ms=$(( $(date +%s) * 1000 + 30000 ))
 kubectl --context "$context" -n "$namespace" create configmap isolation113-run --from-literal=start-unix-ms="$start_ms" --dry-run=client -o yaml | kubectl --context "$context" apply -f - >/dev/null
 
 sample_output=$ISOLATION113_EVIDENCE_DIR/container-samples.jsonl
-echo 'stage=three-member fixture overlay ready; launching bounded IAM/API-key diagnostic'
+case "$baseline_iam_only" in
+	1) echo 'stage=three-member fixture overlay ready; launching baseline IAM-only diagnostic (not a qualification)' ;;
+	0) echo 'stage=three-member fixture overlay ready; launching bounded IAM/API-key diagnostic' ;;
+esac
 kubectl create --dry-run=client -f deploy/kind-saas-isolation-113/driver-job.yaml -o json | jq -e '
 	[.spec.template.spec.containers[]|select(.name=="driver").env[]|select(.name=="GOAUTHY_E2E_ISOLATION113_FIXTURE_URL")|.value] == ["https://api-key-fixture.e2e.test/healthy"]
 ' >/dev/null || { echo 'driver fixture URL is missing or does not use portless HTTPS' >&2; exit 1; }
-kubectl --context "$context" -n "$namespace" apply -f deploy/kind-saas-isolation-113/driver-job.yaml
+if [ "$baseline_iam_only" -eq 1 ]; then
+	baseline_job_raw=$temp_dir/baseline-driver-job.json
+	baseline_job_selected=$temp_dir/baseline-driver-job-selected.json
+	if ! kubectl create --dry-run=client -f deploy/kind-saas-isolation-113/driver-job.yaml -o json >"$baseline_job_raw"; then
+		echo 'baseline driver Job dry-run failed; refusing to apply' >&2
+		exit 1
+	fi
+	if ! jq -se '
+		if length != 1 then error("expected exactly one JSON document")
+		elif .[0].kind != "Job" then error("expected a Job document")
+		elif ([.[0].spec.template.spec.containers[]? | select(.name == "driver")] | length) != 1 then error("expected exactly one driver container")
+		else .[0] | .spec.template.spec.containers |= map(
+			if .name == "driver" then .args = ["-test.run=^TestConnectionUseGrantLive$/^baseline-iam-", "-test.timeout=240s", "-test.v"] else . end
+		) end
+	' "$baseline_job_raw" >"$baseline_job_selected"; then
+		echo 'baseline driver Job dry-run output was invalid; refusing to apply' >&2
+		exit 1
+	fi
+	kubectl --context "$context" -n "$namespace" apply -f "$baseline_job_selected"
+else
+	kubectl --context "$context" -n "$namespace" apply -f deploy/kind-saas-isolation-113/driver-job.yaml
+fi
 kube_ips=
 for _ in $(seq 1 50); do
 	kube_ips=$(kubectl --context "$context" -n "$namespace" get pods -l job-name=isolation113-driver -o jsonpath='{range .items[*]}{.status.podIP}{"\n"}{end}' 2>/dev/null || true)
