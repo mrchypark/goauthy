@@ -13,9 +13,79 @@ set -eu
 umask 077
 
 usage() {
-	echo "usage: $0 POD_INDEX CAPTURED_AT_UNIX_MS < prometheus.txt" >&2
+	echo "usage: $0 POD_INDEX CAPTURED_AT_UNIX_MS < prometheus.txt | $0 --archive-json < archive-v1.json" >&2
 	exit 2
 }
+
+# Validate and canonicalize the fixed Rhiza archive-duration snapshot. This
+# input is a typed JSON response, separate from the legacy Prometheus capture.
+if [ "$#" -eq 1 ] && [ "$1" = --archive-json ]; then
+	archive_tmp=$(mktemp -d)
+	trap 'rm -rf "$archive_tmp"' EXIT HUP INT TERM
+	cat >"$archive_tmp/source.json"
+	if ! awk '
+	function above_safe_bound(value, i, digit, bound_digit) {
+		if (length(value) > 16) return 1
+		if (length(value) < 16) return 0
+		for (i = 1; i <= 16; i++) {
+			digit = substr(value, i, 1) + 0
+			bound_digit = substr("9007199254740991", i, 1) + 0
+			if (digit > bound_digit) return 1
+			if (digit < bound_digit) return 0
+		}
+		return 0
+	}
+	{
+		line = $0
+		while (match(line, /"(count|duration_ns_sum)"[[:space:]]*:[[:space:]]*[^,}]*/)) {
+			token = substr(line, RSTART, RLENGTH)
+			sub(/^"(count|duration_ns_sum)"[[:space:]]*:[[:space:]]*/, "", token)
+			sub(/[[:space:]]*$/, "", token)
+			seen++
+			if (token != "null" && (token !~ /^(0|[1-9][0-9]*)$/ || above_safe_bound(token))) exit 1
+			line = substr(line, RSTART + RLENGTH)
+		}
+	}
+	END { if (seen != 10) exit 1 }
+	' "$archive_tmp/source.json" >/dev/null 2>&1; then
+		echo "archive duration metrics rejected: invalid fixed document" >&2
+		exit 1
+	fi
+	if jq --stream -s -e '
+		[
+			["schema_version"],
+			["stages","publication_admission","available"], ["stages","publication_admission","count"], ["stages","publication_admission","duration_ns_sum"],
+			["stages","archive_load","available"], ["stages","archive_load","count"], ["stages","archive_load","duration_ns_sum"],
+			["stages","extent_build_upload","available"], ["stages","extent_build_upload","count"], ["stages","extent_build_upload","duration_ns_sum"],
+			["stages","head_publish","available"], ["stages","head_publish","count"], ["stages","head_publish","duration_ns_sum"],
+			["stages","publication_release","available"], ["stages","publication_release","count"], ["stages","publication_release","duration_ns_sum"]
+		] as $expected_paths |
+		[.[] | select(length == 2) | .[0]] as $paths |
+		($paths | sort) == ($expected_paths | sort)
+	' "$archive_tmp/source.json" >/dev/null 2>&1 && jq -s -c '
+		def safe_int: type == "number" and isfinite and . >= 0 and floor == . and . <= 9007199254740991;
+		def stage_names: ["publication_admission","archive_load","extent_build_upload","head_publish","publication_release"];
+		def valid_stage:
+			type == "object"
+			and (keys | sort) == ["available","count","duration_ns_sum"]
+			and (.available | type) == "boolean"
+			and (if .available then (.count | safe_int) and (.duration_ns_sum | safe_int)
+				else .count == null and .duration_ns_sum == null end);
+		def valid_document:
+			type == "object"
+			and (keys | sort) == ["schema_version","stages"]
+			and .schema_version == 1
+			and (.stages | type) == "object"
+			and ((.stages | keys | sort) == (stage_names | sort))
+			and ([stage_names[] as $name | (.stages[$name] | valid_stage)] | all);
+		if length == 1 and (.[0] | valid_document) then .[0]
+		else error("invalid fixed archive-duration document") end
+	' "$archive_tmp/source.json" 2>/dev/null; then
+		exit 0
+	fi
+	echo "archive duration metrics rejected: invalid fixed document" >&2
+	exit 1
+fi
 
 [ "$#" -eq 2 ] || usage
 pod_index=$1

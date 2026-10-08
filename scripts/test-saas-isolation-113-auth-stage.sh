@@ -69,6 +69,92 @@ canceled_count() {
 # Collect from a file (never a pipeline) so the collector exit status is exact.
 collect() { "$collector" "$1" "$2" <"$3"; }
 
+archive_snapshot() { # BASE_COUNT
+	base=$1
+	jq -cn --argjson n "$base" '
+		def sample($offset): {available:true,count:($n+$offset),duration_ns_sum:(($n+$offset)*100)};
+		{
+			schema_version:1,
+			stages:{
+				publication_admission:sample(0),
+				archive_load:sample(1),
+				extent_build_upload:sample(2),
+				head_publish:sample(3),
+				publication_release:sample(4)
+			}
+		}'
+}
+collect_archive() { "$collector" --archive-json; }
+gen_archive_snapshots() { # DIR PRE_BASE POST_BASE
+	dir=$1; pre_base=$2; post_base=$3
+	for idx in 0 1 2; do
+		archive_snapshot "$pre_base" | collect_archive >"$dir/archive-duration-pre-$idx.json"
+		archive_snapshot "$post_base" | collect_archive >"$dir/archive-duration-post-$idx.json"
+	done
+}
+expect_archive_fail() { # DESCRIPTION FILE [CANARY]
+	desc=$1; file=$2; canary=${3:-}
+	if collect_archive <"$file" >"$tmp/archive-stdout.txt" 2>"$tmp/archive-error.txt"; then
+		bad "$desc"
+	else
+		if [ ! -s "$tmp/archive-stdout.txt" ] && { [ -z "$canary" ] || no_canary "$canary" "$tmp/archive-error.txt"; }; then
+			ok "$desc"
+		else
+			bad "$desc"
+		fi
+	fi
+}
+
+# The versioned archive endpoint has a fixed five-stage JSON contract. The
+# collector canonicalizes only that exact document and emits no source text.
+archive_input=$tmp/archive-source.json
+archive_snapshot 0 >"$archive_input"
+if out=$(collect_archive <"$archive_input") && printf '%s' "$out" | jq -e '
+	(keys | sort) == ["schema_version","stages"]
+	and .schema_version == 1
+	and (.stages | keys | sort) == ["archive_load","extent_build_upload","head_publish","publication_admission","publication_release"]
+	and all(.stages[]; .available == true and (.count | type == "number" and . >= 0) and (.duration_ns_sum | type == "number" and . >= 0))
+	and .stages.publication_admission.count == 0 and .stages.publication_admission.duration_ns_sum == 0
+' >/dev/null; then
+	ok "archive collector accepts the exact five-stage zero-valued document"
+else
+	bad "archive collector accepts the exact five-stage zero-valued document"
+fi
+
+for archive_bad in unknown missing extra version fraction unsafe_fraction overflow unavailable multi duplicate_key stages_null stages_unknown phase_empty; do
+	case "$archive_bad" in
+		unknown) jq '.stages + {SYNTHETIC_PRIVATE_CANARY:{available:true,count:1,duration_ns_sum:1}} as $s | .stages=$s' "$archive_input" >"$tmp/archive-$archive_bad.json"; canary=SYNTHETIC_PRIVATE_CANARY ;;
+		missing) jq 'del(.stages.head_publish)' "$archive_input" >"$tmp/archive-$archive_bad.json"; canary= ;;
+		extra) jq '. + {unapproved:"SYNTHETIC_PRIVATE_CANARY"}' "$archive_input" >"$tmp/archive-$archive_bad.json"; canary=SYNTHETIC_PRIVATE_CANARY ;;
+		version) jq '.schema_version=2' "$archive_input" >"$tmp/archive-$archive_bad.json"; canary= ;;
+		fraction) jq '.stages.archive_load.count=1.5' "$archive_input" >"$tmp/archive-$archive_bad.json"; canary= ;;
+		unsafe_fraction) jq '.stages.archive_load.count=9007199254740991.1' "$archive_input" >"$tmp/archive-$archive_bad.json"; canary= ;;
+		overflow) jq '.stages.archive_load.duration_ns_sum=9007199254740992' "$archive_input" >"$tmp/archive-$archive_bad.json"; canary= ;;
+		unavailable) jq '.stages.archive_load={available:false,count:0,duration_ns_sum:null}' "$archive_input" >"$tmp/archive-$archive_bad.json"; canary= ;;
+		multi) { cat "$archive_input"; cat "$archive_input"; } >"$tmp/archive-$archive_bad.json"; canary= ;;
+		duplicate_key) sed 's/"schema_version":1/"schema_version":1,"schema_version":1/' "$archive_input" >"$tmp/archive-$archive_bad.json"; canary= ;;
+		stages_null) sed 's/"stages":{/"stages":null,"stages":{/' "$archive_input" >"$tmp/archive-$archive_bad.json"; canary= ;;
+		stages_unknown) sed 's/"stages":{/"stages":{"SYNTHETIC_PRIVATE_CANARY":null},"stages":{/' "$archive_input" >"$tmp/archive-$archive_bad.json"; canary=SYNTHETIC_PRIVATE_CANARY ;;
+		phase_empty) sed 's/"publication_admission":{/"publication_admission":{},"publication_admission":{/' "$archive_input" >"$tmp/archive-$archive_bad.json"; canary= ;;
+	esac
+	expect_archive_fail "archive collector rejects $archive_bad input without disclosure" "$tmp/archive-$archive_bad.json" "$canary"
+done
+
+archive_at_max=$tmp/archive-at-max.json
+jq '.stages.publication_admission.count=9007199254740991 | .stages.publication_admission.duration_ns_sum=9007199254740991' "$archive_input" >"$archive_at_max"
+if out=$(collect_archive <"$archive_at_max") && printf '%s' "$out" | jq -e '.stages.publication_admission.count == 9007199254740991 and .stages.publication_admission.duration_ns_sum == 9007199254740991' >/dev/null; then
+	ok "archive collector accepts the exact safe-integer boundary"
+else
+	bad "archive collector accepts the exact safe-integer boundary"
+fi
+
+jq '.stages.publication_admission.duration_ns_sum=9007199254740992' "$archive_input" >"$tmp/archive-overflow.json"
+if out=$(collect_archive <"$tmp/archive-overflow.json"); then
+	bad "archive collector rejects values beyond the safe-integer boundary"
+else
+	ok "archive collector rejects values beyond the safe-integer boundary"
+fi
+
 # ---------------------------------------------------------------------------
 # Collector: exact family, all twelve fixed stages, privacy redaction.
 # ---------------------------------------------------------------------------
@@ -965,6 +1051,16 @@ write_native_stats() {
 	}' >"$tmp/native-stats.json"
 }
 
+write_archive_stats() {
+	value=$1
+	jq -n --argjson n "$value" '
+		def sample: {available:true,count:$n,duration_ns_sum:($n*100)};
+		{schema_version:1,stages:{
+			publication_admission:sample,archive_load:sample,extent_build_upload:sample,
+			head_publish:sample,publication_release:sample
+		}}' >"$tmp/archive-stats.json"
+}
+
 mkdir -p "$tmp/native-bin" "$tmp/native-evidence"
 cat >"$tmp/native-bin/kubectl" <<'MOCK'
 #!/bin/sh
@@ -991,6 +1087,7 @@ case "$MOCK_ID_MODE" in
 	timeout) exit 124 ;;
 	within-change) uid=synthetic-uid-$count; restart=0 ;;
 	replace) if [ "$count" -le 2 ]; then uid=synthetic-uid-a; else uid=synthetic-uid-b; fi; restart=0 ;;
+	phase-change) if [ "$count" -le 3 ]; then uid=synthetic-uid-a; else uid=synthetic-uid-b; fi; restart=0 ;;
 	restart) uid=synthetic-uid-a; if [ "$count" -le 2 ]; then restart=0; else restart=1; fi ;;
 	*) uid=synthetic-uid-a; restart=0 ;;
 esac
@@ -999,20 +1096,30 @@ MOCK
 cat >"$tmp/native-bin/curl" <<'MOCK'
 #!/bin/sh
 route=auth
-for arg do case "$arg" in */metrics/object-store) route=native ;; esac; done
+for arg do
+	case "$arg" in
+		*/metrics/object-store) route=native ;;
+		*/metrics/archive/v1) route=archive ;;
+	esac
+done
 if [ "$route" = native ]; then printf 'native\n' >>"$MOCK_NATIVE_CALLS"; fi
-if [ "${MOCK_FETCH_FAIL:-0}" = 1 ]; then
+if [ "$route" = archive ]; then printf 'archive\n' >>"$MOCK_ARCHIVE_CALLS"; fi
+if { [ "$route" = native ] && [ "${MOCK_FETCH_FAIL:-0}" = 1 ]; } ||
+	{ [ "$route" = archive ] && [ "${MOCK_ARCHIVE_FAIL:-0}" = 1 ]; }; then
 	echo 'SYNTHETIC_RAW_ERROR_CANARY' >&2
 	exit 22
 fi
-cat "$MOCK_STATS"
+if [ "$route" = archive ]; then cat "$MOCK_ARCHIVE_STATS"; else cat "$MOCK_STATS"; fi
 MOCK
 chmod +x "$tmp/native-bin/kubectl" "$tmp/native-bin/curl"
 
 native_capture() {
-	phase=$1 index=$2 mode=$3 fetch_fail=$4 stats=$5
+	phase=$1 index=$2 mode=$3 fetch_fail=$4 stats=$5 archive_fail=${6:-0}
+	temp_dir=$tmp/native-temp
+	mkdir -p "$temp_dir"
 	MOCK_ID_CALLS_DIR=$tmp/native-id-calls MOCK_ID_MODE=$mode MOCK_FETCH_FAIL=$fetch_fail MOCK_STATS=$stats \
-		MOCK_TIMEOUT_ASSERT=$tmp/missing-timeout-flag MOCK_NATIVE_CALLS=$tmp/native-curl-calls \
+		MOCK_ARCHIVE_FAIL=$archive_fail MOCK_ARCHIVE_STATS=$tmp/archive-stats.json \
+		MOCK_TIMEOUT_ASSERT=$tmp/missing-timeout-flag MOCK_NATIVE_CALLS=$tmp/native-curl-calls MOCK_ARCHIVE_CALLS=$tmp/archive-curl-calls \
 		PATH="$tmp/native-bin:$PATH" capture_object_store_snapshot "$phase" "$index" 19090
 }
 
@@ -1020,10 +1127,13 @@ gen_native_snapshots() { # evidence pre-value post-value failure-mode
 	dir=$1 pre_value=$2 post_value=$3 mode=$4
 	ISOLATION113_EVIDENCE_DIR=$dir context=synthetic namespace=synthetic metrics_token=synthetic
 	rm -f "$tmp/native-id-calls"/*
+	: >"$tmp/archive-curl-calls"
 	for idx in 0 1 2; do
 		write_native_stats "$pre_value" "$pre_value"
+		write_archive_stats "$pre_value"
 		native_capture pre "$idx" "$mode" 0 "$tmp/native-stats.json"
 		write_native_stats "$post_value" 0
+		write_archive_stats "$post_value"
 		native_capture post "$idx" "$mode" 0 "$tmp/native-stats.json"
 	done
 }
@@ -1033,22 +1143,31 @@ if [ "$object_store_source_ready" = true ]; then
 	ISOLATION113_EVIDENCE_DIR=$tmp/native-cases context=synthetic namespace=synthetic metrics_token=synthetic
 	: >"$tmp/native-curl-calls"
 	: >"$tmp/mock-auth-scripts/collect-saas-isolation-113-auth-stage.sh"
-	cat >"$tmp/mock-auth-scripts/collect-saas-isolation-113-auth-stage.sh" <<'MOCK'
+	cat >"$tmp/mock-auth-scripts/collect-saas-isolation-113-auth-stage.sh" <<MOCK
 #!/bin/sh
+if [ "\${1:-}" = --archive-json ]; then exec "$collector" --archive-json; fi
 printf '{"stages":{"policy_check":{"count":1}}}\n'
 MOCK
 	chmod +x "$tmp/mock-auth-scripts/collect-saas-isolation-113-auth-stage.sh"
 	rm -f "$tmp/native-id-calls"/*
+	: >"$tmp/archive-curl-calls"
 	write_native_stats 0
+	write_archive_stats 0
 	native_capture pre 0 stable 0 "$tmp/native-stats.json"
-	if jq -e '.available == true and ([.counters[]] | all(. == 0))' "$tmp/native-cases/object-store-pre-0.json" >/dev/null; then
+	if jq -e '.available == true and ([.counters[]] | all(. == 0))' "$tmp/native-cases/object-store-pre-0.json" >/dev/null &&
+		jq -e '.schema_version == 1 and ([.stages[] | select(.available and .count == 0 and .duration_ns_sum == 0)] | length) == 5' "$tmp/native-cases/archive-duration-pre-0.json" >/dev/null &&
+		[ "$(wc -l <"$tmp/archive-curl-calls" | tr -d ' ')" -eq 1 ]; then
 		if no_canary 'synthetic-uid-' "$tmp/native-cases/object-store-pre-0.json"; then
-			ok "native capture accepts zero counters without persisting pod identity"
+			if no_canary 'synthetic-uid-' "$tmp/native-cases/archive-duration-pre-0.json"; then
+				ok "source runner captures one valid zero archive snapshot without persisting pod identity"
+			else
+				bad "source runner captures one valid zero archive snapshot without persisting pod identity"
+			fi
 		else
-			bad "native capture accepts zero counters without persisting pod identity"
+			bad "source runner captures one valid zero archive snapshot without persisting pod identity"
 		fi
 	else
-		bad "native capture accepts a valid all-zero 32-counter producer document"
+		bad "source runner captures one valid zero archive snapshot and keeps native zero counters"
 	fi
 
 	for invalid_case in missing extra bad-type overflow multiple; do
@@ -1061,6 +1180,7 @@ MOCK
 			overflow) jq '.http_requests=9007199254740992' "$tmp/native-stats.json" >"$tmp/native-invalid.json" ;;
 			multiple) cat "$tmp/native-stats.json" "$tmp/native-stats.json" >"$tmp/native-invalid.json" ;;
 		esac
+		write_archive_stats 1
 		native_capture pre 0 stable 0 "$tmp/native-invalid.json"
 		if jq -e '.available == false and .reason == "capture-invalid" and .counters == null' "$tmp/native-cases/object-store-pre-0.json" >/dev/null &&
 			no_canary 'SYNTHETIC_PRIVATE_CANARY' "$tmp/native-cases/object-store-pre-0.json"; then
@@ -1070,12 +1190,37 @@ MOCK
 		fi
 	done
 
+	rm -f "$tmp/native-id-calls"/*
 	write_native_stats 1
-	native_capture pre 0 within-change 0 "$tmp/native-stats.json"
-	if jq -e '.available == false and .reason == "identity-unstable" and .counters == null' "$tmp/native-cases/object-store-pre-0.json" >/dev/null; then
-		ok "native capture rejects identity changes within one fetch"
+	write_archive_stats 1
+	native_capture pre 0 replace 0 "$tmp/native-stats.json"
+	if jq -e '.available == true' "$tmp/native-cases/object-store-pre-0.json" >/dev/null &&
+		[ ! -e "$tmp/native-cases/archive-duration-pre-0.json" ]; then
+		ok "archive response is discarded when identity changes across its own fetch"
 	else
-		bad "native capture rejects identity changes within one fetch"
+		bad "archive response is discarded when identity changes across its own fetch"
+	fi
+
+	write_native_stats 1
+	write_archive_stats 1
+	: >"$tmp/archive-curl-calls"
+	native_capture pre 0 within-change 0 "$tmp/native-stats.json"
+	if jq -e '.available == false and .reason == "identity-unstable" and .counters == null' "$tmp/native-cases/object-store-pre-0.json" >/dev/null &&
+		[ ! -e "$tmp/native-cases/archive-duration-pre-0.json" ] &&
+		[ "$(wc -l <"$tmp/archive-curl-calls" | tr -d ' ')" -eq 1 ]; then
+		ok "archive snapshot is discarded when the shared identity guard changes during capture"
+	else
+		bad "archive snapshot is discarded when the shared identity guard changes during capture"
+	fi
+	rm -f "$tmp/native-id-calls"/*
+	write_native_stats 1
+	write_archive_stats 1
+	native_capture pre 0 stable 0 "$tmp/native-stats.json" 1
+	if jq -e '.available == true' "$tmp/native-cases/object-store-pre-0.json" >/dev/null &&
+		[ ! -e "$tmp/native-cases/archive-duration-pre-0.json" ]; then
+		ok "missing archive endpoint stays best-effort without hiding native capture"
+	else
+		bad "missing archive endpoint stays best-effort without hiding native capture"
 	fi
 	native_capture pre 0 unknown 0 "$tmp/native-stats.json"
 	if jq -e '.available == false and .reason == "identity-unknown" and .counters == null' "$tmp/native-cases/object-store-pre-0.json" >/dev/null; then
@@ -1093,6 +1238,7 @@ MOCK
 	: >"$tmp/native-id-calls/1"
 	: >"$tmp/native-id-calls/2"
 	: >"$tmp/native-curl-calls"
+	: >"$tmp/archive-curl-calls"
 	: >"$tmp/missing-timeout-flag"
 	rm "$tmp/missing-timeout-flag"
 	script_dir=$tmp/mock-auth-scripts
@@ -1102,19 +1248,22 @@ MOCK
 	context=synthetic namespace=synthetic metrics_token=synthetic job_status=0 forward_pid=
 	export MOCK_ID_CALLS_DIR=$tmp/native-id-calls MOCK_ID_MODE=timeout MOCK_STATS=$tmp/native-stats.json
 	export MOCK_TIMEOUT_ASSERT=$tmp/missing-timeout-flag MOCK_NATIVE_CALLS=$tmp/native-curl-calls
+	export MOCK_ARCHIVE_CALLS=$tmp/archive-curl-calls MOCK_ARCHIVE_FAIL=1 MOCK_ARCHIVE_STATS=$tmp/archive-stats.json
 	export MOCK_FETCH_FAIL=0 PATH=$tmp/native-bin:$PATH
 	collect_auth_stage_metrics pre
 	script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 	if [ "$job_status" -eq 0 ] && [ "$(wc -l <"$tmp/native-curl-calls" | tr -d ' ')" -eq 3 ] &&
+		[ "$(wc -l <"$tmp/archive-curl-calls" | tr -d ' ')" -eq 3 ] &&
+		[ ! -e "$tmp/native-auth-evidence/archive-duration-pre-0.json" ] &&
 		[ "$(wc -l <"$tmp/native-auth-evidence/auth-stage-pre-0.json" | tr -d ' ')" -eq 1 ] &&
 		[ "$(wc -l <"$tmp/native-auth-evidence/auth-stage-pre-1.json" | tr -d ' ')" -eq 1 ] &&
 		[ "$(wc -l <"$tmp/native-auth-evidence/auth-stage-pre-2.json" | tr -d ' ')" -eq 1 ] &&
 		jq -s -e 'length == 3 and all(.[]; .available == false and .reason == "identity-unknown" and .counters == null)' \
 			"$tmp/native-auth-evidence/object-store-pre-0.json" "$tmp/native-auth-evidence/object-store-pre-1.json" "$tmp/native-auth-evidence/object-store-pre-2.json" >/dev/null &&
 		[ ! -s "$tmp/missing-timeout-flag" ]; then
-		ok "timed-out identity lookups stay unavailable while actual pre auth capture continues"
+		ok "archive endpoint failures and timed-out identity lookups stay best-effort while auth capture continues"
 	else
-		bad "timed-out identity lookups stay unavailable while actual pre auth capture continues"
+		bad "archive endpoint failures and timed-out identity lookups stay best-effort while auth capture continues"
 	fi
 	if no_canary 'SYNTHETIC_RAW_ERROR_CANARY' "$tmp/native-cases/object-store-pre-0.json"; then
 		ok "native capture never persists raw endpoint errors"
@@ -1125,6 +1274,11 @@ fi
 
 integration=$tmp/integration
 gen_evidence "$integration" 1
+results_without_archive=$tmp/integration-without-archive-results
+mkdir -p "$results_without_archive"
+if ! sh "$wrapper" --summarize "$integration" "$results_without_archive" >/dev/null 2>"$tmp/integration-without-archive.err"; then
+	bad "baseline summary is available before archive snapshots"
+fi
 if [ "$object_store_source_ready" = true ]; then
 	gen_native_snapshots "$integration" 10 14 stable
 fi
@@ -1138,19 +1292,109 @@ if sh "$wrapper" --summarize "$integration" "$results" >/dev/null 2>"$tmp/integr
 		and .auth_stage.captured == true
 		and .auth_stage.canceled_completions.available == true
 		and .auth_stage.canceled_completions.source_continuity == "unknown"
+		and .auth_stage.archive_duration.available == true
+		and .auth_stage.archive_duration.reason == null
+		and ([.auth_stage.archive_duration.pods[].pod_index] | sort) == [0,1,2]
+		and all(.auth_stage.archive_duration.pods[]; (.stages | map(.stage)) == ["publication_admission","archive_load","extent_build_upload","head_publish","publication_release"])
+		and all(.auth_stage.archive_duration.pods[].stages[]; .available == true and .count_delta == 4 and .duration_ns_sum_delta == 400)
 		and .object_store.available == true
 		and (.object_store.pods | map(.pod_index)) == [0,1,2]
 		and all(.object_store.pods[]; .available == true and .counters_delta.http_requests == 4 and .counters_delta.sdk_retries == 4 and ((.counters_delta | keys | sort) == ["condition_conflicts","dedup_hits","http_4xx_unexpected","http_5xx","http_failures","http_requests","sdk_retries","transport_failures"]))
 	' "$results/resource-summary.json" >/dev/null 2>&1 &&
+		[ "$(wc -l <"$tmp/archive-curl-calls" | tr -d ' ')" -eq 6 ] &&
 		jq -e '.criterion_pass == true and .overall.correctness == "pass"' "$results/criterion.json" >/dev/null 2>&1 &&
 		no_canary 'synthetic-uid-' "$results/resource-summary.json"; then
-		ok "direct integration projects only eight deltas and ignores gauge drops"
+		ok "mocked runner archive captures reach the existing auth/resource summary"
+		if jq -n -e --slurpfile before "$results_without_archive/criterion.json" --slurpfile after "$results/criterion.json" '$before[0] == $after[0]' >/dev/null; then
+			ok "archive-duration projection leaves the qualification criterion byte-equivalent"
+		else
+			bad "archive-duration projection leaves the qualification criterion byte-equivalent"
+		fi
 	else
 		bad "direct integration projects only eight deltas and ignores gauge drops"
 	fi
 else
 	bad "direct integration projects only eight deltas and ignores gauge drops (summarize failed)"
 	sed -n '1,3p' "$tmp/integration.err" >&2 || true
+fi
+
+# All-zero native snapshots are observed values, distinct from missing capture
+# files and from producer-side unavailable/null stages.
+archive_zero=$tmp/archive-zero
+cp -R "$integration" "$archive_zero"
+gen_archive_snapshots "$archive_zero" 0 0
+archive_zero_results=$tmp/archive-zero-results
+mkdir -p "$archive_zero_results"
+if sh "$wrapper" --summarize "$archive_zero" "$archive_zero_results" >/dev/null 2>"$tmp/archive-zero.err" &&
+	jq -e '.auth_stage.archive_duration.available == true and all(.auth_stage.archive_duration.pods[].stages[]; .available == true and .count_delta == 0 and .duration_ns_sum_delta == 0)' "$archive_zero_results/resource-summary.json" >/dev/null &&
+	jq -n -e --slurpfile before "$results_without_archive/criterion.json" --slurpfile after "$archive_zero_results/criterion.json" '$before[0] == $after[0]' >/dev/null; then
+	ok "observed zero archive deltas remain available without changing criterion"
+else
+	bad "observed zero archive deltas remain available without changing criterion"
+fi
+
+archive_unavailable=$tmp/archive-unavailable
+cp -R "$integration" "$archive_unavailable"
+jq '.stages.archive_load={available:false,count:null,duration_ns_sum:null}' "$archive_unavailable/archive-duration-pre-1.json" >"$tmp/archive-unavailable.json"
+mv "$tmp/archive-unavailable.json" "$archive_unavailable/archive-duration-pre-1.json"
+archive_unavailable_results=$tmp/archive-unavailable-results
+mkdir -p "$archive_unavailable_results"
+if sh "$wrapper" --summarize "$archive_unavailable" "$archive_unavailable_results" >/dev/null 2>"$tmp/archive-unavailable.err" &&
+	jq -e '
+		.auth_stage.archive_duration.available == true
+		and ([.auth_stage.archive_duration.pods[] | select(.pod_index == 1)][0].stages[] | select(.stage == "archive_load") | .available == false and .reason == "source-unavailable" and .count_pre == null and .count_delta == null and .duration_ns_sum_pre == null and .duration_ns_sum_delta == null)
+	' "$archive_unavailable_results/resource-summary.json" >/dev/null &&
+	jq -n -e --slurpfile before "$results_without_archive/criterion.json" --slurpfile after "$archive_unavailable_results/criterion.json" '$before[0] == $after[0]' >/dev/null; then
+	ok "producer unavailable/null stage stays distinct from zero and leaves criterion unchanged"
+else
+	bad "producer unavailable/null stage stays distinct from zero and leaves criterion unchanged"
+fi
+
+archive_reset=$tmp/archive-reset
+cp -R "$integration" "$archive_reset"
+jq '.stages.head_publish.count=0 | .stages.head_publish.duration_ns_sum=0' "$archive_reset/archive-duration-post-1.json" >"$tmp/archive-reset.json"
+mv "$tmp/archive-reset.json" "$archive_reset/archive-duration-post-1.json"
+archive_reset_results=$tmp/archive-reset-results
+mkdir -p "$archive_reset_results"
+if sh "$wrapper" --summarize "$archive_reset" "$archive_reset_results" >/dev/null 2>"$tmp/archive-reset.err" &&
+	jq -e '
+			.auth_stage.archive_duration.available == true
+			and ([.auth_stage.archive_duration.pods[] | select(.pod_index == 1)][0].stages[] | select(.stage == "head_publish") | .available == false and .reason == "counter-reset" and .reset == true and .count_delta == null and .duration_ns_sum_delta == null)
+			and ([.auth_stage.archive_duration.pods[] | select(.pod_index == 0)][0].stages[] | select(.stage == "head_publish") | .available == true and .count_delta == 4 and .duration_ns_sum_delta == 400)
+	' "$archive_reset_results/resource-summary.json" >/dev/null &&
+	jq -n -e --slurpfile before "$results_without_archive/criterion.json" --slurpfile after "$archive_reset_results/criterion.json" '$before[0] == $after[0]' >/dev/null; then
+	ok "archive counter decrease nulls only its stage deltas and leaves criterion unchanged"
+else
+	bad "archive counter decrease nulls only its stage deltas and leaves criterion unchanged"
+fi
+
+archive_missing=$tmp/archive-missing
+cp -R "$integration" "$archive_missing"
+rm "$archive_missing/archive-duration-post-2.json"
+archive_missing_results=$tmp/archive-missing-results
+mkdir -p "$archive_missing_results"
+if sh "$wrapper" --summarize "$archive_missing" "$archive_missing_results" >/dev/null 2>"$tmp/archive-missing.err" &&
+	jq -e '.available == true and .auth_stage.available == true and .auth_stage.archive_duration.available == false and .auth_stage.archive_duration.reason == "capture-incomplete"' "$archive_missing_results/resource-summary.json" >/dev/null &&
+	jq -n -e --slurpfile before "$results_without_archive/criterion.json" --slurpfile after "$archive_missing_results/criterion.json" '$before[0] == $after[0]' >/dev/null; then
+	ok "missing archive capture is unavailable without invalidating auth evidence or criterion"
+else
+	bad "missing archive capture is unavailable without invalidating auth evidence or criterion"
+fi
+
+archive_invalid=$tmp/archive-invalid
+cp -R "$integration" "$archive_invalid"
+sed 's/"stages":{/"stages":{"SYNTHETIC_ARCHIVE_PRIVATE_CANARY":null},"stages":{/' \
+	"$archive_invalid/archive-duration-post-2.json" >"$tmp/archive-invalid.json"
+mv "$tmp/archive-invalid.json" "$archive_invalid/archive-duration-post-2.json"
+archive_invalid_results=$tmp/archive-invalid-results
+mkdir -p "$archive_invalid_results"
+if sh "$wrapper" --summarize "$archive_invalid" "$archive_invalid_results" >/dev/null 2>"$tmp/archive-invalid.err" &&
+	jq -e '.auth_stage.available == true and .auth_stage.archive_duration.available == false and .auth_stage.archive_duration.reason == "capture-invalid"' "$archive_invalid_results/resource-summary.json" >/dev/null &&
+	no_canary 'SYNTHETIC_ARCHIVE_PRIVATE_CANARY' "$archive_invalid_results/resource-summary.json" &&
+	jq -n -e --slurpfile before "$results_without_archive/criterion.json" --slurpfile after "$archive_invalid_results/criterion.json" '$before[0] == $after[0]' >/dev/null; then
+	ok "malformed archive capture is redacted and leaves auth evidence and criterion unchanged"
+else
+	bad "malformed archive capture is redacted and leaves auth evidence and criterion unchanged"
 fi
 
 if [ "$object_store_source_ready" = true ]; then
@@ -1239,6 +1483,16 @@ if [ "$object_store_source_ready" = true ]; then
 		ok "container restart makes native deltas unavailable without changing criterion"
 	else
 		bad "container restart makes native deltas unavailable without changing criterion"
+	fi
+	gen_native_snapshots "$integration" 10 14 phase-change
+	phase_change_results=$tmp/integration-phase-change-results
+	mkdir -p "$phase_change_results"
+	if sh "$wrapper" --summarize "$integration" "$phase_change_results" >/dev/null 2>"$tmp/integration-phase-change.err" &&
+		jq -e '.auth_stage.archive_duration.available == false and .auth_stage.archive_duration.reason == "capture-incomplete"' "$phase_change_results/resource-summary.json" >/dev/null &&
+		jq -e '.criterion_pass == true and .overall.correctness == "pass"' "$phase_change_results/criterion.json" >/dev/null; then
+		ok "archive pre/post identity change withholds the delta and leaves criterion unchanged"
+	else
+		bad "archive pre/post identity change withholds the delta and leaves criterion unchanged"
 	fi
 	rm -f "$integration/object-store-pre-2.json"
 	missing_results=$tmp/integration-missing-results

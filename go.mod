@@ -14,7 +14,7 @@ require (
 	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68
 	github.com/go-kit/log v0.2.1
 	github.com/go-webauthn/webauthn v0.18.0
-	github.com/mrchypark/rhiza v0.19.0
+	github.com/mrchypark/rhiza v0.19.1-0.20261008113120-91fd1a1378c5
 	github.com/ory/fosite v0.49.0
 	github.com/oschwald/maxminddb-golang v1.13.1
 	github.com/pb33f/jsonpath v0.8.2

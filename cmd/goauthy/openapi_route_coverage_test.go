@@ -139,8 +139,8 @@ func validMethod(method string) bool {
 }
 func excludedRoute(path string) bool {
 	// Health endpoints are root-only bypasses, outside the issuer API server URL.
-	// The object-store metrics endpoint is mounted on the separate opt-in metrics mux.
-	return path == "/livez" || path == "/readyz" || path == "/metrics" || path == "/metrics/object-store" || strings.HasPrefix(path, "/auth/v1/docs") || strings.HasSuffix(path, "/{$}")
+	// Native diagnostics are mounted only on the separate opt-in metrics mux.
+	return path == "/livez" || path == "/readyz" || path == "/metrics" || path == "/metrics/object-store" || path == "/metrics/archive/v1" || strings.HasPrefix(path, "/auth/v1/docs") || strings.HasSuffix(path, "/{$}")
 }
 
 func TestExcludedRouteDoesNotHideOtherMetricsPaths(t *testing.T) {
@@ -150,7 +150,9 @@ func TestExcludedRouteDoesNotHideOtherMetricsPaths(t *testing.T) {
 	}{
 		{path: "/metrics", excluded: true},
 		{path: "/metrics/object-store", excluded: true},
+		{path: "/metrics/archive/v1", excluded: true},
 		{path: "/metrics/object-store/extra", excluded: false},
+		{path: "/metrics/archive/v1/extra", excluded: false},
 		{path: "/metrics/object-store-extra", excluded: false},
 		{path: "/metrics/custom", excluded: false},
 	} {

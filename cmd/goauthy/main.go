@@ -1421,7 +1421,7 @@ func run() (err error) {
 		identityStore.SetMetrics(registry)
 		appHandler = registry.Instrument(appHandler)
 
-		metricsMux := newMetricsMux(registry, metricsToken, db.Handler())
+		metricsMux := newMetricsMux(registry, metricsToken, db.Handler(), newArchiveStatsHandler(db))
 		metricsServer = &http.Server{
 			Addr:              metricsAddr,
 			Handler:           metricsMux,
@@ -1456,14 +1456,26 @@ func run() (err error) {
 	return err
 }
 
-// newMetricsMux keeps the opt-in metrics listener limited to its two exact
-// routes. The native handler is mounted only beneath the protected
-// object-store path; its other Rhiza API routes remain unreachable here.
-func newMetricsMux(registry *metrics.Registry, token string, objectStoreHandler http.Handler) *http.ServeMux {
+// newMetricsMux keeps the opt-in metrics listener limited to its exact routes.
+// The native handler is mounted only beneath the protected object-store path;
+// its other Rhiza API routes remain unreachable here.
+func newMetricsMux(registry *metrics.Registry, token string, objectStoreHandler, archiveStatsHandler http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", registry.Handler(token))
 	mux.Handle("GET /metrics/object-store", metrics.AuthenticatedHandler(objectStoreHandler, token))
+	mux.Handle("GET /metrics/archive/v1", metrics.AuthenticatedHandler(archiveStatsHandler, token))
 	return mux
+}
+
+func newArchiveStatsHandler(db *rhiza.DB) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(db.ArchiveStats())
+	})
 }
 
 // metricsListenAddrFromEnv validates the optional metrics TCP bind address

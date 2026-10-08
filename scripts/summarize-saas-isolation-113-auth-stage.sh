@@ -70,11 +70,88 @@ and ([.stages | to_entries[] | valid_stage_value(.value)] | all)
 and (.pod_index == $idx)
 '
 
+# Archive snapshots are optional diagnostic sidecars. Re-run the collector's
+# fixed-schema validator so hand-edited, partial, or multi-document files can
+# never be copied into the resource summary. Their absence does not invalidate
+# the independent auth-stage capture.
+archive_collector=$script_dir/collect-saas-isolation-113-auth-stage.sh
+: >"$tmp/archive-pre.jsonl"
+: >"$tmp/archive-post.jsonl"
+archive_present=0
+archive_invalid=false
+for idx in 0 1 2; do
+	for phase in pre post; do
+		f=$dir/archive-duration-$phase-$idx.json
+		if [ -f "$f" ]; then
+			if "$archive_collector" --archive-json <"$f" >"$tmp/archive-record.json" 2>/dev/null; then
+				cat "$tmp/archive-record.json" >>"$tmp/archive-$phase.jsonl"
+				archive_present=$((archive_present + 1))
+			else
+				printf 'null\n' >>"$tmp/archive-$phase.jsonl"
+				archive_invalid=true
+			fi
+		else
+			printf 'null\n' >>"$tmp/archive-$phase.jsonl"
+		fi
+	done
+done
+jq -s '.' "$tmp/archive-pre.jsonl" >"$tmp/archive-pre.json"
+jq -s '.' "$tmp/archive-post.jsonl" >"$tmp/archive-post.json"
+if [ "$archive_invalid" = true ]; then
+	archive_reason=capture-invalid
+elif [ "$archive_present" -eq 0 ]; then
+	archive_reason=capture-missing
+elif [ "$archive_present" -ne 6 ]; then
+	archive_reason=capture-incomplete
+else
+	archive_reason=
+fi
+
+cat >"$tmp/archive-summary.jq" <<'JQ'
+def stage_names: ["publication_admission","archive_load","extent_build_upload","head_publish","publication_release"];
+def stage_summary($name; $before_doc; $after_doc; $capture_reason):
+	($before_doc.stages[$name] // null) as $before |
+	($after_doc.stages[$name] // null) as $after |
+	($before != null and $before.available == true and $after != null and $after.available == true) as $valid |
+	($valid and ($after.count < $before.count or $after.duration_ns_sum < $before.duration_ns_sum)) as $reset |
+	{
+		stage: $name,
+		available: ($valid and ($reset | not)),
+		reason: (if $reset then "counter-reset" elif $valid then null elif $capture_reason != "" then $capture_reason else "source-unavailable" end),
+		count_pre: (if $before != null and $before.available then $before.count else null end),
+		count_post: (if $after != null and $after.available then $after.count else null end),
+		count_delta: (if $valid and ($reset | not) then $after.count - $before.count else null end),
+		duration_ns_sum_pre: (if $before != null and $before.available then $before.duration_ns_sum else null end),
+		duration_ns_sum_post: (if $after != null and $after.available then $after.duration_ns_sum else null end),
+		duration_ns_sum_delta: (if $valid and ($reset | not) then $after.duration_ns_sum - $before.duration_ns_sum else null end),
+		reset: $reset
+	};
+($pre[0]) as $before_all |
+($post[0]) as $after_all |
+{
+	schema_version: 1,
+	available: ($capture_reason == ""),
+	reason: (if $capture_reason == "" then null else $capture_reason end),
+	pods: [range(0; 3) as $idx |
+		($before_all[$idx] // null) as $before_doc |
+		($after_all[$idx] // null) as $after_doc |
+		{
+			pod_index: $idx,
+			stages: [stage_names[] as $name | stage_summary($name; $before_doc; $after_doc; $capture_reason)]
+		}
+	],
+	notes: "Per-process cumulative durations between two captures; the runner must verify unchanged process identity. Stage intervals can nest and must not be summed. Deltas are not per-request attribution or proof of cause."
+}
+JQ
+jq -n --slurpfile pre "$tmp/archive-pre.json" --slurpfile post "$tmp/archive-post.json" \
+	--arg capture_reason "$archive_reason" -f "$tmp/archive-summary.jq" >"$tmp/archive-summary.json"
+
 emit_unavailable() {
-	jq -n --arg reason "$1" '{
+	jq -n --arg reason "$1" --slurpfile archive "$tmp/archive-summary.json" '{
 		schema_version: 1,
 		available: false,
 		reason: $reason,
+		archive_duration: $archive[0],
 		family: "goauthy_auth_stage_duration_seconds",
 		canceled_completions: {
 			available: false,
@@ -155,4 +232,5 @@ if ! jq -n --slurpfile pre "$tmp/pre.json" --slurpfile post "$tmp/post.json" -e 
 	exit 0
 fi
 
-jq -n --slurpfile pre "$tmp/pre.json" --slurpfile post "$tmp/post.json" -f "$analyzer_jq"
+jq -n --slurpfile pre "$tmp/pre.json" --slurpfile post "$tmp/post.json" -f "$analyzer_jq" >"$tmp/auth-summary.json"
+jq --slurpfile archive "$tmp/archive-summary.json" '. + {archive_duration:$archive[0]}' "$tmp/auth-summary.json"

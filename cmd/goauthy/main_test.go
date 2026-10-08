@@ -2333,7 +2333,7 @@ func TestLoadMetricsTokenRejectsFileAtMaxSizePlusOne(t *testing.T) {
 // newProductionMetricsMux builds the production mux with no native API routes.
 func newProductionMetricsMux(token string) *http.ServeMux {
 	reg := metrics.NewRegistry()
-	return newMetricsMux(reg, token, http.NotFoundHandler())
+	return newMetricsMux(reg, token, http.NotFoundHandler(), http.NotFoundHandler())
 }
 
 func TestMetricsMuxServesOnlyProtectedNativeObjectStoreCounters(t *testing.T) {
@@ -2348,7 +2348,7 @@ func TestMetricsMuxServesOnlyProtectedNativeObjectStoreCounters(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	const token = "metrics-test-token"
-	mux := newMetricsMux(metrics.NewRegistry(), token, db.Handler())
+	mux := newMetricsMux(metrics.NewRegistry(), token, db.Handler(), newArchiveStatsHandler(db))
 	request := httptest.NewRequest(http.MethodGet, "/metrics/object-store", nil)
 	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
@@ -2367,34 +2367,51 @@ func TestMetricsMuxServesOnlyProtectedNativeObjectStoreCounters(t *testing.T) {
 		t.Fatal("native object-store response is missing the fixed http_requests counter")
 	}
 
-	for _, headers := range [][]string{
-		nil,
-		{"Bearer wrong"},
-		{"Bearer bad,token"},
-		{"Bearer " + token, "Bearer other"},
-	} {
-		request := httptest.NewRequest(http.MethodGet, "/metrics/object-store", nil)
-		for _, value := range headers {
-			request.Header.Add("Authorization", value)
+	request = httptest.NewRequest(http.MethodGet, "/metrics/archive/v1", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("GET /metrics/archive/v1 with valid bearer returned status=%d content-type=%q", response.Code, response.Header().Get("Content-Type"))
+	}
+	var archiveStats rhiza.ArchiveStats
+	if err := json.Unmarshal(response.Body.Bytes(), &archiveStats); err != nil {
+		t.Fatalf("decode versioned archive stats: %v", err)
+	}
+	if archiveStats.SchemaVersion != rhiza.ArchiveStatsSchemaVersion || !archiveStats.Stages.PublicationAdmission.Available {
+		t.Fatalf("unexpected available archive stats: %+v", archiveStats)
+	}
+
+	for _, path := range []string{"/metrics/object-store", "/metrics/archive/v1"} {
+		for _, headers := range [][]string{
+			nil,
+			{"Bearer wrong"},
+			{"Bearer bad,token"},
+			{"Bearer " + token, "Bearer other"},
+		} {
+			request := httptest.NewRequest(http.MethodGet, path, nil)
+			for _, value := range headers {
+				request.Header.Add("Authorization", value)
+			}
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+			if response.Code != http.StatusUnauthorized {
+				t.Fatalf("GET %s with headers %q returned %d, want 401", path, headers, response.Code)
+			}
 		}
-		response := httptest.NewRecorder()
-		mux.ServeHTTP(response, request)
-		if response.Code != http.StatusUnauthorized {
-			t.Fatalf("GET /metrics/object-store with headers %q returned %d, want 401", headers, response.Code)
+
+		for _, method := range []string{http.MethodPost, http.MethodHead} {
+			request := httptest.NewRequest(method, path, nil)
+			request.Header.Set("Authorization", "Bearer "+token)
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+			if response.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("%s %s returned %d, want 405", method, path, response.Code)
+			}
 		}
 	}
 
-	for _, method := range []string{http.MethodPost, http.MethodHead} {
-		request := httptest.NewRequest(method, "/metrics/object-store", nil)
-		request.Header.Set("Authorization", "Bearer "+token)
-		response := httptest.NewRecorder()
-		mux.ServeHTTP(response, request)
-		if response.Code != http.StatusMethodNotAllowed {
-			t.Fatalf("%s /metrics/object-store returned %d, want 405", method, response.Code)
-		}
-	}
-
-	for _, path := range []string{"/sql/query", "/membership/status", "/ready", "/metrics/object-store/extra"} {
+	for _, path := range []string{"/sql/query", "/membership/status", "/ready", "/metrics/object-store/extra", "/metrics/archive/v1/extra"} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		request.Header.Set("Authorization", "Bearer "+token)
 		response := httptest.NewRecorder()
@@ -2415,7 +2432,7 @@ func TestMetricsMuxPreservesNativeObjectStoreDisabledNotFound(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/metrics/object-store", nil)
 	request.Header.Set("Authorization", "Bearer metrics-test-token")
 	response := httptest.NewRecorder()
-	newMetricsMux(metrics.NewRegistry(), "metrics-test-token", db.Handler()).ServeHTTP(response, request)
+	newMetricsMux(metrics.NewRegistry(), "metrics-test-token", db.Handler(), newArchiveStatsHandler(db)).ServeHTTP(response, request)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("disabled native object-store route returned %d, want 404", response.Code)
 	}
@@ -2427,6 +2444,21 @@ func TestMetricsMuxPreservesNativeObjectStoreDisabledNotFound(t *testing.T) {
 	}
 	if body.Code != "object_store_disabled" {
 		t.Fatalf("native disabled response code %q, want object_store_disabled", body.Code)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/metrics/archive/v1", nil)
+	request.Header.Set("Authorization", "Bearer metrics-test-token")
+	response = httptest.NewRecorder()
+	newMetricsMux(metrics.NewRegistry(), "metrics-test-token", db.Handler(), newArchiveStatsHandler(db)).ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("archive stats route without archive returned %d, want 200 with unavailable stages", response.Code)
+	}
+	var archiveStats rhiza.ArchiveStats
+	if err := json.Unmarshal(response.Body.Bytes(), &archiveStats); err != nil {
+		t.Fatalf("decode unavailable archive stats: %v", err)
+	}
+	if archiveStats.SchemaVersion != rhiza.ArchiveStatsSchemaVersion || archiveStats.Stages.PublicationAdmission.Available || archiveStats.Stages.PublicationAdmission.Count != nil || archiveStats.Stages.PublicationAdmission.DurationNSSum != nil {
+		t.Fatalf("archive stage without manager was not unavailable/null: %+v", archiveStats.Stages.PublicationAdmission)
 	}
 }
 

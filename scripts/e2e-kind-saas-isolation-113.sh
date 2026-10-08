@@ -116,14 +116,15 @@ object_store_pod_identity() {
 		' 2>/dev/null
 }
 
-# Best-effort native counter snapshot. Pod identity is compared only in shell
+# Best-effort native metrics snapshots. Pod identity is compared only in shell
 # memory; neither the UID nor restart count is written to evidence or logs.
-# The raw response is held only in a shell variable and only the selected
-# fixed counters are written to the evidence directory.
+# Raw responses stay in shell variables and only the fixed counter projections
+# are written to the evidence directory.
 capture_object_store_snapshot() {
 	object_store_phase=$1
 	object_store_index=$2
 	object_store_port=$3
+	object_store_written=false
 	case "$object_store_phase:$object_store_index" in
 		pre:0|pre:1|pre:2|post:0|post:1|post:2) ;;
 		*) return 0 ;;
@@ -192,16 +193,38 @@ capture_object_store_snapshot() {
 			} end end
 		' 2>/dev/null); then
 			printf '%s\n' "$object_store_counters" >"$object_store_output" 2>/dev/null || true
-			return 0
+			object_store_written=true
 		else
 			object_store_reason=capture-invalid
 		fi
 	elif [ "$object_store_stable" = true ]; then
 		object_store_reason=capture-unavailable
 	fi
-	jq -n --argjson pod "$object_store_index" --arg reason "$object_store_reason" \
-		'{schema_version:1,available:false,reason:$reason,pod_index:$pod,incarnation_stable:false,counters:null}' \
-		>"$object_store_output" 2>/dev/null || true
+	if [ "${object_store_written:-false}" != true ]; then
+		jq -n --argjson pod "$object_store_index" --arg reason "$object_store_reason" \
+			'{schema_version:1,available:false,reason:$reason,pod_index:$pod,incarnation_stable:false,counters:null}' \
+			>"$object_store_output" 2>/dev/null || true
+	fi
+
+	# The archive snapshot is an optional sibling from the same private metrics
+	# port-forward. Reuse the object-store identity guard: object_store_after is
+	# the identity immediately before this request, and the next lookup proves
+	# it remained stable through the request. No response or identity is logged.
+	archive_duration_output=$ISOLATION113_EVIDENCE_DIR/archive-duration-$object_store_phase-$object_store_index.json
+	archive_duration_temporary=$temp_dir/archive-duration-$object_store_phase-$object_store_index.safe.json
+	rm -f "$archive_duration_output" "$archive_duration_temporary" 2>/dev/null || true
+	archive_duration_raw=$(curl --silent --show-error --fail --connect-timeout 1 --max-time 2 \
+		--header "Authorization: Bearer $metrics_token" \
+		"http://127.0.0.1:$object_store_port/metrics/archive/v1" 2>/dev/null) || archive_duration_raw=
+	archive_duration_after=$(object_store_pod_identity "$object_store_index" 2>/dev/null) || archive_duration_after=
+	if [ "$object_store_stable" = true ] && [ -n "$object_store_after" ] &&
+		[ -n "$archive_duration_after" ] && [ "$object_store_after" = "$archive_duration_after" ] &&
+		[ -n "$archive_duration_raw" ] &&
+		printf '%s' "$archive_duration_raw" | "$script_dir/collect-saas-isolation-113-auth-stage.sh" --archive-json >"$archive_duration_temporary" 2>/dev/null; then
+		mv "$archive_duration_temporary" "$archive_duration_output" 2>/dev/null || rm -f "$archive_duration_temporary" 2>/dev/null || true
+	else
+		rm -f "$archive_duration_temporary" 2>/dev/null || true
+	fi
 	return 0
 }
 
