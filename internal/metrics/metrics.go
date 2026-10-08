@@ -161,7 +161,8 @@ type Registry struct {
 	cacheMisses    *prometheus.CounterVec
 	cacheEvictions *prometheus.CounterVec
 
-	authStageDuration *prometheus.HistogramVec
+	authStageDuration            *prometheus.HistogramVec
+	authStageCanceledCompletions *prometheus.CounterVec
 
 	clk clock
 }
@@ -316,6 +317,13 @@ func newRegistry(clk clock) *Registry {
 			},
 			[]string{"stage"},
 		),
+		authStageCanceledCompletions: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "goauthy_auth_stage_canceled_completions_total",
+				Help: "Authentication stage completions observed after request-context cancellation.",
+			},
+			[]string{"stage"},
+		),
 	}
 
 	reg.MustRegister(
@@ -340,6 +348,7 @@ func newRegistry(clk clock) *Registry {
 		r.cacheMisses,
 		r.cacheEvictions,
 		r.authStageDuration,
+		r.authStageCanceledCompletions,
 	)
 
 	return r
@@ -546,6 +555,16 @@ func (r *Registry) AuthStageDuration(stage AuthStage, seconds float64) {
 		return
 	}
 	r.authStageDuration.WithLabelValues(string(stage)).Observe(seconds)
+}
+
+// AuthStageCanceledCompletion records a stage completion observed after its
+// request context was canceled. The stage label uses the same closed allowlist
+// as AuthStageDuration. A nil Registry is a no-op.
+func (r *Registry) AuthStageCanceledCompletion(stage AuthStage) {
+	if r == nil || !allowedAuthStages[stage] {
+		return
+	}
+	r.authStageCanceledCompletions.WithLabelValues(string(stage)).Inc()
 }
 
 // CacheHit increments the cache hit counter for the given cache name.

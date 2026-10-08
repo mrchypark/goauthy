@@ -4,8 +4,8 @@
 # Input (built by the companion shell wrapper) is
 #   {"pre": [<collector.json>...], "post": [<collector.json>...]}
 # where each collector record was already strictly validated against the exact
-# goauthy_auth_stage_duration_seconds family and the fixed issue #113 stage
-# label set. This analyzer only subtracts cumulative counters between the two
+# auth-stage families and the fixed issue #113 stage label set. This analyzer
+# subtracts cumulative histogram/cancellation counters between the two
 # capture endpoints. It never derives a percentile, an average, or a causal
 # claim, and it never attributes latency to a workload phase: the two endpoints
 # bound the whole diagnostic interval, so the output is a capture-interval
@@ -18,8 +18,8 @@ $post[0] as $post_all |
 $pre[0] as $pre_all |
 # Fail closed on a pre-only stage (a stage present in pre but absent in post)
 # and on incompatible bucket bounds between pre and post for a shared stage.
-# Only a wholly absent pre stage is synthesized as zero; an actually observed
-# zero child (count 0, sum 0, every bucket 0) is valid and compared normally.
+# For histograms, only an absent pre stage is synthesized as zero. Cancellation
+# counters never synthesize zero: lazy-family absence stays null.
 if ([$pre_all[] | . as $q | ($post_all[] | select(.pod_index == $q.pod_index)) as $p |
      ([$q.stages | keys[] | select(. as $k | ($p.stages | has($k)) | not)] | length) > 0
      or
@@ -60,6 +60,7 @@ else . end |
     ] | sort_by(.stage))
   }
 ] | sort_by(.pod_index) as $pods |
+([($pre_all + $post_all)[] | has("canceled_completions")] | all) as $canceled_available |
 if ([$pods[].span_ms <= 0] | any) then error("pre and post capture timestamps must differ")
 else {
   schema_version: 1,
@@ -77,6 +78,30 @@ else {
       sum_delta: (if any(.[]; .reset) then null else ([.[].sum_delta] | add) end)
     }
   )),
+  canceled_completions: {
+    available: $canceled_available,
+    reason: (if $canceled_available then null else "legacy-capture" end),
+    source_continuity: "unknown",
+    pods: ([ $post_all[] | . as $p |
+      ($pre_all[] | select(.pod_index == $p.pod_index)) as $q |
+      {
+        pod_index: $p.pod_index,
+        stages: ([allowed_stages[] as $s |
+          (if (($q.canceled_completions // {}) | has($s)) then $q.canceled_completions[$s] else null end) as $pre_count |
+          (if (($p.canceled_completions // {}) | has($s)) then $p.canceled_completions[$s] else null end) as $post_count |
+          {
+            stage: $s,
+            count_pre: $pre_count,
+            count_post: $post_count,
+            delta: (if $pre_count != null and $post_count != null and $post_count >= $pre_count then $post_count - $pre_count else null end),
+            reset: ($pre_count != null and ($post_count == null or $post_count < $pre_count)),
+            delta_available: ($pre_count != null and $post_count != null and $post_count >= $pre_count)
+          }
+        ])
+      }
+    ] | sort_by(.pod_index)),
+    notes: "Fixed-stage handler completions observed with the original request context already canceled. These counters may include multiple completions per request and do not identify first cancellation, request, cause, or latency. Numeric differences require both explicit samples and no decrease; source continuity is unknown, so positive differences are suggestive only."
+  },
   notes: "Per-pod cumulative histogram deltas between the pre-run and post-run native metrics listener captures, bound to the pod index observed through the per-pod port-forward. Only the exact goauthy_auth_stage_duration_seconds family and the fixed twelve-stage label set are read. Counts, sums, and bucket deltas are reported with both capture timestamps and the interval span. The two endpoints bound the whole diagnostic interval, so this is capture-interval evidence, not workload-phase alignment, and no percentile, average, or causal claim is derived."
 }
 end

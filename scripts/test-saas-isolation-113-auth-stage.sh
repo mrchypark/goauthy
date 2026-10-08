@@ -18,12 +18,38 @@ pass=0
 fail=0
 ok() { pass=$((pass + 1)); echo "ok: $1" >&2; }
 bad() { fail=$((fail + 1)); echo "not ok: $1" >&2; }
+no_canary() {
+	if grep -F "$1" "$2" >/dev/null; then
+		return 1
+	else
+		grep_status=$?
+	fi
+	[ "$grep_status" -eq 1 ]
+}
 
 for tool in awk jq mktemp date cp grep; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "required tool missing: $tool" >&2; exit 1; }
 done
 [ -x "$collector" ] || { echo "collector not executable: $collector" >&2; exit 1; }
 [ -x "$summarizer" ] || { echo "summarizer not executable: $summarizer" >&2; exit 1; }
+
+printf 'safe synthetic output\n' >"$tmp/privacy-safe.txt"
+printf 'SYNTHETIC_CANARY\n' >"$tmp/privacy-hit.txt"
+if no_canary 'SYNTHETIC_CANARY' "$tmp/privacy-safe.txt"; then
+	ok "privacy assertion accepts grep status 1 for no match"
+else
+	bad "privacy assertion accepts grep status 1 for no match"
+fi
+if no_canary 'SYNTHETIC_CANARY' "$tmp/privacy-hit.txt"; then
+	bad "privacy assertion rejects grep status 0 for a match"
+else
+	ok "privacy assertion rejects grep status 0 for a match"
+fi
+if no_canary 'SYNTHETIC_CANARY' "$tmp/privacy-missing.txt" 2>/dev/null; then
+	bad "privacy assertion rejects grep status 2 for a read error"
+else
+	ok "privacy assertion rejects grep status 2 for a read error"
+fi
 
 stages="credential_lookup password_verify subject_revalidate interaction_consume session_rotate oauth_issue authorize_validate authorize_session policy_check policy_allow policy_account_lock policy_success"
 
@@ -34,6 +60,10 @@ hist() {
 	printf 'goauthy_auth_stage_duration_seconds_bucket{stage="%s",le="+Inf"} %s\n' "$stage" "$b2"
 	printf 'goauthy_auth_stage_duration_seconds_sum{stage="%s"} %s\n' "$stage" "$sum"
 	printf 'goauthy_auth_stage_duration_seconds_count{stage="%s"} %s\n' "$stage" "$count"
+}
+
+canceled_count() {
+	printf 'goauthy_auth_stage_canceled_completions_total{stage="%s"} %s\n' "$1" "$2"
 }
 
 # Collect from a file (never a pipeline) so the collector exit status is exact.
@@ -49,11 +79,12 @@ for s in $stages; do
 	hist "$s" "$n" "$((n + 1))" "0.0$n" "$((n + 1))" >>"$all12_in"
 	n=$((n + 1))
 done
+canceled_count policy_check 3 >>"$all12_in"
 printf '# HELP goauthy_http_requests_total nope\n' >>"$all12_in"
 printf 'goauthy_http_requests_total{method="GET",route_class="authorize",status_class="2xx",tenant="SECRET_TENANT_CANARY"} 42\n' >>"$all12_in"
 if out=$(collect 0 1700000000000 "$all12_in") &&
 	printf '%s' "$out" | jq -e --argjson n 12 '
-		.schema_version == 1
+		.schema_version == 2
 		and .family == "goauthy_auth_stage_duration_seconds"
 		and .pod_index == 0
 		and (.stages | length) == $n
@@ -64,14 +95,16 @@ if out=$(collect 0 1700000000000 "$all12_in") &&
 		and .stages.policy_allow.count == 11
 		and .stages.policy_account_lock.count == 12
 		and .stages.policy_success.count == 13
+		and .canceled_completions.policy_check == 3
 	' >/dev/null; then
-	ok "collector extracts all twelve fixed stages"
+	ok "collector extracts twelve histogram stages and the fixed cancellation counter"
 else
-	bad "collector extracts all twelve fixed stages"
+	bad "collector extracts twelve histogram stages and the fixed cancellation counter"
 fi
 
 if ! printf '%s' "$out" | grep -q 'SECRET_TENANT_CANARY' &&
 	! printf '%s' "$out" | grep -q 'goauthy_http_requests_total' &&
+	! printf '%s' "$out" | grep -q 'goauthy_auth_stage_canceled_completions_total' &&
 	! printf '%s' "$out" | grep -q 'tenant' &&
 	! printf '%s' "$out" | grep -q 'route_class'; then
 	ok "collector redacts foreign families and label values"
@@ -141,10 +174,63 @@ expect_collect_fail "collector rejects non-monotonic buckets" "$tmp/nonmono.txt"
 expect_collect_fail "collector rejects a non-integer count" "$tmp/nonint.txt"
 
 : >"$tmp/empty.txt"
-if out=$(collect 2 1 "$tmp/empty.txt") && printf '%s' "$out" | jq -e '.stages == {}' >/dev/null; then
-	ok "collector accepts an absent family as an empty stage map"
+if out=$(collect 2 1 "$tmp/empty.txt") && printf '%s' "$out" | jq -e '.stages == {} and .canceled_completions == {} and .schema_version == 2' >/dev/null; then
+	ok "collector represents absent histogram and lazy cancellation families as observed-empty maps"
 else
-	bad "collector accepts an absent family as an empty stage map"
+	bad "collector represents absent histogram and lazy cancellation families as observed-empty maps"
+fi
+
+for bad_cancel in unknown duplicate duplicate_label label decimal negative nonfinite_nan nonfinite_inf scientific_fraction overflow scientific_overflow overlong_mantissa overlong_exponent suffix; do
+	case "$bad_cancel" in
+		unknown) printf 'goauthy_auth_stage_canceled_completions_total{stage="policy_check_PRIVATE_CANARY"} 1\n' >"$tmp/canceled-$bad_cancel.txt" ;;
+		duplicate) { canceled_count policy_check 1; canceled_count policy_check 2; } >"$tmp/canceled-$bad_cancel.txt" ;;
+		duplicate_label) printf 'goauthy_auth_stage_canceled_completions_total{stage="policy_check",stage="policy_check"} 1\n' >"$tmp/canceled-$bad_cancel.txt" ;;
+		label) printf 'goauthy_auth_stage_canceled_completions_total{stage="policy_check",tenant="RAW_CANARY"} 1\n' >"$tmp/canceled-$bad_cancel.txt" ;;
+		decimal) printf 'goauthy_auth_stage_canceled_completions_total{stage="policy_check"} 1.5\n' >"$tmp/canceled-$bad_cancel.txt" ;;
+		negative) printf 'goauthy_auth_stage_canceled_completions_total{stage="policy_check"} -1\n' >"$tmp/canceled-$bad_cancel.txt" ;;
+		nonfinite_nan) printf 'goauthy_auth_stage_canceled_completions_total{stage="policy_check"} NaN\n' >"$tmp/canceled-$bad_cancel.txt" ;;
+		nonfinite_inf) printf 'goauthy_auth_stage_canceled_completions_total{stage="policy_check"} +Inf\n' >"$tmp/canceled-$bad_cancel.txt" ;;
+		scientific_fraction) printf 'goauthy_auth_stage_canceled_completions_total{stage="policy_check"} 1.5e+0\n' >"$tmp/canceled-$bad_cancel.txt" ;;
+		overflow) printf 'goauthy_auth_stage_canceled_completions_total{stage="policy_check"} 9007199254740992\n' >"$tmp/canceled-$bad_cancel.txt" ;;
+		scientific_overflow) printf 'goauthy_auth_stage_canceled_completions_total{stage="policy_check"} 9.007199254740992e+15\n' >"$tmp/canceled-$bad_cancel.txt" ;;
+		overlong_mantissa) printf 'goauthy_auth_stage_canceled_completions_total{stage="policy_check"} 0000000000000000000000000000000000000001\n' >"$tmp/canceled-$bad_cancel.txt" ;;
+		overlong_exponent) printf 'goauthy_auth_stage_canceled_completions_total{stage="policy_check"} 1e+0000000000000000000000000000000000000001\n' >"$tmp/canceled-$bad_cancel.txt" ;;
+		suffix) printf 'goauthy_auth_stage_canceled_completions_total_extra{stage="policy_check"} 1\n' >"$tmp/canceled-$bad_cancel.txt" ;;
+	esac
+	if out=$(collect 0 1 "$tmp/canceled-$bad_cancel.txt" 2>&1); then
+		bad "collector rejects malformed cancellation counter: $bad_cancel"
+	else
+		printf '%s' "$out" >"$tmp/canceled-error-$bad_cancel.txt"
+		if no_canary 'PRIVATE_CANARY' "$tmp/canceled-error-$bad_cancel.txt" &&
+			no_canary 'RAW_CANARY' "$tmp/canceled-error-$bad_cancel.txt" &&
+			no_canary 'tenant=' "$tmp/canceled-error-$bad_cancel.txt"; then
+			ok "collector rejects malformed cancellation counter without disclosure: $bad_cancel"
+		else
+			bad "collector rejects malformed cancellation counter without disclosure: $bad_cancel"
+		fi
+	fi
+done
+
+canceled_count policy_check 9007199254740991 >"$tmp/canceled-max.txt"
+if out=$(collect 0 1 "$tmp/canceled-max.txt") && printf '%s' "$out" | jq -e '.canceled_completions.policy_check == 9007199254740991' >/dev/null; then
+	ok "collector accepts the exact safe-integer boundary"
+else
+	bad "collector accepts the exact safe-integer boundary"
+fi
+
+{
+	canceled_count policy_check 1e+06
+	canceled_count policy_allow 1.5e+06
+	canceled_count policy_success 9.007199254740991e+15
+} >"$tmp/canceled-native-format.txt"
+if out=$(collect 0 1 "$tmp/canceled-native-format.txt") && printf '%s' "$out" | jq -e '
+	.canceled_completions.policy_check == 1000000
+	and .canceled_completions.policy_allow == 1500000
+	and .canceled_completions.policy_success == 9007199254740991
+' >/dev/null; then
+	ok "collector accepts native scientific counter formatting, integral mantissas, and the exact safe boundary"
+else
+	bad "collector accepts native scientific counter formatting, integral mantissas, and the exact safe boundary"
 fi
 
 # An observed zero child is valid: a histogram child can publish zero between
@@ -195,6 +281,9 @@ if out=$("$summarizer" "$evidence") &&
 		and (([.pods[] | select(.pod_index == 0)][0].stages | map(select(.stage == "policy_check" or .stage == "policy_allow" or .stage == "policy_account_lock" or .stage == "policy_success"))) | (length == 4 and all(.[]; .count_delta == 9)))
 		and ([.totals[] | select(.stage == "credential_lookup")][0].count_delta) == 27
 		and ([.pods[] | select(.pod_index == 0)][0].span_ms) == 1000
+		and .canceled_completions.available == true
+		and ([.canceled_completions.pods[].stages[] | select(.stage == "policy_check")]
+			| length == 3 and all(.[]; .count_pre == null and .count_post == null and .delta == null and .reset == false))
 	' >/dev/null; then
 	ok "summarizer reports twelve-stage capture-interval deltas"
 else
@@ -223,6 +312,126 @@ if empty_pre_out=$("$summarizer" "$empty_pre") && printf '%s' "$empty_pre_out" |
 else
 	bad "empty pre-capture and first post-capture observation produce a valid bounded delta"
 	printf '%s\n' "$empty_pre_out" >&2 || true
+fi
+
+# Cancellation counters use the actual collector and summarizer. A lazy
+# post-only series remains visible without inventing a baseline or delta.
+cancel_pre_src=$tmp/cancel-pre-src.txt
+cancel_post_src=$tmp/cancel-post-src.txt
+hist credential_lookup 1 2 0.2 2 >"$cancel_pre_src"
+hist credential_lookup 2 4 0.4 4 >"$cancel_post_src"
+canceled_count policy_check 4 >>"$cancel_post_src"
+cancel_postonly=$tmp/cancel-postonly
+mkdir -p "$cancel_postonly"
+for idx in 0 1 2; do
+	collect "$idx" 1000 "$cancel_pre_src" >"$cancel_postonly/auth-stage-pre-$idx.json"
+	collect "$idx" 2000 "$cancel_post_src" >"$cancel_postonly/auth-stage-post-$idx.json"
+done
+if cancel_out=$("$summarizer" "$cancel_postonly") && printf '%s' "$cancel_out" | jq -e '
+	.available == true and .canceled_completions.available == true
+	and .canceled_completions.source_continuity == "unknown"
+	and ([.canceled_completions.pods[].stages[] | select(.stage == "policy_check")]
+		| length == 3 and all(.[]; .count_pre == null and .count_post == 4 and .delta == null and .reset == false))
+	and ([.pods[] | .stages[] | select(.stage == "credential_lookup") | .count_delta] | all(. == 2))
+' >/dev/null; then
+	ok "post-only cancellation count is retained with null baseline/delta and unchanged histogram deltas"
+else
+	bad "post-only cancellation count is retained with null baseline/delta and unchanged histogram deltas"
+	printf '%s\n' "$cancel_out" >&2 || true
+fi
+
+cancel_pre_both=$tmp/cancel-pre-both.txt
+hist credential_lookup 1 2 0.2 2 >"$cancel_pre_both"
+canceled_count policy_check 2 >>"$cancel_pre_both"
+cancel_both=$tmp/cancel-both
+mkdir -p "$cancel_both"
+for idx in 0 1 2; do
+	collect "$idx" 1000 "$cancel_pre_both" >"$cancel_both/auth-stage-pre-$idx.json"
+	collect "$idx" 2000 "$cancel_post_src" >"$cancel_both/auth-stage-post-$idx.json"
+done
+if cancel_out=$("$summarizer" "$cancel_both") && printf '%s' "$cancel_out" | jq -e '
+	.canceled_completions.available == true
+	and ([.canceled_completions.pods[].stages[] | select(.stage == "policy_check")]
+		| length == 3 and all(.[]; .count_pre == 2 and .count_post == 4 and .delta == 2 and .reset == false))
+' >/dev/null; then
+	ok "explicit monotonic cancellation samples yield a bounded difference"
+else
+	bad "explicit monotonic cancellation samples yield a bounded difference"
+	printf '%s\n' "$cancel_out" >&2 || true
+fi
+
+cancel_zero_src=$tmp/cancel-zero-src.txt
+hist credential_lookup 1 2 0.2 2 >"$cancel_zero_src"
+canceled_count policy_check 0 >>"$cancel_zero_src"
+cancel_zero=$tmp/cancel-zero
+mkdir -p "$cancel_zero"
+for idx in 0 1 2; do
+	collect "$idx" 1000 "$cancel_zero_src" >"$cancel_zero/auth-stage-pre-$idx.json"
+	collect "$idx" 2000 "$cancel_zero_src" >"$cancel_zero/auth-stage-post-$idx.json"
+done
+if cancel_out=$("$summarizer" "$cancel_zero") && printf '%s' "$cancel_out" | jq -e '
+	.canceled_completions.available == true
+	and ([.canceled_completions.pods[].stages[] | select(.stage == "policy_check")]
+		| length == 3 and all(.[]; .count_pre == 0 and .count_post == 0 and .delta == 0 and .reset == false))
+' >/dev/null; then
+	ok "explicit zero counter samples remain numeric and distinct from an empty map"
+else
+	bad "explicit zero counter samples remain numeric and distinct from an empty map"
+	printf '%s\n' "$cancel_out" >&2 || true
+fi
+
+cancel_decrease_src=$tmp/cancel-decrease-src.txt
+hist credential_lookup 1 2 0.2 2 >"$cancel_decrease_src"
+canceled_count policy_check 1 >>"$cancel_decrease_src"
+cancel_decrease=$tmp/cancel-decrease
+mkdir -p "$cancel_decrease"
+for idx in 0 1 2; do
+	collect "$idx" 1000 "$cancel_pre_both" >"$cancel_decrease/auth-stage-pre-$idx.json"
+	collect "$idx" 2000 "$cancel_decrease_src" >"$cancel_decrease/auth-stage-post-$idx.json"
+done
+if cancel_out=$("$summarizer" "$cancel_decrease") && printf '%s' "$cancel_out" | jq -e '
+	.canceled_completions.available == true
+	and ([.canceled_completions.pods[].stages[] | select(.stage == "policy_check")]
+		| length == 3 and all(.[]; .count_pre == 2 and .count_post == 1 and .delta == null and .reset == true))
+' >/dev/null; then
+	ok "counter decrease preserves endpoints and suppresses a negative delta"
+else
+	bad "counter decrease preserves endpoints and suppresses a negative delta"
+	printf '%s\n' "$cancel_out" >&2 || true
+fi
+
+cancel_preonly=$tmp/cancel-preonly
+mkdir -p "$cancel_preonly"
+for idx in 0 1 2; do
+	collect "$idx" 1000 "$cancel_pre_both" >"$cancel_preonly/auth-stage-pre-$idx.json"
+	collect "$idx" 2000 "$cancel_pre_src" >"$cancel_preonly/auth-stage-post-$idx.json"
+done
+if cancel_out=$("$summarizer" "$cancel_preonly") && printf '%s' "$cancel_out" | jq -e '
+	.canceled_completions.available == true
+	and ([.canceled_completions.pods[].stages[] | select(.stage == "policy_check")]
+		| length == 3 and all(.[]; .count_pre == 2 and .count_post == null and .delta == null and .reset == true and .delta_available == false))
+' >/dev/null; then
+	ok "pre-only counter is unavailable after its post series disappears"
+else
+	bad "pre-only counter is unavailable after its post series disappears"
+	printf '%s\n' "$cancel_out" >&2 || true
+fi
+
+cancel_legacy=$tmp/cancel-legacy
+mkdir -p "$cancel_legacy"
+for idx in 0 1 2; do
+	collect "$idx" 1000 "$cancel_pre_src" | jq -c 'del(.canceled_completions) | .schema_version = 1' >"$cancel_legacy/auth-stage-pre-$idx.json"
+	collect "$idx" 2000 "$cancel_post_src" | jq -c 'del(.canceled_completions) | .schema_version = 1' >"$cancel_legacy/auth-stage-post-$idx.json"
+done
+if cancel_out=$("$summarizer" "$cancel_legacy") && printf '%s' "$cancel_out" | jq -e '
+	.available == true and .canceled_completions.available == false
+	and .canceled_completions.reason == "legacy-capture"
+	and ([.pods[] | .stages[] | select(.stage == "credential_lookup") | .count_delta] | all(. == 2))
+' >/dev/null; then
+	ok "legacy histogram captures remain valid with cancellation signal unavailable"
+else
+	bad "legacy histogram captures remain valid with cancellation signal unavailable"
+	printf '%s\n' "$cancel_out" >&2 || true
 fi
 
 if ! printf '%s' "$out" | jq -e '[paths | map(tostring) | join(".")] | any(test("percentile|p95|p99|average|mean|phase"))' >/dev/null; then
@@ -324,6 +533,12 @@ expect_unavailable "strict schema rejects a decreasing bucket" "$tmp/schema-buck
 schema_case "$tmp/schema-unknown" 'jq ".stages.bogus = .stages.credential_lookup" "$tmp/schema-unknown/auth-stage-pre-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/schema-unknown/auth-stage-pre-0.json"'
 expect_unavailable "strict schema rejects an unknown stage key" "$tmp/schema-unknown" capture-invalid
 
+schema_case "$tmp/counter-schema-unknown" 'jq ".canceled_completions.bogus = 1" "$tmp/counter-schema-unknown/auth-stage-pre-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/counter-schema-unknown/auth-stage-pre-0.json"'
+expect_unavailable "strict schema rejects an unknown cancellation stage" "$tmp/counter-schema-unknown" capture-invalid
+
+schema_case "$tmp/counter-schema-fraction" 'jq ".canceled_completions.policy_check = 1.5" "$tmp/counter-schema-fraction/auth-stage-pre-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/counter-schema-fraction/auth-stage-pre-0.json"'
+expect_unavailable "strict schema rejects a non-integer cancellation counter" "$tmp/counter-schema-fraction" capture-invalid
+
 schema_case "$tmp/schema-ts" 'jq ".captured_at_unix_ms = 1000" "$tmp/schema-ts/auth-stage-post-0.json" >"$tmp/e" && mv "$tmp/e" "$tmp/schema-ts/auth-stage-post-0.json"'
 expect_unavailable "strict schema rejects an identical pre/post capture timestamp" "$tmp/schema-ts" capture-invalid
 
@@ -333,7 +548,7 @@ expect_unavailable "strict schema rejects a missing expected pod" "$tmp/schema-m
 schema_case "$tmp/schema-binding" 'cp "$tmp/schema-binding/auth-stage-post-1.json" "$tmp/schema-binding/auth-stage-post-2.json"'
 expect_unavailable "strict schema rejects a mismatched native pod binding" "$tmp/schema-binding" capture-invalid
 
-if out=$("$summarizer" "$tmp") && printf '%s' "$out" | jq -e '.available == false and .reason == "capture-missing"' >/dev/null; then
+if out=$("$summarizer" "$tmp") && printf '%s' "$out" | jq -e '.available == false and .reason == "capture-missing" and .canceled_completions.available == false and .canceled_completions.reason == "capture-missing"' >/dev/null; then
 	ok "summarizer reports a missing capture as unavailable"
 else
 	bad "summarizer reports a missing capture as unavailable"
@@ -724,14 +939,6 @@ gen_evidence() { # DIR WITH_AUTH(0/1)
 # Exercise the runner's actual fixed native-counter capture and wrapper
 # projection with synthetic inputs. Identity values exist only in mock command
 # output and shell comparisons; evidence contains only the fixed projection.
-no_canary() {
-	if grep -F "$1" "$2" >/dev/null; then
-		return 1
-	else
-		grep_status=$?
-	fi
-	[ "$grep_status" -eq 1 ]
-}
 object_store_funcs=$tmp/object-store-functions.sh
 awk '/^object_store_pod_identity\(\) \{/{copy=1} copy{print} copy && /^\}$/{functions++; if(functions==3) exit}' "$runner" >"$object_store_funcs"
 if [ -s "$object_store_funcs" ]; then
@@ -929,6 +1136,8 @@ if sh "$wrapper" --summarize "$integration" "$results" >/dev/null 2>"$tmp/integr
 		and (.series | length) == 6
 		and .auth_stage.available == true
 		and .auth_stage.captured == true
+		and .auth_stage.canceled_completions.available == true
+		and .auth_stage.canceled_completions.source_continuity == "unknown"
 		and .object_store.available == true
 		and (.object_store.pods | map(.pod_index)) == [0,1,2]
 		and all(.object_store.pods[]; .available == true and .counters_delta.http_requests == 4 and .counters_delta.sdk_retries == 4 and ((.counters_delta | keys | sort) == ["condition_conflicts","dedup_hits","http_4xx_unexpected","http_5xx","http_failures","http_requests","sdk_retries","transport_failures"]))

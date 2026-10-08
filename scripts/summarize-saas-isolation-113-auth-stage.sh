@@ -44,6 +44,10 @@ def is_num: type == "number" and isfinite and . >= 0 and . <= 9007199254740991;
 def le_key: if . == "+Inf" then 1e300 else (. | tonumber) end;
 def le_finite: . == "+Inf" or ((type == "string") and (test("^[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?$")) and ((. | tonumber) | isfinite) and ((. | tonumber) >= 0));
 def stage_names: ["credential_lookup","password_verify","subject_revalidate","interaction_consume","session_rotate","oauth_issue","authorize_validate","authorize_session","policy_check","policy_allow","policy_account_lock","policy_success"];
+def valid_canceled($values):
+	($values | type) == "object"
+	and ([$values | keys[] | select(. as $k | (stage_names | index($k)) == null)] | length) == 0
+	and ([$values[] | is_int] | all);
 def valid_stage_value($v):
 	($v | keys | sort) == ["buckets","count","sum"]
 	and ($v.count | is_int)
@@ -55,8 +59,8 @@ def valid_stage_value($v):
 	and (([$v.buckets[] | select(.le == "+Inf")][0].value) == $v.count)
 	and ([range(0; (($v.buckets | length) - 1)) as $i | ($v.buckets[$i].value <= $v.buckets[$i + 1].value)] | all)
 	and ([range(0; (($v.buckets | length) - 1)) as $i | (($v.buckets[$i].le | le_key) < ($v.buckets[$i + 1].le | le_key))] | all);
-(keys | sort) == ["captured_at_unix_ms","family","pod_index","schema_version","stages"]
-and .schema_version == 1
+((.schema_version == 1 and (keys | sort) == ["captured_at_unix_ms","family","pod_index","schema_version","stages"])
+	or (.schema_version == 2 and (keys | sort) == ["canceled_completions","captured_at_unix_ms","family","pod_index","schema_version","stages"] and (.canceled_completions | valid_canceled(.))))
 and .family == "goauthy_auth_stage_duration_seconds"
 and (.pod_index | is_int)
 and (.captured_at_unix_ms | is_int)
@@ -72,6 +76,12 @@ emit_unavailable() {
 		available: false,
 		reason: $reason,
 		family: "goauthy_auth_stage_duration_seconds",
+		canceled_completions: {
+			available: false,
+			reason: $reason,
+			source_continuity: "unknown",
+			pods: []
+		},
 		known_stages: ["credential_lookup","password_verify","subject_revalidate","interaction_consume","session_rotate","oauth_issue","authorize_validate","authorize_session","policy_check","policy_allow","policy_account_lock","policy_success"],
 		observed_stages: [],
 		pods: [],

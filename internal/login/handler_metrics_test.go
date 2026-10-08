@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -298,6 +299,67 @@ func TestLoginMetricsAuthStagesObservedAndBounded(t *testing.T) {
 	for stage, count := range policyStageCounts {
 		if count != 1 {
 			t.Errorf("stage %q count=%d, want 1", stage, count)
+		}
+	}
+}
+
+func TestLoginMetricsCanceledStageCompletions(t *testing.T) {
+	root, span := tracing.NewTracer("goauthy/canceled-stage-metrics-test").Start(context.Background(), "non-recording")
+	defer span.End()
+	if span.IsRecording() {
+		t.Fatal("test requires tracing to be off")
+	}
+
+	h := &Handler{}
+	reg := metrics.NewRegistry()
+	h.SetMetrics(reg)
+
+	canceled, cancel := context.WithCancel(root)
+	cancel()
+	h.recordAuthStage(canceled, metrics.AuthStagePolicyCheck, time.Now())
+	h.recordAuthStage(canceled, metrics.AuthStagePolicyAllow, time.Now())
+	h.recordAuthStage(root, metrics.AuthStagePolicySuccess, time.Now())
+
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	response := httptest.NewRecorder()
+	reg.Handler("").ServeHTTP(response, request)
+	text := response.Body.String()
+	for _, want := range []string{
+		`goauthy_auth_stage_canceled_completions_total{stage="policy_check"} 1`,
+		`goauthy_auth_stage_canceled_completions_total{stage="policy_allow"} 1`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("metrics output missing %q", want)
+		}
+	}
+	if strings.Contains(text, `goauthy_auth_stage_canceled_completions_total{stage="policy_success"}`) {
+		t.Fatal("live-context stage emitted a cancellation completion")
+	}
+
+	metricsRegistry := prometheus.NewRegistry()
+	if err := metricsRegistry.Register(reg.AuthStageDurationCollector()); err != nil {
+		t.Fatal(err)
+	}
+	families, err := metricsRegistry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	durations := make(map[string]uint64)
+	for _, family := range families {
+		if family.GetName() != "goauthy_auth_stage_duration_seconds" {
+			continue
+		}
+		for _, sample := range family.GetMetric() {
+			for _, label := range sample.GetLabel() {
+				if label.GetName() == "stage" {
+					durations[label.GetValue()] = sample.GetHistogram().GetSampleCount()
+				}
+			}
+		}
+	}
+	for _, stage := range []string{"policy_check", "policy_allow", "policy_success"} {
+		if durations[stage] != 1 {
+			t.Errorf("duration observations for %s=%d, want 1", stage, durations[stage])
 		}
 	}
 }

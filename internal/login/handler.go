@@ -1939,6 +1939,9 @@ func (h *Handler) passwordlessCookie(value string) (*http.Cookie, error) {
 func (h *Handler) recordAuthStage(ctx context.Context, stage metrics.AuthStage, start time.Time) {
 	if h.metrics != nil {
 		h.metrics.AuthStageDuration(stage, time.Since(start).Seconds())
+		if ctx.Err() != nil {
+			h.metrics.AuthStageCanceledCompletion(stage)
+		}
 	}
 	tracing.ObserveAuthStage(ctx, string(stage), start)
 }

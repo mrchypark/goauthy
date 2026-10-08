@@ -1219,6 +1219,25 @@ func TestAuthStageDurationBoundedLabelsUnderVariedInput(t *testing.T) {
 	}
 }
 
+func TestAuthStageCanceledCompletionRejectsUnknownAndNilRegistry(t *testing.T) {
+	reg := NewRegistry()
+	reg.AuthStageCanceledCompletion(AuthStage("untrusted_value"))
+	reg.AuthStageCanceledCompletion(AuthStagePolicyCheck)
+	var nilRegistry *Registry
+	nilRegistry.AuthStageCanceledCompletion(AuthStagePolicyAllow)
+
+	text := gatherText(t, reg)
+	if strings.Contains(text, "untrusted_value") {
+		t.Fatalf("untrusted stage label leaked: %s", text)
+	}
+	if got := strings.Count(text, "goauthy_auth_stage_canceled_completions_total{stage="); got != 1 {
+		t.Fatalf("canceled-completion series=%d, want 1", got)
+	}
+	if !strings.Contains(text, `goauthy_auth_stage_canceled_completions_total{stage="policy_check"} 1`) {
+		t.Fatalf("known stage count missing: %s", text)
+	}
+}
+
 // --- dto import guard (ensures client_model is available) -----------------
 
 var _ *dto.MetricFamily
