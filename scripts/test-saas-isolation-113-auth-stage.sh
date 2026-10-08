@@ -522,7 +522,7 @@ authorize_line=$(grep -n '^authorize_url=' "$runner" | head -1 | cut -d: -f1)
 deadline_line=$(grep -n '^readiness_deadline=' "$runner" | head -1 | cut -d: -f1)
 start_line=$(grep -n '^start_ms=' "$runner" | head -1 | cut -d: -f1)
 cm_line=$(grep -n 'create configmap isolation113-run' "$runner" | head -1 | cut -d: -f1)
-apply_line=$(grep -n '^kubectl --context .* apply -f deploy/kind-saas-isolation-113/driver-job.yaml' "$runner" | head -1 | cut -d: -f1)
+apply_line=$(grep -n '^[[:space:]]*kubectl --context .* apply -f deploy/kind-saas-isolation-113/driver-job.yaml$' "$runner" | head -1 | cut -d: -f1)
 if [ -n "$ready_line" ] && [ -n "$pin_snapshot_line" ] && [ -n "$pin_check_line" ] && [ -n "$pre_line" ] &&
 	[ -n "$authorize_line" ] && [ -n "$deadline_line" ] && [ -n "$start_line" ] && [ -n "$cm_line" ] && [ -n "$apply_line" ] &&
 	[ "$ready_line" -lt "$pin_snapshot_line" ] && [ "$pin_snapshot_line" -lt "$pin_check_line" ] &&
@@ -580,6 +580,7 @@ context=kind-test
 namespace=goauthy
 temp_dir=$HARNESS/tmp
 job_status=0
+baseline_iam_only=0
 startup_only=$MOCK_STARTUP_ONLY
 GOAUTHY_IMAGE=synthetic
 candidate_config_digest=synthetic
