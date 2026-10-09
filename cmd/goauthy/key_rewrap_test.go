@@ -6,9 +6,131 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/kv"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/passkey"
 )
+
+func TestMasterKeyRewrapStepSyntheticBudgetModel(t *testing.T) {
+	var order []string
+	var deadlineCount int
+	worker := syntheticMasterKeyRewrapWorker(func(name string, ctx context.Context) {
+		order = append(order, name)
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Errorf("%s callback has no family deadline", name)
+			return
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 || remaining > masterKeyRewrapFamilyTimeout {
+			t.Errorf("%s callback deadline remaining=%s, want >0 and <=%s", name, remaining, masterKeyRewrapFamilyTimeout)
+		}
+		deadlineCount++
+	})
+	if err := worker.Step(context.Background()); err != nil {
+		t.Fatal("synthetic worker step failed")
+	}
+	wantOrder := []string{
+		"signing", "idempotency", "transactions", "passkey", "kv", "managed",
+		"login-revoke", "email-outbox", "generated-api-key-bootstrap", "saas",
+		"saas-provider", "saas-authorization", "auth-provider-secret",
+	}
+	if !equalStrings(order, wantOrder) || deadlineCount != len(wantOrder) {
+		t.Fatalf("family callbacks=%v deadlines=%d want %v", order, deadlineCount, wantOrder)
+	}
+	if got, want := time.Duration(len(wantOrder))*masterKeyRewrapFamilyTimeout, 130*time.Second; got != want {
+		t.Fatalf("synthetic per-family timeout budget=%s want %s", got, want)
+	}
+	for _, cursor := range []struct{ name, got, want string }{
+		{"signing", worker.signingCursor, "signing-next"},
+		{"idempotency", worker.idempotencyCursor, "idempotency-next"},
+		{"transactions", worker.transactionCursor, "transactions-next"},
+		{"passkey", worker.passkeyCursor, "passkey-next"},
+		{"kv", worker.kvCursor, "kv-next"},
+		{"managed", worker.managedCursor, "managed-next"},
+		{"login-revoke", worker.loginRevokeCursor, "login-revoke-next"},
+		{"email-outbox", worker.emailOutboxCursor, "email-outbox-next"},
+		{"saas", worker.saasCursor, "saas-next"},
+		{"saas-provider", worker.saasProviderCursor, "saas-provider-next"},
+		{"saas-authorization", worker.saasAuthorizationCursor, "saas-authorization-next"},
+		{"auth-provider-secret", worker.authProviderSecretCursor, "auth-provider-secret-next"},
+	} {
+		if cursor.got != cursor.want {
+			t.Errorf("%s cursor=%q want %q", cursor.name, cursor.got, cursor.want)
+		}
+	}
+}
+
+func BenchmarkMasterKeyRewrapStepSyntheticCallbacks(b *testing.B) {
+	worker := syntheticMasterKeyRewrapWorker(func(string, context.Context) {})
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := worker.Step(context.Background()); err != nil {
+			b.Fatal("synthetic worker step failed")
+		}
+	}
+	b.ReportMetric(13, "families/op")
+	b.ReportMetric(float64(13*int(masterKeyRewrapFamilyTimeout/time.Second)), "modeled-timeout-budget-sec/op")
+}
+
+func syntheticMasterKeyRewrapWorker(observe func(string, context.Context)) *masterKeyRewrapWorker {
+	call := func(name string, ctx context.Context) { observe(name, ctx) }
+	return &masterKeyRewrapWorker{
+		now: func() time.Time { return time.Unix(1_900_000_000, 0).UTC() },
+		rewrapSigning: func(ctx context.Context, _ string) (oidc.SigningKeyRewrapBatchResult, error) {
+			call("signing", ctx)
+			return oidc.SigningKeyRewrapBatchResult{Cursor: "signing-next"}, nil
+		},
+		rewrapIdempotency: func(ctx context.Context, _ string) (string, int, error) {
+			call("idempotency", ctx)
+			return "idempotency-next", 0, nil
+		},
+		rewrapTransactions: func(ctx context.Context, _ time.Time, _ string) (string, bool, int64, error) {
+			call("transactions", ctx)
+			return "transactions-next", false, 0, nil
+		},
+		rewrapPasskey: func(ctx context.Context, _ string) (passkey.RewrapBatchResult, error) {
+			call("passkey", ctx)
+			return passkey.RewrapBatchResult{Cursor: "passkey-next"}, nil
+		},
+		rewrapKV: func(ctx context.Context, _ string) (kv.RewrapResult, error) {
+			call("kv", ctx)
+			return kv.RewrapResult{Cursor: "kv-next"}, nil
+		},
+		rewrapManaged: func(ctx context.Context, _ string) (oidc.SigningKeyRewrapBatchResult, error) {
+			call("managed", ctx)
+			return oidc.SigningKeyRewrapBatchResult{Cursor: "managed-next"}, nil
+		},
+		rewrapLoginRevoke: func(ctx context.Context, _ string) (oidc.SigningKeyRewrapBatchResult, error) {
+			call("login-revoke", ctx)
+			return oidc.SigningKeyRewrapBatchResult{Cursor: "login-revoke-next"}, nil
+		},
+		rewrapEmailOutbox: func(ctx context.Context, _ string) (oidc.SigningKeyRewrapBatchResult, error) {
+			call("email-outbox", ctx)
+			return oidc.SigningKeyRewrapBatchResult{Cursor: "email-outbox-next"}, nil
+		},
+		rewrapGeneratedAPIKeyBootstrap: func(ctx context.Context) (oidc.SigningKeyRewrapBatchResult, error) {
+			call("generated-api-key-bootstrap", ctx)
+			return oidc.SigningKeyRewrapBatchResult{Done: true}, nil
+		},
+		rewrapSaaS: func(ctx context.Context, _ string) (oidc.SigningKeyRewrapBatchResult, error) {
+			call("saas", ctx)
+			return oidc.SigningKeyRewrapBatchResult{Cursor: "saas-next"}, nil
+		},
+		rewrapSaaSProvider: func(ctx context.Context, _ string) (oidc.SigningKeyRewrapBatchResult, error) {
+			call("saas-provider", ctx)
+			return oidc.SigningKeyRewrapBatchResult{Cursor: "saas-provider-next"}, nil
+		},
+		rewrapSaaSAuthorization: func(ctx context.Context, _ string) (oidc.SigningKeyRewrapBatchResult, error) {
+			call("saas-authorization", ctx)
+			return oidc.SigningKeyRewrapBatchResult{Cursor: "saas-authorization-next"}, nil
+		},
+		rewrapAuthProviderSecret: func(ctx context.Context, _ string) (oidc.SigningKeyRewrapBatchResult, error) {
+			call("auth-provider-secret", ctx)
+			return oidc.SigningKeyRewrapBatchResult{Cursor: "auth-provider-secret-next"}, nil
+		},
+	}
+}
 
 func TestMasterKeyRewrapStepAdvancesAndResetsCursors(t *testing.T) {
 	t.Parallel()
