@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,47 @@ import (
 // Only scripts/test-confirmation-proof.sh rewrites call sites to these functions.
 // They capture the actual request, not a copied SQL implementation.
 type confirmationKey struct{}
+type sessionCostProbeKey struct{}
+
+// SessionCostProbe is exposed only by the confirmationproof overlay so a
+// cross-package handler test can count the actual browser-store requests.
+type SessionCostProbe struct {
+	sessionReads        int
+	touchSubmits        int
+	sessionReadFailures int
+	failNextSessionRead bool
+	beforeInteraction   func()
+}
+
+func WithSessionCostProbe(ctx context.Context, probe *SessionCostProbe) context.Context {
+	return context.WithValue(ctx, sessionCostProbeKey{}, probe)
+}
+
+func (p *SessionCostProbe) Counts() (sessionReads, touchSubmits int) {
+	if p == nil {
+		return 0, 0
+	}
+	return p.sessionReads, p.touchSubmits
+}
+
+func (p *SessionCostProbe) FailNextSessionRead() {
+	p.failNextSessionRead = true
+}
+
+func (p *SessionCostProbe) SessionReadFailures() int {
+	return p.sessionReadFailures
+}
+
+func (p *SessionCostProbe) BeforeNextInteractionInsert(fn func()) {
+	p.beforeInteraction = fn
+}
+
+func SetSessionCostClock(store *Store, now func() time.Time) {
+	store.now = now
+}
+
+func SessionCostTouchInterval() time.Duration { return touchInterval }
+
 type confirmationProbe struct {
 	request           rhiza.ExecuteRequest
 	response          rhiza.ExecuteResponse
@@ -58,6 +100,16 @@ func isConfirmationPair(request rhiza.ExecuteRequest) bool {
 
 func confirmationExecute(ctx context.Context, db *rhiza.DB, request rhiza.ExecuteRequest) (rhiza.ExecuteResponse, error) {
 	p, _ := ctx.Value(confirmationKey{}).(*confirmationProbe)
+	if cost, _ := ctx.Value(sessionCostProbeKey{}).(*SessionCostProbe); cost != nil {
+		if strings.HasPrefix(strings.TrimSpace(request.SQL), "UPDATE browser_sessions SET last_seen_at_unix_ms = ?") {
+			cost.touchSubmits++
+		}
+		if cost.beforeInteraction != nil && hasAuthorizationInteractionInsert(request) {
+			before := cost.beforeInteraction
+			cost.beforeInteraction = nil
+			before()
+		}
+	}
 	creator, pair := isConfirmationCreator(request), isConfirmationPair(request)
 	if p != nil {
 		p.executes++
@@ -99,7 +151,27 @@ func confirmationQuery(ctx context.Context, db *rhiza.DB, request rhiza.QueryReq
 	if p, ok := ctx.Value(confirmationKey{}).(*confirmationProbe); ok {
 		p.queries++
 	}
+	if cost, _ := ctx.Value(sessionCostProbeKey{}).(*SessionCostProbe); cost != nil && strings.HasPrefix(strings.TrimSpace(request.SQL), "SELECT subject, auth_method, created_at_unix_ms,") && strings.Contains(request.SQL, "FROM browser_sessions WHERE token_digest = ?") {
+		if cost.failNextSessionRead {
+			cost.failNextSessionRead = false
+			cost.sessionReadFailures++
+			return rhiza.QueryResponse{}, errors.New("injected first browser session lookup failure")
+		}
+		cost.sessionReads++
+	}
 	return db.Query(ctx, request)
+}
+
+func hasAuthorizationInteractionInsert(request rhiza.ExecuteRequest) bool {
+	if strings.Contains(strings.ToUpper(request.SQL), "INSERT INTO BROWSER_AUTHORIZATION_INTERACTIONS") {
+		return true
+	}
+	for _, statement := range request.Statements {
+		if strings.Contains(strings.ToUpper(statement.SQL), "INSERT INTO BROWSER_AUTHORIZATION_INTERACTIONS") {
+			return true
+		}
+	}
+	return false
 }
 func confirmationFixture(t *testing.T) (*Store, IssuedSession, time.Time) {
 	t.Helper()
