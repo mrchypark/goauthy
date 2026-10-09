@@ -74,8 +74,12 @@ func TestLoginMetadataFailurePreservesOldSessionAndPublishesNoCookie(t *testing.
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "login-metadata-reject-update", SQL: `CREATE TRIGGER login_metadata_reject BEFORE UPDATE OF last_login_at_unix_ms ON identity_users BEGIN SELECT RAISE(ABORT, 'metadata fixture failure'); END`}); err != nil {
 		t.Fatal(err)
 	}
+	auth, err := h.identity.Authenticate(ctx, "alice", []byte("correct password"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	response := httptest.NewRecorder()
-	if _, err := h.rotateBrowserSession(response, httptest.NewRequest(http.MethodPost, "/", nil), old.Value, "user-1", "pwd", initSession.PeerIP); err == nil {
+	if _, err := h.rotateBrowserSession(response, httptest.NewRequest(http.MethodPost, "/", nil), old.Value, "user-1", "pwd", initSession.PeerIP, auth.PasswordGeneration, auth.AuthenticationGeneration); err == nil {
 		t.Fatal("metadata failure accepted")
 	}
 	if response.Header().Get("Set-Cookie") != "" {
@@ -94,7 +98,7 @@ func TestLoginMetadataFailurePreservesOldSessionAndPublishesNoCookie(t *testing.
 		t.Fatal(err)
 	}
 	ok := httptest.NewRecorder()
-	newSession, err := h.rotateBrowserSession(ok, httptest.NewRequest(http.MethodPost, "/", nil), old.Value, "user-1", "pwd", initSession.PeerIP)
+	newSession, err := h.rotateBrowserSession(ok, httptest.NewRequest(http.MethodPost, "/", nil), old.Value, "user-1", "pwd", initSession.PeerIP, auth.PasswordGeneration, auth.AuthenticationGeneration)
 	if err != nil || newSession.Token == "" {
 		t.Fatalf("positive control rotation err=%v", err)
 	}

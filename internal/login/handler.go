@@ -557,10 +557,11 @@ func (h *Handler) renderAuthenticationPage(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	_, span := tracing.NewTracer("goauthy/login").Start(r.Context(), "login",
+	ctx, span := tracing.NewTracer("goauthy/login").Start(r.Context(), "login",
 		trace.WithSpanKind(trace.SpanKindServer),
 	)
 	defer span.End()
+	r = r.WithContext(ctx)
 	securityHeaders(w)
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
@@ -680,7 +681,7 @@ func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request, form log
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	h.completeAuthenticationWithInteraction(w, r, sessionToken, form.interaction, interaction, auth.Subject, "pwd", func() error {
+	h.completeAuthenticationWithInteraction(w, r, sessionToken, form.interaction, interaction, auth.Subject, "pwd", auth.PasswordGeneration, auth.AuthenticationGeneration, func() error {
 		return h.recordSuccessfulAuthentication(r.Context(), peerIP, h.now().Sub(started), nil)
 	})
 }
@@ -871,7 +872,7 @@ func (h *Handler) fedCMPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	if _, err := h.rotateBrowserSession(w, r, sessionToken, auth.Subject, "pwd", peerIP); err != nil {
+	if _, err := h.rotateBrowserSession(w, r, sessionToken, auth.Subject, "pwd", peerIP, auth.PasswordGeneration, auth.AuthenticationGeneration); err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
@@ -1176,7 +1177,7 @@ func (h *Handler) completeExternalAuthentication(w http.ResponseWriter, r *http.
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	h.completeConsumedAuthentication(w, r, sessionToken, subject, authMethod, target, peerIP, nil, binding)
+	h.completeConsumedAuthentication(w, r, sessionToken, subject, authMethod, 0, 0, target, peerIP, nil, binding)
 }
 
 // CurrentExternalInitSession returns the cookie bearer token and its canonical
@@ -1243,7 +1244,11 @@ func (h *Handler) completeAuthentication(w http.ResponseWriter, r *http.Request,
 // interaction is known only by its canonical persisted digest, so the raw
 // continuation token never enters durable state or the caller (GA66-OTP-003).
 func (h *Handler) completeAuthenticationByDigest(w http.ResponseWriter, r *http.Request, sessionToken, interactionDigest, subject, authMethod string, onConsumed func() error) {
-	h.completeAuthenticationInteraction(w, r, sessionToken, interactionDigest, subject, authMethod, onConsumed, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+	h.completeAuthenticationByDigestWithProof(w, r, sessionToken, interactionDigest, subject, authMethod, 0, 0, onConsumed)
+}
+
+func (h *Handler) completeAuthenticationByDigestWithProof(w http.ResponseWriter, r *http.Request, sessionToken, interactionDigest, subject, authMethod string, passwordGeneration, authenticationGeneration int64, onConsumed func() error) {
+	h.completeAuthenticationInteractionWithProof(w, r, sessionToken, interactionDigest, subject, authMethod, passwordGeneration, authenticationGeneration, onConsumed, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
 		return h.browser.LoadAuthorizationInteractionReadOnlyByDigest(ctx, sessionToken, interactionDigest)
 	}, func(ctx context.Context) (browser.AuthorizationInteraction, error) {
 		return h.browser.ConsumeAuthorizationInteractionByDigest(ctx, sessionToken, interactionDigest)
@@ -1251,6 +1256,10 @@ func (h *Handler) completeAuthenticationByDigest(w http.ResponseWriter, r *http.
 }
 
 func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *http.Request, sessionToken, interactionDigest, subject, authMethod string, onConsumed func() error, load, consume func(context.Context) (browser.AuthorizationInteraction, error)) {
+	h.completeAuthenticationInteractionWithProof(w, r, sessionToken, interactionDigest, subject, authMethod, 0, 0, onConsumed, load, consume)
+}
+
+func (h *Handler) completeAuthenticationInteractionWithProof(w http.ResponseWriter, r *http.Request, sessionToken, interactionDigest, subject, authMethod string, passwordGeneration, authenticationGeneration int64, onConsumed func() error, load, consume func(context.Context) (browser.AuthorizationInteraction, error)) {
 	peerIP, peerOK := h.resolvePeerIP(r)
 	if !peerOK {
 		http.Error(w, "Invalid login request", http.StatusBadRequest)
@@ -1261,7 +1270,7 @@ func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *ht
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	h.finishAuthentication(w, r, sessionToken, interactionDigest, subject, authMethod, onConsumed, consume, peerIP, interaction)
+	h.finishAuthentication(w, r, sessionToken, interactionDigest, subject, authMethod, passwordGeneration, authenticationGeneration, onConsumed, consume, peerIP, interaction)
 }
 
 // completeAuthenticationWithInteraction completes an account login from an
@@ -1269,7 +1278,7 @@ func (h *Handler) completeAuthenticationInteraction(w http.ResponseWriter, r *ht
 // but the authorization request is re-resolved fresh at the original gate so a
 // concurrent client/ForceMFA change is fenced before the one-time interaction is
 // consumed and the session is rotated.
-func (h *Handler) completeAuthenticationWithInteraction(w http.ResponseWriter, r *http.Request, sessionToken, interactionToken string, interaction browser.AuthorizationInteraction, subject, authMethod string, onConsumed func() error) {
+func (h *Handler) completeAuthenticationWithInteraction(w http.ResponseWriter, r *http.Request, sessionToken, interactionToken string, interaction browser.AuthorizationInteraction, subject, authMethod string, passwordGeneration, authenticationGeneration int64, onConsumed func() error) {
 	peerIP, peerOK := h.resolvePeerIP(r)
 	if !peerOK {
 		http.Error(w, "Invalid login request", http.StatusBadRequest)
@@ -1283,13 +1292,13 @@ func (h *Handler) completeAuthenticationWithInteraction(w http.ResponseWriter, r
 	consume := func(ctx context.Context) (browser.AuthorizationInteraction, error) {
 		return h.browser.ConsumeAuthorizationInteraction(ctx, sessionToken, interactionToken)
 	}
-	h.finishAuthentication(w, r, sessionToken, digest, subject, authMethod, onConsumed, consume, peerIP, interaction)
+	h.finishAuthentication(w, r, sessionToken, digest, subject, authMethod, passwordGeneration, authenticationGeneration, onConsumed, consume, peerIP, interaction)
 }
 
 // finishAuthentication re-resolves the current authorization request from the
 // loaded interaction, enforces the ForceMFA gate, consumes the one-time
 // interaction atomically, and rotates the session only after every fence passes.
-func (h *Handler) finishAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, interactionDigest, subject, authMethod string, onConsumed func() error, consume func(context.Context) (browser.AuthorizationInteraction, error), peerIP string, interaction browser.AuthorizationInteraction) {
+func (h *Handler) finishAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, interactionDigest, subject, authMethod string, passwordGeneration, authenticationGeneration int64, onConsumed func() error, consume func(context.Context) (browser.AuthorizationInteraction, error), peerIP string, interaction browser.AuthorizationInteraction) {
 	target, err := h.resolveAuthenticationRequest(r, interaction.Payload)
 	if err != nil || (target.policy.ForceMFA && authMethod != "mfa") {
 		http.Error(w, "Invalid login request", http.StatusForbidden)
@@ -1302,13 +1311,13 @@ func (h *Handler) finishAuthentication(w http.ResponseWriter, r *http.Request, s
 		http.Error(w, "Invalid login request", http.StatusForbidden)
 		return
 	}
-	h.completeConsumedAuthentication(w, r, sessionToken, subject, authMethod, target, peerIP, onConsumed, nil)
+	h.completeConsumedAuthentication(w, r, sessionToken, subject, authMethod, passwordGeneration, authenticationGeneration, target, peerIP, onConsumed, nil)
 }
 
 // completeBrowserAuthentication performs the shared post-proof transition.
 // The caller must consume its one-use interaction first and dispatch to its
 // own destination afterward; this function never issues OAuth credentials.
-func (h *Handler) completeBrowserAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP, parentDigest string, onConsumed func() error, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, bool) {
+func (h *Handler) completeBrowserAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP string, passwordGeneration, authenticationGeneration int64, parentDigest string, onConsumed func() error, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, bool) {
 	if _, err := h.identity.UserBySubject(r.Context(), subject); err != nil {
 		http.Error(w, "Invalid login request", http.StatusUnauthorized)
 		return browser.IssuedSession{}, false
@@ -1333,7 +1342,7 @@ func (h *Handler) completeBrowserAuthentication(w http.ResponseWriter, r *http.R
 			return browser.IssuedSession{}, false
 		}
 	}
-	newSession, err := h.rotateBrowserSessionWithParent(w, r, sessionToken, subject, authMethod, peerIP, parentDigest, binding)
+	newSession, err := h.rotateBrowserSessionWithParent(w, r, sessionToken, subject, authMethod, peerIP, passwordGeneration, authenticationGeneration, parentDigest, binding)
 	if err != nil {
 		if errors.Is(err, errLoginLocation) {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -1352,13 +1361,13 @@ func (h *Handler) completeBrowserAuthentication(w http.ResponseWriter, r *http.R
 	return newSession, true
 }
 
-func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, target authenticationRequest, peerIP string, onConsumed func() error, binding *browser.UpstreamSessionBinding) {
+func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod string, passwordGeneration, authenticationGeneration int64, target authenticationRequest, peerIP string, onConsumed func() error, binding *browser.UpstreamSessionBinding) {
 	parentDigest := ""
 	if target.approval != nil {
 		parentDigest = target.approval.ParentSessionDigest
 	}
 	// ponytail: a failed code issuance consumes this interaction; restart authorize rather than risking duplicate codes.
-	newSession, ok := h.completeBrowserAuthentication(w, r, sessionToken, subject, authMethod, peerIP, parentDigest, onConsumed, binding)
+	newSession, ok := h.completeBrowserAuthentication(w, r, sessionToken, subject, authMethod, peerIP, passwordGeneration, authenticationGeneration, parentDigest, onConsumed, binding)
 	if !ok {
 		return
 	}
@@ -1398,17 +1407,30 @@ func (h *Handler) completeConsumedAuthentication(w http.ResponseWriter, r *http.
 // Callers must consume any one-time challenge before invoking it. The caller's
 // old session is revoked after the replacement is durably created, matching
 // the existing OAuth login behavior and preserving the peer binding.
-func (h *Handler) rotateBrowserSession(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP string) (browser.IssuedSession, error) {
-	return h.rotateBrowserSessionWithBinding(w, r, sessionToken, subject, authMethod, peerIP, nil)
+func (h *Handler) rotateBrowserSession(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP string, passwordGeneration, authenticationGeneration int64) (browser.IssuedSession, error) {
+	return h.rotateBrowserSessionWithBinding(w, r, sessionToken, subject, authMethod, peerIP, passwordGeneration, authenticationGeneration, nil)
 }
 
-func (h *Handler) rotateBrowserSessionWithBinding(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP string, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, error) {
-	return h.rotateBrowserSessionWithParent(w, r, sessionToken, subject, authMethod, peerIP, "", binding)
+func (h *Handler) rotateBrowserSessionWithBinding(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP string, passwordGeneration, authenticationGeneration int64, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, error) {
+	return h.rotateBrowserSessionWithParent(w, r, sessionToken, subject, authMethod, peerIP, passwordGeneration, authenticationGeneration, "", binding)
 }
 
-func (h *Handler) rotateBrowserSessionWithParent(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP, parentDigest string, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, error) {
+func (h *Handler) rotateBrowserSessionWithParent(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP string, passwordGeneration, authenticationGeneration int64, parentDigest string, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, error) {
 	rotateStart := time.Now()
 	defer h.recordAuthStage(r.Context(), metrics.AuthStageSessionRotate, rotateStart)
+	hasPasswordProof := passwordGeneration != 0 || authenticationGeneration != 0
+	if hasPasswordProof && (passwordGeneration < 1 || authenticationGeneration < 1) {
+		return browser.IssuedSession{}, errors.New("password session requires authentication generations")
+	}
+	if hasPasswordProof && authMethod != "pwd" && authMethod != "mfa" {
+		return browser.IssuedSession{}, errors.New("password proof is invalid for authentication method")
+	}
+	if hasPasswordProof && binding != nil {
+		return browser.IssuedSession{}, errors.New("password proof cannot use an upstream session binding")
+	}
+	if authMethod == "pwd" && !hasPasswordProof {
+		return browser.IssuedSession{}, errors.New("password session requires authentication generations")
+	}
 	if h.onLoginLocation != nil && (authMethod == "webauthn" || authMethod == "mfa") && !security.ValidHeaderText(r.UserAgent()) {
 		return browser.IssuedSession{}, identity.ErrInvalidUserAgent
 	}
@@ -1426,14 +1448,24 @@ func (h *Handler) rotateBrowserSessionWithParent(w http.ResponseWriter, r *http.
 		combined   bool
 	)
 	if parentDigest != "" {
-		newSession, err = h.browser.CreateReauthenticatedSession(r.Context(), subject, authMethod, h.now().Add(sessionLifetime), peerIP, parentDigest, binding)
+		if hasPasswordProof {
+			if authMethod != "mfa" {
+				return browser.IssuedSession{}, errors.New("password proof reauthentication requires mfa")
+			}
+			newSession, err = h.browser.CreateReauthenticatedPasswordMFASession(r.Context(), subject, passwordGeneration, authenticationGeneration, h.now().Add(sessionLifetime), peerIP, parentDigest)
+		} else {
+			newSession, err = h.browser.CreateReauthenticatedSession(r.Context(), subject, authMethod, h.now().Add(sessionLifetime), peerIP, parentDigest, binding)
+		}
 	} else if binding != nil {
 		if authMethod != "external" && authMethod != "mfa" {
 			return browser.IssuedSession{}, errors.New("upstream binding requires external or mfa authentication")
 		}
 		newSession, err = h.browser.CreateUpstreamSession(r.Context(), subject, *binding, authMethod, h.now().Add(sessionLifetime), peerIP)
 	} else if authMethod == "pwd" {
-		newSession, err = h.browser.CreatePasswordSession(r.Context(), subject, authMethod, h.now().Add(sessionLifetime), peerIP, sessionToken)
+		newSession, err = h.browser.CreatePasswordSession(r.Context(), subject, authMethod, passwordGeneration, authenticationGeneration, h.now().Add(sessionLifetime), peerIP, sessionToken)
+		combined = true
+	} else if authMethod == "mfa" && hasPasswordProof {
+		newSession, err = h.browser.CreatePasswordMFASession(r.Context(), subject, passwordGeneration, authenticationGeneration, h.now().Add(sessionLifetime), peerIP, sessionToken)
 		combined = true
 	} else {
 		newSession, err = h.browser.CreateSession(r.Context(), subject, authMethod, h.now().Add(sessionLifetime), peerIP)
@@ -1739,7 +1771,7 @@ func (h *Handler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid OTP request", http.StatusBadRequest)
 		return
 	}
-	subject, interactionDigest, err := h.otp.LoadInteraction(r.Context(), session.ID)
+	subject, interactionDigest, passwordGeneration, authenticationGeneration, err := h.otp.LoadInteractionWithAuthenticationGenerations(r.Context(), session.ID)
 	if err != nil || subject == "" || interactionDigest == "" {
 		http.Error(w, "Invalid OTP request", http.StatusUnauthorized)
 		return
@@ -1767,7 +1799,7 @@ func (h *Handler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 	// method the completion path, the stored session and the amr claim accept.
 	// Completion reuses the digest the verified binding proved, so no raw
 	// continuation token is needed to consume the interaction.
-	h.completeAuthenticationByDigest(w, r, sessionToken, interactionDigest, subject, "mfa", func() error {
+	h.completeAuthenticationByDigestWithProof(w, r, sessionToken, interactionDigest, subject, "mfa", passwordGeneration, authenticationGeneration, func() error {
 		return h.recordSuccessfulAuthentication(r.Context(), peerIP, h.now().Sub(started), nil)
 	})
 }

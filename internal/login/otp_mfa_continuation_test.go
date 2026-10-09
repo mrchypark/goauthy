@@ -3,6 +3,7 @@ package login
 import (
 	"bufio"
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/recovery"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
@@ -222,6 +224,158 @@ func TestForcedMFAOTPStepUpCompletesAsMFA(t *testing.T) {
 				t.Fatalf("replay status=%d location=%q body=%q", replay.Code, replay.Header().Get("Location"), replay.Body.String())
 			}
 		})
+	}
+}
+
+func TestOTPCompletionRejectsFirstFactorChangeAfterVerification(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		advance string
+	}{
+		{name: "password reset", advance: "password-reset"},
+		{name: "password mode changed", advance: "password-mode-change"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h, db := testHandlerWithDB(t, true)
+			service, delivered := testOTPStepUp(t, h, db)
+			ctx := context.Background()
+			if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "otp-final-guard-profile", SQL: `INSERT INTO identity_user_profiles(subject,email,email_verified) VALUES('user-1','alice@example.test',1)`}); err != nil {
+				t.Fatal(err)
+			}
+			page := httptest.NewRecorder()
+			h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
+			if page.Code != http.StatusOK {
+				t.Fatalf("authorize status=%d", page.Code)
+			}
+			init := page.Result().Cookies()[0]
+			interaction := interactionToken(t, page.Body.String())
+			stepUp := httptest.NewRecorder()
+			h.Login(stepUp, postLogin(init, interaction, "alice", "correct password"))
+			if stepUp.Code != http.StatusOK {
+				t.Fatalf("step-up status=%d", stepUp.Code)
+			}
+			select {
+			case <-delivered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("OTP was not delivered")
+			}
+			code, err := service.GenerateOTP(ctx, "user-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var resetter *identity.Store
+			var resetToken string
+			var challenge identity.PasswordResetChallenge
+			if tc.advance == "password-reset" {
+				resetter = testPasswordResetStore(t, db)
+				resetToken, _, err = resetter.IssuePasswordReset(ctx, "user-1", time.Minute)
+				if err != nil {
+					t.Fatal(err)
+				}
+				challenge, err = resetter.BeginPasswordReset(ctx, "user-1", resetToken)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			h.SetLoginLocationObserver(func(r *http.Request, subject, _, _, _ string) error {
+				if tc.advance == "password-reset" {
+					_, err := resetter.ResetPassword(r.Context(), subject, resetToken, challenge.CookieToken, challenge.CSRFToken, []byte("ChangedPassword2"), "")
+					return err
+				}
+				_, err := storage.Execute(r.Context(), db, rhiza.ExecuteRequest{RequestID: "otp-final-guard-mode-change", SQL: `UPDATE identity_authentication_modes SET mode='passkey',generation=generation+1 WHERE subject=?`, Args: []any{subject}})
+				return err
+			})
+			completed := httptest.NewRecorder()
+			request := postOTPForm(init, code)
+			request.Header.Set("User-Agent", "Browser")
+			h.OTPVerify(completed, request)
+			if completed.Code != http.StatusServiceUnavailable || completed.Header().Get("Location") != "" || len(completed.Result().Cookies()) != 0 {
+				t.Fatalf("stale OTP completion status=%d location-set=%t cookies=%d body=%q", completed.Code, completed.Header().Get("Location") != "", len(completed.Result().Cookies()), completed.Body.String())
+			}
+			if got := otpLoginRowCount(t, db, `SELECT COUNT(*) FROM browser_sessions WHERE subject='user-1' AND revoked_at_unix_ms IS NULL`); got != 0 {
+				t.Fatalf("stale OTP completion left authenticated sessions=%d", got)
+			}
+			if got := otpLoginRowCount(t, db, `SELECT COUNT(*) FROM oauth_authorize_codes WHERE json_extract(request_json,'$.subject')='user-1'`); got != 0 {
+				t.Fatalf("stale OTP completion issued authorization codes=%d", got)
+			}
+		})
+	}
+}
+
+func otpLoginRowCount(t *testing.T, db *rhiza.DB, query string) int64 {
+	t.Helper()
+	rows, err := db.Query(context.Background(), rhiza.QueryRequest{SQL: query, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(rows.Rows) != 1 || len(rows.Rows[0]) != 1 {
+		t.Fatalf("query rows=%v err=%v", rows.Rows, err)
+	}
+	return rows.Rows[0][0].(int64)
+}
+
+func TestPasswordOTPRotationReauthenticatesWithOriginalProof(t *testing.T) {
+	t.Parallel()
+	h, _ := testHandlerWithDB(t, false)
+	ctx := context.Background()
+	auth, err := h.identity.Authenticate(ctx, "alice", []byte("correct password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := h.browser.CreateSession(ctx, auth.Subject, "pwd", time.Now().Add(time.Hour), "192.0.2.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	init, err := h.browser.CreateInitSession(ctx, time.Now().Add(time.Hour), "192.0.2.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	issued, err := h.rotateBrowserSessionWithParent(response, httptest.NewRequest(http.MethodPost, "/", nil), init.Token, auth.Subject, "mfa", "192.0.2.1", auth.PasswordGeneration, auth.AuthenticationGeneration, parent.ID, nil)
+	if err != nil || issued.AuthenticationMethod != "mfa" {
+		t.Fatalf("current OTP proof reauthentication session=%#v err=%v", issued, err)
+	}
+	if _, err := h.browser.LoadSessionReadOnly(ctx, parent.Token); !errors.Is(err, browser.ErrRevoked) {
+		t.Fatalf("successful reauthentication did not retire parent: %v", err)
+	}
+}
+
+func TestPasswordOTPRotationReauthenticationRejectsStaleProof(t *testing.T) {
+	t.Parallel()
+	h, db := testHandlerWithDB(t, false)
+	ctx := context.Background()
+	auth, err := h.identity.Authenticate(ctx, "alice", []byte("correct password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := h.browser.CreateSession(ctx, auth.Subject, "pwd", time.Now().Add(time.Hour), "192.0.2.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	init, err := h.browser.CreateInitSession(ctx, time.Now().Add(time.Hour), "192.0.2.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.SetLoginLocationObserver(func(r *http.Request, subject, _, _, _ string) error {
+		_, err := storage.Execute(r.Context(), db, rhiza.ExecuteRequest{
+			RequestID: "otp-reauth-final-guard-mode-change",
+			SQL:       `UPDATE identity_authentication_modes SET mode='passkey',generation=generation+1 WHERE subject=?`,
+			Args:      []any{subject},
+		})
+		return err
+	})
+	response := httptest.NewRecorder()
+	_, err = h.rotateBrowserSessionWithParent(response, httptest.NewRequest(http.MethodPost, "/", nil), init.Token, auth.Subject, "mfa", "192.0.2.1", auth.PasswordGeneration, auth.AuthenticationGeneration, parent.ID, nil)
+	if err == nil {
+		t.Fatal("reauthentication accepted stale password-plus-OTP proof")
+	}
+	if _, err := h.browser.LoadSessionReadOnly(ctx, parent.Token); err != nil {
+		t.Fatalf("failed reauthentication revoked its parent: %v", err)
+	}
+	if _, err := h.browser.LoadSessionReadOnly(ctx, init.Token); err != nil {
+		t.Fatalf("failed reauthentication consumed its init session: %v", err)
+	}
+	if got := otpLoginRowCount(t, db, `SELECT COUNT(*) FROM browser_sessions WHERE subject='user-1' AND revoked_at_unix_ms IS NULL`); got != 1 {
+		t.Fatalf("stale reauthentication left authenticated sessions=%d, want parent only", got)
 	}
 }
 

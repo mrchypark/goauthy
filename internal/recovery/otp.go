@@ -328,31 +328,42 @@ func (s *OTPInteractionStore) Store(sessionDigest, subject, interactionToken str
 // returned token is the persisted canonical interaction digest, never raw
 // continuation material.
 func (s *OTPInteractionStore) Load(ctx context.Context, sessionDigest string) (string, string, error) {
+	subject, interaction, _, _, err := s.LoadWithAuthenticationGenerations(ctx, sessionDigest)
+	return subject, interaction, err
+}
+
+// LoadWithAuthenticationGenerations returns the password proof stored with a
+// pending OTP binding. VerifyOTPAndConsumeInteraction independently checks
+// that the same binding and generations are still current when it consumes the
+// code; callers carry these original values to the final MFA session write.
+func (s *OTPInteractionStore) LoadWithAuthenticationGenerations(ctx context.Context, sessionDigest string) (string, string, int64, int64, error) {
 	if sessionDigest == "" {
-		return "", "", errors.New("invalid session digest")
+		return "", "", 0, 0, errors.New("invalid session digest")
 	}
 	db, err := s.database()
 	if err != nil {
-		return "", "", err
+		return "", "", 0, 0, err
 	}
 	result, err := db.Query(ctx, rhiza.QueryRequest{
-		SQL:         `SELECT subject,interaction_digest,expires_at_unix_ms FROM identity_email_otp_interactions WHERE session_digest=?`,
+		SQL:         `SELECT subject,interaction_digest,password_generation,authentication_generation,expires_at_unix_ms FROM identity_email_otp_interactions WHERE session_digest=?`,
 		Args:        []any{sessionDigest},
 		Consistency: rhiza.ConsistencyLinearizable,
 	})
 	if err != nil {
-		return "", "", err
+		return "", "", 0, 0, err
 	}
-	if len(result.Rows) != 1 || len(result.Rows[0]) != 3 {
-		return "", "", ErrOTPInteractionNotFound
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 5 {
+		return "", "", 0, 0, ErrOTPInteractionNotFound
 	}
 	subject, subjectOK := result.Rows[0][0].(string)
 	interaction, interactionOK := result.Rows[0][1].(string)
-	expiresAt, expiresOK := result.Rows[0][2].(int64)
-	if !subjectOK || !interactionOK || !expiresOK || subject == "" || interaction == "" || expiresAt < s.now().UTC().UnixMilli() {
-		return "", "", ErrOTPInteractionNotFound
+	passwordGeneration, passwordOK := result.Rows[0][2].(int64)
+	authenticationGeneration, authenticationOK := result.Rows[0][3].(int64)
+	expiresAt, expiresOK := result.Rows[0][4].(int64)
+	if !subjectOK || !interactionOK || !passwordOK || !authenticationOK || !expiresOK || subject == "" || interaction == "" || passwordGeneration < 1 || authenticationGeneration < 1 || expiresAt < s.now().UTC().UnixMilli() {
+		return "", "", 0, 0, ErrOTPInteractionNotFound
 	}
-	return subject, interaction, nil
+	return subject, interaction, passwordGeneration, authenticationGeneration, nil
 }
 
 func (s *OTPInteractionStore) Consume(sessionDigest string) (string, string, error) {
@@ -404,10 +415,15 @@ func (h *OTPHandler) SendOTPForSubject(ctx context.Context, subject, email, lang
 // store it reads, and the OAuth login boundary applies identity policy before
 // the one-time consumption.
 func (h *OTPHandler) LoadInteraction(ctx context.Context, sessionDigest string) (string, string, error) {
+	subject, interaction, _, _, err := h.LoadInteractionWithAuthenticationGenerations(ctx, sessionDigest)
+	return subject, interaction, err
+}
+
+func (h *OTPHandler) LoadInteractionWithAuthenticationGenerations(ctx context.Context, sessionDigest string) (string, string, int64, int64, error) {
 	if h == nil || h.interacts == nil {
-		return "", "", errors.New("OTP interaction store unavailable")
+		return "", "", 0, 0, errors.New("OTP interaction store unavailable")
 	}
-	return h.interacts.Load(ctx, sessionDigest)
+	return h.interacts.LoadWithAuthenticationGenerations(ctx, sessionDigest)
 }
 
 // VerifyInteraction consumes the submitted code and the session binding in one
