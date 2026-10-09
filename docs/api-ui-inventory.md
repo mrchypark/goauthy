@@ -57,7 +57,6 @@
 | `/auth/v1/register/passkey/finish` | POST, OPTIONS | 공개 패스키 가입 완료 계약 및 CORS. 현재 가입 시작이 차단되어 정상 여정 불가 | POST: 공개/프로토콜별 검증¹<br>OPTIONS: 공개/프로토콜별 검증¹ | 복구+공개 가입+패스키 가입+패스키; 시작 현재 거부 |
 | `/auth/v1/register/passkey/start` | POST, OPTIONS | 공개 패스키 가입 시작 계약 및 CORS. 현재 구현은 가입 예약 전에 안전하게 거부 | POST: 공개/프로토콜별 검증¹<br>OPTIONS: 공개/프로토콜별 검증¹ | 복구+공개 가입+패스키 가입+패스키; 시작 현재 거부 |
 | `/auth/v1/users` | GET, POST | 사용자 목록(GET), 관리자 사용자 생성(POST) | GET: 브라우저 세션 또는 권한 API 키<br>POST: 브라우저 세션 + CSRF 또는 권한 API 키 | GET 상시; POST 복구 서비스 필요 |
-| `/auth/v1/users/otp/start` | POST | 로그인용 이메일 OTP 발송 | POST: 공개/프로토콜별 검증¹ | OTP 핸들러 구성 |
 | `/auth/v1/users/otp/verify` | POST | 로그인 OTP 검증 | POST: 공개/프로토콜별 검증¹ | OTP 핸들러 구성 |
 | `/auth/v1/users/password_reset` | GET | 비밀번호 복구 요청 HTML | GET: 공개/프로토콜별 검증¹ | 복구 서비스 구성 |
 | `/auth/v1/users/recovery.js` | GET | 복구·가입 화면 공통 스크립트 | GET: 공개/프로토콜별 검증¹ | 복구 서비스 구성 |

@@ -3136,3 +3136,56 @@ func TestMigrateConcurrentStartSafety(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestMigrationV111ScopesOTPAndPreservesExistingRows(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "otp-v111", DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := migrateThroughV97(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	for _, migrate := range []func(context.Context, *rhiza.DB) error{
+		migrateSchemaV98, migrateSchemaV99, migrateSchemaV100, migrateSchemaV101,
+		migrateSchemaV102, migrateSchemaV103, migrateSchemaV104, migrateSchemaV105,
+		migrateSchemaV106, migrateSchemaV107, migrateSchemaV108, migrateSchemaV109, migrateSchemaV110,
+	} {
+		if err := migrate(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Seed both a pending and a consumed row in the actual pre-v111 table.
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "v111-legacy-fixture", Statements: []rhiza.SQLStatement{
+		{SQL: `INSERT INTO identity_email_otp VALUES ('pending-digest','subject-pending',2000,NULL,NULL)`},
+		{SQL: `INSERT INTO identity_email_otp VALUES ('consumed-digest','subject-consumed',3000,'attempt-id',2500)`},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateSchemaV111(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := db.Query(ctx, rhiza.QueryRequest{
+		SQL:         `SELECT code_digest,subject,expires_at_unix_ms,consumed_attempt,consumed_at_unix_ms FROM identity_email_otp ORDER BY subject`,
+		Consistency: rhiza.ConsistencyLinearizable,
+	})
+	if err != nil || len(rows.Rows) != 2 {
+		t.Fatalf("migrated OTP rows=%#v err=%v", rows.Rows, err)
+	}
+	if rows.Rows[0][0] != "consumed-digest" || rows.Rows[0][1] != "subject-consumed" || rows.Rows[0][2] != int64(3000) || rows.Rows[0][3] != "attempt-id" || rows.Rows[0][4] != int64(2500) {
+		t.Fatalf("consumed OTP row changed during migration: %#v", rows.Rows[0])
+	}
+	if rows.Rows[1][0] != "pending-digest" || rows.Rows[1][1] != "subject-pending" || rows.Rows[1][2] != int64(2000) || rows.Rows[1][3] != nil || rows.Rows[1][4] != nil {
+		t.Fatalf("pending OTP row changed during migration: %#v", rows.Rows[1])
+	}
+	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "v111-same-digest-two-subjects", Statements: []rhiza.SQLStatement{
+		{SQL: `INSERT INTO identity_email_otp (code_digest,subject,expires_at_unix_ms) VALUES ('same-digest','subject-a',4000)`},
+		{SQL: `INSERT INTO identity_email_otp (code_digest,subject,expires_at_unix_ms) VALUES ('same-digest','subject-b',4000)`},
+	}}); err != nil {
+		t.Fatalf("subject-scoped primary key rejected a shared digest: %v", err)
+	}
+}

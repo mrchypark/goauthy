@@ -129,6 +129,107 @@ func TestGenerateOTPEnforcesWindowedRateLimit(t *testing.T) {
 	}
 }
 
+func TestGenerateOTPAllowsSameCodeForDifferentSubjects(t *testing.T) {
+	t.Parallel()
+	db := testOTPDatabase(t)
+	service, err := NewOTPService(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.generateCode = func() (string, error) { return "123456", nil }
+
+	for _, subject := range []string{"subject-a", "subject-b"} {
+		if code, err := service.GenerateOTP(context.Background(), subject); err != nil || code != "123456" {
+			t.Fatalf("GenerateOTP(%q)=(%q,%v), want same code and success", subject, code, err)
+		}
+	}
+	for _, subject := range []string{"subject-a", "subject-b"} {
+		if ok, err := service.VerifyOTP(context.Background(), subject, "123456"); err != nil || !ok {
+			t.Fatalf("VerifyOTP(%q)=(%v,%v), want success", subject, ok, err)
+		}
+	}
+}
+
+func TestGenerateOTPRejectsSameSubjectCodeCollisionWithoutSpendingLimit(t *testing.T) {
+	t.Parallel()
+	db := testOTPDatabase(t)
+	service, err := NewOTPService(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.generateCode = func() (string, error) { return "654321", nil }
+	ctx := context.Background()
+	if _, err := service.GenerateOTP(ctx, "subject-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.GenerateOTP(ctx, "subject-a"); !errors.Is(err, ErrOTPAlreadyIssued) {
+		t.Fatalf("active same-subject collision error=%v, want ErrOTPAlreadyIssued", err)
+	}
+	if ok, err := service.VerifyOTP(ctx, "subject-a", "654321"); err != nil || !ok {
+		t.Fatalf("initial VerifyOTP=(%v,%v), want success", ok, err)
+	}
+	if _, err := service.GenerateOTP(ctx, "subject-a"); !errors.Is(err, ErrOTPAlreadyIssued) {
+		t.Fatalf("same-subject collision error=%v, want ErrOTPAlreadyIssued", err)
+	}
+	if got := otpScalar(t, db, `SELECT count FROM identity_email_otp_rate_limits WHERE subject_digest=?`, challengeDigest("subject-a")); got != 1 {
+		t.Fatalf("same-subject collision spent the rate limit: count=%d want=1", got)
+	}
+	if ok, err := service.VerifyOTP(ctx, "subject-a", "654321"); ok || !errors.Is(err, ErrOTPInvalid) {
+		t.Fatalf("same-subject collision revived a consumed code: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestGenerateOTPRejectsConsumedLegacyCodeUntilExpiry(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "otp-legacy-migration", DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	const subject, code = "subject-migrated", "271828"
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "otp-pre-v111-consumed-row", Statements: []rhiza.SQLStatement{
+		{SQL: `CREATE TABLE identity_email_otp (
+			code_digest TEXT PRIMARY KEY NOT NULL,
+			subject TEXT NOT NULL CHECK (length(subject) BETWEEN 1 AND 512),
+			expires_at_unix_ms INTEGER NOT NULL,
+			consumed_attempt TEXT,
+			consumed_at_unix_ms INTEGER
+		) STRICT`},
+		{SQL: `INSERT INTO identity_email_otp VALUES (?,?,?,?,?)`, Args: []any{legacyOTPCodeDigest(code), subject, now.Add(otpExpiry).UnixMilli(), "consumed-at-first-factor", now.UnixMilli()}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if got := otpScalar(t, db, `SELECT COUNT(*) FROM identity_email_otp WHERE subject=? AND code_digest=? AND consumed_attempt='consumed-at-first-factor'`, subject, legacyOTPCodeDigest(code)); got != 1 {
+		t.Fatalf("schema migration did not preserve the consumed OTP row: count=%d", got)
+	}
+	service, err := NewOTPService(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return now }
+	service.generateCode = func() (string, error) { return code, nil }
+
+	issued, issueErr := service.GenerateOTP(ctx, subject)
+	if !errors.Is(issueErr, ErrOTPAlreadyIssued) {
+		t.Errorf("reissue of a consumed legacy code=(%q,%v), want ErrOTPAlreadyIssued", issued, issueErr)
+	}
+	if got := otpScalar(t, db, `SELECT COUNT(*) FROM identity_email_otp WHERE subject=?`, subject); got != 1 {
+		t.Errorf("legacy row plus reissued row count=%d, want only the preserved legacy row", got)
+	}
+	windowStart := now.Unix() / int64(otpRateWindow/time.Second) * int64(otpRateWindow/time.Second)
+	if got := otpScalar(t, db, `SELECT COALESCE((SELECT count FROM identity_email_otp_rate_limits WHERE subject_digest=? AND window_start_unix_seconds=?),0)`, challengeDigest(subject), windowStart); got != 0 {
+		t.Errorf("legacy-code collision spent rate quota: count=%d want=0", got)
+	}
+	if ok, err := service.VerifyOTP(ctx, subject, code); ok || !errors.Is(err, ErrOTPInvalid) {
+		t.Errorf("consumed legacy code became usable again: ok=%v err=%v", ok, err)
+	}
+}
+
 // TestGenerateOTPSimultaneousIssuanceStaysWithinLimit proves the same conflict
 // target keeps the bounded counter correct when issuance races itself.
 func TestGenerateOTPSimultaneousIssuanceStaysWithinLimit(t *testing.T) {
@@ -271,6 +372,37 @@ func TestVerifyOTPAndConsumeInteractionBindsSessionAndCode(t *testing.T) {
 	}
 	if verified, err := service.VerifyOTPAndConsumeInteraction(ctx, session, "subject-1", interactionDigest, code); verified || !errors.Is(err, ErrOTPInvalid) {
 		t.Fatalf("replay verified=%v err=%v", verified, err)
+	}
+}
+
+func TestVerifyOTPAndConsumeInteractionAcceptsPendingLegacyDigest(t *testing.T) {
+	t.Parallel()
+	db := testOTPDatabase(t)
+	ctx := context.Background()
+	seedOTPSubject(t, db, "subject-legacy", "alice", 1, 1)
+	service, err := NewOTPService(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	service.now = func() time.Time { return now }
+	code := "314159"
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{
+		RequestID: "otp-legacy-pending-code",
+		Statements: []rhiza.SQLStatement{{SQL: `INSERT INTO identity_email_otp (code_digest,subject,expires_at_unix_ms,consumed_attempt,consumed_at_unix_ms) VALUES (?,?,?,NULL,NULL)`,
+			Args: []any{legacyOTPCodeDigest(code), "subject-legacy", now.Add(otpExpiry).UnixMilli()}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session := strings.Repeat("a", 43)
+	token, interactionDigest := otpTestToken(t, 0x2a)
+	store := NewOTPInteractionStore(db)
+	store.now = func() time.Time { return now }
+	if err := store.Store(session, "subject-legacy", token, 1, 1, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if verified, err := service.VerifyOTPAndConsumeInteraction(ctx, session, "subject-legacy", interactionDigest, code); !verified || err != nil {
+		t.Fatalf("pending legacy OTP verification=(%v,%v), want success", verified, err)
 	}
 }
 

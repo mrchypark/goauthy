@@ -123,8 +123,8 @@ func upstreamHandlerFromEnv(getenv func(string) string, db *rhiza.DB, keyring up
 	}
 	linkHooks := upstreamprovider.LinkHooks{
 		Current: accountHandler.CurrentExternalLinkSession,
-		Link: func(ctx context.Context, localSubject string, external upstreamprovider.SubjectResult, now time.Time) (upstreamprovider.LinkDecision, error) {
-			return identityStore.LinkExternal(ctx, localSubject, external, now)
+		Link: func(ctx context.Context, session upstreamprovider.LinkSession, external upstreamprovider.SubjectResult, now time.Time) (upstreamprovider.LinkDecision, error) {
+			return accountHandler.LinkExternalWithSession(ctx, session, external, now)
 		},
 	}
 	handler, err := upstreamprovider.NewLocalLoginAndLinkHandler(configs, store, exchanger, verifier, nil, allowedCallbacks, localHooks, callbacks, linkHooks)

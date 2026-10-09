@@ -88,6 +88,91 @@ func (s *Store) LinkExternal(ctx context.Context, localSubject string, external 
 	return upstreamprovider.LinkDecisionNone, ErrInactiveSubject
 }
 
+// LinkExternalWithGuard creates an explicit browser-initiated link only when
+// the supplied browser session predicate still holds in the same Rhiza batch
+// as the insert. The predicate and arguments must come from
+// browser.Store.SessionAuthorizationGuard. LinkExternal remains available to
+// trusted provisioning paths that do not have browser-session authority.
+func (s *Store) LinkExternalWithGuard(ctx context.Context, localSubject string, external upstreamprovider.SubjectResult, guardSQL string, guardArgs []any, now time.Time) (upstreamprovider.LinkDecision, error) {
+	if s == nil || s.db == nil {
+		return upstreamprovider.LinkDecisionNone, ErrInvalidSubject
+	}
+	if err := validateSubject(localSubject); err != nil {
+		return upstreamprovider.LinkDecisionNone, err
+	}
+	if err := external.Validate(); err != nil {
+		return upstreamprovider.LinkDecisionNone, err
+	}
+	if guardSQL == "" {
+		return upstreamprovider.LinkDecisionNone, ErrInvalidCredentials
+	}
+	now = now.UTC().Truncate(time.Millisecond)
+	key := external.ExternalKey()
+	attemptBytes := make([]byte, 16)
+	random := s.random
+	if random == nil {
+		random = rand.Read
+	}
+	if n, err := random(attemptBytes); err != nil || n != len(attemptBytes) {
+		if err != nil {
+			return upstreamprovider.LinkDecisionNone, err
+		}
+		return upstreamprovider.LinkDecisionNone, errors.New("short external link attempt")
+	}
+	attempt := base64.RawURLEncoding.EncodeToString(attemptBytes)
+	one := int64(1)
+	insertArgs := []any{external.ProviderID, key, localSubject, now.UnixMilli(), localSubject}
+	insertArgs = append(insertArgs, guardArgs...)
+	assertArgs := []any{external.ProviderID, key, localSubject, localSubject}
+	assertArgs = append(assertArgs, guardArgs...)
+	_, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
+		RequestID: mutationID("external-link-guarded", external.ProviderID, key, localSubject, strconv.FormatInt(now.UnixMilli(), 10), attempt),
+		Statements: []rhiza.SQLStatement{
+			{SQL: `INSERT INTO identity_external_links (provider_id,external_key,local_subject,linked_at_unix_ms)
+				SELECT ?,?,?,? WHERE EXISTS (SELECT 1 FROM identity_users WHERE subject = ? AND disabled = 0)
+				AND (` + guardSQL + `) ON CONFLICT DO NOTHING`, Args: insertArgs},
+			{SQL: `UPDATE identity_external_links SET linked_at_unix_ms=linked_at_unix_ms
+				WHERE provider_id=? AND external_key=? AND local_subject=?
+				AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0)
+				AND (` + guardSQL + `)`, Args: assertArgs, ExpectedRowsAffected: &one},
+		},
+	})
+	if err == nil {
+		return upstreamprovider.LinkDecisionLinked, nil
+	}
+	return s.classifyExternalLinkFailure(ctx, localSubject, external, key, err)
+}
+
+func (s *Store) classifyExternalLinkFailure(ctx context.Context, localSubject string, external upstreamprovider.SubjectResult, key string, cause error) (upstreamprovider.LinkDecision, error) {
+	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT local_subject FROM identity_external_links WHERE provider_id=? AND external_key=?`, Args: []any{external.ProviderID, key}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return upstreamprovider.LinkDecisionNone, cause
+	}
+	if len(result.Rows) > 1 || len(result.Rows) == 1 && len(result.Rows[0]) != 1 {
+		return upstreamprovider.LinkDecisionNone, errors.New("invalid external identity link row")
+	}
+	if len(result.Rows) == 1 {
+		linkedSubject, ok := result.Rows[0][0].(string)
+		if !ok {
+			return upstreamprovider.LinkDecisionNone, errors.New("invalid external identity link subject")
+		}
+		if linkedSubject != localSubject {
+			return upstreamprovider.LinkDecisionConflict, ErrExternalLinkConflict
+		}
+		// Even an existing identical mapping is not a success when the guarded
+		// batch failed: the caller's session authority was not proven.
+		return upstreamprovider.LinkDecisionNone, cause
+	}
+	result, err = s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT 1 FROM identity_external_links WHERE provider_id=? AND local_subject=?`, Args: []any{external.ProviderID, localSubject}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return upstreamprovider.LinkDecisionNone, cause
+	}
+	if len(result.Rows) != 0 {
+		return upstreamprovider.LinkDecisionConflict, ErrExternalLinkConflict
+	}
+	return upstreamprovider.LinkDecisionNone, cause
+}
+
 // FindExternalLink returns the local subject mapped to an upstream subject.
 func (s *Store) FindExternalLink(ctx context.Context, external upstreamprovider.SubjectResult) (string, bool, error) {
 	if s == nil || s.db == nil {

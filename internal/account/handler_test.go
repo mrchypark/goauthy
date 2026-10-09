@@ -491,9 +491,9 @@ func TestCurrentExternalLinkSession(t *testing.T) {
 	}
 	assertSession := func(t *testing.T, cookie *http.Cookie, want browser.Session) {
 		t.Helper()
-		subject, token, digest, err := h.CurrentExternalLinkSession(request(cookie))
-		if err != nil || subject != want.Subject || token != cookie.Value || digest != want.ID {
-			t.Fatalf("subject=%q token=%q digest=%q err=%v", subject, token, digest, err)
+		proof, err := h.CurrentExternalLinkSession(request(cookie))
+		if err != nil || proof.Session.ID != want.ID || proof.Session.Subject != want.Subject || proof.Session.AuthenticationMethod != want.AuthenticationMethod || proof.RawSessionToken != cookie.Value || proof.PeerIP != "" {
+			t.Fatalf("proof=%#v err=%v", proof, err)
 		}
 	}
 
@@ -537,7 +537,7 @@ func TestCurrentExternalLinkSession(t *testing.T) {
 		}()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, _, _, err := h.CurrentExternalLinkSession(tc.request); !errors.Is(err, ErrExternalLinkSession) {
+			if _, err := h.CurrentExternalLinkSession(tc.request); !errors.Is(err, ErrExternalLinkSession) {
 				t.Fatalf("err=%v", err)
 			}
 		})
@@ -547,7 +547,7 @@ func TestCurrentExternalLinkSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Run("revoked", func(t *testing.T) {
-		if _, _, _, err := h.CurrentExternalLinkSession(request(cookie)); !errors.Is(err, ErrExternalLinkSession) {
+		if _, err := h.CurrentExternalLinkSession(request(cookie)); !errors.Is(err, ErrExternalLinkSession) {
 			t.Fatalf("err=%v", err)
 		}
 	})
@@ -561,7 +561,7 @@ func TestCurrentExternalLinkSession(t *testing.T) {
 	}
 	t.Run("expired", func(t *testing.T) {
 		expiredCookie := &http.Cookie{Name: cookie.Name, Value: expiredToken}
-		if _, _, _, err := h.CurrentExternalLinkSession(request(expiredCookie)); !errors.Is(err, ErrExternalLinkSession) {
+		if _, err := h.CurrentExternalLinkSession(request(expiredCookie)); !errors.Is(err, ErrExternalLinkSession) {
 			t.Fatalf("err=%v", err)
 		}
 	})

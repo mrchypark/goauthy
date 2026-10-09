@@ -1124,8 +1124,8 @@ func run() (err error) {
 		}
 		linkHooks = upstreamprovider.LinkHooks{
 			Current: accountHandler.CurrentExternalLinkSession,
-			Link: func(ctx context.Context, localSubject string, external upstreamprovider.SubjectResult, now time.Time) (upstreamprovider.LinkDecision, error) {
-				return identityStore.LinkExternal(ctx, localSubject, external, now)
+			Link: func(ctx context.Context, session upstreamprovider.LinkSession, external upstreamprovider.SubjectResult, now time.Time) (upstreamprovider.LinkDecision, error) {
+				return accountHandler.LinkExternalWithSession(ctx, session, external, now)
 			},
 		}
 	}
@@ -1250,7 +1250,6 @@ func run() (err error) {
 	mountPasskeyAccountRoutes(handler, passkeyService != nil,
 		accountHandler.IssueModificationToken, accountHandler.BeginMFAWebAuthn, accountHandler.FinishMFAWebAuthn, accountHandler.ConvertSelfPasskey)
 	if otpHandler != nil {
-		handler.HandleFunc("POST /auth/v1/users/otp/start", otpHandler.Start)
 		handler.HandleFunc("POST /auth/v1/users/otp/verify", loginHandler.OTPVerify)
 	}
 	handler.Handle("GET /auth/v1/users/{subject}/revoke/{code}", recovery.NewLoginRevokeHandler(identityStore, keyring, locationLookup))

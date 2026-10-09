@@ -262,11 +262,6 @@ func addAccountOperations(doc *openapi3.T, features Features) error {
 		doc.Paths.Value("/auth/v1/pow").Post.Responses.Status(200).Value.Content = openapi3.Content{"text/plain": {Schema: &openapi3.SchemaRef{Value: str}}}
 	}
 	if features.Recovery {
-		add("/auth/v1/users/otp/start", "post", "otpStart", "Send an OTP code to the user", 200)
-		doc.Paths.Value("/auth/v1/users/otp/start").Post.RequestBody = &openapi3.RequestBodyRef{Value: openapi3.NewRequestBody().WithRequired(true).WithJSONSchema(openapi3.NewObjectSchema().WithProperty("subject", str))}
-		doc.Paths.Value("/auth/v1/users/otp/start").Post.Responses.Status(200).Value.WithJSONSchema(openapi3.NewObjectSchema().WithProperty("expires_at", openapi3.NewDateTimeSchema()))
-		doc.Paths.Value("/auth/v1/users/otp/start").Post.Description = "Public endpoint. No browser session or API key is required; only cross-site request protection applies."
-		doc.Paths.Value("/auth/v1/users/otp/start").Post.Security = &openapi3.SecurityRequirements{}
 		add("/auth/v1/users/otp/verify", "post", "otpVerify", "Verify an OTP code during login", 200)
 		otpVerify := openapi3.NewObjectSchema().WithoutAdditionalProperties().WithProperty("code", str).WithRequired([]string{"code"})
 		doc.Paths.Value("/auth/v1/users/otp/verify").Post.RequestBody = &openapi3.RequestBodyRef{Value: openapi3.NewRequestBody().WithRequired(true).WithJSONSchema(otpVerify)}

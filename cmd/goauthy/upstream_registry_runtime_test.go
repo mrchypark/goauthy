@@ -184,10 +184,10 @@ func drtFakeLocalHooks() upstreamprovider.LocalLoginHooks {
 
 func drtFakeLinkHooks() upstreamprovider.LinkHooks {
 	return upstreamprovider.LinkHooks{
-		Current: func(r *http.Request) (string, string, string, error) {
-			return "", "", "", errors.New("no link session")
+		Current: func(r *http.Request) (upstreamprovider.LinkSession, error) {
+			return upstreamprovider.LinkSession{}, errors.New("no link session")
 		},
-		Link: func(ctx context.Context, localSubject string, upstream upstreamprovider.SubjectResult, now time.Time) (upstreamprovider.LinkDecision, error) {
+		Link: func(ctx context.Context, session upstreamprovider.LinkSession, upstream upstreamprovider.SubjectResult, now time.Time) (upstreamprovider.LinkDecision, error) {
 			return upstreamprovider.LinkDecisionLinked, nil
 		},
 	}
