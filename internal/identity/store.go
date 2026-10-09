@@ -1301,6 +1301,20 @@ func (s *Store) ResetPassword(ctx context.Context, subject, raw, cookie, csrf st
 // a user-verified WebAuthn credential exists. It deliberately leaves browser
 // and OAuth sessions intact, matching Rauthy's conversion contract.
 func (s *Store) ConvertToPasskeyOnly(ctx context.Context, subject string) error {
+	return s.convertToPasskeyOnly(ctx, subject, "", nil)
+}
+
+// ConvertToPasskeyOnlyWithGuard converts an account only while the browser
+// session that authorized the request remains valid in the same transaction.
+// guardSQL and guardArgs must come from browser.Store.SessionAuthorizationGuard.
+func (s *Store) ConvertToPasskeyOnlyWithGuard(ctx context.Context, subject, guardSQL string, guardArgs []any) error {
+	if guardSQL == "" || strings.Contains(guardSQL, ";") {
+		return ErrInvalidCredentials
+	}
+	return s.convertToPasskeyOnly(ctx, subject, guardSQL, guardArgs)
+}
+
+func (s *Store) convertToPasskeyOnly(ctx context.Context, subject, guardSQL string, guardArgs []any) error {
 	if err := validateSubject(subject); err != nil {
 		return err
 	}
@@ -1344,6 +1358,13 @@ func (s *Store) ConvertToPasskeyOnly(ctx context.Context, subject string) error 
 		{SQL: `DELETE FROM identity_email_otp_interactions WHERE subject = ? AND EXISTS (SELECT 1 FROM identity_users WHERE ` + userGuard + `)`, Args: []any{subject, subject, newPasswordGeneration}},
 		// This CAS follows all password-state writes in the same transaction.
 		{SQL: `UPDATE identity_authentication_modes SET mode = 'passkey', generation = generation + 1, updated_at_unix_ms = ? WHERE subject = ? AND mode = 'password' AND generation = ? AND EXISTS (SELECT 1 FROM identity_users WHERE ` + userGuard + `)`, Args: []any{now.UnixMilli(), subject, modeGeneration, subject, newPasswordGeneration}},
+	}
+	if guardSQL != "" {
+		one := int64(1)
+		statements = append([]rhiza.SQLStatement{{
+			SQL: `SELECT 1 AS authorized WHERE (` + guardSQL + `)`, Args: guardArgs,
+			WantRows: true, ExpectedReturnedRows: &one,
+		}}, statements...)
 	}
 	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: mutationID("password-to-passkey", subject, strconv.FormatInt(record.generation, 10), strconv.FormatInt(modeGeneration, 10), attempt), Statements: statements})
 	if err != nil {

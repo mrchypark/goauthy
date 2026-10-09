@@ -640,7 +640,8 @@ func (h *Handler) UnlinkExternal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	if err := h.identity.UnlinkExternal(r.Context(), session.Subject, providerID, h.now(), base64.RawURLEncoding.EncodeToString(random[:])); err != nil {
+	guard, guardArgs := h.browser.SessionAuthorizationGuard(session, browser.PeerIPFromContext(r.Context()))
+	if err := h.identity.UnlinkExternalWithGuard(r.Context(), session.Subject, providerID, h.now(), base64.RawURLEncoding.EncodeToString(random[:]), guard, guardArgs); err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
@@ -906,7 +907,8 @@ func (h *Handler) ConvertSelfPasskey(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "invalid passkey conversion request")
 		return
 	}
-	if err := h.identity.ConvertToPasskeyOnly(r.Context(), session.Subject); err != nil {
+	guard, guardArgs := h.browser.SessionAuthorizationGuard(session, browser.PeerIPFromContext(r.Context()))
+	if err := h.identity.ConvertToPasskeyOnlyWithGuard(r.Context(), session.Subject, guard, guardArgs); err != nil {
 		badRequest(w, "invalid passkey conversion request")
 		return
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/storage"
@@ -201,6 +202,20 @@ func (s *Store) FindExternalLink(ctx context.Context, external upstreamprovider.
 // UnlinkExternal removes a provider-scoped link. attempt must change for a
 // later unlink after relink so Rhiza cannot suppress the newer mutation.
 func (s *Store) UnlinkExternal(ctx context.Context, localSubject, providerID string, now time.Time, attempt string) error {
+	return s.unlinkExternal(ctx, localSubject, providerID, now, attempt, "", nil)
+}
+
+// UnlinkExternalWithGuard removes a browser-requested link only while the
+// original authorizing session remains valid in the same transaction.
+// guardSQL and guardArgs must come from browser.Store.SessionAuthorizationGuard.
+func (s *Store) UnlinkExternalWithGuard(ctx context.Context, localSubject, providerID string, now time.Time, attempt, guardSQL string, guardArgs []any) error {
+	if guardSQL == "" || strings.Contains(guardSQL, ";") {
+		return ErrInvalidCredentials
+	}
+	return s.unlinkExternal(ctx, localSubject, providerID, now, attempt, guardSQL, guardArgs)
+}
+
+func (s *Store) unlinkExternal(ctx context.Context, localSubject, providerID string, now time.Time, attempt, guardSQL string, guardArgs []any) error {
 	if s == nil || s.db == nil {
 		return ErrInvalidSubject
 	}
@@ -214,12 +229,32 @@ func (s *Store) UnlinkExternal(ctx context.Context, localSubject, providerID str
 		return ErrInvalidSubject
 	}
 	now = now.UTC().Truncate(time.Millisecond)
-	_, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
-		RequestID: mutationID("external-unlink", providerID, localSubject, strconv.FormatInt(now.UnixMilli(), 10), attempt),
+	if guardSQL == "" {
+		_, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
+			RequestID: mutationID("external-unlink", providerID, localSubject, strconv.FormatInt(now.UnixMilli(), 10), attempt),
+			SQL: `DELETE FROM identity_external_links
+				WHERE provider_id = ? AND local_subject = ?
+				AND EXISTS (SELECT 1 FROM identity_users WHERE subject = ? AND disabled = 0)`,
+			Args: []any{providerID, localSubject, localSubject},
+		})
+		return err
+	}
+
+	statements := make([]rhiza.SQLStatement, 0, 2)
+	one := int64(1)
+	statements = append(statements, rhiza.SQLStatement{
+		SQL: `SELECT 1 AS authorized WHERE (` + guardSQL + `)`, Args: guardArgs,
+		WantRows: true, ExpectedReturnedRows: &one,
+	})
+	statements = append(statements, rhiza.SQLStatement{
 		SQL: `DELETE FROM identity_external_links
 			WHERE provider_id = ? AND local_subject = ?
 			AND EXISTS (SELECT 1 FROM identity_users WHERE subject = ? AND disabled = 0)`,
 		Args: []any{providerID, localSubject, localSubject},
+	})
+	_, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
+		RequestID:  mutationID("external-unlink-guarded", providerID, localSubject, strconv.FormatInt(now.UnixMilli(), 10), attempt),
+		Statements: statements,
 	})
 	return err
 }
