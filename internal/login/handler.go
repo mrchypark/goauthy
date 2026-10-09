@@ -388,7 +388,9 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var err error
-	if session, sessionToken, ok := h.session(r); ok && session.Authenticated() && !reauthenticate(request, session, h.now()) {
+	initialSession, initialSessionToken, initialSessionOK := h.session(r)
+	if initialSessionOK && initialSession.Authenticated() && !reauthenticate(request, initialSession, h.now()) {
+		session, sessionToken := initialSession, initialSessionToken
 		if _, err := h.identity.UserBySubject(r.Context(), session.Subject); err == nil && (!request.ForceMFA || session.AuthenticationMethod == "mfa") {
 			needs, checkErr := h.needsProfileUpdate(r, session.Subject, request.ClientID)
 			if checkErr != nil {
@@ -433,10 +435,39 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 	var session browser.IssuedSession
 	var interaction browser.IssuedAuthorizationInteraction
 	reusedSession := false
-	if current, token, ok := h.session(r); ok && !current.Authenticated() {
-		session = browser.IssuedSession{Session: current, Token: token}
+	reusedFromInitialSnapshot := initialSessionOK && !initialSession.Authenticated()
+	reusedSessionPeerIP := ""
+	if reusedFromInitialSnapshot {
+		session = browser.IssuedSession{Session: initialSession, Token: initialSessionToken}
 		reusedSession = true
-	} else {
+	} else if !initialSessionOK {
+		// Keep the historical retry when the initial cookie lookup failed. A
+		// failed read is not a reusable snapshot or a lasting negative result.
+		current, token, ok := h.session(r)
+		if ok && !current.Authenticated() {
+			session = browser.IssuedSession{Session: current, Token: token}
+			reusedSession = true
+		}
+	}
+	if reusedFromInitialSnapshot {
+		var peerOK bool
+		reusedSessionPeerIP, peerOK = h.resolvePeerIP(r)
+		if !peerOK {
+			h.recordAuthStage(r.Context(), metrics.AuthStageAuthorizeSession, sessionStart)
+			http.Error(w, "Invalid login request", http.StatusBadRequest)
+			return
+		}
+		current, refreshErr := h.browser.RefreshSessionForPeerIfTouchDue(r.Context(), session.Token, reusedSessionPeerIP, session.Session)
+		if refreshErr != nil {
+			// A failed peer-aware refresh followed the old second-load behavior:
+			// abandon the stale init cookie and create a fresh init pair.
+			reusedFromInitialSnapshot = false
+			reusedSession = false
+		} else {
+			session.Session = current
+		}
+	}
+	if !reusedSession {
 		peerIP, peerOK := h.resolvePeerIP(r)
 		if !peerOK {
 			h.recordAuthStage(r.Context(), metrics.AuthStageAuthorizeSession, sessionStart)
@@ -454,7 +485,11 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if reusedSession {
-		interaction, err = h.browser.CreateAuthorizationInteraction(r.Context(), session.Token, request.RequestID, []byte(r.URL.RequestURI()), h.now().Add(interactionLifetime))
+		if reusedFromInitialSnapshot {
+			interaction, err = h.browser.CreateAuthorizationInteractionForInitSession(r.Context(), session.Token, reusedSessionPeerIP, request.RequestID, []byte(r.URL.RequestURI()), h.now().Add(interactionLifetime))
+		} else {
+			interaction, err = h.browser.CreateAuthorizationInteraction(r.Context(), session.Token, request.RequestID, []byte(r.URL.RequestURI()), h.now().Add(interactionLifetime))
+		}
 		h.recordAuthStage(r.Context(), metrics.AuthStageAuthorizeSession, sessionStart)
 		if err != nil {
 			slog.Error("authorize request failed", "operation", "authorization_interaction", "error_class", authorizeStoreErrorClass(err), "error_type", fmt.Sprintf("%T", err))

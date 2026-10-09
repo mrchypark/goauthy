@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
 
-func registeredAPIKeyFixture(t *testing.T, id string) (context.Context, *CredentialStore, *rhiza.DB, credentialBinding, *APIKeyConnector) {
+func registeredAPIKeyFixture(t testing.TB, id string) (context.Context, *CredentialStore, *rhiza.DB, credentialBinding, *APIKeyConnector) {
 	t.Helper()
 	ctx, store, db, b := credentialStoreFixture(t)
 	connector := validAPIKeyConnectorConfig()
@@ -30,6 +31,105 @@ func registeredAPIKeyFixture(t *testing.T, id string) (context.Context, *Credent
 		t.Fatal(err)
 	}
 	return ctx, store, db, b, bound
+}
+
+func benchmarkConnectorHasCurrentBinding(connector *APIKeyConnector, store *CredentialStore, db *rhiza.DB, id string, revision int64) bool {
+	want := providerHTTPBinding{db: db, id: id, kind: "api_key", revision: revision}
+	if connector == nil || store == nil || connector.client == nil || connector.registered != want {
+		return false
+	}
+	transport, ok := connector.client.Transport.(*providerHTTPTransport)
+	return ok && transport.owner == &store.http && transport.binding == want
+}
+
+// BenchmarkRegisteredAPIKeyRebuild separates connector reconstruction from
+// the guarded database lookup that supplies the row. Both cases use a local
+// fixture and synthetic authority predicate; neither dispatches an operation.
+func BenchmarkRegisteredAPIKeyRebuild(b *testing.B) {
+	b.Run("row-rebuild", func(b *testing.B) {
+		ctx, store, db, binding, _ := registeredAPIKeyFixture(b, "bench-provider")
+		b.Cleanup(store.CloseConnections)
+		config := validAPIKeyConnectorConfig()
+		config.ID = "bench-provider"
+		configJSON, err := json.Marshal(config)
+		if err != nil {
+			b.Fatal(err)
+		}
+		row := []any{binding.Generation, config.ID, "api_key", int64(1), int64(1), string(configJSON)}
+		want, err := store.APIKeyConnector(ctx, binding.Owner, binding.CollectionID, binding.ConnectionID, credentialAuthority())
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		var got registeredAPIKey
+		var generation string
+		for i := 0; i < b.N; i++ {
+			got, generation, err = store.registeredAPIKeyFromRow(row)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StopTimer()
+
+		if generation != binding.Generation || got.ID != config.ID || got.Revision != 1 || !got.Enabled ||
+			!benchmarkConnectorHasCurrentBinding(got.Connector, store, db, config.ID, 1) ||
+			!got.Connector.HasOperation("account") || !got.Connector.HasOperation("balance") ||
+			!reflect.DeepEqual(got.Connector.Info(), want.Info()) {
+			b.Fatalf("row rebuild contract mismatch: generation=%q provider=%#v", generation, got)
+		}
+	})
+
+	b.Run("guarded-lookup", func(b *testing.B) {
+		ctx, store, db, binding, _ := registeredAPIKeyFixture(b, "bench-provider")
+		b.Cleanup(store.CloseConnections)
+		want, generation, err := store.registeredAPIKeyInfo(ctx, binding.Owner, binding.CollectionID, binding.ConnectionID, credentialAuthority())
+		if err != nil || generation != binding.Generation || want.ID != "bench-provider" || want.Revision != 1 || !want.Enabled ||
+			!benchmarkConnectorHasCurrentBinding(want.Connector, store, db, "bench-provider", 1) {
+			b.Fatalf("guarded lookup fixture contract mismatch: generation=%q provider=%#v err=%v", generation, want, err)
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		var got *APIKeyConnector
+		for i := 0; i < b.N; i++ {
+			got, err = store.APIKeyConnector(ctx, binding.Owner, binding.CollectionID, binding.ConnectionID, credentialAuthority())
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StopTimer()
+
+		if !benchmarkConnectorHasCurrentBinding(got, store, db, "bench-provider", 1) ||
+			!got.HasOperation("account") || !got.HasOperation("balance") || !reflect.DeepEqual(got.Info(), want.Connector.Info()) {
+			b.Fatalf("guarded lookup contract mismatch: connector=%#v", got)
+		}
+	})
+}
+
+func TestRegisteredAPIKeyBenchmarkBindingCheckRejectsStaleTransport(t *testing.T) {
+	ctx, store, db, binding, expected := registeredAPIKeyFixture(t, "provider")
+	t.Cleanup(store.CloseConnections)
+	connector, err := store.APIKeyConnector(ctx, binding.Owner, binding.CollectionID, binding.ConnectionID, credentialAuthority())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Reproduce the previous assertions: they accept stale dispatch provenance
+	// because the connector metadata and public Info remain unchanged.
+	oldAssertionsAccept := connector.registered.id == "provider" && connector.registered.kind == "api_key" && connector.registered.revision == 1 &&
+		connector.HasOperation("account") && connector.HasOperation("balance") && reflect.DeepEqual(connector.Info(), expected.Info())
+	if !oldAssertionsAccept {
+		t.Fatal("control setup did not satisfy the previous benchmark assertions")
+	}
+	transport, ok := connector.client.Transport.(*providerHTTPTransport)
+	if !ok || transport.binding.revision != 1 {
+		t.Fatalf("unexpected control transport: %#v", connector.client.Transport)
+	}
+	transport.binding.revision++
+	if benchmarkConnectorHasCurrentBinding(connector, store, db, "provider", 1) {
+		t.Fatal("current-binding assertion accepted a stale dispatch transport")
+	}
 }
 
 func TestRegisteredAPIKeyBindsProviderAndFailsClosedWhenDisabled(t *testing.T) {

@@ -130,6 +130,7 @@ type Session struct {
 	CreatedAt            time.Time
 	ExpiresAt            time.Time
 	PeerIP               string
+	lastSeenAt           time.Time
 }
 
 // SessionAuthorizationGuard returns a commit-time predicate for this exact
@@ -496,6 +497,7 @@ func (s *Store) loadSessionAndTouch(ctx context.Context, token string, peerIP *s
 		return Session{}, err
 	}
 	if response.MutationReceipt.RowsAffected != 0 {
+		session.lastSeenAt = now
 		return session, nil
 	}
 	// A concurrent touch can make the guarded update a no-op. Re-read rather
@@ -526,6 +528,21 @@ func (s *Store) LoadSessionReadOnly(ctx context.Context, token string) (Session,
 // can silently weaken the binding.
 func (s *Store) LoadSessionForPeer(ctx context.Context, token string, peerIP string) (Session, error) {
 	return s.loadSessionAndTouch(ctx, token, &peerIP)
+}
+
+// RefreshSessionForPeerIfTouchDue avoids a stable second read while retaining
+// the normal peer-aware load/touch path when the snapshot's idle touch interval
+// has elapsed. Callers that skip the read must still use a final guarded
+// mutation for current session authority.
+func (s *Store) RefreshSessionForPeerIfTouchDue(ctx context.Context, token, peerIP string, snapshot Session) (Session, error) {
+	if err := CheckPeerIP(snapshot, peerIP); err != nil {
+		return snapshot, err
+	}
+	now := s.timeNow()
+	if !snapshot.lastSeenAt.IsZero() && now.Sub(snapshot.lastSeenAt) < touchInterval {
+		return snapshot, nil
+	}
+	return s.LoadSessionForPeer(ctx, token, peerIP)
 }
 
 // LoadSessionReadOnlyForPeer applies the same atomic load+check without
@@ -570,8 +587,8 @@ func (s *Store) loadSession(ctx context.Context, digest string, now time.Time) (
 		return Session{}, time.Time{}, ErrRevoked
 	}
 	peerIP, _ := result.Rows[0][6].(string)
-	session := Session{ID: digest, Subject: subject, AuthenticationMethod: authMethod, CreatedAt: time.UnixMilli(createdAt).UTC(), ExpiresAt: time.UnixMilli(expiresAt).UTC(), PeerIP: peerIP}
 	lastSeenTime := time.UnixMilli(lastSeen).UTC()
+	session := Session{ID: digest, Subject: subject, AuthenticationMethod: authMethod, CreatedAt: time.UnixMilli(createdAt).UTC(), ExpiresAt: time.UnixMilli(expiresAt).UTC(), PeerIP: peerIP, lastSeenAt: lastSeenTime}
 	return session, lastSeenTime, nil
 }
 
@@ -657,6 +674,15 @@ func (s *Store) authorizationInteractionInsert(digest, requestID, sessionDigest 
 		Args: []any{digest, requestID, sessionDigest, base64.RawURLEncoding.EncodeToString(payload), now.UnixMilli(), expiresAt.UnixMilli(), sessionDigest, now.UnixMilli(), now.Add(-s.idleTimeout).UnixMilli(), now.UnixMilli()}, ExpectedRowsAffected: &one}
 }
 
+func (s *Store) initAuthorizationInteractionInsert(digest, requestID, sessionDigest string, payload []byte, peerIP string, now, expiresAt time.Time) rhiza.SQLStatement {
+	one := int64(1)
+	return rhiza.SQLStatement{SQL: `INSERT INTO browser_authorization_interactions (token_digest, request_id, session_digest, payload, created_at_unix_ms, expires_at_unix_ms)
+				SELECT ?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM browser_sessions WHERE token_digest=?
+				AND subject='' AND auth_method='' AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ? AND last_seen_at_unix_ms > ?
+				AND (peer_ip='' OR (?<>'' AND peer_ip=?)) AND ` + activeSessionSubjectSQL + `)`,
+		Args: []any{digest, requestID, sessionDigest, base64.RawURLEncoding.EncodeToString(payload), now.UnixMilli(), expiresAt.UnixMilli(), sessionDigest, now.UnixMilli(), now.Add(-s.idleTimeout).UnixMilli(), peerIP, peerIP, now.UnixMilli()}, ExpectedRowsAffected: &one}
+}
+
 func (s *Store) CreateAuthorizationInteraction(ctx context.Context, sessionToken, requestID string, payload []byte, expiresAt time.Time) (IssuedAuthorizationInteraction, error) {
 	if err := validateInteraction(requestID, payload); err != nil {
 		return IssuedAuthorizationInteraction{}, err
@@ -668,6 +694,26 @@ func (s *Store) CreateAuthorizationInteraction(ctx context.Context, sessionToken
 	if _, err := s.LoadSession(ctx, sessionToken); err != nil {
 		return IssuedAuthorizationInteraction{}, err
 	}
+	return s.createAuthorizationInteraction(ctx, sessionDigest, requestID, payload, expiresAt, nil)
+}
+
+// CreateAuthorizationInteractionForInitSession inserts an interaction only
+// while the current session row is still the peer-authorized init session that
+// the caller loaded. Unlike the general-purpose creator, it deliberately skips
+// a separate preflight read and makes the final mutation authoritative.
+func (s *Store) CreateAuthorizationInteractionForInitSession(ctx context.Context, sessionToken, peerIP, requestID string, payload []byte, expiresAt time.Time) (IssuedAuthorizationInteraction, error) {
+	if err := validateInteraction(requestID, payload); err != nil {
+		return IssuedAuthorizationInteraction{}, err
+	}
+	sessionDigest, err := tokenDigest(sessionToken)
+	if err != nil {
+		return IssuedAuthorizationInteraction{}, ErrNotFound
+	}
+	peer := peerIP
+	return s.createAuthorizationInteraction(ctx, sessionDigest, requestID, payload, expiresAt, &peer)
+}
+
+func (s *Store) createAuthorizationInteraction(ctx context.Context, sessionDigest, requestID string, payload []byte, expiresAt time.Time, initPeer *string) (IssuedAuthorizationInteraction, error) {
 	now := s.timeNow()
 	expiresAt = expiresAt.UTC()
 	if !expiresAt.After(now) {
@@ -679,11 +725,15 @@ func (s *Store) CreateAuthorizationInteraction(ctx context.Context, sessionToken
 	}
 	// Success proves guarded insertion at this mutation's position in the order,
 	// not existence or authority at a later snapshot. Loads/consumes revalidate.
+	insert := s.authorizationInteractionInsert(digest, requestID, sessionDigest, payload, now, expiresAt)
+	if initPeer != nil {
+		insert = s.initAuthorizationInteractionInsert(digest, requestID, sessionDigest, payload, *initPeer, now, expiresAt)
+	}
 	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID: mutationID("authorization-create", digest),
 		Statements: []rhiza.SQLStatement{
 			expiredInteractionCleanup(now),
-			s.authorizationInteractionInsert(digest, requestID, sessionDigest, payload, now, expiresAt),
+			insert,
 		},
 	})
 	if err != nil {
