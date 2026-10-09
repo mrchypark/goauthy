@@ -1308,7 +1308,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func loginMigratedTemplate(t *testing.T, nodeID string) string {
+func loginMigratedTemplate(t testing.TB, nodeID string) string {
 	t.Helper()
 	entry := loginTemplates[nodeID]
 	if entry == nil {
@@ -1382,7 +1382,7 @@ func testHash(ctx context.Context, password []byte) (string, error) {
 	return testHasherInstance.Hash(ctx, password)
 }
 
-func testHandler(t *testing.T) *Handler {
+func testHandler(t testing.TB) *Handler {
 	return testHandlerWithForce(t, false)
 }
 
@@ -1390,12 +1390,12 @@ func testHandlerWithForceMFA(t *testing.T) *Handler {
 	return testHandlerWithForce(t, true)
 }
 
-func testHandlerWithForce(t *testing.T, forceMFA bool) *Handler {
+func testHandlerWithForce(t testing.TB, forceMFA bool) *Handler {
 	h, _ := testHandlerWithDB(t, forceMFA)
 	return h
 }
 
-func testHandlerWithDB(t *testing.T, forceMFA bool) (*Handler, *rhiza.DB) {
+func testHandlerWithDB(t testing.TB, forceMFA bool) (*Handler, *rhiza.DB) {
 	return testHandlerWithDBAndManaged(t, forceMFA, false)
 }
 
@@ -1406,7 +1406,7 @@ func testHandlerWithManagedClients(t *testing.T, forceMFA bool) (*Handler, *rhiz
 	return testHandlerWithDBAndManaged(t, forceMFA, true)
 }
 
-func testHandlerWithDBAndManaged(t *testing.T, forceMFA, managed bool) (*Handler, *rhiza.DB) {
+func testHandlerWithDBAndManaged(t testing.TB, forceMFA, managed bool) (*Handler, *rhiza.DB) {
 	t.Helper()
 	ctx := context.Background()
 	directory := t.TempDir()
@@ -1486,7 +1486,7 @@ func testHandlerWithDBAndManaged(t *testing.T, forceMFA, managed bool) (*Handler
 	return h, db
 }
 
-func testOIDCKeyring(t *testing.T) *oidc.Keyring {
+func testOIDCKeyring(t testing.TB) *oidc.Keyring {
 	t.Helper()
 	dir := t.TempDir()
 	key := make([]byte, 32)
@@ -1722,7 +1722,7 @@ func TestFedCMLandingNeverDowngradesForcedMFAToPassword(t *testing.T) {
 	}
 }
 
-func interactionToken(t *testing.T, page string) string {
+func interactionToken(t testing.TB, page string) string {
 	t.Helper()
 	match := interactionPattern.FindStringSubmatch(page)
 	if len(match) != 2 {
@@ -1731,7 +1731,7 @@ func interactionToken(t *testing.T, page string) string {
 	return match[1]
 }
 
-func externalAuthorization(t *testing.T, h *Handler) (*http.Cookie, string, string) {
+func externalAuthorization(t testing.TB, h *Handler) (*http.Cookie, string, string) {
 	t.Helper()
 	page := httptest.NewRecorder()
 	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
@@ -1824,6 +1824,83 @@ func testHandlerWithTrustedProxies(t *testing.T) *Handler {
 	h.wait = func(context.Context, time.Duration) error { return nil }
 	h.deadline = func(http.ResponseWriter, time.Time) error { return nil }
 	return h
+}
+
+func BenchmarkLoginInteractionCost(b *testing.B) {
+	h := testHandler(b)
+	initCookie, interactionToken, _ := externalAuthorization(b, h)
+	ctx := context.Background()
+	valid, err := h.browser.LoadAuthorizationInteractionReadOnly(ctx, initCookie.Value, interactionToken)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if valid.RequestID == "" || len(valid.Payload) == 0 {
+		b.Fatalf("fixture interaction is incomplete: %#v", valid)
+	}
+
+	otherSession, err := h.browser.CreateInitSession(ctx, time.Now().Add(time.Hour), "")
+	if err != nil {
+		b.Fatal(err)
+	}
+	if _, err := h.browser.LoadAuthorizationInteractionReadOnly(ctx, otherSession.Token, interactionToken); !errors.Is(err, browser.ErrNotFound) {
+		b.Fatalf("mismatched live init session err=%v, want %v", err, browser.ErrNotFound)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, authorizePath, nil)
+	resolved, err := h.resolveAuthenticationRequest(request, valid.Payload)
+	if err != nil {
+		b.Fatal(err)
+	}
+	wantClientID := authorizeValues().Get("client_id")
+	if resolved.original == nil || resolved.policy.ClientID != wantClientID || resolved.policy.RedirectURI != authorizeValues().Get("redirect_uri") || resolved.original.URL.RequestURI() != string(valid.Payload) {
+		b.Fatalf("resolved saved request mismatch: policy=%#v original=%v", resolved.policy, resolved.original)
+	}
+
+	b.Run("lookup-live-session", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			got, err := h.browser.LoadAuthorizationInteractionReadOnly(ctx, initCookie.Value, interactionToken)
+			if err != nil || got.RequestID != valid.RequestID || !bytes.Equal(got.Payload, valid.Payload) {
+				b.Fatalf("lookup result=%#v err=%v", got, err)
+			}
+		}
+		b.StopTimer()
+		got, err := h.browser.LoadAuthorizationInteractionReadOnly(ctx, initCookie.Value, interactionToken)
+		if err != nil || got.RequestID != valid.RequestID || !bytes.Equal(got.Payload, valid.Payload) {
+			b.Fatalf("interaction changed or was consumed: result=%#v err=%v", got, err)
+		}
+	})
+
+	b.Run("lookup-mismatched-live-session", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			if _, err := h.browser.LoadAuthorizationInteractionReadOnly(ctx, otherSession.Token, interactionToken); !errors.Is(err, browser.ErrNotFound) {
+				b.Fatalf("mismatched-session lookup err=%v, want %v", err, browser.ErrNotFound)
+			}
+		}
+		b.StopTimer()
+		if _, err := h.browser.LoadAuthorizationInteractionReadOnly(ctx, initCookie.Value, interactionToken); err != nil {
+			b.Fatalf("mismatched lookup affected the bound interaction: %v", err)
+		}
+	})
+
+	b.Run("saved-request-resolver", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			got, err := h.resolveAuthenticationRequest(request, valid.Payload)
+			if err != nil || got.original == nil || got.policy.ClientID != wantClientID || got.policy.RedirectURI != resolved.policy.RedirectURI || got.original.URL.RequestURI() != string(valid.Payload) {
+				b.Fatalf("resolver result=%#v err=%v", got, err)
+			}
+		}
+		b.StopTimer()
+		got, err := h.browser.LoadAuthorizationInteractionReadOnly(ctx, initCookie.Value, interactionToken)
+		if err != nil || got.RequestID != valid.RequestID || !bytes.Equal(got.Payload, valid.Payload) {
+			b.Fatalf("resolver changed or consumed interaction: result=%#v err=%v", got, err)
+		}
+	})
 }
 
 func TestAuthorizeRejectsMalformedForwardedHeaderFromTrustedProxy(t *testing.T) {
