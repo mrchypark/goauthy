@@ -941,7 +941,7 @@ func TestForegroundSessionExpiryCleanupMutationCap(t *testing.T) {
 				t.Run(path, func(t *testing.T) {
 					seedExpiredBrowserSessions(t, s, ctx, backlog, now, path)
 					beforeSessions := expiredBrowserSessionCount(t, s, ctx, now)
-					beforeBindings := expiredBrowserBindingCount(t, s, ctx, now)
+					beforeBindings := browserBindingRowCount(t, s, ctx)
 					started := time.Now()
 					if path == "init-interaction" {
 						_, _, err = s.CreateInitSessionWithAuthorizationInteraction(ctx, "192.0.2.1", fmt.Sprintf("cleanup-%s-%d", path, backlog), []byte("state"), now.Add(time.Minute))
@@ -953,7 +953,7 @@ func TestForegroundSessionExpiryCleanupMutationCap(t *testing.T) {
 						t.Fatal(err)
 					}
 					afterSessions := expiredBrowserSessionCount(t, s, ctx, now)
-					afterBindings := expiredBrowserBindingCount(t, s, ctx, now)
+					afterBindings := browserBindingRowCount(t, s, ctx)
 					removedSessions, removedBindings := beforeSessions-afterSessions, beforeBindings-afterBindings
 					t.Logf("path=%s backlog=%d expired_sessions_mutated=%d bindings_mutated=%d elapsed=%s (observed, not a latency bound)", path, backlog, removedSessions, removedBindings, elapsed)
 					if removedSessions > 32 || removedBindings > 32 {
@@ -961,6 +961,9 @@ func TestForegroundSessionExpiryCleanupMutationCap(t *testing.T) {
 					}
 					if removedSessions != removedBindings {
 						t.Errorf("binding/session cleanup mismatch: sessions=%d bindings=%d", removedSessions, removedBindings)
+					}
+					if got := countBrowserRows(t, s, ctx, `SELECT COUNT(*) FROM browser_upstream_session_bindings AS b WHERE NOT EXISTS (SELECT 1 FROM browser_sessions AS s WHERE s.token_digest=b.session_digest)`); got != 0 {
+						t.Errorf("cleanup left orphaned upstream bindings=%d", got)
 					}
 					if got := countBrowserRows(t, s, ctx, `SELECT COUNT(*) FROM browser_sessions WHERE token_digest=? AND expires_at_unix_ms>?`, liveDigest, now.UnixMilli()); got != 1 {
 						t.Errorf("live session control count=%d want=1", got)
@@ -1004,9 +1007,9 @@ func expiredBrowserSessionCount(t *testing.T, s *Store, ctx context.Context, now
 	return countBrowserRows(t, s, ctx, `SELECT COUNT(*) FROM browser_sessions WHERE expires_at_unix_ms<=?`, now.UnixMilli())
 }
 
-func expiredBrowserBindingCount(t *testing.T, s *Store, ctx context.Context, now time.Time) int64 {
+func browserBindingRowCount(t *testing.T, s *Store, ctx context.Context) int64 {
 	t.Helper()
-	return countBrowserRows(t, s, ctx, `SELECT COUNT(*) FROM browser_upstream_session_bindings WHERE session_digest IN (SELECT token_digest FROM browser_sessions WHERE expires_at_unix_ms<=?)`, now.UnixMilli())
+	return countBrowserRows(t, s, ctx, `SELECT COUNT(*) FROM browser_upstream_session_bindings`)
 }
 
 func countBrowserRows(t *testing.T, s *Store, ctx context.Context, query string, args ...any) int64 {
@@ -1049,8 +1052,11 @@ func TestBoundedSessionExpiryCleanupRollsBackOnLaterFailure(t *testing.T) {
 			if got := expiredBrowserSessionCount(t, s, ctx, now); got != 40 {
 				t.Errorf("expired sessions after rollback=%d want=40", got)
 			}
-			if got := expiredBrowserBindingCount(t, s, ctx, now); got != 40 {
+			if got := browserBindingRowCount(t, s, ctx); got != 40 {
 				t.Errorf("expired bindings after rollback=%d want=40", got)
+			}
+			if got := countBrowserRows(t, s, ctx, `SELECT COUNT(*) FROM browser_upstream_session_bindings AS b WHERE NOT EXISTS (SELECT 1 FROM browser_sessions AS s WHERE s.token_digest=b.session_digest)`); got != 0 {
+				t.Errorf("rollback left orphaned upstream bindings=%d", got)
 			}
 			if path == "password-session" {
 				if _, err := s.LoadSessionReadOnly(ctx, init.Token); err != nil {

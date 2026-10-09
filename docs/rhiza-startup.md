@@ -5,15 +5,16 @@ The current greenfield build pins Rhiza to
 resolving to upstream commit [`3895b723e194`](https://github.com/mrchypark/rhiza/commit/3895b723e194).
 Earlier documentation cited the official Rhiza `v0.19.0` release (commit
 [`abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8`](https://github.com/mrchypark/rhiza/commit/abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8),
-[release tag](https://github.com/mrchypark/rhiza/releases/tag/v0.19.0)). The prior `main`
-`go.mod` used `v0.18.0`; this branch directly updates the requirement to the current
-pseudo-version above.
+[release tag](https://github.com/mrchypark/rhiza/releases/tag/v0.19.0)). PR #146 inherits
+the same pseudo-version unchanged from its base and corrects this stale release citation;
+it does not change the Rhiza dependency.
 This build uses `github.com/mrchypark/latticedb-go v0.11.3` with a fresh `DataDir`,
 unused cluster ID, and unused object-store namespace. Existing-data migration is
 out of scope and unsupported.
 Rhiza's SQL execution policy changes from 4 to 7; earlier materializers,
 checkpoints and history are rejected. Mixed-version peers and downgrade are
-unsupported. See the [v0.19.0 release](https://github.com/mrchypark/rhiza/releases/tag/v0.19.0).
+unsupported. The earlier citation links to the
+[official v0.19.0 release](https://github.com/mrchypark/rhiza/releases/tag/v0.19.0).
 After Rhiza opens, `cmd/goauthy` starts the existing HTTP listener and answers
 canonical `GET /livez` while waiting up to 30 seconds for `DB.Ready()` and then
 initializing the schema and application. `/readyz` and all application routes

@@ -13,9 +13,10 @@ GoAuthy-specific external-connection and credential-delegation capabilities. Rau
 is a compatibility ledger rather than the sole product roadmap. Earlier documentation
 cited the official Rhiza `v0.19.0` release (commit
 [`abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8`](https://github.com/mrchypark/rhiza/commit/abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8)).
-The prior `main` `go.mod` used Rhiza `v0.18.0`; this branch directly updates the
-requirement to `v0.19.1-0.20261008214459-3895b723e194`, resolving to upstream commit
-[`3895b723e194`](https://github.com/mrchypark/rhiza/commit/3895b723e194). Rhiza
+The current Go build pins Rhiza `v0.19.1-0.20261008214459-3895b723e194` in `go.mod`,
+resolving to upstream commit [`3895b723e194`](https://github.com/mrchypark/rhiza/commit/3895b723e194).
+PR #146 inherits this pin unchanged from its base and corrects the stale release citation;
+it does not change the Rhiza dependency. Rhiza
 `v0.9.0` is retracted because its published proxy-cached commit was wrong.
 v0.10.0 remains the historical baseline for earlier recorded runs.
 Rhiza v0.10.0 introduced bounded graph reachability APIs; GoAuthy does not need or

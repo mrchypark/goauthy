@@ -329,10 +329,23 @@ func TestPasswordOTPRotationReauthenticatesWithOriginalProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	observerCalls := 0
+	h.SetLoginLocationObserver(func(*http.Request, string, string, string, string) error {
+		observerCalls++
+		return nil
+	})
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	request.Header.Set("User-Agent", "Browser")
 	response := httptest.NewRecorder()
-	issued, err := h.rotateBrowserSessionWithParent(response, httptest.NewRequest(http.MethodPost, "/", nil), init.Token, auth.Subject, "mfa", "192.0.2.1", auth.PasswordGeneration, auth.AuthenticationGeneration, parent.ID, nil)
+	issued, err := h.rotateBrowserSessionWithParent(response, request, init.Token, auth.Subject, "mfa", "192.0.2.1", auth.PasswordGeneration, auth.AuthenticationGeneration, parent.ID, nil)
 	if err != nil || issued.AuthenticationMethod != "mfa" {
 		t.Fatalf("current OTP proof reauthentication session=%#v err=%v", issued, err)
+	}
+	if observerCalls != 1 {
+		t.Fatalf("current-proof observer calls=%d want=1", observerCalls)
+	}
+	if len(response.Result().Cookies()) == 0 {
+		t.Fatal("current-proof reauthentication published no session cookie")
 	}
 	if _, err := h.browser.LoadSessionReadOnly(ctx, parent.Token); !errors.Is(err, browser.ErrRevoked) {
 		t.Fatalf("successful reauthentication did not retire parent: %v", err)
@@ -355,7 +368,9 @@ func TestPasswordOTPRotationReauthenticationRejectsStaleProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	observerCalls := 0
 	h.SetLoginLocationObserver(func(r *http.Request, subject, _, _, _ string) error {
+		observerCalls++
 		_, err := storage.Execute(r.Context(), db, rhiza.ExecuteRequest{
 			RequestID: "otp-reauth-final-guard-mode-change",
 			SQL:       `UPDATE identity_authentication_modes SET mode='passkey',generation=generation+1 WHERE subject=?`,
@@ -363,10 +378,29 @@ func TestPasswordOTPRotationReauthenticationRejectsStaleProof(t *testing.T) {
 		})
 		return err
 	})
+	request := httptest.NewRequest(http.MethodPost, "/", nil)
+	request.Header.Set("User-Agent", "Browser")
 	response := httptest.NewRecorder()
-	_, err = h.rotateBrowserSessionWithParent(response, httptest.NewRequest(http.MethodPost, "/", nil), init.Token, auth.Subject, "mfa", "192.0.2.1", auth.PasswordGeneration, auth.AuthenticationGeneration, parent.ID, nil)
+	_, err = h.rotateBrowserSessionWithParent(response, request, init.Token, auth.Subject, "mfa", "192.0.2.1", auth.PasswordGeneration, auth.AuthenticationGeneration, parent.ID, nil)
+	if errors.Is(err, identity.ErrInvalidUserAgent) {
+		t.Fatalf("reauthentication stopped at unrelated User-Agent guard: %v", err)
+	}
 	if err == nil {
 		t.Fatal("reauthentication accepted stale password-plus-OTP proof")
+	}
+	if observerCalls != 1 {
+		t.Fatalf("stale-proof observer calls=%d want=1", observerCalls)
+	}
+	modeRows, err := db.Query(ctx, rhiza.QueryRequest{
+		SQL:         `SELECT mode,generation FROM identity_authentication_modes WHERE subject=?`,
+		Args:        []any{auth.Subject},
+		Consistency: rhiza.ConsistencyLinearizable,
+	})
+	if err != nil || len(modeRows.Rows) != 1 || len(modeRows.Rows[0]) != 2 || modeRows.Rows[0][0] != "passkey" || modeRows.Rows[0][1] != auth.AuthenticationGeneration+1 {
+		t.Fatalf("mode-change observer did not advance proof mode: rows=%#v err=%v", modeRows.Rows, err)
+	}
+	if cookies := response.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("stale proof published %d response cookies", len(cookies))
 	}
 	if _, err := h.browser.LoadSessionReadOnly(ctx, parent.Token); err != nil {
 		t.Fatalf("failed reauthentication revoked its parent: %v", err)
