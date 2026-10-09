@@ -71,6 +71,104 @@ func TestConfirmationCreateCleanup(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthorizationInteractionCleanupMutationCap(t *testing.T) {
+	for _, path := range []string{"existing-session", "combined-init-pair"} {
+		t.Run(path, func(t *testing.T) {
+			s := testStore(t)
+			ctx := t.Context()
+			base := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+			now := base
+			s.now = func() time.Time { return now }
+			session, err := s.CreateInitSession(ctx, base.Add(time.Hour), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			expiredReplay, err := s.CreateAuthorizationInteraction(ctx, session.Token, "expired-replay-target", []byte("expired"), base.Add(time.Second))
+			if err != nil {
+				t.Fatal(err)
+			}
+			live, err := s.CreateAuthorizationInteraction(ctx, session.Token, "live-control", []byte("live"), base.Add(time.Hour))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			now = base.Add(2 * time.Second)
+			statements := make([]rhiza.SQLStatement, 0, 40)
+			for i := range 40 {
+				expiresAt := base.Add(-time.Duration(40-i) * time.Second)
+				statements = append(statements, rhiza.SQLStatement{
+					SQL:  `INSERT INTO browser_authorization_interactions(token_digest,request_id,session_digest,payload,created_at_unix_ms,expires_at_unix_ms) VALUES(?,?,?,'eA',?,?)`,
+					Args: []any{fmt.Sprintf("cleanup-expired-%02d", i), fmt.Sprintf("cleanup-expired-request-%02d", i), "expired-session", expiresAt.UnixMilli(), expiresAt.UnixMilli()},
+				})
+			}
+			if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "seed-interaction-cleanup-backlog", Statements: statements}); err != nil {
+				t.Fatal(err)
+			}
+
+			var issued IssuedAuthorizationInteraction
+			if path == "existing-session" {
+				issued, err = s.CreateAuthorizationInteraction(ctx, session.Token, "cleanup-trigger-existing", []byte("new"), now.Add(time.Minute))
+			} else {
+				var paired IssuedSession
+				paired, issued, err = s.CreateInitSessionWithAuthorizationInteraction(ctx, "", "cleanup-trigger-pair", []byte("new"), now.Add(time.Minute))
+				if err == nil && (paired.Token == "" || paired.ID == "") {
+					t.Fatal("combined init flow returned an empty session")
+				}
+			}
+			if err != nil || issued.Token == "" {
+				t.Fatalf("interaction creation=%+v err=%v", issued, err)
+			}
+
+			for i := range 40 {
+				want := int64(0)
+				if i >= 32 {
+					want = 1
+				}
+				if got := confirmationMatchingCount(t, s, `SELECT COUNT(*) FROM browser_authorization_interactions WHERE token_digest=?`, fmt.Sprintf("cleanup-expired-%02d", i)); got != want {
+					t.Errorf("expired row %02d count=%d want=%d (oldest rows should be swept first)", i, got, want)
+				}
+			}
+			if got := confirmationMatchingCount(t, s, `SELECT COUNT(*) FROM browser_authorization_interactions WHERE expires_at_unix_ms<=?`, now.UnixMilli()); got != 9 {
+				t.Errorf("expired rows remaining=%d want=9 (40-row backlog plus retained replay target, minus 32)", got)
+			}
+			expiredDigest, err := tokenDigest(expiredReplay.Token)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := confirmationMatchingCount(t, s, `SELECT COUNT(*) FROM browser_authorization_interactions WHERE token_digest=?`, expiredDigest); got != 1 {
+				t.Errorf("expired replay target row count=%d want=1", got)
+			}
+			liveDigest, err := tokenDigest(live.Token)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := confirmationMatchingCount(t, s, `SELECT COUNT(*) FROM browser_authorization_interactions WHERE token_digest=? AND expires_at_unix_ms>?`, liveDigest, now.UnixMilli()); got != 1 {
+				t.Errorf("live interaction row count=%d want=1", got)
+			}
+			issuedDigest, err := tokenDigest(issued.Token)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := confirmationMatchingCount(t, s, `SELECT COUNT(*) FROM browser_authorization_interactions WHERE token_digest=? AND expires_at_unix_ms>?`, issuedDigest, now.UnixMilli()); got != 1 {
+				t.Errorf("new live interaction row count=%d want=1", got)
+			}
+			if _, err := s.LoadAuthorizationInteractionReadOnly(ctx, session.Token, expiredReplay.Token); !errors.Is(err, ErrExpired) {
+				t.Errorf("retained expired interaction replay error=%v want ErrExpired", err)
+			}
+		})
+	}
+}
+
+func confirmationMatchingCount(t *testing.T, s *Store, query string, args ...any) int64 {
+	t.Helper()
+	result, err := s.db.Query(t.Context(), rhiza.QueryRequest{SQL: query, Args: args, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
+		t.Fatalf("count query rows=%#v err=%v", result.Rows, err)
+	}
+	return result.Rows[0][0].(int64)
+}
+
 func TestConfirmationAuthorityLossRollsBackCleanup(t *testing.T) {
 	for _, kind := range []string{"revoke", "delete", "hard-expiry", "idle-expiry", "disable-user", "account-expiry"} {
 		t.Run(kind, func(t *testing.T) {
