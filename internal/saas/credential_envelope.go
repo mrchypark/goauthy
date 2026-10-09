@@ -88,12 +88,22 @@ func RewrapCredentialEnvelopeBatch(ctx context.Context, db *rhiza.DB, keys *oidc
 		if err != nil {
 			return oidc.SigningKeyRewrapBatchResult{}, err
 		}
+		keyID, err := keys.PurposeEnvelopeKeyID(purpose, envelope)
+		if err != nil {
+			return oidc.SigningKeyRewrapBatchResult{}, err
+		}
+		last = connectionID
+		if keyID == active {
+			continue
+		}
 		replacement, err := keys.RewrapEnvelope(purpose, envelope)
 		if err != nil {
 			return oidc.SigningKeyRewrapBatchResult{}, err
 		}
 		candidates = append(candidates, credentialRewrapCandidate{binding: binding, connectionID: connectionID, state: state, claim: claim, oldEnvelope: envelope, newEnvelope: replacement})
-		last = connectionID
+	}
+	if len(candidates) == 0 {
+		return oidc.SigningKeyRewrapBatchResult{Cursor: last, Done: len(result.Rows) < credentialEnvelopeBatchSize}, nil
 	}
 	requestID := credentialRewrapRequestID(last, candidates)
 	sql, args := credentialRewrapSQL(candidates)

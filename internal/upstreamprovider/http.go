@@ -118,8 +118,17 @@ func cloneIDTokenClaims(claims *IDTokenClaims) *IDTokenClaims {
 // LinkHooks connects an authenticated local account to explicit upstream link
 // decisions without importing an account implementation.
 type LinkHooks struct {
-	Current func(r *http.Request) (localSubject, rawSessionToken, sessionDigest string, err error)
-	Link    func(ctx context.Context, localSubject string, upstream SubjectResult, now time.Time) (LinkDecision, error)
+	Current func(r *http.Request) (LinkSession, error)
+	Link    func(ctx context.Context, session LinkSession, upstream SubjectResult, now time.Time) (LinkDecision, error)
+}
+
+// LinkSession is the browser authority captured from the authenticated
+// request. The raw token is used only to confirm its canonical digest; writes
+// receive the persisted session snapshot and trusted peer address.
+type LinkSession struct {
+	Session         browser.Session
+	RawSessionToken string
+	PeerIP          string
 }
 
 // NewHandler creates a Handler. configs must be keyed by provider ID
@@ -462,13 +471,14 @@ func (h *Handler) LinkStartHandler() http.Handler {
 			http.Error(w, "Provider not found", http.StatusNotFound)
 			return
 		}
-		localSubject, rawSessionToken, sessionDigest, err := h.linkHooks.Current(r)
-		canonical, canonErr := canonicalSessionDigest(rawSessionToken)
-		if err != nil || canonErr != nil || !validLinkSubject(localSubject) || rawSessionToken == "" || !validDigest(sessionDigest) || subtle.ConstantTimeCompare([]byte(canonical), []byte(sessionDigest)) != 1 {
+		linkSession, err := h.linkHooks.Current(r)
+		sessionDigest := linkSession.Session.ID
+		canonical, canonErr := canonicalSessionDigest(linkSession.RawSessionToken)
+		if err != nil || canonErr != nil || !linkSession.Session.Authenticated() || !validLinkSubject(linkSession.Session.Subject) || linkSession.RawSessionToken == "" || !validDigest(sessionDigest) || subtle.ConstantTimeCompare([]byte(canonical), []byte(sessionDigest)) != 1 {
 			http.Error(w, "Invalid link request", http.StatusForbidden)
 			return
 		}
-		result, err := GenerateAuthorizationURL(r.Context(), h.provider, h.configs[providerID], h.store, AuthorizationParams{Purpose: PurposeLink, CallbackURI: callbackURI, Scopes: h.configs[providerID].Scopes, LinkSubject: localSubject, LinkSessionDigest: sessionDigest, ProviderSource: h.configs[providerID].ProviderSource, RuntimeVersion: h.configs[providerID].RuntimeVersion}, sessionDigest, providerID, h.now())
+		result, err := GenerateAuthorizationURL(r.Context(), h.provider, h.configs[providerID], h.store, AuthorizationParams{Purpose: PurposeLink, CallbackURI: callbackURI, Scopes: h.configs[providerID].Scopes, LinkSubject: linkSession.Session.Subject, LinkSessionDigest: sessionDigest, ProviderSource: h.configs[providerID].ProviderSource, RuntimeVersion: h.configs[providerID].RuntimeVersion}, sessionDigest, providerID, h.now())
 		if err != nil {
 			http.Error(w, "Failed to start link", http.StatusInternalServerError)
 			return
@@ -700,7 +710,7 @@ func (h *Handler) CombinedCallbackHandler() http.Handler {
 			return
 		}
 		_, _, localErr := h.localLogin.Current(r)
-		_, _, _, linkErr := h.linkHooks.Current(r)
+		_, linkErr := h.linkHooks.Current(r)
 		if localErr == nil && linkErr != nil {
 			h.LocalCallbackHandler().ServeHTTP(w, r)
 			return
@@ -740,9 +750,11 @@ func (h *Handler) LinkCallbackHandler() http.Handler {
 		if providerID == "" {
 			providerID = extractProviderID(r.URL.Path)
 		}
-		localSubject, rawSessionToken, sessionDigest, err := h.linkHooks.Current(r)
+		linkSession, err := h.linkHooks.Current(r)
+		localSubject := linkSession.Session.Subject
+		rawSessionToken, sessionDigest := linkSession.RawSessionToken, linkSession.Session.ID
 		canonical, canonErr := canonicalSessionDigest(rawSessionToken)
-		if err != nil || canonErr != nil || !validLinkSubject(localSubject) || rawSessionToken == "" || !validDigest(sessionDigest) || subtle.ConstantTimeCompare([]byte(canonical), []byte(sessionDigest)) != 1 {
+		if err != nil || canonErr != nil || !linkSession.Session.Authenticated() || !validLinkSubject(localSubject) || rawSessionToken == "" || !validDigest(sessionDigest) || subtle.ConstantTimeCompare([]byte(canonical), []byte(sessionDigest)) != 1 {
 			linkReject(w)
 			return
 		}
@@ -768,7 +780,7 @@ func (h *Handler) LinkCallbackHandler() http.Handler {
 			linkReject(w)
 			return
 		}
-		decision, err := h.linkHooks.Link(r.Context(), localSubject, sr, now)
+		decision, err := h.linkHooks.Link(r.Context(), linkSession, sr, now)
 		if err != nil {
 			linkReject(w)
 			return

@@ -39,6 +39,26 @@ func TestAPIKeyConnectorInfoMatchesExecutionAndIsDetached(t *testing.T) {
 	}
 }
 
+func TestAPIKeyConnectorHasOperationMatchesConfiguredOperations(t *testing.T) {
+	t.Parallel()
+	c, err := NewAPIKeyConnector(validAPIKeyConnectorConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range c.Info().Operations {
+		if !c.HasOperation(operation.ID) {
+			t.Errorf("configured operation %q was not found", operation.ID)
+		}
+	}
+	if c.HasOperation("missing") {
+		t.Fatal("unknown operation was found")
+	}
+	var absent *APIKeyConnector
+	if absent.HasOperation("account") {
+		t.Fatal("nil connector has an operation")
+	}
+}
+
 func validAPIKeyConnectorConfig() APIKeyConnectorConfig {
 	return APIKeyConnectorConfig{ID: "billing", Header: "authorization", Prefix: "Bearer ", Operations: []APIKeyOperationConfig{
 		{ID: "account", URL: "https://api.example.com/account", ResponseFields: map[string]string{"id": "string", "active": "boolean"}},

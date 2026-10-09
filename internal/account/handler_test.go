@@ -12,7 +12,9 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -184,7 +186,7 @@ func TestPasswordHandlerRejectsUntrustedOrMalformedChanges(t *testing.T) {
 
 func TestConvertSelfPasskey(t *testing.T) {
 	t.Parallel()
-	h, identities, cookie, csrf, addCredential := testConversionHandler(t)
+	h, identities, _, cookie, csrf, addCredential := testConversionHandler(t)
 	addCredential(t, true)
 
 	response := conversionRequest(t, h, cookie, csrf, "subject-1", http.MethodPost, nil)
@@ -205,9 +207,57 @@ func TestConvertSelfPasskey(t *testing.T) {
 	}
 }
 
+func TestConvertSelfPasskeyRejectsSessionRevokedBeforeMutation(t *testing.T) {
+	h, _, db, cookie, csrf, addCredential := testConversionHandler(t)
+	ctx := context.Background()
+	addCredential(t, true)
+	resetIssued := time.Now().Add(-time.Minute).UnixMilli()
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "account-revoked-conversion-reset", SQL: `INSERT INTO identity_password_reset_tokens (token_digest,subject,password_generation,issued_at_unix_ms,expires_at_unix_ms,usage) VALUES (?,?,?,?,?,'password_reset')`, Args: []any{strings.Repeat("r", 43), "subject-1", int64(1), resetIssued, time.Now().Add(time.Hour).UnixMilli()}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "account-revoked-conversion-ceremony", SQL: `INSERT INTO identity_webauthn_ceremonies (code_digest,purpose,subject,session_digest,interaction_digest,passkey_name,session_json,expires_at_unix_ms) VALUES (?,?,?,?,?,?,?,?)`, Args: []any{strings.Repeat("g", 43), "register", "subject-1", strings.Repeat("s", 43), nil, "pending", "ciphertext", time.Now().Add(time.Hour).UnixMilli()}}); err != nil {
+		t.Fatal(err)
+	}
+	userBefore := accountTestSnapshot(t, db, `SELECT password_phc,password_generation,(SELECT generation FROM identity_authentication_modes WHERE subject='subject-1') FROM identity_users WHERE subject='subject-1'`)
+	resetBefore := tableCount(t, db, `SELECT COUNT(*) FROM identity_password_reset_tokens WHERE subject='subject-1'`)
+	ceremonyBefore := tableCount(t, db, `SELECT COUNT(*) FROM identity_webauthn_ceremonies WHERE subject='subject-1'`)
+
+	gate := newGatedEOFReader()
+	request := httptest.NewRequest(http.MethodPost, "/auth/v1/users/subject-1/self/convert_passkey", gate)
+	request.AddCookie(cookie)
+	request = request.WithContext(browser.ContextWithPeerIP(request.Context(), "203.0.113.8"))
+	request.Header.Set("X-CSRF-Token", csrf)
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	request.SetPathValue("subject", "subject-1")
+	responseCh := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		response := httptest.NewRecorder()
+		h.ConvertSelfPasskey(response, request)
+		responseCh <- response
+	}()
+	awaitGatedBodyRead(t, gate)
+	if err := h.browser.RevokeSession(ctx, cookie.Value); err != nil {
+		t.Fatal(err)
+	}
+	gate.releaseBody()
+	response := awaitAccountResponse(t, responseCh)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("revoked-session conversion status=%d body=%q, want=%d", response.Code, response.Body.String(), http.StatusBadRequest)
+	}
+	if userAfter := accountTestSnapshot(t, db, `SELECT password_phc,password_generation,(SELECT generation FROM identity_authentication_modes WHERE subject='subject-1') FROM identity_users WHERE subject='subject-1'`); !equalAccountSnapshot(userAfter, userBefore) {
+		t.Fatalf("revoked-session conversion changed password/mode state: before=%#v after=%#v", userBefore, userAfter)
+	}
+	if got := tableCount(t, db, `SELECT COUNT(*) FROM identity_password_reset_tokens WHERE subject='subject-1'`); got != resetBefore {
+		t.Fatalf("revoked-session conversion changed reset-token count: before=%d after=%d", resetBefore, got)
+	}
+	if got := tableCount(t, db, `SELECT COUNT(*) FROM identity_webauthn_ceremonies WHERE subject='subject-1'`); got != ceremonyBefore {
+		t.Fatalf("revoked-session conversion changed ceremony count: before=%d after=%d", ceremonyBefore, got)
+	}
+}
+
 func TestConvertSelfPasskeyRequiresCurrentMFAPeerBoundSession(t *testing.T) {
 	t.Parallel()
-	h, _, _, _, addCredential := testConversionHandler(t)
+	h, _, _, _, _, addCredential := testConversionHandler(t)
 	addCredential(t, true)
 	ctx := context.Background()
 	now := time.Date(2100, time.January, 1, 1, 0, 0, 0, time.UTC)
@@ -266,7 +316,7 @@ func TestConvertSelfPasskeyRejectsUntrustedOrInvalidRequests(t *testing.T) {
 		{name: "no user verification", subject: "subject-1", method: http.MethodPost, credentialUV: boolPtr(false), want: http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			h, identities, cookie, csrf, addCredential := testConversionHandler(t)
+			h, identities, _, cookie, csrf, addCredential := testConversionHandler(t)
 			if tc.credentialUV != nil {
 				addCredential(t, *tc.credentialUV)
 			}
@@ -333,12 +383,15 @@ func TestExternalLinkAccountBoundary(t *testing.T) {
 	}
 	fixedNow := time.Date(2099, time.January, 2, 3, 4, 5, 0, time.UTC)
 	h.now = func() time.Time { return fixedNow }
-	h.random = func(p []byte) (int, error) {
+	var attemptCounter byte
+	deterministicAttempt := func(p []byte) (int, error) {
+		attemptCounter++
 		for i := range p {
-			p[i] = byte(i + 1)
+			p[i] = attemptCounter + byte(i+1)
 		}
 		return len(p), nil
 	}
+	h.random = deterministicAttempt
 
 	for _, tc := range []struct {
 		name, method, provider, token string
@@ -423,7 +476,7 @@ func TestExternalLinkAccountBoundary(t *testing.T) {
 			if _, found, err := identities.FindExternalLink(ctx, external); err != nil || !found {
 				t.Fatalf("external link found=%t err=%v", found, err)
 			}
-			h.random = func(p []byte) (int, error) { return len(p), nil }
+			h.random = deterministicAttempt
 			if got := call(http.MethodDelete, "google", nil, cookie, csrf, true).Code; got != http.StatusNoContent {
 				t.Fatalf("cleanup unlink status=%d", got)
 			}
@@ -434,9 +487,51 @@ func TestExternalLinkAccountBoundary(t *testing.T) {
 	}
 }
 
+func TestUnlinkExternalRejectsSessionRevokedBeforeMutation(t *testing.T) {
+	h, sessions, identities, cookie, csrf := testPasswordHandler(t)
+	ctx := context.Background()
+	if err := h.ConfigureExternalLinks(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), []string{"google"}); err != nil {
+		t.Fatal(err)
+	}
+	external := upstreamprovider.SubjectResult{ProviderID: "google", Subject: "revoked-unlink"}
+	if _, err := identities.LinkExternal(ctx, "subject-1", external, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	h.random = func(p []byte) (int, error) {
+		for i := range p {
+			p[i] = byte(i + 1)
+		}
+		return len(p), nil
+	}
+	gate := newGatedEOFReader()
+	request := httptest.NewRequest(http.MethodDelete, "/auth/v1/providers/google/link", gate)
+	request.AddCookie(cookie)
+	request.Header.Set("X-CSRF-Token", csrf)
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	request.SetPathValue("providerID", "google")
+	responseCh := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		response := httptest.NewRecorder()
+		h.UnlinkExternal(response, request)
+		responseCh <- response
+	}()
+	awaitGatedBodyRead(t, gate)
+	if err := sessions.RevokeSession(ctx, cookie.Value); err != nil {
+		t.Fatal(err)
+	}
+	gate.releaseBody()
+	response := awaitAccountResponse(t, responseCh)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("revoked-session unlink status=%d body=%q, want=%d", response.Code, response.Body.String(), http.StatusServiceUnavailable)
+	}
+	if _, found, err := identities.FindExternalLink(ctx, external); err != nil || !found {
+		t.Fatalf("revoked-session unlink removed mapping: found=%t err=%v", found, err)
+	}
+}
+
 func TestExternalLinkUnlinkAllowsPasskeyOnlyAccount(t *testing.T) {
 	t.Parallel()
-	h, identities, cookie, csrf, addCredential := testConversionHandler(t)
+	h, identities, _, cookie, csrf, addCredential := testConversionHandler(t)
 	ctx := context.Background()
 	addCredential(t, true)
 	if err := identities.ConvertToPasskeyOnly(ctx, "subject-1"); err != nil {
@@ -491,9 +586,9 @@ func TestCurrentExternalLinkSession(t *testing.T) {
 	}
 	assertSession := func(t *testing.T, cookie *http.Cookie, want browser.Session) {
 		t.Helper()
-		subject, token, digest, err := h.CurrentExternalLinkSession(request(cookie))
-		if err != nil || subject != want.Subject || token != cookie.Value || digest != want.ID {
-			t.Fatalf("subject=%q token=%q digest=%q err=%v", subject, token, digest, err)
+		proof, err := h.CurrentExternalLinkSession(request(cookie))
+		if err != nil || proof.Session.ID != want.ID || proof.Session.Subject != want.Subject || proof.Session.AuthenticationMethod != want.AuthenticationMethod || proof.RawSessionToken != cookie.Value || proof.PeerIP != "" {
+			t.Fatalf("proof=%#v err=%v", proof, err)
 		}
 	}
 
@@ -537,7 +632,7 @@ func TestCurrentExternalLinkSession(t *testing.T) {
 		}()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, _, _, err := h.CurrentExternalLinkSession(tc.request); !errors.Is(err, ErrExternalLinkSession) {
+			if _, err := h.CurrentExternalLinkSession(tc.request); !errors.Is(err, ErrExternalLinkSession) {
 				t.Fatalf("err=%v", err)
 			}
 		})
@@ -547,7 +642,7 @@ func TestCurrentExternalLinkSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Run("revoked", func(t *testing.T) {
-		if _, _, _, err := h.CurrentExternalLinkSession(request(cookie)); !errors.Is(err, ErrExternalLinkSession) {
+		if _, err := h.CurrentExternalLinkSession(request(cookie)); !errors.Is(err, ErrExternalLinkSession) {
 			t.Fatalf("err=%v", err)
 		}
 	})
@@ -561,7 +656,7 @@ func TestCurrentExternalLinkSession(t *testing.T) {
 	}
 	t.Run("expired", func(t *testing.T) {
 		expiredCookie := &http.Cookie{Name: cookie.Name, Value: expiredToken}
-		if _, _, _, err := h.CurrentExternalLinkSession(request(expiredCookie)); !errors.Is(err, ErrExternalLinkSession) {
+		if _, err := h.CurrentExternalLinkSession(request(expiredCookie)); !errors.Is(err, ErrExternalLinkSession) {
 			t.Fatalf("err=%v", err)
 		}
 	})
@@ -1383,7 +1478,58 @@ func tableCount(t *testing.T, db *rhiza.DB, query string) int64 {
 	return count
 }
 
-func testConversionHandler(t *testing.T) (*Handler, *identity.Store, *http.Cookie, string, func(*testing.T, bool)) {
+func accountTestSnapshot(t *testing.T, db *rhiza.DB, query string, args ...any) []any {
+	t.Helper()
+	result, err := db.Query(context.Background(), rhiza.QueryRequest{SQL: query, Args: args, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(result.Rows) != 1 {
+		t.Fatalf("query=%q rows=%#v err=%v", query, result.Rows, err)
+	}
+	return append([]any(nil), result.Rows[0]...)
+}
+
+func equalAccountSnapshot(a, b []any) bool { return reflect.DeepEqual(a, b) }
+
+type gatedEOFReader struct {
+	started     chan struct{}
+	release     chan struct{}
+	startedOnce sync.Once
+	releaseOnce sync.Once
+}
+
+func newGatedEOFReader() *gatedEOFReader {
+	return &gatedEOFReader{started: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (r *gatedEOFReader) Read([]byte) (int, error) {
+	r.startedOnce.Do(func() { close(r.started) })
+	<-r.release
+	return 0, io.EOF
+}
+
+func (r *gatedEOFReader) releaseBody() { r.releaseOnce.Do(func() { close(r.release) }) }
+
+func awaitGatedBodyRead(t *testing.T, reader *gatedEOFReader) {
+	t.Helper()
+	t.Cleanup(reader.releaseBody)
+	select {
+	case <-reader.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler did not reach request-body EOF gate")
+	}
+}
+
+func awaitAccountResponse(t *testing.T, responses <-chan *httptest.ResponseRecorder) *httptest.ResponseRecorder {
+	t.Helper()
+	select {
+	case response := <-responses:
+		return response
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler did not return after request-body gate opened")
+		return nil
+	}
+}
+
+func testConversionHandler(t *testing.T) (*Handler, *identity.Store, *rhiza.DB, *http.Cookie, string, func(*testing.T, bool)) {
 	t.Helper()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "account-conversion-test", DataDir: t.TempDir()})
@@ -1433,7 +1579,7 @@ func testConversionHandler(t *testing.T) (*Handler, *identity.Store, *http.Cooki
 			t.Fatal(err)
 		}
 	}
-	return h, identities, cookie, csrf, addCredential
+	return h, identities, db, cookie, csrf, addCredential
 }
 
 func conversionRequest(t *testing.T, h *Handler, cookie *http.Cookie, csrf, subject, method string, body []byte) *httptest.ResponseRecorder {

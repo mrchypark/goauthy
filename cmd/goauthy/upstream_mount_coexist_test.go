@@ -11,9 +11,9 @@ import (
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/goauthy/internal/upstreamprovider"
 	"github.com/mrchypark/rhiza"
-	"github.com/mrchypark/goauthy/internal/storage"
 )
 
 // stubStore satisfies upstreamprovider.Store without a real DB.
@@ -87,8 +87,10 @@ func coexistTestUpstreamRuntime(t *testing.T) *upstreamRuntime {
 		Complete: func(http.ResponseWriter, *http.Request, string, string, string, *upstreamprovider.OIDCSession) {},
 	}
 	linkHooks := upstreamprovider.LinkHooks{
-		Current: func(*http.Request) (string, string, string, error) { return "", "", "", nil },
-		Link:    func(context.Context, string, upstreamprovider.SubjectResult, time.Time) (upstreamprovider.LinkDecision, error) { return 0, nil },
+		Current: func(*http.Request) (upstreamprovider.LinkSession, error) { return upstreamprovider.LinkSession{}, nil },
+		Link: func(context.Context, upstreamprovider.LinkSession, upstreamprovider.SubjectResult, time.Time) (upstreamprovider.LinkDecision, error) {
+			return 0, nil
+		},
 	}
 	handler, err := upstreamprovider.NewLocalLoginAndLinkHandler(configs, stubStore{}, stubExchanger{}, stubVerifier{}, nil, allowedCallbacks, hooks, callbacks, linkHooks)
 	if err != nil {
@@ -154,8 +156,10 @@ func TestCoexistDynamicOnlyLinks(t *testing.T) {
 			Complete: func(http.ResponseWriter, *http.Request, string, string, string, *upstreamprovider.OIDCSession) {},
 		},
 		upstreamprovider.LinkHooks{
-			Current: func(*http.Request) (string, string, string, error) { return "", "", "", nil },
-			Link:    func(context.Context, string, upstreamprovider.SubjectResult, time.Time) (upstreamprovider.LinkDecision, error) { return 0, nil },
+			Current: func(*http.Request) (upstreamprovider.LinkSession, error) { return upstreamprovider.LinkSession{}, nil },
+			Link: func(context.Context, upstreamprovider.LinkSession, upstreamprovider.SubjectResult, time.Time) (upstreamprovider.LinkDecision, error) {
+				return 0, nil
+			},
 		},
 		nil,
 	)

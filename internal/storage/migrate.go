@@ -12,7 +12,7 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-const schemaVersion = 110
+const schemaVersion = 111
 
 // migrateThroughV97 applies schema versions v1 through v97. It is the
 // unchanged prefix of Migrate, extracted so tests can reach a clean v97
@@ -423,6 +423,9 @@ func Migrate(ctx context.Context, db *rhiza.DB) error {
 	}
 	if err := migrateSchemaV110(ctx, db); err != nil {
 		return fmt.Errorf("migrate schema v110: %w", err)
+	}
+	if err := migrateSchemaV111(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v111: %w", err)
 	}
 	return nil
 }
@@ -3952,6 +3955,37 @@ func migrateSchemaV110(ctx context.Context, db *rhiza.DB) error {
 	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v110", Statements: []rhiza.SQLStatement{
 		{SQL: `ALTER TABLE oauth_device_grants ADD COLUMN mfa_verified INTEGER NOT NULL DEFAULT 0 CHECK (mfa_verified IN (0,1))`},
 		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(110)`},
+	}})
+	return err
+}
+
+// migrateSchemaV111 scopes OTP digests to their subject while preserving
+// pending and consumed rows from the legacy globally keyed table.
+func migrateSchemaV111(ctx context.Context, db *rhiza.DB) error {
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=111)`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 1 {
+		return errors.New("invalid schema 111 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v111", Statements: []rhiza.SQLStatement{
+		{SQL: `CREATE TABLE identity_email_otp_v111 (
+			code_digest TEXT NOT NULL,
+			subject TEXT NOT NULL CHECK (length(subject) BETWEEN 1 AND 512),
+			expires_at_unix_ms INTEGER NOT NULL,
+			consumed_attempt TEXT,
+			consumed_at_unix_ms INTEGER,
+			PRIMARY KEY (subject, code_digest)
+		) STRICT`},
+		{SQL: `INSERT INTO identity_email_otp_v111 (code_digest,subject,expires_at_unix_ms,consumed_attempt,consumed_at_unix_ms)
+			SELECT code_digest,subject,expires_at_unix_ms,consumed_attempt,consumed_at_unix_ms FROM identity_email_otp`},
+		{SQL: `DROP TABLE identity_email_otp`},
+		{SQL: `ALTER TABLE identity_email_otp_v111 RENAME TO identity_email_otp`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(111)`},
 	}})
 	return err
 }

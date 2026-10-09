@@ -640,7 +640,8 @@ func (h *Handler) UnlinkExternal(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	if err := h.identity.UnlinkExternal(r.Context(), session.Subject, providerID, h.now(), base64.RawURLEncoding.EncodeToString(random[:])); err != nil {
+	guard, guardArgs := h.browser.SessionAuthorizationGuard(session, browser.PeerIPFromContext(r.Context()))
+	if err := h.identity.UnlinkExternalWithGuard(r.Context(), session.Subject, providerID, h.now(), base64.RawURLEncoding.EncodeToString(random[:]), guard, guardArgs); err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
@@ -668,12 +669,25 @@ func (h *Handler) resolveExternalLinkProvider(ctx context.Context, providerID st
 // CurrentExternalLinkSession returns the local browser authority required by
 // an upstream link callback. The callback's upstream state validation is its
 // CSRF protection, so this deliberately writes no HTTP response or CSRF check.
-func (h *Handler) CurrentExternalLinkSession(r *http.Request) (subject, token, digest string, err error) {
+func (h *Handler) CurrentExternalLinkSession(r *http.Request) (upstreamprovider.LinkSession, error) {
 	session, token, ok := h.session(r)
 	if !ok || !session.Authenticated() || session.Subject == "" || token == "" || session.ID == "" {
-		return "", "", "", ErrExternalLinkSession
+		return upstreamprovider.LinkSession{}, ErrExternalLinkSession
 	}
-	return session.Subject, token, session.ID, nil
+	return upstreamprovider.LinkSession{
+		Session: session, RawSessionToken: token, PeerIP: browser.PeerIPFromContext(r.Context()),
+	}, nil
+}
+
+// LinkExternalWithSession binds a provider identity only while the exact
+// browser session captured by the callback remains authorized at commit time.
+func (h *Handler) LinkExternalWithSession(ctx context.Context, proof upstreamprovider.LinkSession, external upstreamprovider.SubjectResult, now time.Time) (upstreamprovider.LinkDecision, error) {
+	digest, err := browser.CanonicalTokenDigest(proof.RawSessionToken)
+	if err != nil || !proof.Session.Authenticated() || proof.Session.Subject == "" || proof.Session.ID == "" || digest != proof.Session.ID {
+		return upstreamprovider.LinkDecisionNone, ErrExternalLinkSession
+	}
+	guard, args := h.browser.SessionAuthorizationGuard(proof.Session, proof.PeerIP)
+	return h.identity.LinkExternalWithGuard(ctx, proof.Session.Subject, external, guard, args, now)
 }
 
 // passkeyPrincipal separates API-key authentication from browser authority.
@@ -893,7 +907,8 @@ func (h *Handler) ConvertSelfPasskey(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, "invalid passkey conversion request")
 		return
 	}
-	if err := h.identity.ConvertToPasskeyOnly(r.Context(), session.Subject); err != nil {
+	guard, guardArgs := h.browser.SessionAuthorizationGuard(session, browser.PeerIPFromContext(r.Context()))
+	if err := h.identity.ConvertToPasskeyOnlyWithGuard(r.Context(), session.Subject, guard, guardArgs); err != nil {
 		badRequest(w, "invalid passkey conversion request")
 		return
 	}

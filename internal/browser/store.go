@@ -631,9 +631,18 @@ type IssuedAuthorizationInteraction struct {
 }
 
 // expiredInteractionCleanup is the expiry sweep that precedes every
-// authorization-interaction insert.
+// authorization-interaction insert. Its selector caps physical deletions per
+// request; SQLite may still scan more candidates, so this is not a latency
+// bound.
+const expiredInteractionCleanupBatchSize = 32
+
 func expiredInteractionCleanup(now time.Time) rhiza.SQLStatement {
-	return rhiza.SQLStatement{SQL: `DELETE FROM browser_authorization_interactions WHERE expires_at_unix_ms <= ?`, Args: []any{now.UnixMilli()}}
+	return rhiza.SQLStatement{SQL: `DELETE FROM browser_authorization_interactions WHERE rowid IN (
+		SELECT rowid FROM browser_authorization_interactions
+		WHERE expires_at_unix_ms <= ?
+		ORDER BY expires_at_unix_ms, token_digest
+		LIMIT ?
+	)`, Args: []any{now.UnixMilli(), expiredInteractionCleanupBatchSize}}
 }
 
 // authorizationInteractionInsert is the guarded interaction insert shared by

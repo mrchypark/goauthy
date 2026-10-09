@@ -174,3 +174,35 @@ func TestInvokeConnectionGrantHTTPBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestValidInvokeConnectorID(t *testing.T) {
+	tests := []struct {
+		name string
+		id   string
+		want bool
+	}{
+		{name: "lowercase", id: "connector", want: true},
+		{name: "numeric first character", id: "7connector", want: true},
+		{name: "underscore and hyphen", id: "a_b-c9", want: true},
+		{name: "empty", id: "", want: false},
+		{name: "uppercase first character", id: "Connector", want: false},
+		{name: "uppercase tail", id: "aConnector", want: false},
+		{name: "unicode", id: "aé", want: false},
+		{name: "malformed UTF-8 tail", id: string([]byte{'a', 0xff}), want: false},
+		{name: "leading whitespace", id: " connector", want: false},
+		{name: "embedded whitespace", id: "a b", want: false},
+		{name: "trailing whitespace", id: "a ", want: false},
+		{name: "underscore first character", id: "_connector", want: false},
+		{name: "hyphen first character", id: "-connector", want: false},
+		{name: "invalid punctuation", id: "a.connector", want: false},
+		{name: "64 byte boundary", id: "a" + strings.Repeat("b", 63), want: true},
+		{name: "over 64 bytes", id: "a" + strings.Repeat("b", 64), want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := validInvokeConnectorID(tc.id); got != tc.want {
+				t.Fatalf("validInvokeConnectorID(%q) = %t, want %t", tc.id, got, tc.want)
+			}
+		})
+	}
+}

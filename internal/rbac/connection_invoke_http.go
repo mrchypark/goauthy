@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
-	"unicode/utf8"
 
 	"github.com/mrchypark/goauthy/internal/saas"
 	"github.com/mrchypark/rhiza"
@@ -102,14 +100,7 @@ func (h *Handler) InvokeConnectionGrant(w http.ResponseWriter, r *http.Request) 
 		h.notFound(w)
 		return
 	}
-	allowed := false
-	for _, operation := range connector.Info().Operations {
-		if operation.ID == in.Operation {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
+	if !connector.HasOperation(in.Operation) {
 		h.badRequest(w)
 		return
 	}
@@ -156,15 +147,16 @@ func connectionUseErrorClass(err error) string {
 }
 
 func validInvokeConnectorID(s string) bool {
-	if s == "" || len([]byte(s)) > 64 || !utf8.ValidString(s) || !((s[0] >= 'a' && s[0] <= 'z') || (s[0] >= '0' && s[0] <= '9')) {
+	if s == "" || len(s) > 64 || !((s[0] >= 'a' && s[0] <= 'z') || (s[0] >= '0' && s[0] <= '9')) {
 		return false
 	}
-	for _, b := range []byte(s[1:]) {
+	for i := 1; i < len(s); i++ {
+		b := s[i]
 		if !((b >= 'a' && b <= 'z') || (b >= '0' && b <= '9') || b == '_' || b == '-') {
 			return false
 		}
 	}
-	return strings.ToLower(s) == s
+	return true
 }
 
 func (h *Handler) writeInvokeError(w http.ResponseWriter, err error) {

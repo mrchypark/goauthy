@@ -474,7 +474,7 @@ func TestMigrationV98V102Constraints(t *testing.T) {
 		t.Fatal("enabled=2 accepted")
 	}
 
-	// --- v101 email OTP constraints ---
+	// --- v101/v111 email OTP constraints ---
 	// empty subject rejected.
 	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{
 		RequestID: "c-v101-empty-subject",
@@ -491,13 +491,22 @@ func TestMigrationV98V102Constraints(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// duplicate code_digest rejected.
+	// duplicate subject/code_digest rejected.
 	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{
-		RequestID: "c-v101-dup",
+		RequestID: "c-v111-dup-subject-code",
+		SQL:       "INSERT INTO identity_email_otp(code_digest,subject,expires_at_unix_ms) VALUES(?,?,?)",
+		Args:      []any{"digest-ok", "user@example.com", int64(2000)},
+	}); err == nil {
+		t.Fatal("duplicate subject/code_digest accepted")
+	}
+	// The v111 subject-scoped key allows equal digest values for distinct
+	// subjects; the digest itself is derived from both subject and code.
+	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{
+		RequestID: "c-v111-same-code-digest-different-subject",
 		SQL:       "INSERT INTO identity_email_otp(code_digest,subject,expires_at_unix_ms) VALUES(?,?,?)",
 		Args:      []any{"digest-ok", "other@example.com", int64(2000)},
-	}); err == nil {
-		t.Fatal("duplicate code_digest accepted")
+	}); err != nil {
+		t.Fatalf("same code digest for a different subject rejected: %v", err)
 	}
 	// rate limit row accepted.
 	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{

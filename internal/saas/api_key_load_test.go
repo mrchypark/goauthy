@@ -59,16 +59,16 @@ func TestLoadAPIKeyForDispatchUsesOneSnapshotAndFencesResolvedBinding(t *testing
 	// the snapshot count for the dispatch load: provider metadata and the ready
 	// credential must be read together.
 	reads := 0
-	binding, value, err := store.loadAPIKeyForDispatch(ctx, b.Owner, b.CollectionID, b.ConnectionID, func() (string, []any) { reads++; return "1", nil }, &resolved.registered)
-	if err != nil || reads != 1 || binding.TokenVersion != 1 || binding.ProviderID != "provider" || value.APIKey != "synthetic-key" {
-		t.Fatalf("snapshot binding=%+v value=%+v reads=%d err=%v", binding, value, reads, err)
+	snapshot, err := store.loadAPIKeyForDispatch(ctx, b.Owner, b.CollectionID, b.ConnectionID, func() (string, []any) { reads++; return "1", nil }, &resolved.registered, nil)
+	if err != nil || reads != 1 || snapshot.binding.TokenVersion != 1 || snapshot.binding.ProviderID != "provider" || snapshot.value.APIKey != "synthetic-key" {
+		t.Fatalf("snapshot binding=%+v value=%+v reads=%d err=%v", snapshot.binding, snapshot.value, reads, err)
 	}
 	// A provider revision change invalidates the caller's resolved binding even
 	// though the connector config and credential are otherwise unchanged.
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "load-dispatch-revision", SQL: `UPDATE saas_providers SET revision=revision+1 WHERE id='provider'`}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.loadAPIKeyForDispatch(ctx, b.Owner, b.CollectionID, b.ConnectionID, credentialAuthority(), &resolved.registered); !errors.Is(err, ErrCredentialUnauthorized) {
+	if _, err := store.loadAPIKeyForDispatch(ctx, b.Owner, b.CollectionID, b.ConnectionID, credentialAuthority(), &resolved.registered, nil); !errors.Is(err, ErrCredentialUnauthorized) {
 		t.Fatalf("stale resolved binding err=%v", err)
 	}
 }

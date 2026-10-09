@@ -179,12 +179,12 @@ func TestUpstreamLogoutHasSignedFormContract(t *testing.T) {
 	}
 }
 
-func TestOTPRoutesPublicNoBrowserAuth(t *testing.T) {
+func TestOTPRoutesDoNotRequireAPIAuthentication(t *testing.T) {
 	doc := &openapi3.T{Paths: openapi3.NewPaths()}
 	if err := addAccountOperations(doc, Features{Recovery: true}); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/auth/v1/users/otp/start", "/auth/v1/users/otp/verify"} {
+	for _, path := range []string{"/auth/v1/users/otp/verify"} {
 		op := doc.Paths.Value(path).Post
 		if op == nil {
 			t.Fatalf("missing %s", path)
@@ -203,13 +203,8 @@ func TestOTPSchemasComplete(t *testing.T) {
 	if err := addAccountOperations(doc, Features{Recovery: true}); err != nil {
 		t.Fatal(err)
 	}
-	startBody := doc.Paths.Value("/auth/v1/users/otp/start").Post.RequestBody.Value.Content["application/json"].Schema.Value
-	if startBody.Properties["subject"] == nil {
-		t.Fatal("otp/start missing subject in request body")
-	}
-	startResp := doc.Paths.Value("/auth/v1/users/otp/start").Post.Responses.Status(200).Value.Content["application/json"].Schema.Value
-	if startResp.Properties["expires_at"] == nil {
-		t.Fatal("otp/start response missing expires_at")
+	if doc.Paths.Value("/auth/v1/users/otp/start") != nil {
+		t.Fatal("otp/start must not be advertised: login OTP is sent after first-factor proof")
 	}
 	verifyBody := doc.Paths.Value("/auth/v1/users/otp/verify").Post.RequestBody.Value.Content["application/json"].Schema.Value
 	if verifyBody.Properties["code"] == nil {
@@ -235,7 +230,7 @@ func TestOTPRoutesGatedByRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	if doc.Paths.Value("/auth/v1/users/otp/start") != nil {
-		t.Fatal("otp/start must be absent when recovery disabled")
+		t.Fatal("otp/start must not be advertised")
 	}
 	if doc.Paths.Value("/auth/v1/users/otp/verify") != nil {
 		t.Fatal("otp/verify must be absent when recovery disabled")

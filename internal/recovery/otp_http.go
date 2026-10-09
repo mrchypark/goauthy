@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-const otpStartLimit = 4 << 10
 const otpVerifyLimit = 1 << 10
 
 type OTPHandler struct {
@@ -16,11 +15,10 @@ type OTPHandler struct {
 	sender    *SMTPSender
 	enabled   bool
 	interacts *OTPInteractionStore
-	now       func() time.Time
 }
 
 func NewOTPHandler(otp *OTPService, sender *SMTPSender, enabled bool, interacts *OTPInteractionStore) *OTPHandler {
-	return &OTPHandler{otp: otp, sender: sender, enabled: enabled, interacts: interacts, now: time.Now}
+	return &OTPHandler{otp: otp, sender: sender, enabled: enabled, interacts: interacts}
 }
 
 func (h *OTPHandler) Enabled() bool { return h.enabled }
@@ -57,67 +55,13 @@ func (h *OTPHandler) VerifyOTPCode(ctx context.Context, subject, code string) (b
 	return h.otp.VerifyOTP(ctx, subject, code)
 }
 
-type otpStartRequest struct {
-	Subject string `json:"subject"`
-}
-
 type otpVerifyRequest struct {
 	Subject string `json:"subject"`
 	Code    string `json:"code"`
 }
 
-type otpStartResponse struct {
-	ExpiresAt time.Time `json:"expires_at"`
-}
-
 type otpVerifyResponse struct {
 	OK bool `json:"ok"`
-}
-
-func (h *OTPHandler) Start(w http.ResponseWriter, r *http.Request) {
-	securityHeaders(w)
-	if r.Method != http.MethodPost {
-		methodNotAllowed(w, http.MethodPost)
-		return
-	}
-	if crossSite(r) {
-		forbidden(w)
-		return
-	}
-	if !h.enabled || h.otp == nil || h.sender == nil {
-		unavailable(w)
-		return
-	}
-	req, err := decodeJSON[otpStartRequest](w, r, otpStartLimit)
-	if err != nil || req.Subject == "" {
-		badRequest(w)
-		return
-	}
-	lang := ""
-	langHeader := r.Header.Get("Accept-Language")
-	if langHeader != "" {
-		lang = parseLang(langHeader)
-	}
-	if lang == "" {
-		lang = "en"
-	}
-	code, err := h.otp.GenerateOTP(r.Context(), req.Subject)
-	if errors.Is(err, ErrOTPRateLimited) {
-		w.Header().Set("Retry-After", "300")
-		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
-		return
-	}
-	if err != nil {
-		unavailable(w)
-		return
-	}
-	expiresAt := h.now().UTC().Add(otpExpiry)
-	if err := h.sender.SendOTP(r.Context(), req.Subject, code, lang, expiresAt); err != nil {
-		unavailable(w)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(otpStartResponse{ExpiresAt: expiresAt})
 }
 
 func (h *OTPHandler) Verify(w http.ResponseWriter, r *http.Request) {

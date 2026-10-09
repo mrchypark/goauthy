@@ -18,27 +18,29 @@ func (s *CredentialStore) CallAPIKey(ctx context.Context, owner, collection, con
 		logAPIKeyCallFailure("connector_validation", ErrAPIKeyConnectorConfig)
 		return nil, ErrAPIKeyConnectorConfig
 	}
-	binding, value, err := s.loadAPIKeyForDispatch(ctx, owner, collection, connection, authority, &connector.registered)
+	preflight, err := s.loadAPIKeyForDispatch(ctx, owner, collection, connection, authority, &connector.registered, nil)
 	if err != nil {
 		logAPIKeyCallFailure("credential_preflight", err)
 		return nil, err
 	}
-	if value.ConnectorDigest == "" || value.ConnectorDigest != connector.Digest() {
+	if preflight.value.ConnectorDigest == "" || preflight.value.ConnectorDigest != connector.Digest() {
 		logAPIKeyCallFailure("credential_preflight", ErrCredentialUnauthorized)
 		return nil, ErrCredentialUnauthorized
 	}
-	result, err := connector.request(ctx, operation, value)
-	value = credential{}
+	result, err := connector.request(ctx, operation, preflight.value)
+	preflight.value = credential{ConnectorDigest: preflight.value.ConnectorDigest}
 	if err != nil {
 		logAPIKeyCallFailure("provider_request", err)
 		return nil, err
 	}
-	current, value, err := s.loadAPIKeyForDispatch(ctx, owner, collection, connection, authority, &connector.registered)
+	current, err := s.loadAPIKeyForDispatch(ctx, owner, collection, connection, authority, &connector.registered, &preflight)
 	if err != nil {
 		logAPIKeyCallFailure("credential_postflight", err)
 		return nil, err
 	}
-	if current != binding || value.ConnectorDigest != connector.Digest() {
+	postflightDigest := current.value.ConnectorDigest
+	current.value = credential{}
+	if current.binding != preflight.binding || postflightDigest != connector.Digest() {
 		logAPIKeyCallFailure("credential_postflight", ErrCredentialConflict)
 		return nil, ErrCredentialConflict
 	}

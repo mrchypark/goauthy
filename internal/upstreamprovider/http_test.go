@@ -2,8 +2,8 @@ package upstreamprovider
 
 import (
 	"context"
-	"encoding/json"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -1461,8 +1461,10 @@ type linkHookRecorder struct {
 
 func (h *linkHookRecorder) hooks() LinkHooks {
 	return LinkHooks{
-		Current: func(*http.Request) (string, string, string, error) { return h.subject, h.token, h.digest, h.currentErr },
-		Link: func(_ context.Context, _ string, upstream SubjectResult, now time.Time) (LinkDecision, error) {
+		Current: func(*http.Request) (LinkSession, error) {
+			return LinkSession{Session: browser.Session{ID: h.digest, Subject: h.subject, AuthenticationMethod: "pwd"}, RawSessionToken: h.token}, h.currentErr
+		},
+		Link: func(_ context.Context, _ LinkSession, upstream SubjectResult, now time.Time) (LinkDecision, error) {
 			h.linkCalls++
 			h.linkNow = now
 			h.gotUpstream = upstream
@@ -1724,7 +1726,6 @@ func TestLocalCallbackCarriesVerifiedOIDCSession(t *testing.T) {
 		})
 	}
 }
-
 
 // rawClaimsVerifier returns claims with rawClaims set, enabling MFA
 // claim mapping evaluation in the callback handler. It copies the
