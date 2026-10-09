@@ -102,14 +102,7 @@ func (h *Handler) InvokeConnectionGrant(w http.ResponseWriter, r *http.Request) 
 		h.notFound(w)
 		return
 	}
-	allowed := false
-	for _, operation := range connector.Info().Operations {
-		if operation.ID == in.Operation {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
+	if !connector.HasOperation(in.Operation) {
 		h.badRequest(w)
 		return
 	}

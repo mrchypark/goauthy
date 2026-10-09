@@ -109,3 +109,116 @@ func TestCallAPIKeyEncryptedStoreToTLSProvider(t *testing.T) {
 		})
 	}
 }
+
+type apiKeyPostflightMutationTransport struct {
+	base   http.RoundTripper
+	mutate func() error
+}
+
+func (transport apiKeyPostflightMutationTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	response, err := transport.base.RoundTrip(request)
+	if err != nil {
+		return nil, err
+	}
+	if err := transport.mutate(); err != nil {
+		_ = response.Body.Close()
+		return nil, err
+	}
+	return response, nil
+}
+
+func TestCallAPIKeyPostflightCiphertextSnapshot(t *testing.T) {
+	t.Parallel()
+	for _, scenario := range []string{"unchanged", "rewrapped", "tampered"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			ctx, store, db, binding, connector := registeredAPIKeyFixture(t, "postflight-"+scenario)
+			if _, err := store.PutBoundAPIKey(ctx, binding.Owner, binding.CollectionID, binding.ConnectionID, 0, "synthetic-postflight-key", connector, connector.Digest(), credentialAuthority()); err != nil {
+				t.Fatal(err)
+			}
+			connector, err := store.APIKeyConnector(ctx, binding.Owner, binding.CollectionID, binding.ConnectionID, credentialAuthority())
+			if err != nil {
+				t.Fatal(err)
+			}
+			binding, _, err = store.loadAPIKey(ctx, binding.Owner, binding.CollectionID, binding.ConnectionID, credentialAuthority())
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := readCredentialEnvelope(t, ctx, db, binding.ConnectionID)
+
+			unavailableKeys := credentialKeys(t, "unavailable", "unavailable")
+			var providerCalls atomic.Int64
+			var interpositionErr error
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				providerCalls.Add(1)
+				if r.Method != http.MethodGet || r.URL.Path != "/account" {
+					t.Error("unexpected outbound request contract")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"account-1","active":true}`))
+			}))
+			defer server.Close()
+			client := apiKeyConnectorTLSClient(t, server)
+			client.Transport = apiKeyPostflightMutationTransport{base: client.Transport, mutate: func() (mutationErr error) {
+				defer func() { interpositionErr = mutationErr }()
+				switch scenario {
+				case "unchanged":
+					// The proof from preflight remains valid for this exact binding
+					// and ciphertext; postflight must not need this retired key.
+					store.keys = unavailableKeys
+				case "rewrapped":
+					purpose, err := credentialPurpose(binding)
+					if err != nil {
+						return err
+					}
+					rewrapped, err := store.keys.RewrapEnvelope(purpose, before)
+					if err != nil {
+						return err
+					}
+					if bytes.Equal(rewrapped, before) {
+						return errors.New("rewrap did not change the envelope")
+					}
+					response, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "api-key-postflight-rewrap", SQL: `UPDATE saas_connection_credentials SET credential=? WHERE connection_id=? AND token_version=?`, Args: []any{rewrapped, binding.ConnectionID, binding.TokenVersion}})
+					if err != nil {
+						return err
+					}
+					if response.Status != "committed" || response.MutationReceipt.RowsAffected != 1 {
+						return errors.New("rewrap interposition did not update one credential")
+					}
+					return nil
+				case "tampered":
+					tampered := append([]byte(nil), before...)
+					tampered[len(tampered)-1] ^= 1
+					response, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "api-key-postflight-tamper", SQL: `UPDATE saas_connection_credentials SET credential=? WHERE connection_id=? AND token_version=?`, Args: []any{tampered, binding.ConnectionID, binding.TokenVersion}})
+					if err != nil {
+						return err
+					}
+					if response.Status != "committed" || response.MutationReceipt.RowsAffected != 1 {
+						return errors.New("tamper interposition did not update one credential")
+					}
+					return nil
+				}
+				return nil
+			}}
+			connector.client = client
+
+			result, err := store.CallAPIKey(ctx, binding.Owner, binding.CollectionID, binding.ConnectionID, connector, "account", credentialAuthority())
+			if interpositionErr != nil {
+				t.Fatalf("interposition failed: %v", interpositionErr)
+			}
+			if providerCalls.Load() != 1 {
+				t.Fatalf("provider calls=%d want=1", providerCalls.Load())
+			}
+			switch scenario {
+			case "unchanged", "rewrapped":
+				if err != nil || string(result["id"]) != `"account-1"` || string(result["active"]) != "true" || len(result) != 2 {
+					t.Fatalf("current credential result was not released: err=%v", err)
+				}
+			case "tampered":
+				if err == nil || result != nil {
+					t.Fatal("tampered current ciphertext released provider data")
+				}
+			}
+		})
+	}
+}

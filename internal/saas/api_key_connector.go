@@ -118,6 +118,15 @@ func (c *APIKeyConnector) Digest() string {
 	return c.digest
 }
 
+// HasOperation reports whether this connector has a configured operation.
+func (c *APIKeyConnector) HasOperation(operation string) bool {
+	if c == nil {
+		return false
+	}
+	_, ok := c.operations[operation]
+	return ok
+}
+
 type canonicalAPIKeyField struct{ Name, Type string }
 type canonicalAPIKeyOperation struct {
 	ID, Method, URL string
