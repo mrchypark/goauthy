@@ -197,14 +197,23 @@ func (s *Store) CreateInitSession(ctx context.Context, expiresAt time.Time, peer
 	return s.createSession(ctx, "", "", expiresAt, peerIP, nil)
 }
 
-// expiredSessionCleanupStatements is the expiry sweep that precedes every
-// session insert. Rhiza does not enforce SQLite foreign keys, so bindings are
-// removed before their expired sessions to keep session-digest lookups from
-// retaining stale rows.
+const expiredSessionCleanupBatchSize = 32
+
+// expiredSessionCleanupStatements is the bounded expiry sweep that precedes
+// session inserts. Rhiza does not enforce SQLite foreign keys, so bindings are
+// removed before their expired sessions. The selector caps rows mutated per
+// statement; SQLite may still scan more candidates, so this is not a latency
+// bound.
 func expiredSessionCleanupStatements(now time.Time) []rhiza.SQLStatement {
 	return []rhiza.SQLStatement{
-		{SQL: `DELETE FROM browser_upstream_session_bindings WHERE session_digest IN (SELECT token_digest FROM browser_sessions WHERE expires_at_unix_ms <= ?)`, Args: []any{now.UnixMilli()}},
-		{SQL: `DELETE FROM browser_sessions WHERE expires_at_unix_ms <= ?`, Args: []any{now.UnixMilli()}},
+		{SQL: `DELETE FROM browser_upstream_session_bindings WHERE session_digest IN (
+			SELECT token_digest FROM browser_sessions WHERE expires_at_unix_ms <= ?
+			ORDER BY expires_at_unix_ms, token_digest LIMIT ?
+		)`, Args: []any{now.UnixMilli(), expiredSessionCleanupBatchSize}},
+		{SQL: `DELETE FROM browser_sessions WHERE token_digest IN (
+			SELECT token_digest FROM browser_sessions WHERE expires_at_unix_ms <= ?
+			ORDER BY expires_at_unix_ms, token_digest LIMIT ?
+		)`, Args: []any{now.UnixMilli(), expiredSessionCleanupBatchSize}},
 	}
 }
 
@@ -290,7 +299,16 @@ func (s *Store) createSession(ctx context.Context, subject, authMethod string, e
 	return s.createSessionWithParent(ctx, subject, authMethod, expiresAt, peerIP, binding, nil)
 }
 
+type passwordAuthenticationProof struct {
+	passwordGeneration       int64
+	authenticationGeneration int64
+}
+
 func (s *Store) createSessionWithParent(ctx context.Context, subject, authMethod string, expiresAt time.Time, peerIP string, binding *UpstreamSessionBinding, parent *Session) (IssuedSession, error) {
+	return s.createSessionWithParentAndProof(ctx, subject, authMethod, expiresAt, peerIP, binding, parent, nil)
+}
+
+func (s *Store) createSessionWithParentAndProof(ctx context.Context, subject, authMethod string, expiresAt time.Time, peerIP string, binding *UpstreamSessionBinding, parent *Session, proof *passwordAuthenticationProof) (IssuedSession, error) {
 	now := s.timeNow()
 	expiresAt = expiresAt.UTC()
 	if !expiresAt.After(now) {
@@ -309,10 +327,20 @@ func (s *Store) createSessionWithParent(ctx context.Context, subject, authMethod
 	} else {
 		insert = initSessionInsert(digest, now, expiresAt, peerIP)
 	}
+	if proof != nil {
+		if subject == "" || proof.passwordGeneration < 1 || proof.authenticationGeneration < 1 {
+			return IssuedSession{}, errors.New("password MFA session requires authentication generations")
+		}
+		insert.SQL += ` AND password_generation=? AND EXISTS (SELECT 1 FROM identity_authentication_modes WHERE subject=? AND mode='password' AND generation=?)`
+		insert.Args = append(insert.Args, proof.passwordGeneration, subject, proof.authenticationGeneration)
+	}
 	if parent != nil {
 		guard, args := s.SessionAuthorizationGuard(*parent, peerIP)
 		insert.SQL += " AND (" + guard + ")"
 		insert.Args = append(insert.Args, args...)
+		one := int64(1)
+		insert.ExpectedRowsAffected = &one
+	} else if proof != nil {
 		one := int64(1)
 		insert.ExpectedRowsAffected = &one
 	}
@@ -365,12 +393,29 @@ const LoginRecordSQL = `UPDATE identity_users SET last_failed_login_at_unix_ms=N
 // RevokeSession sequence. The old-token guard requires a canonical, current,
 // unrevoked, unexpired init session bound to this peer; any guard failure rolls
 // the whole transaction back so no usable replacement or bookkeeping survives.
-func (s *Store) CreatePasswordSession(ctx context.Context, subject, authMethod string, expiresAt time.Time, peerIP, oldInitToken string) (IssuedSession, error) {
+func (s *Store) CreatePasswordSession(ctx context.Context, subject, authMethod string, passwordGeneration, authenticationGeneration int64, expiresAt time.Time, peerIP, oldInitToken string) (IssuedSession, error) {
+	if authMethod != "pwd" {
+		return IssuedSession{}, errors.New("password session requires pwd authentication method")
+	}
+	return s.createPasswordAuthenticationSession(ctx, subject, authMethod, passwordGeneration, authenticationGeneration, expiresAt, peerIP, oldInitToken)
+}
+
+// CreatePasswordMFASession creates a session for password-plus-OTP proof. The
+// session keeps the stronger mfa method while the insert remains fenced by the
+// password and authentication-mode generations proved at the first factor.
+func (s *Store) CreatePasswordMFASession(ctx context.Context, subject string, passwordGeneration, authenticationGeneration int64, expiresAt time.Time, peerIP, oldInitToken string) (IssuedSession, error) {
+	return s.createPasswordAuthenticationSession(ctx, subject, "mfa", passwordGeneration, authenticationGeneration, expiresAt, peerIP, oldInitToken)
+}
+
+func (s *Store) createPasswordAuthenticationSession(ctx context.Context, subject, authMethod string, passwordGeneration, authenticationGeneration int64, expiresAt time.Time, peerIP, oldInitToken string) (IssuedSession, error) {
 	if strings.TrimSpace(subject) == "" || len(subject) > maxSubjectLength {
 		return IssuedSession{}, errors.New("invalid browser session subject")
 	}
-	if authMethod != "pwd" {
-		return IssuedSession{}, errors.New("password session requires pwd authentication method")
+	if authMethod != "pwd" && authMethod != "mfa" {
+		return IssuedSession{}, errors.New("password session requires pwd or mfa authentication method")
+	}
+	if passwordGeneration < 1 || authenticationGeneration < 1 {
+		return IssuedSession{}, errors.New("password session requires authentication generations")
 	}
 	oldDigest, err := tokenDigest(oldInitToken)
 	if err != nil {
@@ -387,16 +432,17 @@ func (s *Store) CreatePasswordSession(ctx context.Context, subject, authMethod s
 	}
 	insert := rhiza.SQLStatement{SQL: `INSERT INTO browser_sessions (token_digest, subject, auth_method, created_at_unix_ms, expires_at_unix_ms, last_seen_at_unix_ms, peer_ip)
 		SELECT ?,subject,?,?,MIN(?,COALESCE(user_expires_at_unix_ms,?)),?,? FROM identity_users
-		WHERE subject=? AND disabled=0 AND (user_expires_at_unix_ms IS NULL OR user_expires_at_unix_ms > ?)`,
-		Args: []any{digest, authMethod, now.UnixMilli(), expiresAt.UnixMilli(), expiresAt.UnixMilli(), now.UnixMilli(), peerIP, subject, now.UnixMilli()}}
+		WHERE subject=? AND disabled=0 AND (user_expires_at_unix_ms IS NULL OR user_expires_at_unix_ms > ?)
+		AND password_generation=?
+		AND EXISTS (SELECT 1 FROM identity_authentication_modes WHERE subject=? AND mode='password' AND generation=?)`,
+		Args: []any{digest, authMethod, now.UnixMilli(), expiresAt.UnixMilli(), expiresAt.UnixMilli(), now.UnixMilli(), peerIP, subject, now.UnixMilli(), passwordGeneration, subject, authenticationGeneration}}
 	one := int64(1)
-	statements := []rhiza.SQLStatement{
-		{SQL: `DELETE FROM browser_upstream_session_bindings WHERE session_digest IN (SELECT token_digest FROM browser_sessions WHERE expires_at_unix_ms <= ?)`, Args: []any{now.UnixMilli()}},
-		{SQL: `DELETE FROM browser_sessions WHERE expires_at_unix_ms <= ?`, Args: []any{now.UnixMilli()}},
+	insert.ExpectedRowsAffected = &one
+	statements := append(expiredSessionCleanupStatements(now),
 		insert,
-		{SQL: `UPDATE browser_sessions SET revoked_at_unix_ms = COALESCE(revoked_at_unix_ms, ?) WHERE token_digest = ? AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ? AND subject = '' AND auth_method = '' AND peer_ip = ?`, Args: []any{now.UnixMilli(), oldDigest, now.UnixMilli(), peerIP}, ExpectedRowsAffected: &one},
-		{SQL: LoginRecordSQL, Args: []any{subject, digest, now.UnixMilli(), now.UnixMilli()}, ExpectedRowsAffected: &one},
-	}
+		rhiza.SQLStatement{SQL: `UPDATE browser_sessions SET revoked_at_unix_ms = COALESCE(revoked_at_unix_ms, ?) WHERE token_digest = ? AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ? AND subject = '' AND auth_method = '' AND peer_ip = ?`, Args: []any{now.UnixMilli(), oldDigest, now.UnixMilli(), peerIP}, ExpectedRowsAffected: &one},
+		rhiza.SQLStatement{SQL: LoginRecordSQL, Args: []any{subject, digest, now.UnixMilli(), now.UnixMilli()}, ExpectedRowsAffected: &one},
+	)
 	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID:  mutationID("password-session-create", digest),
 		Statements: statements,

@@ -953,7 +953,7 @@ func TestCompleteAuthenticationWithInteractionRejectsForceMFA(t *testing.T) {
 	}
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/auth/login", nil)
-	h.completeAuthenticationWithInteraction(response, request, init.Value, interaction, loaded, "user-1", "pwd", func() error { return nil })
+	h.completeAuthenticationWithInteraction(response, request, init.Value, interaction, loaded, "user-1", "pwd", 0, 0, func() error { return nil })
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("status=%d want=403", response.Code)
 	}
@@ -964,6 +964,109 @@ func TestCompleteAuthenticationWithInteractionRejectsForceMFA(t *testing.T) {
 	if err != nil || len(row.Rows) != 1 || row.Rows[0][0] != nil {
 		t.Fatalf("interaction consumed row=%v err=%v", row.Rows, err)
 	}
+}
+
+func TestPasswordCompletionRejectsStaleAuthenticationGenerations(t *testing.T) {
+	t.Parallel()
+	h, db := testHandlerWithDB(t, false)
+	auth, err := h.identity.Authenticate(context.Background(), "alice", []byte("correct password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := httptest.NewRecorder()
+	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
+	if page.Code != http.StatusOK {
+		t.Fatalf("authorize status=%d", page.Code)
+	}
+	init := page.Result().Cookies()[0]
+	interaction := interactionToken(t, page.Body.String())
+	loaded, err := h.browser.LoadAuthorizationInteractionReadOnly(context.Background(), init.Value, interaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := browser.CanonicalTokenDigest(interaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resetter := testPasswordResetStore(t, db)
+	resetToken, _, err := resetter.IssuePasswordReset(context.Background(), auth.Subject, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	challenge, err := resetter.BeginPasswordReset(context.Background(), auth.Subject, resetToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	consume := func(ctx context.Context) (browser.AuthorizationInteraction, error) {
+		return h.browser.ConsumeAuthorizationInteraction(ctx, init.Value, interaction)
+	}
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/auth/login", nil)
+	h.finishAuthentication(response, request, init.Value, digest, auth.Subject, "pwd", auth.PasswordGeneration, auth.AuthenticationGeneration, func() error {
+		_, err := resetter.ResetPassword(request.Context(), auth.Subject, resetToken, challenge.CookieToken, challenge.CSRFToken, []byte("ChangedPassword2"), "")
+		return err
+	}, consume, "192.0.2.1", loaded)
+	if location := response.Header().Get("Location"); response.Code != http.StatusServiceUnavailable || location != "" {
+		t.Fatalf("stale proof completion status=%d location-set=%t", response.Code, location != "")
+	}
+	for _, query := range []struct {
+		name string
+		sql  string
+	}{
+		{name: "authenticated session", sql: `SELECT COUNT(*) FROM browser_sessions WHERE subject=? AND revoked_at_unix_ms IS NULL`},
+		{name: "authorization code", sql: `SELECT COUNT(*) FROM oauth_authorize_codes WHERE json_extract(request_json,'$.subject')=?`},
+	} {
+		row, err := db.Query(context.Background(), rhiza.QueryRequest{SQL: query.sql, Args: []any{auth.Subject}, Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil || len(row.Rows) != 1 || row.Rows[0][0].(int64) != 0 {
+			t.Fatalf("%s count=%v err=%v", query.name, row.Rows, err)
+		}
+	}
+}
+
+func TestPasswordResetRevokesSessionIssuedFromCurrentProof(t *testing.T) {
+	t.Parallel()
+	h, db := testHandlerWithDB(t, false)
+	ctx := context.Background()
+	auth, err := h.identity.Authenticate(ctx, "alice", []byte("correct password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	init, err := h.browser.CreateInitSession(ctx, time.Now().Add(time.Hour), "192.0.2.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := h.browser.CreatePasswordSession(ctx, auth.Subject, "pwd", auth.PasswordGeneration, auth.AuthenticationGeneration, time.Now().Add(time.Hour), "192.0.2.1", init.Token)
+	if err != nil {
+		t.Fatalf("current proof failed to issue session: %v", err)
+	}
+	resetter := testPasswordResetStore(t, db)
+	resetToken, _, err := resetter.IssuePasswordReset(ctx, auth.Subject, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	challenge, err := resetter.BeginPasswordReset(ctx, auth.Subject, resetToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resetter.ResetPassword(ctx, auth.Subject, resetToken, challenge.CookieToken, challenge.CSRFToken, []byte("ChangedPassword2"), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.browser.LoadSessionReadOnly(ctx, session.Token); !errors.Is(err, browser.ErrRevoked) {
+		t.Fatalf("session issued before reset remains usable: %v", err)
+	}
+}
+
+func testPasswordResetStore(t *testing.T, db *rhiza.DB) *identity.Store {
+	t.Helper()
+	hasher, err := credential.NewHasher(credential.Policy{MemoryKiB: 19 * 1024, Iterations: 2, Parallelism: 1, MaxConcurrency: 8, WaitTimeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := identity.NewStoreWithPasswordReset(db, hasher, credential.DefaultRules(), bytes.Repeat([]byte{1}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
 }
 
 // TestCompleteAuthenticationWithInteractionRejectsForceMFACommittedAfterPassword
@@ -1022,7 +1125,7 @@ func TestCompleteAuthenticationWithInteractionRejectsForceMFACommittedAfterPassw
 	}
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/auth/login", nil)
-	h.completeAuthenticationWithInteraction(response, request, init.Value, interaction, loaded, "user-1", "pwd", func() error { return nil })
+	h.completeAuthenticationWithInteraction(response, request, init.Value, interaction, loaded, "user-1", "pwd", 0, 0, func() error { return nil })
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("status=%d want=403", response.Code)
 	}

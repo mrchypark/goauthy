@@ -53,3 +53,19 @@ func (s *Store) CreateReauthenticatedSession(ctx context.Context, subject, authM
 	}
 	return s.createSessionWithParent(ctx, subject, authMethod, expiresAt, peerIP, binding, &parent)
 }
+
+// CreateReauthenticatedPasswordMFASession replaces an eligible parent only
+// while the password and password-mode generations proved before OTP still
+// match. It is reserved for local password-plus-OTP proof; upstream MFA keeps
+// CreateReauthenticatedSession and its existing binding contract.
+func (s *Store) CreateReauthenticatedPasswordMFASession(ctx context.Context, subject string, passwordGeneration, authenticationGeneration int64, expiresAt time.Time, peerIP, parentDigest string) (IssuedSession, error) {
+	if passwordGeneration < 1 || authenticationGeneration < 1 {
+		return IssuedSession{}, ErrNotFound
+	}
+	parent, err := s.LoadReauthenticationParent(ctx, parentDigest, subject, peerIP)
+	if err != nil {
+		return IssuedSession{}, err
+	}
+	proof := &passwordAuthenticationProof{passwordGeneration: passwordGeneration, authenticationGeneration: authenticationGeneration}
+	return s.createSessionWithParentAndProof(ctx, subject, "mfa", expiresAt, peerIP, nil, &parent, proof)
+}

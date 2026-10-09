@@ -39,7 +39,6 @@ import (
 	"github.com/ory/fosite/compose"
 	"github.com/ory/fosite/handler/oauth2"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 )
 
 var clientIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
@@ -523,10 +522,9 @@ func (s *Server) writeTokenError(ctx context.Context, w http.ResponseWriter, req
 
 func (s *Server) TokenHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, span := tracing.NewTracer("goauthy/oauth").Start(r.Context(), "token",
-			trace.WithAttributes(attribute.String("grant_type", r.PostForm.Get("grant_type"))),
-		)
+		ctx, span := tracing.NewTracer("goauthy/oauth").Start(r.Context(), "token")
 		defer span.End()
+		r = r.WithContext(ctx)
 		// Retain the exact client snapshot used to authenticate this request.
 		// Later grant loads must not hide a concurrent secret/policy change.
 		r = r.WithContext(context.WithValue(r.Context(), managedClientSnapshotsKey{}, make(map[string]fosite.Client)))
@@ -559,6 +557,17 @@ func (s *Server) TokenHandler() http.Handler {
 		}
 		r = r.WithContext(context.WithValue(r.Context(), passwordWriteDeadlineKey{}, http.NewResponseController(w).SetWriteDeadline))
 		request, err := s.provider.NewAccessRequest(r.Context(), r, &fosite.DefaultSession{})
+		grantType := "unknown"
+		if request != nil {
+			grants := request.GetGrantTypes()
+			if len(grants) == 1 {
+				switch grants[0] {
+				case "authorization_code", "refresh_token", "client_credentials", "password", DeviceGrantType, TokenExchangeGrantType:
+					grantType = grants[0]
+				}
+			}
+		}
+		span.SetAttributes(attribute.String("grant_type", grantType))
 		responseStarted := false
 		if request != nil && request.GetGrantTypes().ExactOne(DeviceGrantType) {
 			if session, ok := request.GetSession().(*fosite.DefaultSession); ok {

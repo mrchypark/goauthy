@@ -95,7 +95,7 @@ func TestPasskeyLocationRequiresUserAgentBeforeSession(t *testing.T) {
 	for _, method := range []string{"webauthn", "mfa"} {
 		r := httptest.NewRequest(http.MethodPost, "/", nil)
 		response := httptest.NewRecorder()
-		_, err := h.rotateBrowserSession(response, r, "unused", "user-1", method, "192.0.2.1")
+		_, err := h.rotateBrowserSession(response, r, "unused", "user-1", method, "192.0.2.1", 0, 0)
 		if !errors.Is(err, identity.ErrInvalidUserAgent) {
 			t.Fatalf("method=%s error=%v", method, err)
 		}

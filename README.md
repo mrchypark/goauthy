@@ -10,12 +10,17 @@ remains in [docs/status.md](docs/status.md), while Rauthy parity is tracked sepa
 
 GoAuthy uses Rauthy `v0.36.2` as a fixed behavior baseline while also providing
 GoAuthy-specific external-connection and credential-delegation capabilities. Rauthy parity
-is a compatibility ledger rather than the sole product roadmap. GoAuthy uses
-official Rhiza `v0.19.0` (commit `abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8`) as its only database. Rhiza
+is a compatibility ledger rather than the sole product roadmap. Earlier documentation
+cited the official Rhiza `v0.19.0` release (commit
+[`abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8`](https://github.com/mrchypark/rhiza/commit/abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8)).
+The current Go build pins Rhiza `v0.19.1-0.20261008214459-3895b723e194` in `go.mod`,
+resolving to upstream commit [`3895b723e194`](https://github.com/mrchypark/rhiza/commit/3895b723e194).
+PR #146 inherits this pin unchanged from its base and corrects the stale release citation;
+it does not change the Rhiza dependency. Rhiza
 `v0.9.0` is retracted because its published proxy-cached commit was wrong.
 v0.10.0 remains the historical baseline for earlier recorded runs.
 Rhiza v0.10.0 introduced bounded graph reachability APIs; GoAuthy does not need or
-use them. The v0.19.0 candidate supports only fresh physical state; mixed-version
+use them. The current pinned candidate supports only fresh physical state; mixed-version
 peers, downgrade and existing-data migration are unsupported. See the
 [greenfield upgrade contract](docs/no-pvc-dr.md).
 

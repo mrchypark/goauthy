@@ -920,6 +920,156 @@ func TestInitSessionStoresPeerIP(t *testing.T) {
 	}
 }
 
+func TestForegroundSessionExpiryCleanupMutationCap(t *testing.T) {
+	for _, backlog := range []int{0, 100, 1000} {
+		t.Run(fmt.Sprintf("backlog_%d", backlog), func(t *testing.T) {
+			s := testStore(t)
+			ctx := context.Background()
+			now := time.Date(2026, time.October, 9, 12, 0, 0, 0, time.UTC)
+			s.now = func() time.Time { return now }
+			liveDigest := fmt.Sprintf("%043d", 10_000_000)
+			liveBinding := rhiza.SQLStatement{SQL: `INSERT INTO browser_upstream_session_bindings(session_digest,issuer,client_id,upstream_subject,upstream_sid,created_at_unix_ms) VALUES(?,?,?,?,?,?)`, Args: []any{liveDigest, "https://issuer.example.test", "live-client", "live-subject", "live-sid", now.UnixMilli()}}
+			liveSession := rhiza.SQLStatement{SQL: `INSERT INTO browser_sessions(token_digest,subject,auth_method,created_at_unix_ms,expires_at_unix_ms,last_seen_at_unix_ms,peer_ip) VALUES(?,?,?,?,?,?,?)`, Args: []any{liveDigest, "user-external", "external", now.Add(-time.Minute).UnixMilli(), now.Add(time.Hour).UnixMilli(), now.Add(-time.Minute).UnixMilli(), ""}}
+			if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "expiry-cleanup-live-control", Statements: []rhiza.SQLStatement{liveSession, liveBinding}}); err != nil {
+				t.Fatal(err)
+			}
+			init, err := s.CreateInitSession(ctx, now.Add(time.Hour), "192.0.2.1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, path := range []string{"init-interaction", "password-session"} {
+				t.Run(path, func(t *testing.T) {
+					seedExpiredBrowserSessions(t, s, ctx, backlog, now, path)
+					beforeSessions := expiredBrowserSessionCount(t, s, ctx, now)
+					beforeBindings := browserBindingRowCount(t, s, ctx)
+					started := time.Now()
+					if path == "init-interaction" {
+						_, _, err = s.CreateInitSessionWithAuthorizationInteraction(ctx, "192.0.2.1", fmt.Sprintf("cleanup-%s-%d", path, backlog), []byte("state"), now.Add(time.Minute))
+					} else {
+						_, err = s.CreatePasswordSession(ctx, "user-1", "pwd", 1, 1, now.Add(time.Hour), "192.0.2.1", init.Token)
+					}
+					elapsed := time.Since(started)
+					if err != nil {
+						t.Fatal(err)
+					}
+					afterSessions := expiredBrowserSessionCount(t, s, ctx, now)
+					afterBindings := browserBindingRowCount(t, s, ctx)
+					removedSessions, removedBindings := beforeSessions-afterSessions, beforeBindings-afterBindings
+					t.Logf("path=%s backlog=%d expired_sessions_mutated=%d bindings_mutated=%d elapsed=%s (observed, not a latency bound)", path, backlog, removedSessions, removedBindings, elapsed)
+					if removedSessions > 32 || removedBindings > 32 {
+						t.Errorf("cleanup exceeded 32-row mutation cap: sessions=%d bindings=%d", removedSessions, removedBindings)
+					}
+					if removedSessions != removedBindings {
+						t.Errorf("binding/session cleanup mismatch: sessions=%d bindings=%d", removedSessions, removedBindings)
+					}
+					if got := countBrowserRows(t, s, ctx, `SELECT COUNT(*) FROM browser_upstream_session_bindings AS b WHERE NOT EXISTS (SELECT 1 FROM browser_sessions AS s WHERE s.token_digest=b.session_digest)`); got != 0 {
+						t.Errorf("cleanup left orphaned upstream bindings=%d", got)
+					}
+					if got := countBrowserRows(t, s, ctx, `SELECT COUNT(*) FROM browser_sessions WHERE token_digest=? AND expires_at_unix_ms>?`, liveDigest, now.UnixMilli()); got != 1 {
+						t.Errorf("live session control count=%d want=1", got)
+					}
+					if got := countBrowserRows(t, s, ctx, `SELECT COUNT(*) FROM browser_upstream_session_bindings WHERE session_digest=?`, liveDigest); got != 1 {
+						t.Errorf("live binding control count=%d want=1", got)
+					}
+				})
+			}
+		})
+	}
+}
+
+func seedExpiredBrowserSessions(t *testing.T, s *Store, ctx context.Context, count int, now time.Time, key string) {
+	t.Helper()
+	salt := 0
+	for _, value := range key {
+		salt += int(value)
+	}
+	for start := 0; start < count; start += 32 {
+		end := start + 32
+		if end > count {
+			end = count
+		}
+		statements := make([]rhiza.SQLStatement, 0, (end-start)*2)
+		for i := start; i < end; i++ {
+			digest := fmt.Sprintf("%043d", salt*1_000_000+i+1)
+			statements = append(statements,
+				rhiza.SQLStatement{SQL: `INSERT INTO browser_sessions(token_digest,subject,auth_method,created_at_unix_ms,expires_at_unix_ms,last_seen_at_unix_ms,peer_ip) VALUES(?,?,?,?,?,?,?)`, Args: []any{digest, "user-external", "external", now.Add(-time.Hour).UnixMilli(), now.Add(-time.Minute).UnixMilli(), now.Add(-time.Hour).UnixMilli(), ""}},
+				rhiza.SQLStatement{SQL: `INSERT INTO browser_upstream_session_bindings(session_digest,issuer,client_id,upstream_subject,upstream_sid,created_at_unix_ms) VALUES(?,?,?,?,?,?)`, Args: []any{digest, "https://issuer.example.test", "expired-client", "expired-subject", "expired-sid", now.Add(-time.Hour).UnixMilli()}},
+			)
+		}
+		if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: fmt.Sprintf("expiry-cleanup-seed-%s-%d", key, start), Statements: statements}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func expiredBrowserSessionCount(t *testing.T, s *Store, ctx context.Context, now time.Time) int64 {
+	t.Helper()
+	return countBrowserRows(t, s, ctx, `SELECT COUNT(*) FROM browser_sessions WHERE expires_at_unix_ms<=?`, now.UnixMilli())
+}
+
+func browserBindingRowCount(t *testing.T, s *Store, ctx context.Context) int64 {
+	t.Helper()
+	return countBrowserRows(t, s, ctx, `SELECT COUNT(*) FROM browser_upstream_session_bindings`)
+}
+
+func countBrowserRows(t *testing.T, s *Store, ctx context.Context, query string, args ...any) int64 {
+	t.Helper()
+	row, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: query, Args: args, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(row.Rows) != 1 {
+		t.Fatalf("count query rows=%v err=%v", row.Rows, err)
+	}
+	return row.Rows[0][0].(int64)
+}
+
+func TestBoundedSessionExpiryCleanupRollsBackOnLaterFailure(t *testing.T) {
+	for _, path := range []string{"init-interaction", "password-session"} {
+		t.Run(path, func(t *testing.T) {
+			s := testStore(t)
+			ctx := context.Background()
+			now := time.Date(2026, time.October, 9, 12, 0, 0, 0, time.UTC)
+			s.now = func() time.Time { return now }
+			init, err := s.CreateInitSession(ctx, now.Add(time.Hour), "192.0.2.1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			seedExpiredBrowserSessions(t, s, ctx, 40, now, "rollback-"+path)
+			if path == "init-interaction" {
+				_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "expiry-cleanup-reject-interaction", SQL: `CREATE TRIGGER expiry_cleanup_reject_interaction BEFORE INSERT ON browser_authorization_interactions BEGIN SELECT RAISE(ABORT, 'reject later interaction'); END`})
+			} else {
+				_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "expiry-cleanup-reject-login-record", SQL: `CREATE TRIGGER expiry_cleanup_reject_login_record BEFORE UPDATE OF last_login_at_unix_ms ON identity_users BEGIN SELECT RAISE(ABORT, 'reject later login record'); END`})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if path == "init-interaction" {
+				_, _, err = s.CreateInitSessionWithAuthorizationInteraction(ctx, "192.0.2.1", "rollback-expiry-pair", []byte("state"), now.Add(time.Minute))
+			} else {
+				_, err = s.CreatePasswordSession(ctx, "user-1", "pwd", 1, 1, now.Add(time.Hour), "192.0.2.1", init.Token)
+			}
+			if err == nil {
+				t.Fatal("expected later statement failure")
+			}
+			if got := expiredBrowserSessionCount(t, s, ctx, now); got != 40 {
+				t.Errorf("expired sessions after rollback=%d want=40", got)
+			}
+			if got := browserBindingRowCount(t, s, ctx); got != 40 {
+				t.Errorf("expired bindings after rollback=%d want=40", got)
+			}
+			if got := countBrowserRows(t, s, ctx, `SELECT COUNT(*) FROM browser_upstream_session_bindings AS b WHERE NOT EXISTS (SELECT 1 FROM browser_sessions AS s WHERE s.token_digest=b.session_digest)`); got != 0 {
+				t.Errorf("rollback left orphaned upstream bindings=%d", got)
+			}
+			if path == "password-session" {
+				if _, err := s.LoadSessionReadOnly(ctx, init.Token); err != nil {
+					t.Errorf("failed password batch consumed init session: %v", err)
+				}
+				if got := countBrowserRows(t, s, ctx, `SELECT COUNT(*) FROM browser_sessions WHERE subject='user-1' AND revoked_at_unix_ms IS NULL`); got != 0 {
+					t.Errorf("failed password batch left authenticated sessions=%d", got)
+				}
+			}
+		})
+	}
+}
+
 func testStore(t *testing.T) *Store {
 	t.Helper()
 	db, err := rhiza.Open(context.Background(), rhiza.Config{NodeID: "browser-test", DataDir: t.TempDir()})
@@ -934,6 +1084,7 @@ func testStore(t *testing.T) *Store {
 	for _, subject := range []string{"user-1", "user-2", "user-external", "external-user"} {
 		statements = append(statements, rhiza.SQLStatement{SQL: `INSERT INTO identity_users(subject,username,password_phc) VALUES (?,?,?)`, Args: []any{subject, subject, "phc"}})
 	}
+	statements = append(statements, rhiza.SQLStatement{SQL: `INSERT INTO identity_authentication_modes(subject,mode,generation,updated_at_unix_ms) VALUES ('user-1','password',1,0)`})
 	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "browser-test-schema", Statements: statements}); err != nil {
 		t.Fatal(err)
 	}
@@ -952,7 +1103,7 @@ func TestCreatePasswordSessionCombinesWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := time.Now().Add(-time.Hour).UnixMilli()
-	newSession, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", init.Token)
+	newSession, err := s.CreatePasswordSession(ctx, "user-1", "pwd", 1, 1, time.Now().Add(time.Hour), "203.0.113.8", init.Token)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -971,6 +1122,35 @@ func TestCreatePasswordSessionCombinesWrites(t *testing.T) {
 	}
 }
 
+func TestCreatePasswordSessionRejectsStaleAuthenticationGenerations(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change string
+	}{
+		{name: "password reset", change: `UPDATE identity_users SET password_generation=password_generation+1 WHERE subject='user-1'`},
+		{name: "password mode changed", change: `UPDATE identity_authentication_modes SET mode='passkey',generation=generation+1 WHERE subject='user-1'`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testStore(t)
+			ctx := context.Background()
+			init, err := s.CreateInitSession(ctx, time.Now().Add(time.Hour), "203.0.113.8")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "password-generation-change", SQL: tc.change}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", 1, 1, time.Now().Add(time.Hour), "203.0.113.8", init.Token); err == nil {
+				t.Fatal("stale authentication proof created a password session")
+			}
+			assertNoPasswordReplacement(t, s, ctx, "user-1")
+			if _, err := s.LoadSessionReadOnly(ctx, init.Token); err != nil {
+				t.Fatalf("failed session creation consumed the init session: %v", err)
+			}
+		})
+	}
+}
+
 func TestCreatePasswordSessionRejectsBadOldInit(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
@@ -981,7 +1161,7 @@ func TestCreatePasswordSessionRejectsBadOldInit(t *testing.T) {
 	if err := s.RevokeSession(ctx, init.Token); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", init.Token); err == nil {
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", 1, 1, time.Now().Add(time.Hour), "203.0.113.8", init.Token); err == nil {
 		t.Fatal("expected rejection for revoked old init")
 	}
 	assertNoPasswordReplacement(t, s, ctx, "user-1")
@@ -994,7 +1174,7 @@ func TestCreatePasswordSessionRejectsPeerMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.9", init.Token); err == nil {
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", 1, 1, time.Now().Add(time.Hour), "203.0.113.9", init.Token); err == nil {
 		t.Fatal("expected rejection for peer mismatch")
 	}
 	assertNoPasswordReplacement(t, s, ctx, "user-1")
@@ -1010,7 +1190,7 @@ func TestCreatePasswordSessionRejectsExpiredUser(t *testing.T) {
 	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "password-expired-user", SQL: `UPDATE identity_users SET user_expires_at_unix_ms=? WHERE subject=?`, Args: []any{time.Now().Add(-time.Hour).UnixMilli(), "user-1"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", init.Token); err == nil {
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", 1, 1, time.Now().Add(time.Hour), "203.0.113.8", init.Token); err == nil {
 		t.Fatal("expected rejection for expired user")
 	}
 	assertNoPasswordReplacement(t, s, ctx, "user-1")
@@ -1026,7 +1206,7 @@ func TestCreatePasswordSessionRejectsExpiredOldInit(t *testing.T) {
 	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "password-expire-init", SQL: `UPDATE browser_sessions SET expires_at_unix_ms=? WHERE token_digest=?`, Args: []any{time.Now().Add(-time.Hour).UnixMilli(), init.Session.ID}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", init.Token); err == nil {
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", 1, 1, time.Now().Add(time.Hour), "203.0.113.8", init.Token); err == nil {
 		t.Fatal("expected rejection for expired old init")
 	}
 	assertNoPasswordReplacement(t, s, ctx, "user-1")
@@ -1042,7 +1222,7 @@ func TestCreatePasswordSessionRejectsDisabledUser(t *testing.T) {
 	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "password-disable-user", SQL: `UPDATE identity_users SET disabled=1 WHERE subject=?`, Args: []any{"user-1"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", init.Token); err == nil {
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", 1, 1, time.Now().Add(time.Hour), "203.0.113.8", init.Token); err == nil {
 		t.Fatal("expected rejection for disabled user")
 	}
 	assertNoPasswordReplacement(t, s, ctx, "user-1")
@@ -1059,7 +1239,7 @@ func TestCreatePasswordSessionResetsFailedMetadataMonotonic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", init.Token); err != nil {
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", 1, 1, time.Now().Add(time.Hour), "203.0.113.8", init.Token); err != nil {
 		t.Fatal(err)
 	}
 	row, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT last_login_at_unix_ms, failed_login_attempts, last_failed_login_at_unix_ms FROM identity_users WHERE subject=?`, Args: []any{"user-1"}, Consistency: rhiza.ConsistencyLinearizable})
@@ -1095,7 +1275,7 @@ func assertNoPasswordReplacement(t *testing.T, s *Store, ctx context.Context, su
 func TestCreatePasswordSessionRejectsMalformedToken(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
-	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", "invalid-token"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", 1, 1, time.Now().Add(time.Hour), "203.0.113.8", "invalid-token"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for malformed old token, got %v", err)
 	}
 	assertNoPasswordReplacement(t, s, ctx, "user-1")
@@ -1111,7 +1291,7 @@ func TestCreatePasswordSessionRollsBackOnGuardFailure(t *testing.T) {
 	if _, err := CanonicalTokenDigest(unused); err != nil {
 		t.Fatalf("fixture token must be canonical: %v", err)
 	}
-	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "203.0.113.8", unused); err == nil {
+	if _, err := s.CreatePasswordSession(ctx, "user-1", "pwd", 1, 1, time.Now().Add(time.Hour), "203.0.113.8", unused); err == nil {
 		t.Fatal("expected rejection for unstored canonical token")
 	}
 	assertNoPasswordReplacement(t, s, ctx, "user-1")
