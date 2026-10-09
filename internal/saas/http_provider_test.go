@@ -7,10 +7,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
@@ -310,9 +312,15 @@ func TestSaaSPoolProviderReadErrorFailsClosed(t *testing.T) {
 
 // Reproduce the original transport policy only for the measured baseline:
 // one DNS lookup, first approved address, a fresh non-keepalive transport.
-type noReuseBaseline struct{ owner *restrictedTransport }
+type noReuseBaseline struct {
+	owner   *restrictedTransport
+	binding providerHTTPBinding
+}
 
 func (b noReuseBaseline) RoundTrip(req *http.Request) (*http.Response, error) {
+	if err := b.binding.check(req.Context()); err != nil {
+		return nil, errSaaSHTTP
+	}
 	origin, err := canonicalOrigin(req)
 	if err != nil {
 		return nil, err
@@ -329,23 +337,65 @@ func (b noReuseBaseline) RoundTrip(req *http.Request) (*http.Response, error) {
 	return tr.RoundTrip(clone)
 }
 
+func TestSaaSNoReuseBaselineChecksProviderBinding(t *testing.T) {
+	store, in, counts, _ := registeredPoolFixture(t)
+	o, err := store.LoadOAuth2(context.Background(), in.ID, credentialAuthority())
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := o.client.Transport.(*providerHTTPTransport).binding
+	binding.revision++
+	req, err := http.NewRequest(http.MethodGet, "https://example.com/identity", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := (noReuseBaseline{owner: &store.http, binding: binding}).RoundTrip(req)
+	if err == nil {
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		t.Fatal("stale provider binding was accepted")
+	}
+	if counts.dns.Load() != 0 || counts.tcp.Load() != 0 {
+		t.Fatalf("stale provider binding reached network hooks: DNS=%d TCP=%d", counts.dns.Load(), counts.tcp.Load())
+	}
+}
+
 func BenchmarkSaaSRegisteredRefreshPool(b *testing.B) {
 	for _, reuse := range []bool{false, true} {
 		b.Run(map[bool]string{false: "before-no-reuse", true: "pooled"}[reuse], func(b *testing.B) {
 			store, in, counts, server := registeredPoolFixture(b)
+			var loadTime, refreshTime, dnsTime, dialTime atomic.Int64
+			resolver := store.http.resolver
+			dial := store.http.dial
+			store.http.resolver = poolResolverFunc(func(ctx context.Context, network, host string) ([]netip.Addr, error) {
+				started := time.Now()
+				defer func() { dnsTime.Add(time.Since(started).Nanoseconds()) }()
+				return resolver.LookupNetIP(ctx, network, host)
+			})
+			store.http.dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+				started := time.Now()
+				defer func() { dialTime.Add(time.Since(started).Nanoseconds()) }()
+				return dial(ctx, network, address)
+			}
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
+				started := time.Now()
 				o, err := store.LoadOAuth2(context.Background(), in.ID, credentialAuthority())
+				loadTime.Add(time.Since(started).Nanoseconds())
 				if err != nil {
 					b.Fatal(err)
 				}
 				if !reuse {
-					o.client.Transport = noReuseBaseline{owner: &store.http}
+					registered := o.client.Transport.(*providerHTTPTransport)
+					o.client.Transport = noReuseBaseline{owner: &store.http, binding: registered.binding}
 				}
+				started = time.Now()
 				if _, err = o.Refresh(context.Background(), "refresh"); err != nil {
 					b.Fatal(err)
 				}
+				refreshTime.Add(time.Since(started).Nanoseconds())
 			}
 			b.StopTimer()
 			store.CloseConnections()
@@ -354,6 +404,10 @@ func BenchmarkSaaSRegisteredRefreshPool(b *testing.B) {
 			b.ReportMetric(float64(counts.dns.Load())/float64(b.N), "DNS/op")
 			b.ReportMetric(float64(counts.tcp.Load())/float64(b.N), "TCP/op")
 			b.ReportMetric(float64(counts.tls.Load())/float64(b.N), "TLS/op")
+			b.ReportMetric(float64(loadTime.Load())/float64(b.N), "load-ns/op")
+			b.ReportMetric(float64(refreshTime.Load())/float64(b.N), "refresh-ns/op")
+			b.ReportMetric(float64(dnsTime.Load())/float64(b.N), "dns-ns/op")
+			b.ReportMetric(float64(dialTime.Load())/float64(b.N), "tcp-dial-ns/op")
 		})
 	}
 }
@@ -374,7 +428,8 @@ func BenchmarkSaaSRegisteredRefreshPoolConcurrent(b *testing.B) {
 							return
 						}
 						if !reuse {
-							o.client.Transport = noReuseBaseline{owner: &store.http}
+							registered := o.client.Transport.(*providerHTTPTransport)
+							o.client.Transport = noReuseBaseline{owner: &store.http, binding: registered.binding}
 						}
 						if _, err = o.Refresh(context.Background(), "refresh"); err != nil {
 							b.Error(err)

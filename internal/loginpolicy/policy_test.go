@@ -593,7 +593,70 @@ func TestParseTrustedProxyCIDRs(t *testing.T) {
 	}
 }
 
-func testDB(t *testing.T) *rhiza.DB {
+func BenchmarkSuccessSharedTimingRow(b *testing.B) {
+	for _, parallel := range []bool{false, true} {
+		name := "serial"
+		if parallel {
+			name = "parallel"
+		}
+		b.Run(name, func(b *testing.B) {
+			db := testDB(b)
+			store := NewStore(db)
+			ctx := context.Background()
+			const ip = "192.0.2.77"
+			const elapsed = 500 * time.Millisecond
+			if _, err := db.Execute(ctx, rhiza.ExecuteRequest{
+				RequestID: "benchmark-seed-login-timing",
+				SQL:       `INSERT INTO login_timing (id,success_mean_unix_ms) VALUES (1, ?)`,
+				Args:      []any{elapsed.Milliseconds()},
+			}); err != nil {
+				b.Fatal(err)
+			}
+
+			b.ReportAllocs()
+			var errCh chan error
+			if parallel {
+				errCh = make(chan error, 1)
+			}
+			b.ResetTimer()
+			if parallel {
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						if err := store.Success(ctx, ip, elapsed); err != nil {
+							select {
+							case errCh <- err:
+							default:
+							}
+							return
+						}
+					}
+				})
+				select {
+				case err := <-errCh:
+					b.Fatal(err)
+				default:
+				}
+			} else {
+				for i := 0; i < b.N; i++ {
+					if err := store.Success(ctx, ip, elapsed); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+			b.StopTimer()
+
+			status, err := store.Check(ctx, ip, time.Now())
+			if err != nil {
+				b.Fatal(err)
+			}
+			if status.Mean != elapsed {
+				b.Fatalf("final timing mean=%s want=%s", status.Mean, elapsed)
+			}
+		})
+	}
+}
+
+func testDB(t testing.TB) *rhiza.DB {
 	t.Helper()
 	directory := t.TempDir()
 	if err := copyDirTree(loginpolicyMigratedTemplate(t), directory); err != nil {
@@ -628,7 +691,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func loginpolicyMigratedTemplate(t *testing.T) string {
+func loginpolicyMigratedTemplate(t testing.TB) string {
 	t.Helper()
 	loginpolicyTemplateOnce.Do(func() {
 		directory, err := os.MkdirTemp("", "goauthy-loginpolicy-template-")

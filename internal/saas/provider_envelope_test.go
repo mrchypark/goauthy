@@ -1,6 +1,16 @@
 package saas
 
-import "testing"
+import (
+	"context"
+	"encoding/base64"
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/mrchypark/goauthy/internal/oidc"
+	"github.com/mrchypark/rhiza"
+)
 
 func TestProviderSecretPurposeBindsIDAndGeneration(t *testing.T) {
 	t.Parallel()
@@ -69,4 +79,94 @@ func TestProviderEnvelopeTwoRotationsAndAPIKeyHasNoSecret(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func BenchmarkProviderEnvelopeRewrap32(b *testing.B) {
+	for _, tc := range []struct {
+		name string
+		old  bool
+	}{
+		{name: "active32"},
+		{name: "oldkey32", old: true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				b.StopTimer()
+				ctx, credentials, db, err := providerEnvelopeBenchmarkFixture(b, tc.old)
+				if err != nil {
+					b.Fatal("provider rewrap fixture setup failed")
+				}
+				b.StartTimer()
+				result, err := RewrapProviderEnvelopeBatch(ctx, db, credentials, "")
+				b.StopTimer()
+				if err != nil {
+					b.Fatal("provider rewrap failed")
+				}
+				wantRewrapped := 0
+				if tc.old {
+					wantRewrapped = 32
+				}
+				if result.Rewrapped != wantRewrapped || result.Cursor != "rewrap-31" || result.Done {
+					b.Fatalf("unexpected 32-row batch result: rewrapped=%d cursor=%q done=%v", result.Rewrapped, result.Cursor, result.Done)
+				}
+				if tc.old {
+					family, err := InspectProviderEnvelopeReferences(ctx, db, credentials)
+					if err != nil || family.Total != 32 || family.ByKeyID["key-b"] != 32 {
+						b.Fatal("rewrapped key-reference verification failed")
+					}
+				}
+				// Each old-key row reaches one ExecuteEnvelope call in the
+				// implementation. Rewrapped verifies all 32 CAS updates landed
+				// in this isolated no-writer fixture; active rows submit none.
+			}
+		})
+	}
+}
+
+func providerEnvelopeBenchmarkFixture(b *testing.B, old bool) (context.Context, *oidc.Keyring, *rhiza.DB, error) {
+	b.Helper()
+	ctx, credentials, db, _ := credentialStoreFixture(b)
+	keys := credentials.keys
+	seedKeys := keys
+	if old {
+		var err error
+		seedKeys, err = providerEnvelopeBenchmarkKeyring(b, "key-a", "key-a", "key-b")
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		keys, err = providerEnvelopeBenchmarkKeyring(b, "key-b", "key-a", "key-b")
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	store, err := NewProviderStore(db, seedKeys)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for i := 0; i < 32; i++ {
+		input := providerInputForTest("synthetic-provider-secret")
+		input.ID = fmt.Sprintf("rewrap-%02d", i)
+		input.Name = input.ID
+		if _, err := store.Create(ctx, input, credentialAuthority()); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	return ctx, keys, db, nil
+}
+
+func providerEnvelopeBenchmarkKeyring(b *testing.B, active string, ids ...string) (*oidc.Keyring, error) {
+	b.Helper()
+	dir := b.TempDir()
+	for i, id := range ids {
+		key := make([]byte, 32)
+		for j := range key {
+			key[j] = byte(i + 1)
+		}
+		encoded := []byte(base64.RawURLEncoding.EncodeToString(key))
+		if err := os.WriteFile(filepath.Join(dir, id), encoded, 0o600); err != nil {
+			return nil, err
+		}
+	}
+	return oidc.LoadKeyring(dir, active)
 }
