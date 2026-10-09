@@ -332,33 +332,43 @@ func (s *CredentialStore) loadUseGrant(ctx context.Context, o, consumer, id, res
 // AuthorizeUseGrant's guard is required at the subsequent credential read/use.
 // Credential version fences that one use, not the lifetime of stored consent.
 func (s *CredentialStore) AuthorizeUseGrant(ctx context.Context, o, consumer, id, resource, mode string, authority func() (string, []any)) (UseGrant, func() (string, []any), error) {
+	g, guard, _, err := s.authorizeUseGrantWithProof(ctx, o, consumer, id, resource, mode, authority, false)
+	return g, guard, err
+}
+
+func (s *CredentialStore) authorizeUseGrantWithProof(ctx context.Context, o, consumer, id, resource, mode string, authority func() (string, []any), captureAPIKeyProof bool) (UseGrant, func() (string, []any), apiKeyDispatchSnapshot, error) {
 	g, auth, aa, e := s.loadUseGrant(ctx, o, consumer, id, resource, mode, authority)
 	if e != nil {
-		return UseGrant{}, nil, e
+		return UseGrant{}, nil, apiKeyDispatchSnapshot{}, e
 	}
 	policy, pa := s.usePolicy(g, 0)
 	q, e := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT x.token_version,x.credential,d.auth_method,p.connector_json FROM saas_connection_credentials x JOIN auth_collection_definitions d ON d.id=x.collection_id LEFT JOIN saas_providers p ON p.id=x.provider_id WHERE x.connection_id=? AND ` + policy + ` AND (` + auth + `)`, Args: append(append([]any{g.ConnectionID}, pa...), aa...), Consistency: rhiza.ConsistencyLinearizable})
 	if e != nil {
-		return UseGrant{}, nil, e
+		return UseGrant{}, nil, apiKeyDispatchSnapshot{}, e
 	}
 	if len(q.Rows) != 1 || len(q.Rows[0]) != 4 {
-		return UseGrant{}, nil, ErrUseGrantNotFound
+		return UseGrant{}, nil, apiKeyDispatchSnapshot{}, ErrUseGrantNotFound
 	}
 	version, ok := q.Rows[0][0].(int64)
 	if !ok || version < 1 {
-		return UseGrant{}, nil, ErrUseGrantInvalid
+		return UseGrant{}, nil, apiKeyDispatchSnapshot{}, ErrUseGrantInvalid
 	}
 	env, ok := q.Rows[0][1].([]byte)
 	if !ok {
-		return UseGrant{}, nil, ErrUseGrantInvalid
+		return UseGrant{}, nil, apiKeyDispatchSnapshot{}, ErrUseGrantInvalid
 	}
-	v, e := openCredential(s.keys, credentialBinding{Owner: g.Owner, CollectionID: g.CollectionID, ConnectionID: g.ConnectionID, ProviderID: g.ProviderID, Generation: g.Generation, TokenVersion: version}, env)
+	binding := credentialBinding{Owner: g.Owner, CollectionID: g.CollectionID, ConnectionID: g.ConnectionID, ProviderID: g.ProviderID, Generation: g.Generation, TokenVersion: version}
+	v, e := openCredential(s.keys, binding, env)
 	if e != nil {
-		return UseGrant{}, nil, e
+		return UseGrant{}, nil, apiKeyDispatchSnapshot{}, e
 	}
 	method, _ := q.Rows[0][2].(string)
 	if !validUseCredential(g, v, method, q.Rows[0][3]) {
-		return UseGrant{}, nil, ErrUseGrantNotFound
+		return UseGrant{}, nil, apiKeyDispatchSnapshot{}, ErrUseGrantNotFound
+	}
+	var proof apiKeyDispatchSnapshot
+	if method == "api_key" && captureAPIKeyProof {
+		proof = apiKeyDispatchSnapshot{binding: binding, value: v, envelope: append([]byte(nil), env...)}
 	}
 	guard := func() (string, []any) {
 		auth, aa, e := authorityGuard(authority)
@@ -373,10 +383,10 @@ func (s *CredentialStore) AuthorizeUseGrant(ctx context.Context, o, consumer, id
 	check, ca := guard()
 	q, e = s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT 1 WHERE ` + check, Args: ca, Consistency: rhiza.ConsistencyLinearizable})
 	if e != nil {
-		return UseGrant{}, nil, e
+		return UseGrant{}, nil, apiKeyDispatchSnapshot{}, e
 	}
 	if len(q.Rows) != 1 {
-		return UseGrant{}, nil, ErrUseGrantNotFound
+		return UseGrant{}, nil, apiKeyDispatchSnapshot{}, ErrUseGrantNotFound
 	}
-	return g, guard, nil
+	return g, guard, proof, nil
 }

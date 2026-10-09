@@ -11,9 +11,11 @@ import (
 // one outbound request. Its credential value is cleared before postflight;
 // only the connector digest remains available as non-secret proof metadata.
 type apiKeyDispatchSnapshot struct {
-	binding  credentialBinding
-	value    credential
-	envelope []byte
+	binding         credentialBinding
+	value           credential
+	envelope        []byte
+	connectorHeader string
+	connectorPrefix string
 }
 
 // loadAPIKey returns the current, authenticated API-key binding and its
@@ -91,7 +93,11 @@ func (s *CredentialStore) loadAPIKeyForDispatch(ctx context.Context, owner, coll
 	if info.ID != "" && value.ConnectorDigest != info.Connector.Digest() {
 		return apiKeyDispatchSnapshot{}, ErrCredentialUnauthorized
 	}
-	return apiKeyDispatchSnapshot{binding: b, value: value, envelope: append([]byte(nil), envelope...)}, nil
+	var connectorHeader, connectorPrefix string
+	if info.Connector != nil {
+		connectorHeader, connectorPrefix = info.Connector.header, info.Connector.prefix
+	}
+	return apiKeyDispatchSnapshot{binding: b, value: value, envelope: append([]byte(nil), envelope...), connectorHeader: connectorHeader, connectorPrefix: connectorPrefix}, nil
 }
 
 // loadAPIKeyForDispatchSQL joins the current generation/provider configuration
