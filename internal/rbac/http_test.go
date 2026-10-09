@@ -82,7 +82,10 @@ func TestDecodeRequestStrictlyAcceptsOnlyItsEntityShape(t *testing.T) {
 		{"wrong field", true, `{"group":"team"}`, ""},
 		{"both names", true, `{"role":"viewer","group":"team"}`, ""},
 		{"unknown", true, `{"role":"viewer","actor":"forged"}`, ""},
+		{"wrong name type", true, `{"role":7}`, ""},
+		{"invalid metadata JSON", true, `{"role":"viewer","meta":{"source":}}`, ""},
 		{"duplicate", true, `{"role":"viewer","role":"admin"}`, ""},
+		{"nested invalid JSON", true, `{"role":"viewer","meta":{"nested":{"source":}}}`, ""},
 		{"trailing", true, `{"role":"viewer"}{}`, ""},
 	}
 	for _, test := range tests {
@@ -94,6 +97,18 @@ func TestDecodeRequestStrictlyAcceptsOnlyItsEntityShape(t *testing.T) {
 				t.Fatalf("request=%q got=%+v err=%v", test.body, got, err)
 			}
 		})
+	}
+}
+
+func BenchmarkDecodeRequest(b *testing.B) {
+	const body = `{"role":"viewer","meta":{"source":"synthetic","labels":{"alpha":"one","beta":[1,2,3]}}}`
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		r := httptest.NewRequest(http.MethodPost, "/auth/v1/roles", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		if _, err := decodeRequest(httptest.NewRecorder(), r, true); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

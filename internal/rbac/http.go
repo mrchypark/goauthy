@@ -726,9 +726,6 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, role bool) (entityReq
 	} else {
 		name = *wire.Group
 	}
-	if len(wire.Meta) != 0 && !json.Valid(wire.Meta) {
-		return entityRequest{}, errors.New("invalid metadata")
-	}
 	if bytes.Equal(wire.Meta, []byte("null")) {
 		wire.Meta = nil
 	}
