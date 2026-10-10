@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS build
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -63,7 +63,7 @@ COPY --from=checkpoint-fault-build /goauthy-checkpoint-fault /goauthy-checkpoint
 USER 65532:65532
 ENTRYPOINT ["/goauthy-checkpoint-fault"]
 
-FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS journal-test-build
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS journal-test-build
 ARG TARGETOS
 ARG TARGETARCH
 ENV GOOS=$TARGETOS GOARCH=$TARGETARCH
