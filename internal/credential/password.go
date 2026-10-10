@@ -46,7 +46,7 @@ type Policy struct {
 // DefaultPolicy follows OWASP's Argon2id baseline: 19 MiB, two iterations, one lane.
 // MaxConcurrency is set to 4 to handle burst traffic while limiting memory usage.
 func DefaultPolicy() Policy {
-	return Policy{MemoryKiB: 19 * 1024, Iterations: 2, Parallelism: 1, MaxConcurrency: 4, WaitTimeout: 100 * time.Millisecond}
+	return Policy{MemoryKiB: 19 * 1024, Iterations: 2, Parallelism: 1, MaxConcurrency: 4, WaitTimeout: 250 * time.Millisecond}
 }
 
 // Hasher hashes and verifies credentials using an immutable Policy.

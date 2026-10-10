@@ -109,7 +109,7 @@ func copyDirTree(source, destination string) error {
 }
 
 // testHash routes password hashing through one package-level hasher, because
-// credential.Hash shares a single hasher whose 100ms work limit is exceeded
+// credential.Hash shares a single hasher whose 250ms work limit is exceeded
 // when several parallel tests hash passwords at once.
 var testHasherOnce sync.Once
 var testHasherInstance *credential.Hasher

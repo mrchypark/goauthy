@@ -90,7 +90,7 @@ func TestArgonConcurrencyLimit(t *testing.T) {
 	releaseFourth()
 }
 
-func TestContextWorkLimitFailsFast(t *testing.T) {
+func TestContextWorkLimitWaitsForDefaultDeadline(t *testing.T) {
 	// Default policy now has MaxConcurrency=4, so acquire all 4 slots.
 	releaseFirst := acquireArgon()
 	releaseSecond := acquireArgon()
@@ -111,7 +111,7 @@ func TestContextWorkLimitFailsFast(t *testing.T) {
 }
 
 func TestPolicyValidationAndSnapshot(t *testing.T) {
-	if got := DefaultPolicy(); got != (Policy{MemoryKiB: 19456, Iterations: 2, Parallelism: 1, MaxConcurrency: 4, WaitTimeout: 100 * time.Millisecond}) {
+	if got := DefaultPolicy(); got != (Policy{MemoryKiB: 19456, Iterations: 2, Parallelism: 1, MaxConcurrency: 4, WaitTimeout: 250 * time.Millisecond}) {
 		t.Fatalf("default policy=%+v", got)
 	}
 	for _, policy := range []Policy{

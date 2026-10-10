@@ -30,7 +30,7 @@
 
 **Argon2 해셔 큐잉:**
 - 기본 동시성: 2 → 4 슬롯으로 증가
-- 대기 타임아웃: 100ms (즉시 거부 대신 짧은 대기)
+- 대기 타임아웃: 250ms (즉시 거부 대신 짧은 대기)
 - 컨텍스트 취소 지원
 
 ### 3. 메트릭 확장
@@ -84,10 +84,9 @@ BenchmarkTryAcquireContended-8  2,331,627           465.5 ns/op           142 B/
 - 2개 요청 동시 처리 가능
 - 3번째 요청 즉시 실패
 
-**개선 후 (MaxConcurrency=4, 100ms 대기):**
+**개선 후 (MaxConcurrency=4, 250ms 대기):**
 - 4개 요청 동시 처리 가능
-- 5번째 요청 100ms 대기 후 실패
-- 버스트 트래픽 처리 능력 2배 향상
+- admission 용량이 계속 부족하면 요청은 최대 250ms 기다린 뒤 work-limit 오류를 반환
 
 ## 모니터링
 
@@ -124,7 +123,7 @@ GOAUTHY_ARGON2_MAX_CONCURRENCY=4
 GOAUTHY_ARGON2_MEMORY_BUDGET_KIB=0
 ```
 
-The total slot-plus-memory admission timeout is 100 ms in the runtime policy;
+The total slot-plus-memory admission timeout is 250 ms in the runtime policy;
 there is no wait-time environment variable. Positive memory budgets must be at
 least 131072 KiB. This bounds nominal reservations, not process RSS. See the
 [measurement report](measurements/argon2-109-budget.md) before opting in.
