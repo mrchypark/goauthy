@@ -375,6 +375,25 @@ func summarizeE2ELogin(observations []e2eLoginObservation, cohortStart time.Time
 	return summary
 }
 
+func e2eLoginContractViolations(observations []e2eLoginObservation) []e2eLoginOutcome {
+	violations := make([]e2eLoginOutcome, 0)
+	for _, observation := range observations {
+		switch observation.outcome {
+		case e2eUnexpectedCredentialAccepted,
+			e2eResultRedirectInvalid,
+			e2eRotatedCookieMissing,
+			e2eSessionLookupNotFound,
+			e2eSessionLookupRevoked,
+			e2eSessionLookupExpired,
+			e2eSessionLookupPeerMismatch,
+			e2eSessionLookupOther,
+			e2eSessionIdentityMismatch:
+			violations = append(violations, observation.outcome)
+		}
+	}
+	return violations
+}
+
 func reportE2ELogin(t *testing.T, concurrency int, observations []e2eLoginObservation, makespan time.Duration) {
 	t.Helper()
 	summary := summarizeE2ELogin(observations, time.Time{})
@@ -455,7 +474,32 @@ func TestE2EPostCompletionAccounting(t *testing.T) {
 	}
 }
 
+func TestE2ELoginContractViolations(t *testing.T) {
+	violations := []e2eLoginOutcome{
+		e2eUnexpectedCredentialAccepted,
+		e2eResultRedirectInvalid,
+		e2eRotatedCookieMissing,
+		e2eSessionLookupNotFound,
+		e2eSessionLookupRevoked,
+		e2eSessionLookupExpired,
+		e2eSessionLookupPeerMismatch,
+		e2eSessionLookupOther,
+		e2eSessionIdentityMismatch,
+	}
+	for _, outcome := range violations {
+		if got := e2eLoginContractViolations([]e2eLoginObservation{{outcome: outcome}}); len(got) != 1 || got[0] != outcome {
+			t.Errorf("contract violation %q returned %v", outcome, got)
+		}
+	}
+	for _, outcome := range []e2eLoginOutcome{e2eCredentialRejected, e2ePasswordHTTP503, e2eAuthorizeHTTP503} {
+		if got := e2eLoginContractViolations([]e2eLoginObservation{{outcome: outcome}}); len(got) != 0 {
+			t.Errorf("measured outcome %q was treated as a contract violation: %v", outcome, got)
+		}
+	}
+}
+
 func TestLoginEndToEndDefaultPolicyCost(t *testing.T) {
+	var allObservations []e2eLoginObservation
 	for _, concurrency := range []int{1, e2eLoginConcurrency} {
 		label := fmt.Sprintf("c%d", concurrency)
 		h, cases := defaultKDFLoginFixture(t, label, e2eLoginSamples)
@@ -493,8 +537,12 @@ func TestLoginEndToEndDefaultPolicyCost(t *testing.T) {
 			close(jobs)
 			workers.Wait()
 		}
-		summary := summarizeE2ELogin(observations, cohortStart)
 		verifyE2ELoginSessions(h, cases, observations)
+		summary := summarizeE2ELogin(observations, cohortStart)
 		reportE2ELogin(t, concurrency, observations, summary.responseSpan)
+		allObservations = append(allObservations, observations...)
+	}
+	if violations := e2eLoginContractViolations(allObservations); len(violations) > 0 {
+		t.Errorf("login E2E authentication contract violations: %v", violations)
 	}
 }
