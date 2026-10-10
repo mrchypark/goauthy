@@ -684,7 +684,12 @@ The value must be canonical unsigned decimal within uint32 range. Startup and
 `config check` reject invalid values instead of clamping or falling back.
 
 Admission takes a concurrency slot before a weighted memory reservation, sharing
-one 100 ms wait budget. Waiting for memory holds a slot but does not compute.
+one 250 ms total admission-wait budget for the slot and, when enabled, the
+memory reservation. This is not a KDF execution timeout or an HTTP request
+deadline. Contended requests can remain queued up to 150 ms longer than before,
+which may increase pre-KDF tail latency. The four-slot limit is unchanged, and
+the memory gate remains disabled by default. Waiting for memory holds a slot but
+does not compute.
 Caller cancellation observed before synchronous computation prevents the KDF;
 once computation starts both reservations remain held until it returns. The gate
 does not free Go heap on release and is **not an RSS limit**. It is independent

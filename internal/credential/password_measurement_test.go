@@ -318,7 +318,7 @@ func TestPasswordRealKDFCancellationMeasurement(t *testing.T) {
 	_, _, err = h.VerifyOrDummy(t.Context(), []byte("password"), "")
 	rejectWait := time.Since(begin)
 	if !errors.Is(err, ErrWorkLimit) {
-		t.Fatalf("100ms rejection=%v", err)
+		t.Fatalf("default admission rejection=%v", err)
 	}
 	t.Logf("held after IDKey and cancellation=%d caller-budget return=%s outcome=%v admission rejection=%s", held, cancelWait, callerOutcome, rejectWait)
 	// Release the barrier without closing it twice in deferred cleanup.

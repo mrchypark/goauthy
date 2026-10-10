@@ -141,7 +141,7 @@ type e2eLoginSummary struct {
 func defaultKDFLoginFixture(t *testing.T, label string, count int) (*Handler, []e2eLoginCase) {
 	t.Helper()
 	policy := credential.DefaultPolicy()
-	wantPolicy := credential.Policy{MemoryKiB: 19 * 1024, Iterations: 2, Parallelism: 1, MaxConcurrency: 4, WaitTimeout: 100 * time.Millisecond}
+	wantPolicy := credential.Policy{MemoryKiB: 19 * 1024, Iterations: 2, Parallelism: 1, MaxConcurrency: 4, WaitTimeout: 250 * time.Millisecond}
 	if policy != wantPolicy {
 		t.Fatalf("default credential policy=%+v want=%+v", policy, wantPolicy)
 	}
