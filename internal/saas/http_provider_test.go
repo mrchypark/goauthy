@@ -3,6 +3,7 @@ package saas
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -17,6 +18,105 @@ import (
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
+
+func TestSaaSPoolRoundTripWhileRealGateIsHeld(t *testing.T) {
+	store, in, _, _ := registeredPoolFixture(t)
+	o, err := store.LoadOAuth2(context.Background(), in.ID, credentialAuthority())
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport, ok := o.client.Transport.(*providerHTTPTransport)
+	if !ok {
+		t.Fatalf("transport type=%T", o.client.Transport)
+	}
+	target := "https://example.com/token"
+	probe, err := http.NewRequest(http.MethodPost, target, strings.NewReader("grant_type=refresh_token&refresh_token=synthetic"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin, err := canonicalOrigin(probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, entryCancel := context.WithCancel(context.Background())
+	holder, err := store.http.reserve(httpPoolKey{provider: transport.binding.id, revision: transport.binding.revision, origin: origin}, entryCancel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := holder.entry
+	holder.release()
+	entryCancel()
+
+	for _, callers := range []int{1, 4} {
+		t.Run(fmt.Sprintf("callers_%d", callers), func(t *testing.T) {
+			for sample := 0; sample < 3; sample++ {
+				entry.gate <- struct{}{}
+				started := make(chan struct{}, callers)
+				type result struct {
+					elapsed time.Duration
+					err     error
+				}
+				done := make(chan result, callers)
+				callStarted := time.Now()
+				for i := 0; i < callers; i++ {
+					go func() {
+						req, reqErr := http.NewRequest(http.MethodPost, target, strings.NewReader("grant_type=refresh_token&refresh_token=synthetic"))
+						if reqErr != nil {
+							done <- result{err: reqErr}
+							return
+						}
+						req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+						req.Header.Set("Authorization", "Basic Y2xpZW50OnNlY3JldA==")
+						started <- struct{}{}
+						start := time.Now()
+						resp, callErr := transport.RoundTrip(req)
+						elapsed := time.Since(start)
+						if resp != nil {
+							_, _ = io.Copy(io.Discard, resp.Body)
+							_ = resp.Body.Close()
+						}
+						done <- result{elapsed: elapsed, err: callErr}
+					}()
+				}
+				for i := 0; i < callers; i++ {
+					<-started
+				}
+				// Each real RoundTrip reserves its lease before it can send on this
+				// held production gate. Wait for all leases, then measure the known
+				// gate-unavailable interval without adding a production hook.
+				deadline := time.Now().Add(2 * time.Second)
+				for {
+					store.http.mu.Lock()
+					reserved := len(entry.leases)
+					store.http.mu.Unlock()
+					if reserved == callers {
+						break
+					}
+					if time.Now().After(deadline) {
+						<-entry.gate
+						t.Fatalf("reserved leases=%d want %d", reserved, callers)
+					}
+					time.Sleep(time.Millisecond)
+				}
+				heldAfterReservations := time.Now()
+				time.Sleep(20 * time.Millisecond)
+				gateReleased := time.Now()
+				<-entry.gate
+				var maxCall time.Duration
+				for i := 0; i < callers; i++ {
+					got := <-done
+					if got.err != nil {
+						t.Fatalf("RoundTrip: %v", got.err)
+					}
+					if got.elapsed > maxCall {
+						maxCall = got.elapsed
+					}
+				}
+				t.Logf("callers=%d sample=%d gate_unavailable_after_all_reservations=%s roundtrip_max=%s (includes binding/DNS/dispatch; not isolated gate wait) total_campaign_elapsed=%s", callers, sample+1, gateReleased.Sub(heldAfterReservations), maxCall, time.Since(callStarted))
+			}
+		})
+	}
+}
 
 func registeredPoolFixture(t testing.TB) (*ProviderStore, ProviderInput, *poolCounts, *httptest.Server) {
 	t.Helper()
