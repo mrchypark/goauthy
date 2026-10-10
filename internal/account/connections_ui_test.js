@@ -3,12 +3,13 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 class Element {
-  constructor(id = '') { this.id = id; this.children = []; this.dataset = {}; this.hidden = false; this.disabled = false; this.value = ''; this.checked = false; this._textContent = ''; this.listeners = {}; this.className = ''; this.tagName = ''; }
+  constructor(id = '') { this.id = id; this.children = []; this.dataset = {}; this.hidden = false; this.disabled = false; this.value = ''; this.checked = false; this._textContent = ''; this.listeners = {}; this.className = ''; this.tagName = ''; this.queryCounts = {}; }
   get textContent() { return this._textContent; }
   set textContent(value) { this._textContent = String(value ?? ''); this.children = []; }
   append(...items) { this.children.push(...items); }
   addEventListener(name, fn) { this.listeners[name] = fn; }
   querySelectorAll(selector) {
+    this.queryCounts[selector] = (this.queryCounts[selector] || 0) + 1;
     const all = [];
     const walk = (item) => { (item.children || []).forEach((child) => { if (selector === '[data-connection-field]' && child.dataset.connectionField) all.push(child); if (selector === 'input,select,textarea,button' && ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(child.tagName)) all.push(child); if (selector === 'button' && child.tagName === 'BUTTON') all.push(child); walk(child); }); };
     walk(this); return all;
@@ -48,27 +49,40 @@ function run() {
     await context.accountDashboard.connections.loadDefinitions();
     assert.equal(calls[0].url, '/auth/v1/account/auth-collections');
     const field = (name) => elements['connections-fields'].children.find((item) => item.dataset && item.dataset.connectionField === name);
+    const saveAndAssertSingleFieldScan = async () => {
+      const fields = elements['connections-fields'];
+      const before = fields.queryCounts['[data-connection-field]'] || 0;
+      await context.accountDashboard.connections.saveConnection({ preventDefault() {} });
+      assert.equal((fields.queryCounts['[data-connection-field]'] || 0) - before, 1, 'metadata fields should be queried once per save');
+    };
     field('enabled').checked = false;
     field('count').value = '9007199254740993';
     field('label').value = 'draft';
-    await context.accountDashboard.connections.saveConnection({ preventDefault() {} });
+    const firstRenderedLabel = field('label');
+    const duplicateLabel = new Element('duplicate-label');
+    duplicateLabel.tagName = 'TEXTAREA'; duplicateLabel.dataset.connectionField = 'label'; duplicateLabel.value = 'duplicate';
+    elements['connections-fields'].append(duplicateLabel);
+    await saveAndAssertSingleFieldScan();
     const create = calls.find((item) => item.options.method === 'POST');
     assert.equal(create.options.headers['X-CSRF-Token'], 'csrf-1');
     assert.equal(create.options.body, '{"definition_revision":7,"metadata":{"enabled":false,"count":9007199254740993,"label":"draft"}}');
+    assert.notStrictEqual(field('label'), firstRenderedLabel, 'successful save should render fresh field nodes');
     context.accountDashboard.connections.state.connections = [{ id: 'conn-1', revision: 4, state: 'draft', metadata: { enabled: true, count: 0, label: 'old' } }];
     context.accountDashboard.connections.state.editing = context.accountDashboard.connections.state.connections[0];
     field('enabled').checked = true; field('count').value = '0'; field('label').value = 'edited';
-    await context.accountDashboard.connections.saveConnection({ preventDefault() {} });
+    const missingCount = field('count');
+    elements['connections-fields'].children = elements['connections-fields'].children.filter((item) => item !== missingCount);
+    await saveAndAssertSingleFieldScan();
     const update = calls.find((item) => item.options.method === 'PUT');
     assert.equal(update.options.headers['If-Match'], '"4"');
-    assert.equal(update.options.body, '{"definition_revision":7,"metadata":{"enabled":true,"count":0,"label":"edited"}}');
+    assert.equal(update.options.body, '{"definition_revision":7,"metadata":{"enabled":true,"label":"edited"}}');
     assert.equal(field('label').tagName, 'TEXTAREA');
     context.accountDashboard.connections.state.editing = { id: 'conn-1', revision: 5, metadata: { label: '' } };
     field('count').value = '0'; field('label').value = '';
-    await context.accountDashboard.connections.saveConnection({ preventDefault() {} });
+    await saveAndAssertSingleFieldScan();
     assert.equal(JSON.parse(calls.filter(item => item.options.method === 'PUT').at(-1).options.body).metadata.label, '');
     field('count').value = '0'; field('label').value = ' first\nsecond ';
-    await context.accountDashboard.connections.saveConnection({ preventDefault() {} });
+    await saveAndAssertSingleFieldScan();
     assert.equal(JSON.parse(calls.filter(item => item.options.method === 'POST').at(-1).options.body).metadata.label, ' first\nsecond ');
     context.accountDashboard.connections.state.connections = [{ id: 'conn-1', revision: 4, state: 'draft', metadata: {} }];
     context.confirm = () => true;

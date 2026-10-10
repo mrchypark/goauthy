@@ -44,9 +44,13 @@
   function metadataJSON() {
     const def = definition();
     if (!def) throw new Error(t('Choose a collection first.'));
+    const inputByField = new Map();
+    fields.querySelectorAll('[data-connection-field]').forEach((input) => {
+      if (!inputByField.has(input.dataset.connectionField)) inputByField.set(input.dataset.connectionField, input);
+    });
     const parts = [];
     def.fields.forEach((field) => {
-      const input = [...fields.querySelectorAll('[data-connection-field]')].find((candidate) => candidate.dataset.connectionField === field.name);
+      const input = inputByField.get(field.name);
       if (!input) return;
       if ((field.type !== 'boolean' && input.value === '') || (field.type === 'boolean' && input.tagName === 'SELECT' && input.value === '')) {
         if (field.type === 'string' && (field.required || Object.hasOwn(state.editing?.metadata || {}, field.name))) {

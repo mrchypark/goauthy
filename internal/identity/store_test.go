@@ -593,6 +593,96 @@ func TestAuthenticateUpgradesLegacyCredentialAfterSuccess(t *testing.T) {
 	}
 }
 
+func BenchmarkAuthenticateLegacyRehash(b *testing.B) {
+	ctx := context.Background()
+	password := []byte("correct password")
+	legacyPHC := testPHC(password, 8*1024, 1, 1)
+	policy := credential.DefaultPolicy()
+	currentPHC := testPHC(password, policy.MemoryKiB, policy.Iterations, policy.Parallelism)
+
+	b.Run("legacy-rehash", func(b *testing.B) {
+		store := testStore(b)
+		if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
+			RequestID: "identity-benchmark-import-legacy",
+			SQL:       `INSERT INTO identity_users (subject, username, password_phc) VALUES (?, ?, ?)`,
+			Args:      []any{"subject-benchmark", "benchmark-user", legacyPHC},
+		}); err != nil {
+			b.Fatal(err)
+		}
+		ensureTestPasswordMode(b, store, "subject-benchmark")
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		var got Authentication
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
+				RequestID: "identity-benchmark-reset-legacy-" + strconv.Itoa(i),
+				SQL:       `UPDATE identity_users SET password_phc = ? WHERE subject = ?`,
+				Args:      []any{legacyPHC, "subject-benchmark"},
+			}); err != nil {
+				b.Fatal(err)
+			}
+			b.StartTimer()
+			var err error
+			got, err = store.Authenticate(ctx, "benchmark-user", password)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StopTimer()
+
+		if got.Subject != "subject-benchmark" || got.NeedsRehash || got.PasswordGeneration != 1 || got.AuthenticationGeneration != 1 {
+			b.Fatalf("legacy authentication=%#v", got)
+		}
+		upgradedPHC := passwordPHC(b, store, "benchmark-user")
+		if upgradedPHC == legacyPHC {
+			b.Fatal("successful legacy authentication did not upgrade the stored credential")
+		}
+		if err := store.hasher.ValidateCurrentPHC(upgradedPHC); err != nil {
+			b.Fatalf("upgraded credential is not current: %v", err)
+		}
+		valid, eligible, err := store.hasher.VerifyOrDummy(ctx, password, upgradedPHC)
+		if err != nil || !valid || eligible {
+			b.Fatalf("upgraded credential verification: valid=%t eligible=%t err=%v", valid, eligible, err)
+		}
+	})
+
+	b.Run("current-control", func(b *testing.B) {
+		store := testStore(b)
+		if err := store.hasher.ValidateCurrentPHC(currentPHC); err != nil {
+			b.Fatalf("control credential is not current: %v", err)
+		}
+		if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
+			RequestID: "identity-benchmark-import-current",
+			SQL:       `INSERT INTO identity_users (subject, username, password_phc) VALUES (?, ?, ?)`,
+			Args:      []any{"subject-benchmark", "benchmark-user", currentPHC},
+		}); err != nil {
+			b.Fatal(err)
+		}
+		ensureTestPasswordMode(b, store, "subject-benchmark")
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		var got Authentication
+		var err error
+		for i := 0; i < b.N; i++ {
+			got, err = store.Authenticate(ctx, "benchmark-user", password)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StopTimer()
+
+		if got.Subject != "subject-benchmark" || got.NeedsRehash || got.PasswordGeneration != 1 || got.AuthenticationGeneration != 1 {
+			b.Fatalf("current authentication=%#v", got)
+		}
+		if stored := passwordPHC(b, store, "benchmark-user"); stored != currentPHC {
+			b.Fatal("current credential changed during authentication control")
+		}
+	})
+}
+
 func TestExistingBootstrapSurvivesPolicyRolloutAndUpgradesOnLogin(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -1492,7 +1582,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func identityMigratedTemplate(t *testing.T, nodeID string, migrateFn func(*rhiza.DB) error) string {
+func identityMigratedTemplate(t testing.TB, nodeID string, migrateFn func(*rhiza.DB) error) string {
 	t.Helper()
 	entry := identityTemplates[nodeID]
 	if entry == nil {
@@ -1550,7 +1640,7 @@ func copyDirTree(source, destination string) error {
 	})
 }
 
-func testStore(t *testing.T) *Store {
+func testStore(t testing.TB) *Store {
 	t.Helper()
 	hasher, err := credential.NewHasher(credential.DefaultPolicy())
 	if err != nil {
@@ -1559,7 +1649,7 @@ func testStore(t *testing.T) *Store {
 	return testStoreWithHasher(t, hasher)
 }
 
-func testStoreWithHasher(t *testing.T, hasher *credential.Hasher) *Store {
+func testStoreWithHasher(t testing.TB, hasher *credential.Hasher) *Store {
 	return testStoreWithPolicies(t, hasher, credential.DefaultRules())
 }
 
@@ -1572,7 +1662,7 @@ func testStoreWithRules(t *testing.T, rules credential.Rules) *Store {
 	return testStoreWithPolicies(t, hasher, rules)
 }
 
-func testStoreWithPolicies(t *testing.T, hasher *credential.Hasher, rules credential.Rules) *Store {
+func testStoreWithPolicies(t testing.TB, hasher *credential.Hasher, rules credential.Rules) *Store {
 	t.Helper()
 	directory := t.TempDir()
 	if err := copyDirTree(identityMigratedTemplate(t, "identity-test", func(db *rhiza.DB) error {
@@ -1701,7 +1791,7 @@ func bootstrapPassword(t *testing.T, store *Store, subject, username string, pas
 	}
 }
 
-func ensureTestPasswordMode(t *testing.T, store *Store, subject string) {
+func ensureTestPasswordMode(t testing.TB, store *Store, subject string) {
 	t.Helper()
 	if _, err := storage.Execute(context.Background(), store.db, rhiza.ExecuteRequest{RequestID: "identity-test-mode-" + subject, SQL: `INSERT INTO identity_authentication_modes (subject, mode, generation, updated_at_unix_ms) VALUES (?, 'password', 1, 0)`, Args: []any{subject}}); err != nil {
 		t.Fatal(err)
@@ -1720,7 +1810,7 @@ func beginPasswordReset(t *testing.T, store *Store, subject, token string) Passw
 	return challenge
 }
 
-func passwordPHC(t *testing.T, store *Store, username string) string {
+func passwordPHC(t testing.TB, store *Store, username string) string {
 	t.Helper()
 	result, err := store.db.Query(context.Background(), rhiza.QueryRequest{
 		SQL:         `SELECT password_phc FROM identity_users WHERE username = ?`,
