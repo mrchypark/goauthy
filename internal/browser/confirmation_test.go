@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -167,6 +168,115 @@ func confirmationMatchingCount(t *testing.T, s *Store, query string, args ...any
 		t.Fatalf("count query rows=%#v err=%v", result.Rows, err)
 	}
 	return result.Rows[0][0].(int64)
+}
+
+func TestAuthorizationInteractionCleanupScaling(t *testing.T) {
+	const liveRows = 2048
+	const samples = 5
+	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	for _, candidates := range []int{0, 32, 256, 2048} {
+		t.Run(fmt.Sprintf("expired_%d", candidates), func(t *testing.T) {
+			s := testStore(t)
+			s.now = func() time.Time { return now }
+			session, err := s.CreateInitSession(t.Context(), now.Add(time.Hour), "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			seedInteractionScaleRows(t, s, now, "initial", liveRows, candidates)
+			totalWant := int64(liveRows + candidates)
+			liveWant := int64(liveRows)
+			if got := confirmationMatchingCount(t, s, `SELECT COUNT(*) FROM browser_authorization_interactions`); got != totalWant {
+				t.Fatalf("initial total rows=%d want %d", got, totalWant)
+			}
+			if got := confirmationMatchingCount(t, s, `SELECT COUNT(*) FROM browser_authorization_interactions WHERE expires_at_unix_ms>?`, now.UnixMilli()); got != liveWant {
+				t.Fatalf("initial live rows=%d want %d", got, liveWant)
+			}
+			var elapsed []time.Duration
+			for sample := 0; sample < samples; sample++ {
+				before := confirmationMatchingCount(t, s, `SELECT COUNT(*) FROM browser_authorization_interactions WHERE expires_at_unix_ms<=?`, now.UnixMilli())
+				if before != int64(candidates) {
+					t.Fatalf("sample %d expired candidates=%d want %d", sample+1, before, candidates)
+				}
+				started := time.Now()
+				issued, err := s.CreateAuthorizationInteraction(t.Context(), session.Token, fmt.Sprintf("interaction-scan-%d-%d", candidates, sample), []byte("synthetic"), now.Add(time.Minute))
+				d := time.Since(started)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if issued.Token == "" {
+					t.Fatal("interaction token is empty")
+				}
+				elapsed = append(elapsed, d)
+				issuedDigest, err := tokenDigest(issued.Token)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := storage.Execute(t.Context(), s.db, rhiza.ExecuteRequest{
+					RequestID: fmt.Sprintf("interaction-scan-remove-insert-%d-%d", candidates, sample),
+					SQL:       `DELETE FROM browser_authorization_interactions WHERE token_digest=?`,
+					Args:      []any{issuedDigest},
+				}); err != nil {
+					t.Fatal(err)
+				}
+				after := confirmationMatchingCount(t, s, `SELECT COUNT(*) FROM browser_authorization_interactions WHERE expires_at_unix_ms<=?`, now.UnixMilli())
+				changed := before - after
+				wantChanged := candidates
+				if wantChanged > expiredInteractionCleanupBatchSize {
+					wantChanged = expiredInteractionCleanupBatchSize
+				}
+				if changed != int64(wantChanged) {
+					t.Fatalf("sample %d changed expired rows=%d want %d", sample+1, changed, wantChanged)
+				}
+				if got := confirmationMatchingCount(t, s, `SELECT COUNT(*) FROM browser_authorization_interactions WHERE expires_at_unix_ms>?`, now.UnixMilli()); got != liveWant {
+					t.Fatalf("sample %d live rows=%d want %d", sample+1, got, liveWant)
+				}
+				if changed > 0 {
+					seedInteractionScaleRows(t, s, now, fmt.Sprintf("refill-%d-%d", candidates, sample), 0, int(changed))
+				}
+				if got := confirmationMatchingCount(t, s, `SELECT COUNT(*) FROM browser_authorization_interactions`); got != totalWant {
+					t.Fatalf("sample %d total rows=%d want %d", sample+1, got, totalWant)
+				}
+			}
+			sort.Slice(elapsed, func(i, j int) bool { return elapsed[i] < elapsed[j] })
+			t.Logf("expired_candidates=%d live_rows=%d total_rows=%d changed_per_sample=%d samples=%v median=%s (candidate-count scaling only; physical rows visited unavailable)", candidates, liveRows, totalWant, min(candidates, expiredInteractionCleanupBatchSize), elapsed, elapsed[len(elapsed)/2])
+		})
+	}
+}
+
+func seedInteractionScaleRows(t *testing.T, s *Store, now time.Time, label string, live, expired int) {
+	t.Helper()
+	const batchSize = 32
+	statements := make([]rhiza.SQLStatement, 0, batchSize)
+	batch := 0
+	flush := func() {
+		if len(statements) == 0 {
+			return
+		}
+		if _, err := storage.Execute(t.Context(), s.db, rhiza.ExecuteRequest{
+			RequestID: fmt.Sprintf("interaction-scale-seed-%s-%d", label, batch), Statements: statements,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		batch++
+		statements = make([]rhiza.SQLStatement, 0, batchSize)
+	}
+	add := func(kind string, i int, expiresAt time.Time) {
+		id := fmt.Sprintf("%s-%s-%05d", label, kind, i)
+		statements = append(statements, rhiza.SQLStatement{
+			SQL:  `INSERT INTO browser_authorization_interactions(token_digest,request_id,session_digest,payload,created_at_unix_ms,expires_at_unix_ms) VALUES(?,?,?,'eA',?,?)`,
+			Args: []any{id, "request-" + id, "synthetic-session", now.UnixMilli(), expiresAt.UnixMilli()},
+		})
+		if len(statements) == batchSize {
+			flush()
+		}
+	}
+	for i := 0; i < live; i++ {
+		add("live", i, now.Add(time.Hour))
+	}
+	for i := 0; i < expired; i++ {
+		add("expired", i, now)
+	}
+	flush()
 }
 
 func TestConfirmationAuthorityLossRollsBackCleanup(t *testing.T) {

@@ -23,11 +23,17 @@ type sessionCostProbeKey struct{}
 // SessionCostProbe is exposed only by the confirmationproof overlay so a
 // cross-package handler test can count the actual browser-store requests.
 type SessionCostProbe struct {
-	sessionReads        int
-	touchSubmits        int
-	sessionReadFailures int
-	failNextSessionRead bool
-	beforeInteraction   func()
+	sessionReads           int
+	touchSubmits           int
+	touchApplied           int
+	touchZeroRows          int
+	touchRereads           int
+	sessionReadFailures    int
+	failNextSessionRead    bool
+	awaitingTouchReread    bool
+	afterNextSessionRead   func()
+	sessionReadBarrierUsed bool
+	beforeInteraction      func()
 }
 
 func WithSessionCostProbe(ctx context.Context, probe *SessionCostProbe) context.Context {
@@ -51,6 +57,10 @@ func (p *SessionCostProbe) SessionReadFailures() int {
 
 func (p *SessionCostProbe) BeforeNextInteractionInsert(fn func()) {
 	p.beforeInteraction = fn
+}
+
+func (p *SessionCostProbe) AfterNextSessionRead(fn func()) {
+	p.afterNextSessionRead = fn
 }
 
 func SetSessionCostClock(store *Store, now func() time.Time) {
@@ -100,8 +110,10 @@ func isConfirmationPair(request rhiza.ExecuteRequest) bool {
 
 func confirmationExecute(ctx context.Context, db *rhiza.DB, request rhiza.ExecuteRequest) (rhiza.ExecuteResponse, error) {
 	p, _ := ctx.Value(confirmationKey{}).(*confirmationProbe)
-	if cost, _ := ctx.Value(sessionCostProbeKey{}).(*SessionCostProbe); cost != nil {
-		if strings.HasPrefix(strings.TrimSpace(request.SQL), "UPDATE browser_sessions SET last_seen_at_unix_ms = ?") {
+	cost, _ := ctx.Value(sessionCostProbeKey{}).(*SessionCostProbe)
+	isTouch := strings.HasPrefix(strings.TrimSpace(request.SQL), "UPDATE browser_sessions SET last_seen_at_unix_ms = ?")
+	if cost != nil {
+		if isTouch {
 			cost.touchSubmits++
 		}
 		if cost.beforeInteraction != nil && hasAuthorizationInteractionInsert(request) {
@@ -131,6 +143,15 @@ func confirmationExecute(ctx context.Context, db *rhiza.DB, request rhiza.Execut
 		}
 	}
 	response, err := storage.Execute(ctx, db, request)
+	if cost != nil && isTouch && err == nil {
+		switch response.MutationReceipt.RowsAffected {
+		case 0:
+			cost.touchZeroRows++
+			cost.awaitingTouchReread = true
+		case 1:
+			cost.touchApplied++
+		}
+	}
 	if p != nil {
 		switch {
 		case pair:
@@ -151,15 +172,26 @@ func confirmationQuery(ctx context.Context, db *rhiza.DB, request rhiza.QueryReq
 	if p, ok := ctx.Value(confirmationKey{}).(*confirmationProbe); ok {
 		p.queries++
 	}
-	if cost, _ := ctx.Value(sessionCostProbeKey{}).(*SessionCostProbe); cost != nil && strings.HasPrefix(strings.TrimSpace(request.SQL), "SELECT subject, auth_method, created_at_unix_ms,") && strings.Contains(request.SQL, "FROM browser_sessions WHERE token_digest = ?") {
+	cost, _ := ctx.Value(sessionCostProbeKey{}).(*SessionCostProbe)
+	isSessionRead := cost != nil && strings.HasPrefix(strings.TrimSpace(request.SQL), "SELECT subject, auth_method, created_at_unix_ms,") && strings.Contains(request.SQL, "FROM browser_sessions WHERE token_digest = ?")
+	if isSessionRead {
 		if cost.failNextSessionRead {
 			cost.failNextSessionRead = false
 			cost.sessionReadFailures++
 			return rhiza.QueryResponse{}, errors.New("injected first browser session lookup failure")
 		}
 		cost.sessionReads++
+		if cost.awaitingTouchReread {
+			cost.touchRereads++
+			cost.awaitingTouchReread = false
+		}
 	}
-	return db.Query(ctx, request)
+	response, err := db.Query(ctx, request)
+	if isSessionRead && err == nil && !cost.sessionReadBarrierUsed && cost.afterNextSessionRead != nil {
+		cost.sessionReadBarrierUsed = true
+		cost.afterNextSessionRead()
+	}
+	return response, err
 }
 
 func hasAuthorizationInteractionInsert(request rhiza.ExecuteRequest) bool {
