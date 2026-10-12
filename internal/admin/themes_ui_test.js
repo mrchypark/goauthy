@@ -6,13 +6,14 @@ const source = fs.readFileSync(__dirname + '/themes.js', 'utf8');
 const clone = value => JSON.parse(JSON.stringify(value));
 const makeTheme = client_id => ({client_id, light: {text: [200, 5, 37], text_high: [200, 15, 25], bg: [34, 25, 97], bg_high: [34, 20, 90], action: [34, 100, 40], accent: [265, 100, 53], error: [15, 100, 37], btn_text: 'white', theme_sun: 'hsla(var(--action) / .7)', theme_moon: 'hsla(var(--accent) / .85)'}, dark: {text: [34, 5, 75], text_high: [34, 7, 90], bg: [200, 40, 6], bg_high: [200, 20, 17], action: [34, 100, 59], accent: [265, 100, 53], error: [15, 100, 37], btn_text: 'hsl(var(--bg))', theme_sun: 'hsla(var(--action) / .7)', theme_moon: 'hsla(var(--accent) / .85)'}, border_radius: '5px'});
 
-function harness(messages = {}) {
+function harness(messages = {}, language = 'ko') {
   const nodes = new Map(), calls = [], vars = new Map(), removedVars = [], sampleVars = new Map(), frameBody = {style: {setProperty: (key, value) => vars.set(key, value), removeProperty: key => { removedVars.push(key); vars.delete(key); }}, dataset: {}};
   const sampleFields = {style: {setProperty: (key, value) => sampleVars.set(key, value)}};
   let sampleReady = true;
   const node = id => {
     if (!nodes.has(id)) {
       const el = {id, value: '', textContent: '', className: '', disabled: false, dataset: {}, attrs: {}, naturalWidth: 0, complete: false, style: {setProperty() {}, removeProperty() {}}, setAttribute(key, value) { this.attrs[key] = value; }, querySelectorAll() { return []; }, querySelector(selector) { const field = selector.match(/data-theme-hsl="([^"]+)"/)?.[1]; return field ? outputs.get(field) : null; }, insertAdjacentHTML(position, html) { this.html = html + this.html; }};
+      if (id === 'theme-logo-image') Object.defineProperty(el, 'src', {get() { return this._src; }, set(value) { this._src = value; this.srcWrites = (this.srcWrites || 0) + 1; }});
       Object.defineProperty(el, 'innerHTML', {get() { return el.html || ''; }, set(html) {
         el.html = html;
         if (id !== 'theme-fields') return;
@@ -25,6 +26,7 @@ function harness(messages = {}) {
           if (copy) control.dataset.themeCopy = copy[1];
           if (layout) control.dataset.themeLayout = layout[1];
           const value = (attrs.match(/value="([^"]*)"/) || [])[1]; if (value !== undefined) control.value = value;
+          if (element === 'textarea' && copy) control.value = html.slice(match.index + match[0].length).split('</textarea>')[0];
           if (element !== 'input' && copy) copyFields.push(control);
           if (element !== 'input' && layout) layoutFields.push(control);
           controls.push(control);
@@ -49,18 +51,29 @@ function harness(messages = {}) {
   const copyLanguage = {value: 'en'};
   const modes = ['light', 'dark'].map(value => ({dataset: {themeMode: value}, attrs: {}, disabled: false, setAttribute(key, val) { this.attrs[key] = val; }}));
   const frame = node('theme-preview-frame');
-  const previewNodes = new Map(['theme-sample-fields','theme-sample-title','theme-sample-description','theme-sample-button','theme-logo-image','theme-default-brand','theme-brand-label'].map(id => [id, {id, textContent: '', hidden: false, dataset: {}, style: {setProperty() {}}, set src(value) { this._src = value; }, get src() { return this._src; }}]));
+  const previewLabels = new Map();
+  let frameWrites = 0;
+  Object.defineProperty(frame, 'srcdoc', {get() { return this.htmlDocument; }, set(html) {
+    this.htmlDocument = html;
+    frameWrites++;
+    previewLabels.clear();
+    for (const match of html.matchAll(/data-i18n="([^"]+)"/g)) {
+      const key = match[1];
+      previewLabels.set(key, {textContent: '', getAttribute: () => key});
+    }
+  }});
+  const previewNodes = new Map(['theme-sample-fields','theme-sample-title','theme-sample-description','theme-sample-button','theme-logo-image','theme-default-brand','theme-brand-label'].map(id => [id, {id, textContent: '', hidden: false, dataset: {}, style: {setProperty() {}}, set src(value) { this._src = value; this.srcWrites = (this.srcWrites || 0) + 1; }, get src() { return this._src; }}]));
   const previewPanel = {style: {setProperty(name, value) { this[name] = value; }}}, brand = {style: {setProperty(name, value) { this[name] = value; }}}, topbar = {classList: {toggle(name, value) { this[name] = value; }}};
-  frame.contentDocument = {body: frameBody, getElementById: id => id === 'theme-sample-fields' ? (sampleReady ? sampleFields : null) : previewNodes.get(id) || null, querySelector: selector => selector === '.auth-panel' ? previewPanel : selector === '.auth-topbar .auth-brand' ? brand : topbar};
+  frame.contentDocument = {documentElement: {lang: ''}, body: frameBody, getElementById: id => id === 'theme-sample-fields' ? (sampleReady ? sampleFields : null) : previewNodes.get(id) || null, querySelectorAll: selector => selector === '[data-i18n]' ? [...previewLabels.values()] : [], querySelector: selector => selector === '.auth-panel' ? previewPanel : selector === '.auth-topbar .auth-brand' ? brand : topbar};
   const root = {innerHTML: ''};
   const globalTheme = makeTheme('goauthy');
   let saved = null, failNextPut = false, failNextPost = false, holdNextPut = false, resolvePut, rejectPut, confirmCount = 0;
-  const document = {documentElement: {lang: 'ko'}, getElementById: node, querySelectorAll: selector => selector === '[data-theme-mode]' ? modes : []};
+  const document = {documentElement: {lang: language}, getElementById: node, querySelectorAll: selector => selector === '[data-theme-mode]' ? modes : []};
   const ctx = {
     document, console, root, confirm: () => { confirmCount++; return true; }, encodeURIComponent, Date, FormData: class { append(key, value) { this[key] = value; } },
     esc: value => String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c])),
-    GoAuthyI18n: {t(key, values = {}) { return String(messages[key] || key).replace(/\{(\w+)\}/g, (_, name) => Object.hasOwn(values, name) ? values[name] : `{${name}}`); }},
-    shell(title, subtitle, body) { root.innerHTML = `${title}\n${subtitle}\n${body}`; for (const match of body.matchAll(/id="([^"]+)"/g)) node(match[1]); },
+    GoAuthyI18n: {language, messages, t(key, values = {}) { return String(language === 'ko' ? (messages[key] || key) : key).replace(/\{(\w+)\}/g, (_, name) => Object.hasOwn(values, name) ? values[name] : `{${name}}`); }},
+    shell(title, subtitle, body, toolbar = '') { root.innerHTML = `${toolbar}${title}\n${subtitle}\n${body}`; for (const match of (toolbar + body).matchAll(/id="([^"]+)"/g)) node(match[1]); },
     api: async (path, opts = {}) => {
       calls.push({path, opts});
       if (opts.method === 'POST') {
@@ -80,7 +93,7 @@ function harness(messages = {}) {
     },
   };
   vm.runInNewContext(source, ctx);
-  return {ctx, calls, root, node, colors, cssFields, copyFields, layoutFields, controls, copyLanguage, outputs, modes, frame, vars, removedVars, sampleVars, previewNodes, previewPanel, brand, globalTheme, get saved() { return saved; }, get confirmCount() { return confirmCount; }, setFailPut: () => { failNextPut = true; }, setFailPost: () => { failNextPost = true; }, setSampleReady: ready => { sampleReady = ready; }, holdPut: () => { holdNextPut = true; }, rejectPut: error => rejectPut(error), resolvePut: value => resolvePut(value)};
+  return {ctx, calls, root, node, colors, cssFields, copyFields, layoutFields, controls, copyLanguage, outputs, modes, frame, vars, removedVars, sampleVars, previewNodes, previewLabels, get frameWrites() { return frameWrites; }, previewPanel, brand, globalTheme, get saved() { return saved; }, get confirmCount() { return confirmCount; }, setFailPut: () => { failNextPut = true; }, setFailPost: () => { failNextPost = true; }, setSampleReady: ready => { sampleReady = ready; }, holdPut: () => { holdNextPut = true; }, rejectPut: error => rejectPut(error), resolvePut: value => resolvePut(value)};
 }
 
 (async () => {
@@ -104,7 +117,7 @@ function harness(messages = {}) {
   assert.match(h.frame.srcdoc, /class="auth-panel"/);
   assert.match(h.frame.srcdoc, /class="brand-symbol"/);
   assert.match(h.frame.srcdoc, /id="theme-sample-fields" inert/);
-  assert.match(h.frame.srcdoc, /lang="ko"/);
+  assert.match(h.frame.srcdoc, /lang="en"/);
   assert.match(h.frame.srcdoc, /client&lt;&amp; \/id/);
   assert.doesNotMatch(h.frame.srcdoc, /<script|<form|\saction=|\sstyle=/i);
   assert.match(h.root.innerHTML, /sandbox="allow-same-origin"/);
@@ -299,14 +312,77 @@ function harness(messages = {}) {
   const koreanCommon = harness(koreanMessages);
   koreanCommon.globalTheme.brand_name = 'GoAuthy ID';
   await koreanCommon.ctx.clientTheme('goauthy');
-  assert.equal(koreanCommon.previewNodes.get('theme-sample-title').textContent, '로그인');
+  assert.equal(koreanCommon.previewNodes.get('theme-sample-title').textContent, 'Sign in');
   assert.equal(koreanCommon.previewNodes.get('theme-brand-label').textContent, 'GoAuthy ID');
-  assert.match(koreanCommon.root.innerHTML, /대시보드로 돌아가기/);
+  assert.doesNotMatch(koreanCommon.root.innerHTML, /대시보드로 돌아가기/);
   assert.match(koreanCommon.root.innerHTML, /공통 로고/);
   assert.doesNotMatch(koreanCommon.frame.srcdoc, /rauthy/);
   assert.doesNotMatch(koreanCommon.root.innerHTML, /Back to dashboard|Common logo|Current common logo|Remove this common logo/);
   const koreanClient = harness(koreanMessages);
   await koreanClient.ctx.clientTheme('app-b');
+  assert.equal(koreanClient.previewNodes.get('theme-sample-title').textContent, 'Sign in to app-b');
+  koreanClient.copyLanguage.value = 'ko'; koreanClient.copyLanguage.onchange();
   assert.equal(koreanClient.previewNodes.get('theme-sample-title').textContent, 'app-b 로그인');
+
+  for (const adminLanguage of ['ko', 'en']) {
+    const localized = harness(koreanMessages, adminLanguage);
+    await localized.ctx.clientTheme('goauthy');
+    localized.frame.onload();
+    const adminMarkup = localized.root.innerHTML, callsBefore = localized.calls.length;
+    const sampleText = () => ['title', 'description', 'button'].map(field => localized.previewNodes.get('theme-sample-' + field).textContent);
+    const defaults = {
+      en: ['Sign in', 'Enter your account details to continue.', 'Continue'],
+      ko: ['로그인', koreanMessages['Enter your account details to continue.'], koreanMessages.Continue],
+    };
+    const switchCopy = language => { localized.copyLanguage.value = language; localized.copyLanguage.onchange(); };
+    for (const language of ['en', 'ko', 'en']) {
+      switchCopy(language);
+      assert.deepEqual(sampleText(), defaults[language], `${adminLanguage} admin: ${language} preview defaults`);
+      assert.equal(localized.frame.contentDocument.documentElement.lang, language);
+      assert.match(localized.frame.srcdoc, /lang="en"/);
+      for (const key of ['PREVIEW', 'Email', 'Password', 'Example error message']) {
+        assert.equal(localized.previewLabels.get(key)?.textContent, language === 'ko' ? koreanMessages[key] : key, `${language} static ${key}`);
+      }
+      assert.equal(localized.previewNodes.get('theme-logo-image').alt, language === 'ko' ? koreanMessages['Sign-in preview sample'] : 'Sign-in preview sample');
+    }
+    const loadedImage = localized.node('theme-logo-image');
+    loadedImage.complete = true; loadedImage.naturalWidth = 120; loadedImage.onload();
+    const cachedLogoURL = loadedImage.src, previewLogo = localized.previewNodes.get('theme-logo-image');
+    const editorLogoWrites = loadedImage.srcWrites, previewLogoWrites = previewLogo.srcWrites;
+    const custom = {en: ['English title', 'English description', 'English button'], ko: ['한국어 제목', '한국어 설명', '한국어 버튼']};
+    const editCopy = values => ['title', 'description', 'button'].forEach((field, index) => {
+      const input = localized.copyFields.find(input => input.dataset.themeCopy === field);
+      input.value = values[index]; input.oninput();
+    });
+    editCopy(custom.en);
+    switchCopy('ko');
+    assert.deepEqual(sampleText(), custom.en, 'empty Korean fields preserve the backend English fallback');
+    editCopy(custom.ko);
+    for (const language of ['en', 'ko', 'en']) {
+      switchCopy(language);
+      assert.deepEqual(sampleText(), custom[language], 'unsaved language edits survive switching');
+      assert.deepEqual(['title', 'description', 'button'].map(field => localized.copyFields.find(input => input.dataset.themeCopy === field).value), custom[language]);
+    }
+    assert.equal(localized.calls.length, callsBefore, 'language changes and typing do not request data');
+    assert.equal(localized.frameWrites, 1, 'language changes keep the iframe and its loaded assets');
+    assert.equal(loadedImage.src, cachedLogoURL);
+    assert.equal(previewLogo.src, cachedLogoURL);
+    assert.equal(loadedImage.srcWrites, editorLogoWrites, 'editing does not reassign the editor logo URL');
+    assert.equal(previewLogo.srcWrites, previewLogoWrites, 'editing does not reassign the loaded preview logo URL');
+    assert.equal(previewLogo.hidden, false);
+    assert.equal(localized.ctx.document.documentElement.lang, adminLanguage);
+    assert.equal(localized.ctx.GoAuthyI18n.language, adminLanguage);
+    assert.equal(localized.root.innerHTML, adminMarkup, 'management UI remains in its own language');
+    await localized.node('theme-save').onclick();
+    assert.deepEqual(clone(localized.saved.login.copy), {en: {title: custom.en[0], description: custom.en[1], button: custom.en[2]}, ko: {title: custom.ko[0], description: custom.ko[1], button: custom.ko[2]}});
+    assert.deepEqual(Object.keys(localized.saved.login).sort(), ['card_width', 'copy', 'logo_alignment'], 'editing language does not become a stored default');
+    editCopy(['Discard title', 'Discard description', 'Discard button']);
+    await localized.node('theme-reload').onclick();
+    for (const language of ['en', 'ko']) {
+      switchCopy(language);
+      assert.deepEqual(sampleText(), custom[language], 'reload restores both saved languages');
+      assert.deepEqual(['title', 'description', 'button'].map(field => localized.copyFields.find(input => input.dataset.themeCopy === field).value), custom[language]);
+    }
+  }
   console.log('client theme UI checks passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
