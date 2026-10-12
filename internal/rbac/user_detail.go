@@ -31,12 +31,12 @@ func (s *Store) detailUser(ctx context.Context, actor, target, guard string, arg
 	queryArgs = append(queryArgs, target)
 	if !api {
 		status += `WHEN ?=? OR ` + adminGuard() + ` THEN 200
-		WHEN EXISTS (SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject=? AND (r.name='rauthy_admin' OR substr(r.name,1,13)='rauthy_admin:')) THEN 403
+		WHEN EXISTS (SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject=? AND (r.name='goauthy_admin' OR substr(r.name,1,14)='goauthy_admin:')) THEN 403
 		WHEN NOT EXISTS (
 		 SELECT 1 FROM rbac_user_groups tm JOIN rbac_groups g ON g.id=tm.group_id
 		 JOIN rbac_user_roles am ON am.subject=? JOIN rbac_roles ar ON ar.id=am.role_id
-		 WHERE tm.subject=? AND substr(ar.name,1,13)='rauthy_admin:'
-		 AND (substr(ar.name,14)=g.name OR (substr(ar.name,-1)='*' AND substr(g.name,1,length(ar.name)-14)=substr(ar.name,14,length(ar.name)-14)))
+		 WHERE tm.subject=? AND substr(ar.name,1,14)='goauthy_admin:'
+		 AND (substr(ar.name,15)=g.name OR (substr(ar.name,-1)='*' AND substr(g.name,1,length(ar.name)-15)=substr(ar.name,15,length(ar.name)-15)))
 		) THEN 428 `
 		queryArgs = append(queryArgs, actor, target, actor, target, actor, target)
 	}

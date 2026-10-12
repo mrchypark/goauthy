@@ -184,7 +184,7 @@ func (e *OAuth2TokenExchanger) exchangeCodeExplicit(ctx context.Context, provide
 	defer resp.Body.Close()
 
 	// Accept any 2xx status -- upstream providers may return 201 or other
-	// success codes. Aligns with Rauthy 2xx acceptance.
+	// success codes. Accept any 2xx response.
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, errTokenExchange
 	}

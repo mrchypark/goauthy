@@ -58,7 +58,7 @@ func TestForwardAuthHA(t *testing.T) {
 
 	want := map[string]string{
 		"X-Forwarded-User":                subject,
-		"X-Forwarded-User-Roles":          "forward-auth-admin,rauthy_admin",
+		"X-Forwarded-User-Roles":          "forward-auth-admin,goauthy_admin",
 		"X-Forwarded-User-Groups":         "forward-auth-group",
 		"X-Forwarded-User-Email":          username,
 		"X-Forwarded-User-Email-Verified": "false",

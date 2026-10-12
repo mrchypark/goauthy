@@ -134,7 +134,7 @@ func (s *LockdownStore) IsAdmin(ctx context.Context, subject string) (bool, erro
 		return false, errors.New("invalid input")
 	}
 	result, err := s.db.Query(ctx, rhiza.QueryRequest{
-		SQL:         `SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.subject = ? AND u.disabled = 0 AND r.name = 'rauthy_admin'`,
+		SQL:         `SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.subject = ? AND u.disabled = 0 AND r.name = 'goauthy_admin'`,
 		Args:        []any{subject},
 		Consistency: rhiza.ConsistencyLinearizable,
 	})
@@ -149,7 +149,7 @@ func (s *LockdownStore) IsAdminByUsername(ctx context.Context, username string) 
 		return false, errors.New("invalid input")
 	}
 	result, err := s.db.Query(ctx, rhiza.QueryRequest{
-		SQL:         `SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.username = ? AND u.disabled = 0 AND r.name = 'rauthy_admin'`,
+		SQL:         `SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.username = ? AND u.disabled = 0 AND r.name = 'goauthy_admin'`,
 		Args:        []any{username},
 		Consistency: rhiza.ConsistencyLinearizable,
 	})

@@ -37,7 +37,7 @@ func testFederatedProfileStore(t *testing.T) *Store {
 	storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
 		RequestID: "test-seed-admin-role",
 		Statements: []rhiza.SQLStatement{
-			{SQL: "INSERT OR IGNORE INTO rbac_roles(id,name,created_at_unix_ms,updated_at_unix_ms) VALUES('rauthy-admin-id','rauthy_admin',0,0)"},
+			{SQL: "INSERT OR IGNORE INTO rbac_roles(id,name,created_at_unix_ms,updated_at_unix_ms) VALUES('rauthy-admin-id','goauthy_admin',0,0)"},
 		},
 	})
 	return store
@@ -68,7 +68,7 @@ func seedAdminRole(t *testing.T, store *Store, subject string) {
 	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
 		RequestID: "test-seed-admin-role-for-user",
 		Statements: []rhiza.SQLStatement{
-			{SQL: "INSERT INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) SELECT ?,id,? FROM rbac_roles WHERE name='rauthy_admin'", Args: []any{subject, int64(1_500_000)}},
+			{SQL: "INSERT INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) SELECT ?,id,? FROM rbac_roles WHERE name='goauthy_admin'", Args: []any{subject, int64(1_500_000)}},
 		},
 	}); err != nil {
 		t.Fatalf("seedAdminRole: %v", err)
@@ -175,7 +175,7 @@ func TestFederatedProfileUpdateAdminGrant(t *testing.T) {
 	if !result.AdminChanged {
 		t.Fatalf("expected AdminChanged=true, got result=%#v", result)
 	}
-	assertCount(t, store, "SELECT COUNT(*) FROM rbac_user_roles WHERE subject='"+subject+"' AND role_id IN(SELECT id FROM rbac_roles WHERE name='rauthy_admin')", 1)
+	assertCount(t, store, "SELECT COUNT(*) FROM rbac_user_roles WHERE subject='"+subject+"' AND role_id IN(SELECT id FROM rbac_roles WHERE name='goauthy_admin')", 1)
 }
 
 func TestFederatedProfileUpdateAdminRevoke(t *testing.T) {
@@ -215,7 +215,7 @@ func TestFederatedProfileUpdateAdminRevoke(t *testing.T) {
 	if !result.AdminChanged {
 		t.Fatalf("expected AdminChanged=true, got result=%#v", result)
 	}
-	assertCount(t, store, "SELECT COUNT(*) FROM rbac_user_roles WHERE subject='"+subject+"' AND role_id IN(SELECT id FROM rbac_roles WHERE name='rauthy_admin')", 0)
+	assertCount(t, store, "SELECT COUNT(*) FROM rbac_user_roles WHERE subject='"+subject+"' AND role_id IN(SELECT id FROM rbac_roles WHERE name='goauthy_admin')", 0)
 	_ = peer
 }
 
@@ -236,7 +236,7 @@ func TestFederatedProfileUpdateLastAdminProtection(t *testing.T) {
 	if err != ErrFederatedProfileConflict {
 		t.Fatalf("expected ErrFederatedProfileConflict, got err=%v", err)
 	}
-	assertCount(t, store, "SELECT COUNT(*) FROM rbac_user_roles WHERE subject='"+subject+"' AND role_id IN(SELECT id FROM rbac_roles WHERE name='rauthy_admin')", 1)
+	assertCount(t, store, "SELECT COUNT(*) FROM rbac_user_roles WHERE subject='"+subject+"' AND role_id IN(SELECT id FROM rbac_roles WHERE name='goauthy_admin')", 1)
 }
 
 func TestFederatedProfileUpdateAdminNilNoChange(t *testing.T) {

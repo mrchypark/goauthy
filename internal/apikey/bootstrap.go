@@ -53,7 +53,7 @@ func (s *Store) Bootstrap(ctx context.Context, path string) error {
 // BootstrapWithMasterKeyDir is the encrypted-secret bootstrap entry point.
 // The directory contains the same raw-base64url 32-byte master-key files used
 // by oidc.LoadKeyring. Plain entries remain supported; Generate remains
-// intentionally unsupported because it requires Rauthy's separate generated
+// intentionally unsupported because it requires a separate generated
 // secret container and retrieval lifecycle.
 func (s *Store) BootstrapWithMasterKeyDir(ctx context.Context, path, keyDir string) error {
 	if path == "" {
@@ -542,7 +542,7 @@ func bootstrapStatements(keys []bootstrapKey, created int64) ([]rhiza.SQLStateme
 	statements := make([]rhiza.SQLStatement, 0)
 	minimumRows := 0
 	for _, key := range keys {
-		// Rauthy bootstrap is create-or-update: retain created_at on update,
+		// Bootstrap is create-or-update: retain created_at on update,
 		// while replacing the supplied secret and metadata atomically.
 		statements = append(statements, rhiza.SQLStatement{SQL: `INSERT INTO api_keys(name,secret_digest,created_at_unix_ms,expires_at_unix_ms) VALUES(?,?,?,?) ON CONFLICT(name) DO UPDATE SET secret_digest=excluded.secret_digest,expires_at_unix_ms=excluded.expires_at_unix_ms`, Args: []any{key.Name, digest(string(key.Secret)), created, millis(key.Exp)}})
 		minimumRows++

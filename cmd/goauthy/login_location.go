@@ -70,7 +70,7 @@ func loginLocationObserver(db *rhiza.DB, users *identity.Store, keyring *oidc.Ke
 			var emailTheme *branding.Theme
 			themes, themeErr := branding.NewThemeStore(db)
 			if themeErr == nil {
-				if theme, err := themes.GetFallback(ctx, "rauthy"); err == nil {
+				if theme, err := themes.GetFallback(ctx, branding.GlobalBrandID); err == nil {
 					emailTheme = &theme
 				}
 			}

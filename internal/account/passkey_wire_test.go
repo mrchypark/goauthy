@@ -13,7 +13,7 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-func TestListPasskeysRauthyWireShape(t *testing.T) {
+func TestListPasskeysGoAuthyWireShape(t *testing.T) {
 	t.Parallel()
 	h, db, _, cookie, csrf, _ := testPasskeyAccountHandler(t)
 	assertBody := func(want string) {
@@ -36,7 +36,7 @@ func TestListPasskeysRauthyWireShape(t *testing.T) {
 	assertBody(`[{"name":"primary","registered":1700000000,"last_used":1700000123,"user_verified":true}]`)
 }
 
-func TestPasskeyResponsesRauthyWireShape(t *testing.T) {
+func TestPasskeyResponsesGoAuthyWireShape(t *testing.T) {
 	t.Parallel()
 	items := passkeyResponses([]passkey.Credential{{Name: "primary", Registered: time.Unix(1700000000, 0).UTC(), LastUsed: time.Unix(1700000123, 0).UTC(), UserVerified: true}, {Name: "legacy", Registered: time.Unix(0, 0).UTC(), LastUsed: time.Unix(0, 0).UTC()}})
 	b, err := json.Marshal(items)

@@ -1,7 +1,7 @@
 async function events() {
   const t = globalThis.GoAuthyI18n?.t || ((key, values = {}) => String(key).replace(/\{(\w+)\}/g, (match, name) => Object.hasOwn(values, name) ? String(values[name]) : match));
   const levels = ['info', 'notice', 'warning', 'critical'];
-  const types = ['InvalidLogins', 'IpBlacklisted', 'IpBlacklistRemoved', 'JwksRotated', 'NewUserRegistered', 'NewRauthyAdmin', 'NewRauthyVersion', 'PossibleBruteForce', 'RauthyStarted', 'RauthyHealthy', 'RauthyUnhealthy', 'SecretsMigrated', 'UserEmailChange', 'UserPasswordReset', 'Test', 'BackchannelLogoutFailed', 'ScimTaskFailed', 'ForcedLogout', 'UserLoginRevoke', 'SuspiciousApiScan', 'LoginNewLocation', 'TokenIssued', 'CredentialStuffing', 'EmailSendError'];
+  const types = ['InvalidLogins', 'IpBlacklisted', 'IpBlacklistRemoved', 'JwksRotated', 'NewUserRegistered', 'NewGoAuthyAdmin', 'NewGoAuthyVersion', 'PossibleBruteForce', 'GoAuthyStarted', 'GoAuthyHealthy', 'GoAuthyUnhealthy', 'SecretsMigrated', 'UserEmailChange', 'UserPasswordReset', 'Test', 'BackchannelLogoutFailed', 'ScimTaskFailed', 'ForcedLogout', 'UserLoginRevoke', 'SuspiciousApiScan', 'LoginNewLocation', 'TokenIssued', 'CredentialStuffing', 'EmailSendError'];
   const now = new Date(), from = new Date(now - 864e5);
   const pad = n => String(n).padStart(2, '0');
   const dtLocal = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;

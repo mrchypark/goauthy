@@ -86,7 +86,7 @@ func TestStreamContinuationAdvancesAcrossFilteredRowsAndRetainsWatermark(t *test
 		t.Fatalf("filtered first page=%#v err=%v", page, err)
 	}
 	page, err = store.StreamPageGuarded(ctx, page.Cursor, 100, eventlog.Critical, "1=1")
-	if err != nil || page.Cursor != 101 || page.More || len(page.Events) != 1 || page.Events[0].Type != eventlog.NewRauthyAdmin {
+	if err != nil || page.Cursor != 101 || page.More || len(page.Events) != 1 || page.Events[0].Type != eventlog.NewGoAuthyAdmin {
 		t.Fatalf("critical next=%#v err=%v", page, err)
 	}
 	if _, err = storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "stream-delete-tail", SQL: `DELETE FROM event_log WHERE id=?`, Args: []any{critical.ID}}); err != nil {

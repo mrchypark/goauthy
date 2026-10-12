@@ -48,7 +48,7 @@ func TestAdminUserCreateLifecycle(t *testing.T) {
 	csrf, _ := browsersession.DeriveCSRFToken(sessionCookie.Value)
 	email := "admin-created@goauthy.e2e"
 	expires := int64(4102444800)
-	body, _ := json.Marshal(map[string]any{"email": email, "language": "ko", "roles": []string{"rauthy_admin"}, "given_name": "Created", "family_name": "Admin", "preferred_username": "created-admin", "user_expires": expires, "tz": "Asia/Seoul"})
+	body, _ := json.Marshal(map[string]any{"email": email, "language": "ko", "roles": []string{"goauthy_admin"}, "given_name": "Created", "family_name": "Admin", "preferred_username": "created-admin", "user_expires": expires, "tz": "Asia/Seoul"})
 	var subject string
 	for _, base := range []string{primary} {
 		r := do(t, client, http.MethodPost, base+"/auth/v1/users", bytes.NewReader(body), map[string]string{"Content-Type": "application/json", "Sec-Fetch-Site": "same-origin", "X-CSRF-Token": csrf})
@@ -58,7 +58,7 @@ func TestAdminUserCreateLifecycle(t *testing.T) {
 			t.Fatalf("create status=%d body=%s", r.StatusCode, b)
 		}
 		var u createdUserDetail
-		if json.Unmarshal(b, &u) != nil || u.ID == "" || u.Email != email || u.Language != "ko" || u.AccountType != "new" || u.EmailVerified || !slices.Contains(u.Roles, "rauthy_admin") || u.UserExpires == nil || *u.UserExpires != expires || u.UserValues["tz"] != "Asia/Seoul" {
+		if json.Unmarshal(b, &u) != nil || u.ID == "" || u.Email != email || u.Language != "ko" || u.AccountType != "new" || u.EmailVerified || !slices.Contains(u.Roles, "goauthy_admin") || u.UserExpires == nil || *u.UserExpires != expires || u.UserValues["tz"] != "Asia/Seoul" {
 			t.Fatalf("create response=%s", b)
 		}
 		subject = u.ID
@@ -148,12 +148,12 @@ func assertAdminCreateEvents(t *testing.T, session *http.Client, bases []string,
 		}
 		counts := map[eventlog.Type]int{}
 		for _, event := range events {
-			if event.Text == nil || *event.Text != email || (event.Type != eventlog.NewUserRegistered && event.Type != eventlog.NewRauthyAdmin) {
+			if event.Text == nil || *event.Text != email || (event.Type != eventlog.NewUserRegistered && event.Type != eventlog.NewGoAuthyAdmin) {
 				continue
 			}
 			counts[event.Type]++
 			wantLevel := eventlog.Info
-			if event.Type == eventlog.NewRauthyAdmin {
+			if event.Type == eventlog.NewGoAuthyAdmin {
 				wantLevel = eventlog.Notice
 			}
 			validIP := true
@@ -169,7 +169,7 @@ func assertAdminCreateEvents(t *testing.T, session *http.Client, bases []string,
 			}
 			ids[event.Type] = event.ID
 		}
-		if counts[eventlog.NewUserRegistered] != 1 || counts[eventlog.NewRauthyAdmin] != 1 {
+		if counts[eventlog.NewUserRegistered] != 1 || counts[eventlog.NewGoAuthyAdmin] != 1 {
 			t.Fatalf("lifecycle event counts node=%s: %+v", base, counts)
 		}
 	}
@@ -192,14 +192,14 @@ func assertAdminCreateEventsUnchanged(t *testing.T, session *http.Client, bases 
 		}
 		counts := map[eventlog.Type]int{}
 		for _, event := range events {
-			if event.Text != nil && *event.Text == email && (event.Type == eventlog.NewUserRegistered || event.Type == eventlog.NewRauthyAdmin) {
+			if event.Text != nil && *event.Text == email && (event.Type == eventlog.NewUserRegistered || event.Type == eventlog.NewGoAuthyAdmin) {
 				counts[event.Type]++
 				if baseline[event.Type] != event.ID {
 					t.Fatalf("event changed after duplicate node=%s type=%s", base, event.Type)
 				}
 			}
 		}
-		if counts[eventlog.NewUserRegistered] != 1 || counts[eventlog.NewRauthyAdmin] != 1 {
+		if counts[eventlog.NewUserRegistered] != 1 || counts[eventlog.NewGoAuthyAdmin] != 1 {
 			t.Fatalf("duplicate appended lifecycle event node=%s counts=%+v", base, counts)
 		}
 	}
@@ -261,7 +261,7 @@ func assertDelegatedUserCreation(t *testing.T, admin *http.Client, csrf, primary
 			apiKeyStatus(t, admin, http.MethodDelete, primary+"/auth/v1/"+e.kind+"/"+url.PathEscape(e.id), nil, adminHeaders, http.StatusOK, "delegated entity cleanup")
 		}
 	})
-	for _, entry := range []struct{ kind, name string }{{"roles", "rauthy_admin:" + prefix + "/*"}, {"roles", "rauthy_admin:" + prefix + "-exact"}, {"groups", prefix + "/team"}, {"groups", prefix + "-exact"}, {"groups", prefix + "-outside"}} {
+	for _, entry := range []struct{ kind, name string }{{"roles", "goauthy_admin:" + prefix + "/*"}, {"roles", "goauthy_admin:" + prefix + "-exact"}, {"groups", prefix + "/team"}, {"groups", prefix + "-exact"}, {"groups", prefix + "-outside"}} {
 		e := rbacCreate(t, admin, primary, entry.kind, entry.name, nil, csrf)
 		entities = append(entities, struct{ kind, id string }{entry.kind, e.ID})
 	}
@@ -284,7 +284,7 @@ func assertDelegatedUserCreation(t *testing.T, admin *http.Client, csrf, primary
 	}
 	email := prefix + "@goauthy.e2e"
 	delegateID := create(admin, primary, adminHeaders, email, []string{}, []string{}, http.StatusOK)
-	roles := []string{"rauthy_admin:" + prefix + "/*", "rauthy_admin:" + prefix + "-exact"}
+	roles := []string{"goauthy_admin:" + prefix + "/*", "goauthy_admin:" + prefix + "-exact"}
 	apiKeyStatus(t, admin, http.MethodPut, primary+"/auth/v1/users/"+delegateID, apiKeyJSON(t, map[string]any{"email": email, "given_name": "Delegated", "roles": roles, "groups": []string{}, "enabled": true, "email_verified": true, "password": updateUserPassword}), adminHeaders, http.StatusOK, "delegate initialization")
 	delegate, delegateCSRF := rbacAuthenticatedClient(t, primary, secondary, email, updateUserPassword)
 	headers := rbacMutationHeaders(delegateCSRF)
@@ -292,7 +292,7 @@ func assertDelegatedUserCreation(t *testing.T, admin *http.Client, csrf, primary
 		suffix := prefix + "-" + strconv.Itoa(i) + "@goauthy.e2e"
 		create(delegate, base, headers, "allowed-"+suffix, []string{}, []string{prefix + "/team", prefix + "-exact"}, http.StatusOK)
 		create(delegate, base, headers, "outside-"+suffix, []string{}, []string{prefix + "/team", prefix + "-outside"}, http.StatusForbidden)
-		create(delegate, base, headers, "role-"+suffix, []string{"rauthy_admin"}, []string{prefix + "/team"}, http.StatusForbidden)
+		create(delegate, base, headers, "role-"+suffix, []string{"goauthy_admin"}, []string{prefix + "/team"}, http.StatusForbidden)
 		create(delegate, base, headers, "empty-"+suffix, []string{}, []string{}, http.StatusForbidden)
 	}
 	// Removing wildcard authority must take effect for the existing session.

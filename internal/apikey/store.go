@@ -1,4 +1,4 @@
-// Package apikey implements Rauthy-compatible, narrowly scoped API keys.
+// Package apikey implements narrowly scoped API keys.
 package apikey
 
 import (

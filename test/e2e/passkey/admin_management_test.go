@@ -249,7 +249,7 @@ func validateUserDetail(body []byte, subject string) error {
 		return fmt.Errorf("invalid detail fields")
 	}
 	var roles []string
-	if json.Unmarshal(row["roles"], &roles) != nil || !slices.Contains(roles, "rauthy_admin") {
+	if json.Unmarshal(row["roles"], &roles) != nil || !slices.Contains(roles, "goauthy_admin") {
 		return fmt.Errorf("roles")
 	}
 	if string(row["user_values"]) != "{}" {
@@ -259,7 +259,7 @@ func validateUserDetail(body []byte, subject string) error {
 }
 
 func TestUserDetailWireRejectsMalformed(t *testing.T) {
-	valid := `{"id":"subject","email":"","email_verified":false,"language":"en","enabled":true,"account_type":"password","created_at":1,"last_login":1,"roles":["rauthy_admin"],"user_values":{}}`
+	valid := `{"id":"subject","email":"","email_verified":false,"language":"en","enabled":true,"account_type":"password","created_at":1,"last_login":1,"roles":["goauthy_admin"],"user_values":{}}`
 	if validateUserDetail([]byte(valid), "subject") != nil {
 		t.Fatal("valid detail rejected")
 	}

@@ -121,7 +121,7 @@ func TestUpdateUserHTTPSelfEmailReturnsSnapshotAndNoticesAfterCommit(t *testing.
 		}
 	}
 	w := httptest.NewRecorder()
-	h.UpdateUser(w, userUpdateHTTPReq(cookie, "admin", `{"email":"new-admin@example.test","given_name":"Committed","language":"ko","roles":["rauthy_admin"],"enabled":true,"email_verified":true,"user_values":{"tz":"Asia/Seoul"}}`))
+	h.UpdateUser(w, userUpdateHTTPReq(cookie, "admin", `{"email":"new-admin@example.test","given_name":"Committed","language":"ko","roles":["goauthy_admin"],"enabled":true,"email_verified":true,"user_values":{"tz":"Asia/Seoul"}}`))
 	var user UserResponse
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &user) != nil {
 		t.Fatalf("self status=%d", w.Code)
@@ -147,7 +147,7 @@ func TestUpdateUserHTTPDelegatedLastGroupAndTargetBoundary(t *testing.T) {
 	h, store, _, _, admin := userCreateHTTPFixture(t)
 	ctx := context.Background()
 	insertActive(t, store.db, "delegated")
-	role, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/*", nil)
+	role, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/*", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func TestUpdateUserHTTPInvalidRequestsHaveNoEffects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := `{"email":"new-admin@example.test","given_name":"Admin","roles":["rauthy_admin"],"enabled":true,"email_verified":true}`
+	body := `{"email":"new-admin@example.test","given_name":"Admin","roles":["goauthy_admin"],"enabled":true,"email_verified":true}`
 	wakes := 0
 	h.OnUserUpdated = func(context.Context, identity.UserUpdateResult) { wakes++ }
 	for _, tc := range []struct {
@@ -227,7 +227,7 @@ func TestUpdateUserHTTPUserValuesPolicy(t *testing.T) {
 			h, store, _, _, cookie := userCreateHTTPFixture(t)
 			called := 0
 			h.OnUserUpdated = func(context.Context, identity.UserUpdateResult) { called++ }
-			body := `{"email":"policy-default@example.test","roles":["rauthy_admin"],"enabled":true,"email_verified":true` + given + `}`
+			body := `{"email":"policy-default@example.test","roles":["goauthy_admin"],"enabled":true,"email_verified":true` + given + `}`
 			w := httptest.NewRecorder()
 			h.UpdateUser(w, userUpdateHTTPReq(cookie, "admin", body))
 			if w.Code != http.StatusBadRequest || called != 0 || countRows(t, store, `SELECT COUNT(*) FROM identity_user_profiles WHERE email='policy-default@example.test'`) != 0 {
@@ -243,13 +243,13 @@ func TestUpdateUserHTTPUserValuesPolicy(t *testing.T) {
 		status      int
 		wantName    string
 	}{
-		{"optional omitted", "policy-optional@example.test", identity.UserValuesPolicy{GivenName: "optional"}, `{"email":"policy-optional@example.test","roles":["rauthy_admin"],"enabled":true,"email_verified":true}`, http.StatusOK, ""},
-		{"hidden submitted", "policy-hidden@example.test", identity.UserValuesPolicy{GivenName: "hidden"}, `{"email":"policy-hidden@example.test","given_name":"Hidden","roles":["rauthy_admin"],"enabled":true,"email_verified":true}`, http.StatusOK, "Hidden"},
-		{"required family supplied empty object", "policy-family@example.test", identity.UserValuesPolicy{FamilyName: "required"}, `{"email":"policy-family@example.test","given_name":"Given","roles":["rauthy_admin"],"enabled":true,"email_verified":true,"user_values":{}}`, http.StatusBadRequest, ""},
-		{"required city supplied empty object", "policy-city@example.test", identity.UserValuesPolicy{City: "required"}, `{"email":"policy-city@example.test","given_name":"Given","roles":["rauthy_admin"],"enabled":true,"email_verified":true,"user_values":{}}`, http.StatusBadRequest, ""},
-		{"required city null object", "policy-city-null@example.test", identity.UserValuesPolicy{City: "required"}, `{"email":"policy-city-null@example.test","given_name":"Given","roles":["rauthy_admin"],"enabled":true,"email_verified":true,"user_values":null}`, http.StatusOK, "Given"},
-		{"required family null", "policy-family-null@example.test", identity.UserValuesPolicy{FamilyName: "required"}, `{"email":"policy-family-null@example.test","given_name":"Given","family_name":null,"roles":["rauthy_admin"],"enabled":true,"email_verified":true}`, http.StatusBadRequest, ""},
-		{"required city provided", "policy-city-valid@example.test", identity.UserValuesPolicy{City: "required"}, `{"email":"policy-city-valid@example.test","given_name":"Given","roles":["rauthy_admin"],"enabled":true,"email_verified":true,"user_values":{"city":"Seoul"}}`, http.StatusOK, "Given"},
+		{"optional omitted", "policy-optional@example.test", identity.UserValuesPolicy{GivenName: "optional"}, `{"email":"policy-optional@example.test","roles":["goauthy_admin"],"enabled":true,"email_verified":true}`, http.StatusOK, ""},
+		{"hidden submitted", "policy-hidden@example.test", identity.UserValuesPolicy{GivenName: "hidden"}, `{"email":"policy-hidden@example.test","given_name":"Hidden","roles":["goauthy_admin"],"enabled":true,"email_verified":true}`, http.StatusOK, "Hidden"},
+		{"required family supplied empty object", "policy-family@example.test", identity.UserValuesPolicy{FamilyName: "required"}, `{"email":"policy-family@example.test","given_name":"Given","roles":["goauthy_admin"],"enabled":true,"email_verified":true,"user_values":{}}`, http.StatusBadRequest, ""},
+		{"required city supplied empty object", "policy-city@example.test", identity.UserValuesPolicy{City: "required"}, `{"email":"policy-city@example.test","given_name":"Given","roles":["goauthy_admin"],"enabled":true,"email_verified":true,"user_values":{}}`, http.StatusBadRequest, ""},
+		{"required city null object", "policy-city-null@example.test", identity.UserValuesPolicy{City: "required"}, `{"email":"policy-city-null@example.test","given_name":"Given","roles":["goauthy_admin"],"enabled":true,"email_verified":true,"user_values":null}`, http.StatusOK, "Given"},
+		{"required family null", "policy-family-null@example.test", identity.UserValuesPolicy{FamilyName: "required"}, `{"email":"policy-family-null@example.test","given_name":"Given","family_name":null,"roles":["goauthy_admin"],"enabled":true,"email_verified":true}`, http.StatusBadRequest, ""},
+		{"required city provided", "policy-city-valid@example.test", identity.UserValuesPolicy{City: "required"}, `{"email":"policy-city-valid@example.test","given_name":"Given","roles":["goauthy_admin"],"enabled":true,"email_verified":true,"user_values":{"city":"Seoul"}}`, http.StatusOK, "Given"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, store, _, _, cookie := userCreateHTTPFixture(t)

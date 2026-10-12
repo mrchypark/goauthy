@@ -300,7 +300,7 @@ func run() (err error) {
 	var registrationHandler http.Handler
 	var dynamicClientStore *dcr.Store
 	if registrationToken != "" || dcrAnonymous {
-		dynamicClientStore = dcr.NewStore(db, dcr.Config{AllowRFC8252LoopbackRedirects: loopbackRedirects, ScopePolicy: dynamicClientScopePolicy, ReservedClientIDs: []string{clientID}, Keyring: keyring})
+		dynamicClientStore = dcr.NewStore(db, dcr.Config{AllowRFC8252LoopbackRedirects: loopbackRedirects, ScopePolicy: dynamicClientScopePolicy, ReservedClientIDs: []string{clientID, branding.GlobalBrandID}, Keyring: keyring})
 		registrationHandler, err = dcr.NewHandler(dynamicClientStore, issuer, registrationToken, dcr.HandlerConfig{Anonymous: dcrAnonymous, AnonymousRateLimitWindow: dcrRateLimitWindow, SoftwareStatements: softwareStatementConfig, AllowedResources: allowedResources})
 		if err != nil {
 			return fmt.Errorf("configure DCR handler: %w", err)
@@ -354,7 +354,7 @@ func run() (err error) {
 		return errors.New("GOAUTHY_BOOTSTRAP_USER_ROLES and GOAUTHY_BOOTSTRAP_USER_GROUPS require GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE")
 	}
 	rbacStore := rbac.NewStore(db)
-	managedClients := clients.NewStore(db, keyring, clientID)
+	managedClients := clients.NewStore(db, keyring, clientID, branding.GlobalBrandID)
 	if err := managedClients.EnsureBootstrap(ctx, clientID); err != nil {
 		return fmt.Errorf("reserve bootstrap client: %w", err)
 	}
@@ -809,6 +809,10 @@ func run() (err error) {
 		return fmt.Errorf("configure admin UI: %w", err)
 	}
 	adminUI.SetIssuer(issuer)
+	commonBrand := func(ctx context.Context) (branding.Brand, error) {
+		return themeStore.Brand(ctx, clientLogoStore, branding.GlobalBrandID)
+	}
+	adminUI.SetBrandResolver(commonBrand)
 	adminUI.SetCSRFTokenProvider(adminCSRFTokenProvider(issuer))
 	if emailTemplates, tplErr := recovery.LoadEmailTemplates(os.Getenv("GOAUTHY_EMAIL_TEMPLATES_FILE")); tplErr == nil {
 		adminUI.SetTemplateProvider(&emailTemplateAdapter{templates: emailTemplates})
@@ -967,6 +971,7 @@ func run() (err error) {
 	accountHandler.ConfigurePasskeyAdministrators(apiKeyStore, rbacStore.IsAdmin)
 	accountHandler.ConfigureAdminForceMFA(bootstrapForceMFA)
 	accountHandler.ConfigureSelfDelete(selfDeleteEnabled)
+	accountHandler.SetBrandResolver(commonBrand)
 	deviceStore := device.NewStore(db)
 	if err := rbacHandler.BindDeviceSessions(deviceStore); err != nil {
 		return fmt.Errorf("configure account devices: %w", err)
@@ -1011,7 +1016,7 @@ func run() (err error) {
 	}
 	emailSubjectPrefix, prefixConfigured := os.LookupEnv("GOAUTHY_EMAIL_SUB_PREFIX")
 	if !prefixConfigured {
-		emailSubjectPrefix = "Rauthy IAM"
+		emailSubjectPrefix = "GoAuthy IAM"
 	}
 	if strings.ContainsAny(emailSubjectPrefix, "\r\n") {
 		return errors.New("GOAUTHY_EMAIL_SUB_PREFIX must not contain line breaks")
@@ -1032,17 +1037,17 @@ func run() (err error) {
 		if err != nil {
 			return login.LoginBranding{}, err
 		}
-		var result login.LoginBranding
+		brand, err := themeStore.Brand(ctx, clientLogoStore, id)
+		if err != nil {
+			return login.LoginBranding{}, err
+		}
+		result := login.LoginBranding{Name: brand.Name}
 		if theme.Login != nil {
 			result.English, result.Korean = theme.Login.CopyFor("en"), theme.Login.CopyFor("ko")
 		}
-		asset, err := clientLogoStore.GetFallback(ctx, id)
-		if err != nil && !errors.Is(err, branding.ErrLogoNotFound) {
-			return result, err
-		}
-		if err == nil {
+		if brand.LogoURL != "" {
 			issuerURL, _ := url.Parse(issuer)
-			result.LogoURL = strings.TrimRight(issuerURL.Path, "/") + "/auth/v1/clients/" + url.PathEscape(id) + "/logo?updated=" + strconv.FormatInt(asset.Updated, 10)
+			result.LogoURL = strings.TrimRight(issuerURL.Path, "/") + brand.LogoURL
 		}
 		return result, nil
 	})

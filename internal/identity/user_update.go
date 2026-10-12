@@ -55,7 +55,7 @@ const userUpdateSnapshotSQL = `SELECT json_object(
 	'email',COALESCE(p.email,re.email,''),'recovery',re.email,
 	'profile',json_array(p.email,p.email_verified,p.preferred_username,p.given_name,p.family_name,p.user_values_json),
 	'revision',v.revision,'marker',v.updated_at_unix_ms,
-	'admin',EXISTS(SELECT 1 FROM rbac_user_roles rm JOIN rbac_roles rr ON rr.id=rm.role_id WHERE rm.subject=u.subject AND rr.name='rauthy_admin'))
+	'admin',EXISTS(SELECT 1 FROM rbac_user_roles rm JOIN rbac_roles rr ON rr.id=rm.role_id WHERE rm.subject=u.subject AND rr.name='goauthy_admin'))
 	FROM identity_users u LEFT JOIN identity_user_profiles p ON p.subject=u.subject
 	LEFT JOIN identity_recovery_emails re ON re.subject=u.subject
 	LEFT JOIN identity_authentication_modes m ON m.subject=u.subject
@@ -124,12 +124,12 @@ func (s *Store) UpdateUserWithGuard(ctx context.Context, subject string, input U
 		 AND NOT EXISTS(SELECT 1 FROM identity_recovery_emails WHERE email=? AND subject<>?)`,
 		Args: []any{subject, input.Email, subject, input.Email, subject, input.Email, subject}, WantRows: true, ExpectedReturnedRows: &one,
 	}}
-	if !input.Enabled || !updateContains(input.Roles, "rauthy_admin") || input.UserExpires != nil && *input.UserExpires <= now.UnixMilli() {
+	if !input.Enabled || !updateContains(input.Roles, "goauthy_admin") || input.UserExpires != nil && *input.UserExpires <= now.UnixMilli() {
 		statements = append(statements, rhiza.SQLStatement{
 			SQL: `SELECT subject FROM identity_users WHERE subject=? AND NOT (
-			 disabled=0 AND EXISTS(SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject=? AND r.name='rauthy_admin')
+			 disabled=0 AND EXISTS(SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject=? AND r.name='goauthy_admin')
 			 AND NOT EXISTS(SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id
-			 WHERE u.subject<>? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name='rauthy_admin'))`,
+			 WHERE u.subject<>? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name='goauthy_admin'))`,
 			Args: []any{subject, subject, subject, now.UnixMilli()}, WantRows: true, ExpectedReturnedRows: &one,
 		})
 	}
@@ -235,9 +235,9 @@ func (s *Store) UpdateUserWithGuard(ctx context.Context, subject string, input U
 		}
 		statements = append(statements, event)
 	}
-	newAdmin := old.Admin == 0 && updateContains(input.Roles, "rauthy_admin")
+	newAdmin := old.Admin == 0 && updateContains(input.Roles, "goauthy_admin")
 	if newAdmin {
-		event, err := eventlog.Creation(operation, input.Email, input.SourceIP, true, now).Statement(`EXISTS(SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject=? AND r.name='rauthy_admin')`, subject)
+		event, err := eventlog.Creation(operation, input.Email, input.SourceIP, true, now).Statement(`EXISTS(SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject=? AND r.name='goauthy_admin')`, subject)
 		if err != nil {
 			return UserUpdateResult{}, err
 		}

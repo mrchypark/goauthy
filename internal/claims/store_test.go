@@ -411,7 +411,7 @@ func claimsTestStore(t *testing.T) (context.Context, *Store) {
 	}
 	_, err = storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "claims-store-seed", Statements: []rhiza.SQLStatement{
 		{SQL: `INSERT INTO identity_users (subject,username,password_phc) VALUES ('admin','admin','phc'),('member','member','phc')`},
-		{SQL: `INSERT INTO rbac_roles (id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('admin-role','rauthy_admin',NULL,1,0,0)`},
+		{SQL: `INSERT INTO rbac_roles (id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('admin-role','goauthy_admin',NULL,1,0,0)`},
 		{SQL: `INSERT INTO rbac_user_roles (subject,role_id,granted_at_unix_ms) VALUES ('admin','admin-role',0)`},
 		{SQL: `INSERT INTO rbac_principal_versions (subject,revision,updated_at_unix_ms) VALUES ('admin',1,0),('member',1,0)`},
 	}})

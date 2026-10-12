@@ -65,7 +65,7 @@ assert.match(html, /src="\/auth\/v1\/branding\/locale\.js" defer/);
 assert.match(html, /data-language-select/);
 assert.match(html, /id="admin-menu-toggle"[^>]*aria-controls="admin-navigation"[^>]*aria-expanded="false"[^>]*data-i18n="Menu"/);
 assert.match(html, /<nav id="admin-navigation"/);
-assert.match(html, /<body data-locale-mode="reload">/);
+assert.match(html, /<body\b[^>]* data-locale-mode="reload"/);
 assert.match(html, /href="\/oidc\/logout"/);
 assert.match(adminJS, /document\.documentElement\?\.dataset\?\.basePath/);
 assert.match(adminJS, /GoAuthyI18n\?\.setBusy\?\.\(true\)/);

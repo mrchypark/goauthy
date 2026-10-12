@@ -15,3 +15,8 @@ body{padding:28px 24px;font-size:14px}main{max-width:800px;padding:0;background:
 @media(pointer:coarse){button,.button,input,select,.account-tools .button,.account-tools [data-language-select]{min-height:44px}}
 
 .account-topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}.account-topbar .brand-lockup{margin:0}.account-topbar [data-language-select]{flex:none;width:auto}.page-header h1{margin:0}.account-topbar+.page-header{gap:12px}
+.common-brand{--account-ink:hsl(var(--text-high));--account-muted:hsl(var(--text));--account-paper:hsl(var(--bg));--account-line:hsl(var(--bg-high));color:var(--account-ink);background:var(--account-paper)}
+.common-brand input,.common-brand select,.common-brand textarea{background:hsl(var(--bg-high));color:var(--account-ink)}
+.common-brand button,.common-brand .button{background:hsl(var(--action));border-color:hsl(var(--action));color:var(--btn-text)}
+.common-brand .secondary{background:transparent;color:hsl(var(--action))}
+.common-brand-logo{width:auto;max-width:120px;height:36px;object-fit:contain}

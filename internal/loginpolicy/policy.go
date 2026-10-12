@@ -372,7 +372,7 @@ func applyMean(status Status, meanRow []any) (Status, error) {
 }
 
 // Failure atomically increments the direct-peer failure counter and assigns a
-// Rauthy-compatible block duration at the documented thresholds.
+// Block duration at the documented thresholds.
 func (s *Store) Failure(ctx context.Context, ip string, now time.Time) (Status, error) {
 	if s == nil || s.db == nil || !canonicalIP(ip) {
 		return Status{}, ErrInvalid

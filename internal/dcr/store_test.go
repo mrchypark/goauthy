@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 	"github.com/ory/fosite"
@@ -331,6 +332,17 @@ func TestCreateRejectsReservedClientIDBeforePersistence(t *testing.T) {
 	created, err := store.Create(ctx, validRequest("neighbor-client", TokenEndpointAuthNone))
 	if err != nil || created.ClientID != "neighbor-client" {
 		t.Fatalf("neighbor registration=%#v err=%v", created, err)
+	}
+}
+
+func TestCreateRejectsCanonicalGlobalBrandID(t *testing.T) {
+	t.Parallel()
+	ctx, _, db := testStore(t)
+	store := NewStore(db, Config{ReservedClientIDs: []string{"bootstrap-client", branding.GlobalBrandID}})
+	for _, clientID := range []string{"bootstrap-client", branding.GlobalBrandID} {
+		if _, err := store.Create(ctx, validRequest(clientID, TokenEndpointAuthClientBasic)); !errors.Is(err, ErrReservedClientID) {
+			t.Fatalf("reserved client %q err=%v", clientID, err)
+		}
 	}
 }
 

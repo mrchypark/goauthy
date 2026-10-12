@@ -52,12 +52,12 @@ const (
 	IpBlacklistRemoved      Type = "IpBlacklistRemoved"
 	JwksRotated             Type = "JwksRotated"
 	NewUserRegistered       Type = "NewUserRegistered"
-	NewRauthyAdmin          Type = "NewRauthyAdmin"
-	NewRauthyVersion        Type = "NewRauthyVersion"
+	NewGoAuthyAdmin         Type = "NewGoAuthyAdmin"
+	NewGoAuthyVersion       Type = "NewGoAuthyVersion"
 	PossibleBruteForce      Type = "PossibleBruteForce"
-	RauthyStarted           Type = "RauthyStarted"
-	RauthyHealthy           Type = "RauthyHealthy"
-	RauthyUnhealthy         Type = "RauthyUnhealthy"
+	GoAuthyStarted          Type = "GoAuthyStarted"
+	GoAuthyHealthy          Type = "GoAuthyHealthy"
+	GoAuthyUnhealthy        Type = "GoAuthyUnhealthy"
 	SecretsMigrated         Type = "SecretsMigrated"
 	UserEmailChange         Type = "UserEmailChange"
 	UserPasswordReset       Type = "UserPasswordReset"
@@ -73,7 +73,7 @@ const (
 	EmailSendError          Type = "EmailSendError"
 )
 
-var validTypes = map[Type]bool{InvalidLogins: true, IpBlacklisted: true, IpBlacklistRemoved: true, JwksRotated: true, NewUserRegistered: true, NewRauthyAdmin: true, NewRauthyVersion: true, PossibleBruteForce: true, RauthyStarted: true, RauthyHealthy: true, RauthyUnhealthy: true, SecretsMigrated: true, UserEmailChange: true, UserPasswordReset: true, Test: true, BackchannelLogoutFailed: true, ScimTaskFailed: true, ForcedLogout: true, UserLoginRevoke: true, SuspiciousApiScan: true, LoginNewLocation: true, TokenIssued: true, CredentialStuffing: true, EmailSendError: true}
+var validTypes = map[Type]bool{InvalidLogins: true, IpBlacklisted: true, IpBlacklistRemoved: true, JwksRotated: true, NewUserRegistered: true, NewGoAuthyAdmin: true, NewGoAuthyVersion: true, PossibleBruteForce: true, GoAuthyStarted: true, GoAuthyHealthy: true, GoAuthyUnhealthy: true, SecretsMigrated: true, UserEmailChange: true, UserPasswordReset: true, Test: true, BackchannelLogoutFailed: true, ScimTaskFailed: true, ForcedLogout: true, UserLoginRevoke: true, SuspiciousApiScan: true, LoginNewLocation: true, TokenIssued: true, CredentialStuffing: true, EmailSendError: true}
 
 func (t Type) Valid() bool { return validTypes[t] }
 
@@ -93,7 +93,7 @@ func Creation(requestID, email, ip string, administrator bool, at time.Time) Eve
 	t := NewUserRegistered
 	level := Info
 	if administrator {
-		t, level = NewRauthyAdmin, Notice
+		t, level = NewGoAuthyAdmin, Notice
 	}
 	var ipp *string
 	if ip != "" {
@@ -304,7 +304,7 @@ func (s *Store) ListGuarded(ctx context.Context, q Query, now time.Time, cursor 
 	if s == nil || s.db == nil || ctx == nil || q.Validate() != nil || strings.TrimSpace(condition) == "" || now.IsZero() || limit < 1 || limit > MaxPageSize || cursor != nil && (cursor.Timestamp < 0 || !validID(cursor.ID)) {
 		return nil, nil, false, errors.New("invalid event query")
 	}
-	// Rauthy defaults until to whole Unix seconds before conversion to ms.
+	// Default the query until bound to whole Unix seconds before conversion to ms.
 	untilSeconds := now.Unix()
 	if q.Until != nil {
 		untilSeconds = *q.Until

@@ -88,7 +88,7 @@ func TestThemePutAuthorizedAllowsDynamicClientAndDeniesAfterDeletion(t *testing.
 		t.Fatalf("deleted dynamic client theme put=%v", err)
 	}
 	got, err = store.GetDefault(ctx, clientID)
-	if err != nil || got.ClientID != "rauthy" {
+	if err != nil || got.ClientID != GlobalBrandID {
 		t.Fatalf("deleted dynamic theme after denied put=%#v err=%v", got, err)
 	}
 }
@@ -109,7 +109,7 @@ func TestThemePutAuthorizedRejectsMissingClient(t *testing.T) {
 		t.Fatalf("missing client theme put=%v", err)
 	}
 	got, err := store.GetDefault(ctx, theme.ClientID)
-	if err != nil || got.ClientID != "rauthy" {
+	if err != nil || got.ClientID != GlobalBrandID {
 		t.Fatalf("missing client theme after denied put=%#v err=%v", got, err)
 	}
 }

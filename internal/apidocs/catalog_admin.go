@@ -177,7 +177,7 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 	preferredOp.Description = "Authenticated self-service, Users:update keys, or direct/delegated administrators. Delegated administrators may initialize only an unnamed, non-administrator target within their current group scope. Only full administrators and Users:update keys may force_overwrite. Existing names are immutable by default (400 without force); required and blacklist rules also apply to forced updates. Success is an empty 200 response. Missing legacy email metadata returns 409 rather than fabricating a profile email."
 	updateOp.AddResponse(428, openapi3.NewResponse().WithDescription("Target is outside delegated administrator scope"))
 	updateOp.Description = "Requires Users:update or a direct/delegated browser administrator. An update-only API key receives this mutation's result without Users:read. Delegated changes preserve roles and change only managed groups; removing the last managed group still returns the committed result. Omitted/null names, groups, expiry and profile values clear them; omitted/null language and password preserve them. Preferred username is not accepted. Current password policy, canonical email, display-name syntax and IANA timezones receive additional server validation. Conflict (409) covers email collision, final administrator protection and concurrent authority/state changes. Success includes the transaction's profile even if it revokes the caller's session. With SMTP enabled, email changes notify both addresses after commit; delivery is best effort."
-	updateOp.Description += " Clearing names is subject to deployment required-field policy: given_name is required by default, other ordinary fields optional. Missing/null/empty required names return 400; nested requirements apply only when user_values is present and non-null, matching Rauthy v0.36.2. Hidden fields remain writable with valid syntax. Administrative POST creation is exempt from required-field policy. The static schema permits configurable optional fields; runtime policy can require them."
+	updateOp.Description += " Clearing names is subject to deployment required-field policy: given_name is required by default, other ordinary fields optional. Missing/null/empty required names return 400; nested requirements apply only when user_values is present and non-null. Hidden fields remain writable with valid syntax. Administrative POST creation is exempt from required-field policy. The static schema permits configurable optional fields; runtime policy can require them."
 	entity := obj(map[string]*openapi3.Schema{"id": s, "name": s, "meta": anyJSON}, "id", "name")
 	for _, resource := range []string{"roles", "groups"} {
 		field := strings.TrimSuffix(resource, "s")
@@ -256,8 +256,8 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 	seconds := openapi3.NewInt64Schema().WithMin(1719784800).WithMax(float64(math.MaxInt64 / 1000))
 	types := []interface{}{
 		"InvalidLogins", "IpBlacklisted", "IpBlacklistRemoved", "JwksRotated",
-		"NewUserRegistered", "NewRauthyAdmin", "NewRauthyVersion", "PossibleBruteForce",
-		"RauthyStarted", "RauthyHealthy", "RauthyUnhealthy", "SecretsMigrated",
+		"NewUserRegistered", "NewGoAuthyAdmin", "NewGoAuthyVersion", "PossibleBruteForce",
+		"GoAuthyStarted", "GoAuthyHealthy", "GoAuthyUnhealthy", "SecretsMigrated",
 		"UserEmailChange", "UserPasswordReset", "Test", "BackchannelLogoutFailed",
 		"ScimTaskFailed", "ForcedLogout", "UserLoginRevoke", "SuspiciousApiScan",
 		"LoginNewLocation", "TokenIssued", "CredentialStuffing", "EmailSendError",
@@ -294,7 +294,7 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 	logoutAll := add("DELETE", "/auth/v1/sessions", "Log out all existing sessions", nil, nil, write)
 	logoutAll.Description = "Requires an API key with Sessions:delete or a direct browser administrator with a CSRF token. Delegated administrators are not allowed. Atomically revokes all browser sessions, outstanding authorization codes and issued access/refresh tokens, including sessionless client-credentials tokens, and queues one subject-only back-channel delivery per known user/client login. Browser rows are retained as LoggedOut. Identity/client/API-key credentials and pending device authorizations remain usable; this is not an issuance shutdown. No ForcedLogout event is emitted. Success is an empty 200 response, including when no sessions exist, and does not wait for external delivery. External relying parties must process logout or otherwise validate token revocation. No query parameters or body are accepted."
 	logo := add("GET", "/auth/v1/clients/{id}/logo", "Read public client logo", nil, nil, nil)
-	logo.Description = "Returns the client small raster or SVG logo, falling back to the global rauthy logo. An updated query value enables public cache headers."
+	logo.Description = "Returns the client small raster or SVG logo, falling back to the global GoAuthy logo. An updated query value enables public cache headers."
 	logo.AddParameter(openapi3.NewQueryParameter("updated").WithSchema(openapi3.NewInt64Schema()))
 	logo.Responses.Status(200).Value.Content = openapi3.Content{"image/webp": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema().WithFormat("binary")}}, "image/svg+xml": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema().WithFormat("binary")}}}
 	logoPut := add("PUT", "/auth/v1/clients/{id}/logo", "Replace client logo (Clients:update)", nil, nil, write)
@@ -319,8 +319,9 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 		"btn_text": cssValue, "theme_sun": cssValue, "theme_moon": cssValue,
 	}, "text", "text_high", "bg", "bg_high", "action", "accent", "error", "btn_text", "theme_sun", "theme_moon")
 	theme := obj(map[string]*openapi3.Schema{
-		"client_id": openapi3.NewStringSchema().WithMinLength(2).WithMaxLength(256),
-		"light":     themeCSS, "dark": themeCSS, "border_radius": cssValue,
+		"client_id":  openapi3.NewStringSchema().WithMinLength(2).WithMaxLength(256),
+		"brand_name": openapi3.NewStringSchema().WithMaxLength(120),
+		"light":      themeCSS, "dark": themeCSS, "border_radius": cssValue,
 	}, "client_id", "light", "dark", "border_radius")
 	brandAsset := add("GET", "/auth/v1/branding/{name}", "Read bundled brand assets", nil, nil, nil)
 	brandAsset.Responses.Status(200).Value.Content = openapi3.Content{}
@@ -330,7 +331,7 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 	globalCSS := add("GET", "/auth/v1/theme/global.css", "Read shared theme styles", nil, nil, nil)
 	globalCSS.Responses.Status(200).Value.Content = openapi3.Content{"text/css": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}}
 	themePublic := add("GET", "/auth/v1/theme/{client_id}/{timestamp}", "Read public theme CSS", nil, nil, nil)
-	themePublic.Description = "Returns the requested client theme, then the stored global rauthy theme, then built-in defaults. Timestamp is a signed 64-bit cache-busting value."
+	themePublic.Description = "Returns the requested client theme, then the stored global GoAuthy theme, then built-in defaults. Timestamp is a signed 64-bit cache-busting value."
 	themePublic.Responses.Status(200).Value.Content = openapi3.Content{"text/css": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}}
 	for _, parameter := range themePublic.Parameters {
 		if parameter.Value.Name == "timestamp" {

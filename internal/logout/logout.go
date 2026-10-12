@@ -111,7 +111,7 @@ func validateClients(configured []Client) (map[string]map[string]struct{}, error
 	return clients, nil
 }
 
-// Plan applies Rauthy's logout entry rules without changing state. A valid
+// Plan applies logout entry rules without changing state. A valid
 // hint auto-logs out when no browser session is present or it is bound to that
 // session; a different browser session needs confirmation.
 func (e *Engine) Plan(request Request) (Decision, error) {

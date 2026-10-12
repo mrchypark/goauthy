@@ -45,7 +45,7 @@ type Rules struct {
 	MinEntropyBits int
 }
 
-// DefaultRules matches Rauthy's baseline local-password requirements.
+// DefaultRules defines the baseline local-password requirements.
 func DefaultRules() Rules {
 	return Rules{
 		LengthMin:            14,

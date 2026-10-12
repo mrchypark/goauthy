@@ -456,7 +456,7 @@ func TestExplicitConstructorAllowsNoSecretWhenBasic(t *testing.T) {
 		Protocol:              ProviderProtocol{ClientSecretBasic: boolPtr(true)},
 	}}, map[string]string{}, nil)
 	if err != nil {
-		t.Fatalf("absent secret with basic (Rauthy-aligned): err = %v", err)
+		t.Fatalf("absent secret with basic: err = %v", err)
 	}
 }
 
@@ -548,7 +548,7 @@ func TestExplicitRejectsMissingIDToken(t *testing.T) {
 
 func TestExplicitBasicAuthSendsUsernameColonWithAbsentSecret(t *testing.T) {
 	t.Parallel()
-	// Rauthy-aligned: Basic flag => Authorization header even with absent secret.
+	// Basic flag => Authorization header even with an absent secret.
 	var gotBasic bool
 	var gotUser, gotPass string
 	exchanger, cb := testExchangerWithProtocol(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

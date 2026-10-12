@@ -3,6 +3,8 @@ package login
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/mrchypark/goauthy/internal/branding"
 )
 
 // AccountLoginHandler authenticates a browser for the fixed account dashboard.
@@ -49,7 +51,7 @@ func (h *Handler) accountLoginGet(w http.ResponseWriter, r *http.Request, forceM
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	themeURL, err := h.resolveThemeURL(r.Context(), "rauthy")
+	themeURL, err := h.resolveThemeURL(r.Context(), branding.GlobalBrandID)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return

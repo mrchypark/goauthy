@@ -93,7 +93,7 @@ DNS, TLS and dropped-connection failures plus `429`/`5xx` retry; malformed or
 permanent `4xx` responses are dead-lettered. `identity.DeleteUser`
 atomically snapshots a tombstone, cleans owned identity state, invalidates stale
 user-sync outbox rows, and durably enqueues SCIM delete work. Admin deletion is
-`DELETE /auth/v1/users/{subject}` for a direct `rauthy_admin` browser session
+`DELETE /auth/v1/users/{subject}` for a direct `goauthy_admin` browser session
 with same-origin `X-CSRF-Token`, or a `Users:delete` API key; an empty body and
 `204` success are required, with `404` for missing/inactive subjects and `409`
 for the final active admin. Self deletion is `GET`/`DELETE
@@ -528,8 +528,14 @@ tokens and `attr_include_access` on UserInfo/introspection as the honest
 opaque-token surrogate. Code/refresh persistence repeats the active identity,
 principal revision and claims-catalog revision predicates, preventing stale
 membership or custom-claim snapshots from minting artifacts. Admin reads and
-writes require current browser `rauthy_admin`; bootstrap client scope policy is
+writes require current browser `goauthy_admin`; bootstrap client scope policy is
 an explicit partial route at `GET`/`PUT /auth/v1/clients/{id}/scopes`.
+
+GoAuthy's reserved system role is `goauthy_admin`; delegated user administration
+uses `goauthy_admin:<group>` with the existing exact or trailing-`*` matching.
+Only the configured bootstrap administrator receives the system role automatically.
+Ordinary users receive it only through an explicit administrator assignment.
+
 `claims_at_root` is supported and fails closed on reserved-name collisions.
 Deterministic focused tests cover strict JSON, migration replay, rename/delete
 cascade and revision-race denial without sleep-based assertions. On 2026-09-01,
@@ -574,7 +580,7 @@ its revision-guarded nested/root values only in `client_credentials` access
 JWTs; dynamic clients, UserInfo and introspection remain excluded. Its fresh
 dedicated three-pod E2E passes cross-pod nested/root/clear policy, public-JWKS
 verification and reserved-root collision denial. The existing membership
-PATCH now includes source-tested delegated `rauthy_admin:<group>` exact,
+PATCH now includes source-tested delegated `goauthy_admin:<group>` exact,
 trailing-prefix and all-groups policy with atomic escalation guards; dedicated
 Kind evidence and full static-client/user management remain pending.
 

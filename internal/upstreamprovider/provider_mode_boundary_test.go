@@ -13,7 +13,7 @@ func boundaryFixture(t *testing.T) *mutationFixture {
 	return newMutationFixture(t)
 }
 
-// Fixed 24-char ASCII IDs for each isolated test (rauthy new_store_id format).
+// Fixed 24-char ASCII IDs for each isolated test.
 const (
 	boundaryCreateID    = "AbCdEfGhIjKlMnOpQrStUvWx"
 	boundaryCrossO2OID  = "AbCdEfGhIjKlMnOpQrStUvWx"

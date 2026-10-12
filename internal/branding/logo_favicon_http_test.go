@@ -25,7 +25,7 @@ func TestClientLogoHandlerFaviconReadsSchema94CopyAndHasNoFallback(t *testing.T)
 	seedLogoClient(t, ctx, db, "client-a", false)
 	seedLegacyFavicon(t, ctx, db, "client-a", "image/png", legacy, 100)
 	seedLogo(t, ctx, db, "client-a", "favicon", "image/png", legacy, 100)
-	seedLogo(t, ctx, db, "rauthy", "favicon", "image/webp", []byte("global-favicon"), 101)
+	seedLogo(t, ctx, db, GlobalBrandID, "favicon", "image/webp", []byte("global-favicon"), 101)
 	keys, err := apikey.NewStore(db)
 	if err != nil {
 		t.Fatal(err)

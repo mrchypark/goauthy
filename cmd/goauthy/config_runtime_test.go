@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/credential"
 )
 
@@ -60,6 +61,20 @@ func TestRunConfigCommandRejectsInvalidRuntimeConfig(t *testing.T) {
 		"GOAUTHY_RHIZA_PROFILE": "invalid",
 	}), &out)
 	if err == nil || !strings.Contains(err.Error(), "GOAUTHY_RHIZA_PROFILE") {
+		t.Fatalf("error = %v", err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("unexpected output = %q", out.String())
+	}
+}
+
+func TestRunConfigCommandRejectsGlobalBrandBootstrapClientID(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	err := runConfigCommand([]string{"check"}, applicationConfigTestEnv(t, map[string]string{
+		"GOAUTHY_BOOTSTRAP_CLIENT_ID": branding.GlobalBrandID,
+	}), &out)
+	if err == nil || !strings.Contains(err.Error(), "GOAUTHY_BOOTSTRAP_CLIENT_ID") {
 		t.Fatalf("error = %v", err)
 	}
 	if out.Len() != 0 {

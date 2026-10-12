@@ -476,7 +476,7 @@ func TestNewRejectsUntrustedOrigin(t *testing.T) {
 	}
 }
 
-func TestValidNameMatchesRauthyUnicodeCharacterClass(t *testing.T) {
+func TestValidNameMatchesGoAuthyUnicodeCharacterClass(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		valid bool

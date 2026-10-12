@@ -31,15 +31,15 @@ func Document(issuer string, features Features) ([]byte, error) {
 	components := openapi3.NewComponents()
 	components.Schemas = openapi3.Schemas{}
 	components.SecuritySchemes = openapi3.SecuritySchemes{
-		"browserSession": {Value: &openapi3.SecurityScheme{Type: "apiKey", In: "cookie", Name: cookieName, Description: "Authenticated, active browser session. Administrative operations also require the rauthy_admin role; Init sessions are not sufficient."}},
+		"browserSession": {Value: &openapi3.SecurityScheme{Type: "apiKey", In: "cookie", Name: cookieName, Description: "Authenticated, active browser session. Administrative operations also require the goauthy_admin role; Init sessions are not sufficient."}},
 		"csrfToken":      {Value: &openapi3.SecurityScheme{Type: "apiKey", In: "header", Name: "X-CSRF-Token", Description: "Session-bound CSRF token; required together with the browser session for the documented mutations."}},
 		"bearerToken":    {Value: &openapi3.SecurityScheme{Type: "http", Scheme: "bearer", Description: "OAuth access token with the required audience, scopes and proof binding."}},
 		"apiKey":         {Value: &openapi3.SecurityScheme{Type: "apiKey", In: "header", Name: "Authorization", Description: "Use API-Key <name>$<secret>. Only the operation's explicitly permitted access rights are accepted."}},
 		"kvBearer":       {Value: &openapi3.SecurityScheme{Type: "http", Scheme: "bearer", Description: "Namespace-scoped KV access credential in the form <id>$<secret>; not an OAuth access token."}},
 	}
 	doc := &openapi3.T{
-		OpenAPI: "3.0.3", Info: &openapi3.Info{Title: "GoAuthy API", Version: "rauthy-v0.36.2",
-			Description: "GoAuthy deployment API. Rauthy v0.36.2 is the compatibility target, not a claim of complete parity. Optional routes appear only when configured. Swagger UI is read-only; browser CSRF and role requirements still apply."},
+		OpenAPI: "3.0.3", Info: &openapi3.Info{Title: "GoAuthy API", Version: "development",
+			Description: "GoAuthy deployment API. Optional routes appear only when configured. Swagger UI is read-only; browser CSRF and role requirements still apply."},
 		Servers: openapi3.Servers{{URL: issuer}}, Paths: openapi3.NewPaths(), Components: &components,
 	}
 	for _, add := range []func(*openapi3.T, Features) error{addProtocolOperations, addAccountOperations, addAdminOperations, addKVOperations, addFedCMOperations, addRetirementOperations} {

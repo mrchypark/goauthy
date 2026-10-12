@@ -64,7 +64,7 @@ func (h *Handler) ForceLogoutUser(w http.ResponseWriter, r *http.Request) {
 		}
 		sessionGuard, sessionArgs := h.browser.SessionAuthorizationGuard(session, peer)
 		delegated, delegatedArgs := delegatedMembershipGuard(actor, target, nil, false, false)
-		delegated += ` AND EXISTS (SELECT 1 FROM rbac_user_groups tm JOIN rbac_groups tg ON tg.id=tm.group_id JOIN rbac_user_roles am ON am.subject=? JOIN rbac_roles ar ON ar.id=am.role_id WHERE tm.subject=? AND substr(ar.name,1,13)='rauthy_admin:' AND (ar.name='rauthy_admin:*' OR (substr(ar.name,-1)='*' AND substr(tg.name,1,length(ar.name)-14)=substr(ar.name,14,length(ar.name)-14)) OR (substr(ar.name,-1)<>'*' AND substr(ar.name,14)=tg.name)))`
+		delegated += ` AND EXISTS (SELECT 1 FROM rbac_user_groups tm JOIN rbac_groups tg ON tg.id=tm.group_id JOIN rbac_user_roles am ON am.subject=? JOIN rbac_roles ar ON ar.id=am.role_id WHERE tm.subject=? AND substr(ar.name,1,14)='goauthy_admin:' AND (ar.name='goauthy_admin:*' OR (substr(ar.name,-1)='*' AND substr(tg.name,1,length(ar.name)-15)=substr(ar.name,15,length(ar.name)-15)) OR (substr(ar.name,-1)<>'*' AND substr(ar.name,15)=tg.name)))`
 		guard = `(` + adminGuard() + ` OR (` + delegated + `)) AND ` + sessionGuard
 		args = append([]any{actor}, delegatedArgs...)
 		args = append(args, actor, target)

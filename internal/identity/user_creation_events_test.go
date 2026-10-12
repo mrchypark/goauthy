@@ -17,10 +17,10 @@ func TestUserCreationLifecycleEventsAreAtomicAndClassified(t *testing.T) {
 	now := time.Unix(2_000_000_000, 123000000).UTC()
 	store.now = func() time.Time { return now }
 	ctx := context.Background()
-	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "event-role", SQL: `INSERT INTO rbac_roles(id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) VALUES('admin-role','rauthy_admin',NULL,1,0,0)`}); err != nil {
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "event-role", SQL: `INSERT INTO rbac_roles(id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) VALUES('admin-role','goauthy_admin',NULL,1,0,0)`}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := store.CreateUserWithGuard(ctx, UserCreation{OpenRegistration: OpenRegistration{Email: "admin-event@example.test", TTL: time.Hour, SourceIP: "192.0.2.10"}, Roles: []string{"rauthy_admin"}}, "1=1", nil)
+	_, err := store.CreateUserWithGuard(ctx, UserCreation{OpenRegistration: OpenRegistration{Email: "admin-event@example.test", TTL: time.Hour, SourceIP: "192.0.2.10"}, Roles: []string{"goauthy_admin"}}, "1=1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,14 +32,14 @@ func TestUserCreationLifecycleEventsAreAtomicAndClassified(t *testing.T) {
 	if err != nil || len(rows.Rows) != 3 {
 		t.Fatalf("events=%#v err=%v", rows.Rows, err)
 	}
-	want := map[string]int{string(eventlog.NewRauthyAdmin): 1, string(eventlog.NewUserRegistered): 2}
+	want := map[string]int{string(eventlog.NewGoAuthyAdmin): 1, string(eventlog.NewUserRegistered): 2}
 	for _, row := range rows.Rows {
 		if row[4] != now.UnixMilli() {
 			t.Fatalf("timestamp=%v", row[4])
 		}
 		want[row[0].(string)]--
 		level := int64(0)
-		if row[0] == string(eventlog.NewRauthyAdmin) {
+		if row[0] == string(eventlog.NewGoAuthyAdmin) {
 			level = 1
 			if row[3] != "admin-event@example.test" {
 				t.Fatalf("admin event attributed to ordinary user: %#v", row)
@@ -50,7 +50,7 @@ func TestUserCreationLifecycleEventsAreAtomicAndClassified(t *testing.T) {
 			t.Fatalf("event payload=%#v", row)
 		}
 	}
-	if want[string(eventlog.NewRauthyAdmin)] != 0 || want[string(eventlog.NewUserRegistered)] != 0 {
+	if want[string(eventlog.NewGoAuthyAdmin)] != 0 || want[string(eventlog.NewUserRegistered)] != 0 {
 		t.Fatalf("event types=%v", want)
 	}
 }

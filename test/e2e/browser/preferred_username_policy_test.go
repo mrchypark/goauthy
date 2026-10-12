@@ -252,7 +252,7 @@ func TestPreferredUsernamePolicyAcrossPods(t *testing.T) {
 	}
 	// A delegated administrator may initialize only a currently managed target;
 	// mutable configuration must not turn that privilege into overwrite access.
-	rbacCreate(t, client, primary, "roles", "rauthy_admin:preferred/*", nil, csrf)
+	rbacCreate(t, client, primary, "roles", "goauthy_admin:preferred/*", nil, csrf)
 	rbacCreate(t, client, primary, "groups", "preferred/team", nil, csrf)
 	delegatedEmail := "policy-delegated-" + mode + "@goauthy.e2e"
 	managedEmail := "policy-managed-" + mode + "@goauthy.e2e"
@@ -260,7 +260,7 @@ func TestPreferredUsernamePolicyAcrossPods(t *testing.T) {
 	for _, row := range []struct {
 		id, email     string
 		roles, groups []string
-	}{{delegatedID, delegatedEmail, []string{"rauthy_admin:preferred/*"}, []string{}}, {managedID, managedEmail, []string{}, []string{"preferred/team"}}} {
+	}{{delegatedID, delegatedEmail, []string{"goauthy_admin:preferred/*"}, []string{}}, {managedID, managedEmail, []string{}, []string{"preferred/team"}}} {
 		payload, _ := json.Marshal(map[string]any{"email": row.email, "given_name": "Policy", "roles": row.roles, "groups": row.groups, "enabled": true, "email_verified": true, "password": updateUserPassword})
 		apiKeyStatus(t, client, http.MethodPut, primary+"/auth/v1/users/"+row.id, bytes.NewReader(payload), adminHeaders, 200, "set delegated fixture membership")
 	}

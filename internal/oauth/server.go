@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/mrchypark/goauthy/internal/backchannel"
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/cimd"
 	"github.com/mrchypark/goauthy/internal/claims"
@@ -258,8 +259,7 @@ type OIDCConfig struct {
 	// Static/bootstrap clients always require an exact redirect URI.
 	RFC8252LoopbackRedirects bool
 	// BootstrapForceMFA requires an MFA-authenticated browser session for the
-	// bootstrap client. Dynamic clients are always unforced, matching Rauthy's
-	// dynamic-registration policy.
+	// bootstrap client. Dynamic clients are always unforced.
 	BootstrapForceMFA bool
 	// ClientGroupPolicy returns the static client group-admission policy. It
 	// must return Managed=false for dynamic and CIMD clients. A managed policy
@@ -454,7 +454,7 @@ func newServer(ctx context.Context, db *rhiza.DB, hmacSecret []byte, clientID, c
 	if oidcConfig != nil {
 		cimds = oidcConfig.CIMD
 	}
-	dynamicConfig := dcr.Config{AllowRFC8252LoopbackRedirects: oidcConfig != nil && oidcConfig.RFC8252LoopbackRedirects, ReservedClientIDs: []string{clientID}}
+	dynamicConfig := dcr.Config{AllowRFC8252LoopbackRedirects: oidcConfig != nil && oidcConfig.RFC8252LoopbackRedirects, ReservedClientIDs: []string{clientID, branding.GlobalBrandID}}
 	if oidcConfig != nil {
 		dynamicConfig.ScopePolicy = oidcConfig.DynamicClientScopePolicy
 	}
@@ -1315,7 +1315,7 @@ func (s *Server) completeAuthorization(w http.ResponseWriter, r *http.Request, s
 	// Capture the raw identity_user_profiles snapshot BEFORE ResolveProfile
 	// and NeedsProfileUpdate. The snapshot fences the code commit so a
 	// concurrent profile mutation cannot issue a code on a stale profile.
-	if s.needsProfileUpdate != nil && s.userValuesPolicy.RevalidateDuringLogin && authorizeRequest.GetClient().GetID() != "rauthy" {
+	if s.needsProfileUpdate != nil && s.userValuesPolicy.RevalidateDuringLogin && authorizeRequest.GetClient().GetID() != branding.GlobalBrandID {
 		profileSnap, snapErr := s.store.captureProfileSnapshot(issueContext, subject)
 		if snapErr != nil {
 			s.provider.WriteAuthorizeError(r.Context(), w, authorizeRequest, fosite.ErrServerError)

@@ -704,7 +704,7 @@ func TestDelegatedPatchPreservesUnmanagedGroupsAndEscalationGuards(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	delegatedRole, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/*", nil)
+	delegatedRole, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/*", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -752,7 +752,7 @@ func TestDelegatedPatchRevocationInterpositionIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	role, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/a", nil)
+	role, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

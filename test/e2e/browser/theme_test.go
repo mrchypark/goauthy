@@ -59,7 +59,7 @@ func TestThemeLive(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("theme DELETE status=%d", response.StatusCode)
 	}
-	defaultTheme := branding.DefaultTheme("rauthy")
+	defaultTheme := branding.DefaultTheme(branding.GlobalBrandID)
 	for _, node := range nodes {
 		got := readThemeJSON(t, admin, node, managed.ID, headers)
 		if !reflect.DeepEqual(got, defaultTheme) {

@@ -116,7 +116,7 @@ func TestLogoutTokenRejectsNonceAndMalformedEvents(t *testing.T) {
 	compat := logoutTokenMap(claims, map[string]any{backchannelLogoutEvent: map[string]any{}}, "")
 	compat["typ"] = "logout+jwt"
 	if _, err := VerifyLogoutToken(mustSignedLogoutToken(t, key, compat, jose.EdDSA), jose.JSONWebKeySet{Keys: []jose.JSONWebKey{key.PublicJWK}}, claims.Issuer, claims.Audience, now); err != nil {
-		t.Fatalf("Rauthy compatibility typ was rejected: %v", err)
+		t.Fatalf("optional logout payload typ was rejected: %v", err)
 	}
 	for _, payload := range []map[string]any{
 		logoutTokenMap(claims, map[string]any{backchannelLogoutEvent: map[string]any{}}, "nonce-1"),

@@ -16,9 +16,9 @@ func userUpdateAuthorityFixture(t *testing.T) (context.Context, *rhiza.DB) {
 	}
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "update-authority-fixture", Statements: []rhiza.SQLStatement{
 		{SQL: `INSERT INTO rbac_roles(id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES
-		 ('admin-role','rauthy_admin',1,0,0),('delegate-role','rauthy_admin:team/*',1,0,0),
-		 ('exact-role','rauthy_admin:team/a',1,0,0),('wildcard-role','rauthy_admin:*',1,0,0),
-		 ('literal-role','rauthy_admin:team_*',1,0,0),('viewer-role','viewer',1,0,0)`},
+		 ('admin-role','goauthy_admin',1,0,0),('delegate-role','goauthy_admin:team/*',1,0,0),
+		 ('exact-role','goauthy_admin:team/a',1,0,0),('wildcard-role','goauthy_admin:*',1,0,0),
+		 ('literal-role','goauthy_admin:team_*',1,0,0),('viewer-role','viewer',1,0,0)`},
 		{SQL: `INSERT INTO rbac_groups(id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES
 		 ('a','team/a',1,0,0),('b','team/b',1,0,0),('out','outside',1,0,0),('lookalike','teamish/a',1,0,0)`},
 		{SQL: `INSERT INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) VALUES
@@ -51,7 +51,7 @@ func TestUserUpdateAuthorityMatchesPUTScope(t *testing.T) {
 		{"remove last managed group", "delegate", "member", []string{"viewer"}, []string{"outside"}, 1},
 		{"remove outside group", "delegate", "member", []string{"viewer"}, []string{"team/a"}, 0},
 		{"omitted groups removes outside", "delegate", "member", []string{"viewer"}, nil, 0},
-		{"replace role", "delegate", "member", []string{"rauthy_admin"}, []string{"team/a", "outside"}, 0},
+		{"replace role", "delegate", "member", []string{"goauthy_admin"}, []string{"team/a", "outside"}, 0},
 		{"remove role", "delegate", "member", nil, []string{"team/a", "outside"}, 0},
 		{"unknown role is still a role change", "delegate", "member", []string{"viewer", "unknown"}, []string{"team/a", "outside"}, 0},
 		{"unknown outside group denied before sanitization", "delegate", "member", []string{"viewer"}, []string{"team/a", "outside", "unknown"}, 0},
@@ -62,13 +62,13 @@ func TestUserUpdateAuthorityMatchesPUTScope(t *testing.T) {
 		{"exact scope cannot add sibling", "exact", "member", []string{"viewer"}, []string{"team/a", "team/b", "outside"}, 0},
 		{"wildcard can remove outside", "wildcard", "member", []string{"viewer"}, nil, 1},
 		{"PUT cannot claim an unmanaged user", "delegate", "unmanaged", []string{"viewer"}, []string{"outside", "team/a"}, 0},
-		{"other direct admin protected", "delegate", "other-admin", []string{"rauthy_admin"}, []string{"team/a"}, 0},
-		{"other delegated admin protected", "delegate", "other-delegate", []string{"rauthy_admin:team/*"}, []string{"team/a"}, 0},
-		{"self without any managed group", "delegate", "delegate", []string{"rauthy_admin:team/*"}, nil, 1},
+		{"other direct admin protected", "delegate", "other-admin", []string{"goauthy_admin"}, []string{"team/a"}, 0},
+		{"other delegated admin protected", "delegate", "other-delegate", []string{"goauthy_admin:team/*"}, []string{"team/a"}, 0},
+		{"self without any managed group", "delegate", "delegate", []string{"goauthy_admin:team/*"}, nil, 1},
 		{"self cannot drop role", "delegate", "delegate", nil, nil, 0},
-		{"self cannot add role", "delegate", "delegate", []string{"rauthy_admin:team/*", "rauthy_admin"}, nil, 0},
-		{"self cannot add outside group", "delegate", "delegate", []string{"rauthy_admin:team/*"}, []string{"outside"}, 0},
-		{"self can add managed group", "delegate", "delegate", []string{"rauthy_admin:team/*"}, []string{"team/a"}, 1},
+		{"self cannot add role", "delegate", "delegate", []string{"goauthy_admin:team/*", "goauthy_admin"}, nil, 0},
+		{"self cannot add outside group", "delegate", "delegate", []string{"goauthy_admin:team/*"}, []string{"outside"}, 0},
+		{"self can add managed group", "delegate", "delegate", []string{"goauthy_admin:team/*"}, []string{"team/a"}, 1},
 		{"unmanaged empty roles and groups", "delegate", "empty", nil, nil, 0},
 		{"managed user with no roles", "delegate", "bare", nil, []string{"team/a"}, 1},
 		{"managed user with no roles removes last group", "delegate", "bare", nil, nil, 1},
