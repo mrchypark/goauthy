@@ -147,6 +147,9 @@ func loadApplicationConfig(getenv func(string) string) (applicationConfig, error
 // for both entrypoints instead, so their presence and content are validated
 // before any database side effect.
 func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) error {
+	if envValue(getenv, "GOAUTHY_BOOTSTRAP_CLIENT_ID", "goauthy-dev") == branding.GlobalBrandID {
+		return errors.New("GOAUTHY_BOOTSTRAP_CLIENT_ID is reserved for global branding")
+	}
 	if _, err := scheduledBackupFromEnv(getenv, cfg.Rhiza); err != nil {
 		return err
 	}

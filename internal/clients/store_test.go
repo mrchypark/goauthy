@@ -127,6 +127,19 @@ func TestStoreBootstrapIsDurable(t *testing.T) {
 	}
 }
 
+func TestStoreReservesBootstrapAndGlobalBrandIDs(t *testing.T) {
+	const bootstrapID, globalBrandID = "bootstrap-client", "goauthy"
+	s, ctx := testStore(t, bootstrapID, globalBrandID)
+	for _, id := range []string{bootstrapID, globalBrandID} {
+		if _, err := s.CreateWithGuard(ctx, NewRequest{ID: id, RedirectURIs: []string{"https://example.test/callback"}}, auth()); !errors.Is(err, ErrReserved) {
+			t.Fatalf("reserved client %q error = %v", id, err)
+		}
+	}
+	if _, err := s.CreateWithGuard(ctx, NewRequest{ID: "ordinary-client", RedirectURIs: []string{"https://example.test/callback"}}, auth()); err != nil {
+		t.Fatalf("ordinary client error = %v", err)
+	}
+}
+
 func TestStoreRejectsDynamicIDCollisionsBothDirections(t *testing.T) {
 	s, ctx := testStore(t)
 	_, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "managed-client-dynamic-owner", SQL: `INSERT INTO dynamic_oauth_clients(client_id,secret_hash,registration_token_digest,redirect_uris_json,scopes_json,grant_types_json,response_types_json,audiences_json,token_endpoint_auth_method,name,created_at_unix_ms) VALUES ('dynamic-owned',NULL,'token-dynamic-owned','[]','[]','[]','[]','[]','none','dynamic',1)`})

@@ -354,7 +354,7 @@ func run() (err error) {
 		return errors.New("GOAUTHY_BOOTSTRAP_USER_ROLES and GOAUTHY_BOOTSTRAP_USER_GROUPS require GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE")
 	}
 	rbacStore := rbac.NewStore(db)
-	managedClients := clients.NewStore(db, keyring, clientID)
+	managedClients := clients.NewStore(db, keyring, clientID, branding.GlobalBrandID)
 	if err := managedClients.EnsureBootstrap(ctx, clientID); err != nil {
 		return fmt.Errorf("reserve bootstrap client: %w", err)
 	}

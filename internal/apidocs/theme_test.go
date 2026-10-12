@@ -18,8 +18,8 @@ func TestThemeContractAcceptsPinnedActionAndRejectsMissingTuple(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := doc.Paths.Value("/auth/v1/theme/{client_id}").Put.RequestBody.Value.Content.Get("application/json").Schema.Value
 	theme := branding.DefaultTheme("client-a")
+	theme.BrandName = strings.Repeat("가", 120)
 	theme.Light.Action = []uint16{65535, 65535, 65535}
 	raw, err := json.Marshal(theme)
 	if err != nil {
@@ -29,9 +29,21 @@ func TestThemeContractAcceptsPinnedActionAndRejectsMissingTuple(t *testing.T) {
 	if err := json.Unmarshal(raw, &input); err != nil {
 		t.Fatal(err)
 	}
-	if err := schema.VisitJSON(input); err != nil {
-		t.Fatalf("pinned valid theme rejected: %v", err)
+	path := doc.Paths.Value("/auth/v1/theme/{client_id}")
+	for _, schema := range []*openapi3.Schema{
+		path.Post.Responses.Status(200).Value.Content.Get("application/json").Schema.Value,
+		path.Put.RequestBody.Value.Content.Get("application/json").Schema.Value,
+	} {
+		if err := schema.VisitJSON(input); err != nil {
+			t.Fatalf("pinned valid theme rejected: %v", err)
+		}
+		input["brand_name"] = strings.Repeat("가", 121)
+		if err := schema.VisitJSON(input); err == nil {
+			t.Fatal("overlong brand name accepted")
+		}
+		input["brand_name"] = theme.BrandName
 	}
+	schema := path.Put.RequestBody.Value.Content.Get("application/json").Schema.Value
 	input["light"].(map[string]any)["text"] = []any{float64(1), float64(2)}
 	if err := schema.VisitJSON(input); err == nil {
 		t.Fatal("incomplete HSL tuple accepted")

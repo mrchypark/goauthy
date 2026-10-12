@@ -319,8 +319,9 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 		"btn_text": cssValue, "theme_sun": cssValue, "theme_moon": cssValue,
 	}, "text", "text_high", "bg", "bg_high", "action", "accent", "error", "btn_text", "theme_sun", "theme_moon")
 	theme := obj(map[string]*openapi3.Schema{
-		"client_id": openapi3.NewStringSchema().WithMinLength(2).WithMaxLength(256),
-		"light":     themeCSS, "dark": themeCSS, "border_radius": cssValue,
+		"client_id":  openapi3.NewStringSchema().WithMinLength(2).WithMaxLength(256),
+		"brand_name": openapi3.NewStringSchema().WithMaxLength(120),
+		"light":      themeCSS, "dark": themeCSS, "border_radius": cssValue,
 	}, "client_id", "light", "dark", "border_radius")
 	brandAsset := add("GET", "/auth/v1/branding/{name}", "Read bundled brand assets", nil, nil, nil)
 	brandAsset.Responses.Status(200).Value.Content = openapi3.Content{}
