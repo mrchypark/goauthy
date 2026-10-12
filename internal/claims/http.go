@@ -19,7 +19,7 @@ import (
 
 const requestLimit int64 = 8 << 10
 
-// Handler serves only browser-authenticated rauthy_admin requests. API keys
+// Handler serves only browser-authenticated goauthy_admin requests. API keys
 // deliberately remain out of this first claims slice.
 type Handler struct {
 	store            *Store

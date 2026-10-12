@@ -107,7 +107,7 @@ func TestPasswordHTTPAdmission(t *testing.T) {
 	})
 	t.Run("lockdown admin exception", func(t *testing.T) {
 		_, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{RequestID: "admission-admin", Statements: []rhiza.SQLStatement{
-			{SQL: "INSERT INTO rbac_roles(id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('admission-admin','rauthy_admin',NULL,1,0,0)"},
+			{SQL: "INSERT INTO rbac_roles(id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('admission-admin','goauthy_admin',NULL,1,0,0)"},
 			{SQL: "INSERT INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) VALUES ('admission-user','admission-admin',0)"},
 		}})
 		if err != nil {

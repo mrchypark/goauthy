@@ -96,7 +96,7 @@ func TestUserListHTTPRechecksAuthorityAfterPreflight(t *testing.T) {
 				header = "API-Key " + token
 			}
 			if kind == "delegated" {
-				role, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/*", nil)
+				role, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/*", nil)
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -16,7 +16,7 @@ import (
 var errInvalidAccessToken = errors.New("invalid access token")
 
 // AccessTokenClaims is GoAuthy's signed access-token surface. It mirrors the
-// Rauthy bearer/DPoP fields while retaining stateful server-side revocation.
+// bearer/DPoP fields while retaining stateful server-side revocation.
 type AccessTokenClaims struct {
 	Actor           *ActorClaims
 	Issuer          string

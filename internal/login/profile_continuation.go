@@ -47,7 +47,7 @@ func (h *Handler) SetUserValuesPolicy(policy identity.UserValuesPolicy) error {
 
 // needsProfileUpdate returns whether the authenticated user needs a profile
 // update for the given request, or an error if the check could not be performed.
-// The rauthy clientID is already exempt inside identity.NeedsProfileUpdate.
+// The canonical GoAuthy clientID is already exempt inside identity.NeedsProfileUpdate.
 func (h *Handler) needsProfileUpdate(r *http.Request, subject, clientID string) (bool, error) {
 	if h.userValuesPolicy == nil {
 		return false, nil

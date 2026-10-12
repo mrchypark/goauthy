@@ -22,7 +22,7 @@ func TestClientLogoStoreReplacementAndFallback(t *testing.T) {
 	seedLogoClient(t, ctx, db, "client-a", false)
 	seedLogo(t, ctx, db, "client-a", "small", "image/webp", []byte("old-small"), 11)
 	seedLogo(t, ctx, db, "client-a", "favicon", "image/webp", []byte("old-favicon"), 12)
-	seedLogo(t, ctx, db, "rauthy", "small", "image/webp", []byte("global-small"), 13)
+	seedLogo(t, ctx, db, GlobalBrandID, "small", "image/webp", []byte("global-small"), 13)
 	keys, principal := logoUpdateKey(t, ctx, db, "logo-replace-key")
 
 	if err := store.ReplaceAuthorized(ctx, "client-a", []LogoAsset{{Resolution: "svg", ContentType: "image/svg+xml", Data: []byte("<svg/>")}}, keys, principal); err != nil {

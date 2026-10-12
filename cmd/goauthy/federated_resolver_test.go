@@ -65,7 +65,7 @@ func seedAdminRole(t *testing.T, db *rhiza.DB) {
 	t.Helper()
 	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{
 		RequestID:  "seed-admin-role",
-		Statements: []rhiza.SQLStatement{{SQL: `INSERT INTO rbac_roles(id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) VALUES('admin-role-id','rauthy_admin',NULL,1,0,0)`}},
+		Statements: []rhiza.SQLStatement{{SQL: `INSERT INTO rbac_roles(id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) VALUES('admin-role-id','goauthy_admin',NULL,1,0,0)`}},
 	}); err != nil {
 		t.Fatal(err)
 	}

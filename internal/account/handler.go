@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mrchypark/goauthy/internal/apikey"
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/identity"
@@ -36,6 +37,7 @@ var ErrExternalLinkSession = errors.New("invalid external link session")
 
 // Handler exposes the small authenticated password-change surface.
 type Handler struct {
+	brand                   func(context.Context) (branding.Brand, error)
 	issuer                  string
 	browser                 *browser.Store
 	identity                *identity.Store
@@ -186,7 +188,7 @@ func (h *Handler) ListPasskeys(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(passkeyResponses(items))
 }
 
-// PasskeyResponse is the public Rauthy-compatible representation. The
+// PasskeyResponse is the public passkey representation. The
 // internal passkey model keeps time.Time values; the API intentionally emits
 // Unix seconds.
 type PasskeyResponse struct {
@@ -335,7 +337,7 @@ func (h *Handler) DeletePasskey(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// ConfigureSelfDelete enables the Rauthy self-delete capability. It is
+// ConfigureSelfDelete enables account self-deletion. It is
 // deliberately opt-in because deletion is permanent.
 func (h *Handler) ConfigureSelfDelete(enabled bool) { h.selfDeleteEnabled = enabled }
 
@@ -344,7 +346,7 @@ func (h *Handler) ConfigureSelfDelete(enabled bool) { h.selfDeleteEnabled = enab
 func (h *Handler) ConfigureAdminForceMFA(enabled bool) { h.adminForceMFA = enabled }
 
 // DeleteUser handles DELETE /auth/v1/users/{subject}. Only a direct
-// rauthy_admin browser session or a Users:delete API key may use this route.
+// goauthy_admin browser session or a Users:delete API key may use this route.
 func (h *Handler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 	target, session, _, key, ok := h.passkeyPrincipal(w, r, http.MethodDelete)
 	if !ok {
@@ -526,10 +528,10 @@ func (h *Handler) browserDeleteGuard(session browser.Session, target string, sel
 	guard := sessionGuard + ` AND EXISTS (SELECT 1 FROM identity_users u WHERE u.subject=? AND u.disabled=0)`
 	args := append(sessionArgs, session.Subject)
 	if self {
-		guard += ` AND NOT EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='rauthy_admin')`
+		guard += ` AND NOT EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='goauthy_admin')`
 		args = append(args, target)
 	} else {
-		guard += ` AND EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='rauthy_admin')`
+		guard += ` AND EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='goauthy_admin')`
 		args = append(args, session.Subject)
 	}
 	return guard, args

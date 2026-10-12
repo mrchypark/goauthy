@@ -5,7 +5,7 @@
 - `GOAUTHY_SWAGGER_UI_ENABLE=false`가 기본값이다. 비활성 상태에서는 UI, 명세,
   JS/CSS 모두 제공하지 않는다.
 - 활성화 후에도 `GOAUTHY_SWAGGER_UI_PUBLIC=false`가 기본이다. 기존 브라우저
-  관리자 검사로 활성 세션과 `rauthy_admin`을 확인하며 Init 세션, API-Key,
+  관리자 검사로 활성 세션과 `goauthy_admin`을 확인하며 Init 세션, API-Key,
   OAuth Bearer, cross-site 요청은 대체 인증으로 사용하지 않는다.
 - `GOAUTHY_SWAGGER_UI_PUBLIC=true`는 명시적인 공개 설정이다. 이 값만으로
   문서를 활성화하지는 않는다. API 자체의 인증 정책도 바꾸지 않는다.

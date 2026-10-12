@@ -19,20 +19,20 @@ func TestLockdownEnforcementAllAuthMethods(t *testing.T) {
 	h, db := testHandlerWithDB(t, false)
 	ctx := context.Background()
 
-	// Bootstrap an admin user with rauthy_admin role.
+	// Bootstrap an admin user with goauthy_admin role.
 	adminPW, _ := testHash(ctx, []byte("correct password"))
 	if _, err := h.identity.BootstrapUser(ctx, "admin-1", "adminuser", adminPW); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{
 		RequestID: "lockdown-test-admin-role",
-		SQL:       "INSERT INTO rbac_roles (id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('lockdown-admin-role','rauthy_admin',NULL,1,0,0)",
+		SQL:       "INSERT INTO rbac_roles (id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('lockdown-admin-role','goauthy_admin',NULL,1,0,0)",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{
 		RequestID: "lockdown-test-admin-grant",
-		SQL:       "INSERT INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) SELECT 'admin-1',id,0 FROM rbac_roles WHERE name='rauthy_admin'",
+		SQL:       "INSERT INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) SELECT 'admin-1',id,0 FROM rbac_roles WHERE name='goauthy_admin'",
 	}); err != nil {
 		t.Fatal(err)
 	}

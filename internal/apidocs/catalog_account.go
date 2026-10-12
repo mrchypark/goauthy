@@ -279,7 +279,7 @@ func addAccountOperations(doc *openapi3.T, features Features) error {
 		}
 		schema.Value.WithRequired([]string{"email", "pow"}).WithoutAdditionalProperties()
 		doc.Paths.Value("/auth/v1/users/register").Post.RequestBody = &openapi3.RequestBodyRef{Value: openapi3.NewRequestBody().WithRequired(true).WithJSONSchema(schema.Value)}
-		doc.Paths.Value("/auth/v1/users/register").Post.Description = "Ordinary profile fields follow deployment policy: given_name is required by default; family_name and nested user values are optional by default. A missing or empty required value returns 400 before consuming PoW or sending mail. Hidden fields are still accepted when syntactically valid. Matching Rauthy v0.36.2, nested requirements are checked only when user_values is present and non-null. The static schema describes the configurable request shape, not an exemption from runtime required-field policy."
+		doc.Paths.Value("/auth/v1/users/register").Post.Description = "Ordinary profile fields follow deployment policy: given_name is required by default; family_name and nested user values are optional by default. A missing or empty required value returns 400 before consuming PoW or sending mail. Hidden fields are still accepted when syntactically valid. Nested requirements are checked only when user_values is present and non-null. The static schema describes the configurable request shape, not an exemption from runtime required-field policy."
 	}
 	if features.Recovery && features.OpenRegistration && features.Passkeys {
 		add("/auth/v1/register/passkey/start", "post", "registerPasskeyStartPublic", "Start passkey registration (public CORS)", 200)

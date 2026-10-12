@@ -115,7 +115,7 @@ func TestUserValuesConfigDelegatedAndStrictGates(t *testing.T) {
 	h, store, _, _, admin := userCreateHTTPFixture(t)
 	ctx := context.Background()
 	insertActive(t, store.db, "config-delegated")
-	role, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/*", nil)
+	role, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/*", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestUserValuesConfigCapturedGuard(t *testing.T) {
 	t.Run("delegated role revoked", func(t *testing.T) {
 		h, store, _, _, _ := userCreateHTTPFixture(t)
 		insertActive(t, store.db, "config-delegated-hook")
-		role, err := store.CreateRole(context.Background(), "admin", "rauthy_admin:team/*", nil)
+		role, err := store.CreateRole(context.Background(), "admin", "goauthy_admin:team/*", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

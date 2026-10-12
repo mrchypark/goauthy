@@ -1,6 +1,7 @@
 package account
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/identity"
@@ -19,12 +21,16 @@ var dashboardFS embed.FS
 
 var dashboardTemplate = template.Must(template.ParseFS(dashboardFS, "dashboard.html"))
 
+func (h *Handler) SetBrandResolver(resolve func(context.Context) (branding.Brand, error)) {
+	h.brand = resolve
+}
+
 // Dashboard serves the current browser account, never bearer/API-key authority.
 // Existing mutation handlers remain the only password/profile policy authority.
 func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	securityHeaders(w)
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	if r == nil || r.URL == nil || r.Method != http.MethodGet {
 		methodNotAllowed(w, http.MethodGet)
 		return
@@ -119,9 +125,19 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Vary", "Accept-Language")
 		w.Header().Add("Vary", "Cookie")
 		admin, err := h.isAdminResult(r.Context(), session.Subject)
+		isAdmin := err == nil && admin
+		brand := branding.Brand{Name: "GoAuthy"}
+		if h.brand != nil {
+			brand, err = h.brand(r.Context())
+			if err != nil {
+				http.Error(w, "Brand unavailable", http.StatusServiceUnavailable)
+				return
+			}
+		}
 		_ = dashboardTemplate.Execute(w, struct {
 			BasePath, Language string
 			IsAdmin            bool
-		}{base, language, err == nil && admin})
+			Brand              branding.Brand
+		}{base, language, isAdmin, brand})
 	}
 }

@@ -19,7 +19,7 @@ spec:
             - name: GOAUTHY_BOOTSTRAP_USER_SUBJECT
               value: bootstrap-admin
             - name: GOAUTHY_BOOTSTRAP_USER_ROLES
-              value: '["rauthy_admin"]'
+              value: '["goauthy_admin"]'
             - name: GOAUTHY_SWAGGER_UI_ENABLE
               value: "true"
             - name: GOAUTHY_SWAGGER_UI_PUBLIC

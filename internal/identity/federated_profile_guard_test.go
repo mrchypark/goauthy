@@ -140,7 +140,7 @@ func TestFederatedProfileGuardLastOtherAdminRemoved(t *testing.T) {
 			if _, err := storage.Execute(context.Background(), store.db, rhiza.ExecuteRequest{
 				RequestID: "test-remove-peer-admin",
 				Statements: []rhiza.SQLStatement{
-					{SQL: "DELETE FROM rbac_user_roles WHERE subject=? AND role_id IN(SELECT id FROM rbac_roles WHERE name='rauthy_admin')",
+					{SQL: "DELETE FROM rbac_user_roles WHERE subject=? AND role_id IN(SELECT id FROM rbac_roles WHERE name='goauthy_admin')",
 						Args: []any{peer.Subject}},
 				},
 			}); err != nil {
@@ -165,7 +165,7 @@ func TestFederatedProfileGuardLastOtherAdminRemoved(t *testing.T) {
 	if !called {
 		t.Fatal("guard interposition was not called")
 	}
-	assertCount(t, store, "SELECT COUNT(*) FROM rbac_user_roles WHERE subject='"+subject+"' AND role_id IN(SELECT id FROM rbac_roles WHERE name='rauthy_admin')", 1)
+	assertCount(t, store, "SELECT COUNT(*) FROM rbac_user_roles WHERE subject='"+subject+"' AND role_id IN(SELECT id FROM rbac_roles WHERE name='goauthy_admin')", 1)
 }
 
 func TestFederatedProfileExpiredRejected(t *testing.T) {
@@ -209,7 +209,7 @@ func TestFederatedProfileMissingRole(t *testing.T) {
 	seedExistingUser(t, store, "norole@example.test")
 	storage.Execute(context.Background(), store.db, rhiza.ExecuteRequest{
 		RequestID: "test-delete-admin-role",
-		SQL:       "DELETE FROM rbac_roles WHERE name = 'rauthy_admin'",
+		SQL:       "DELETE FROM rbac_roles WHERE name = 'goauthy_admin'",
 	})
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
 	adminTrue := true

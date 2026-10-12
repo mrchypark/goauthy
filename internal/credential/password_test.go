@@ -55,7 +55,7 @@ func TestRejectsUnsafeInputsAndDummyPath(t *testing.T) {
 	}
 }
 
-func TestAcceptsRauthyDefaultParallelism(t *testing.T) {
+func TestAcceptsGoAuthyDefaultParallelism(t *testing.T) {
 	if err := ValidatePHC("$argon2id$v=19$m=8192,t=1,p=8$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAA"); err != nil {
 		t.Fatalf("p=8 PHC: %v", err)
 	}

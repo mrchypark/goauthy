@@ -16,4 +16,4 @@ spec:
             - name: GOAUTHY_BOOTSTRAP_USER_SUBJECT
               value: bootstrap-admin
             - name: GOAUTHY_BOOTSTRAP_USER_ROLES
-              value: '["rauthy_admin"]'
+              value: '["goauthy_admin"]'

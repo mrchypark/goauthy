@@ -117,7 +117,7 @@ func TestThemeHandlerBrowserAdminReadAndGuardedMutations(t *testing.T) {
 		t.Fatalf("POST status=%d headers=%v", post.Code, post.Header())
 	}
 	var got Theme
-	if err := json.Unmarshal(post.Body.Bytes(), &got); err != nil || !reflect.DeepEqual(got, DefaultTheme("rauthy")) {
+	if err := json.Unmarshal(post.Body.Bytes(), &got); err != nil || !reflect.DeepEqual(got, DefaultTheme(GlobalBrandID)) {
 		t.Fatalf("POST default theme=%#v err=%v", got, err)
 	}
 
@@ -129,7 +129,7 @@ func TestThemeHandlerBrowserAdminReadAndGuardedMutations(t *testing.T) {
 	}
 	put := httptest.NewRecorder()
 	handler.Theme(put, themeRequest(http.MethodPut, "/auth/v1/theme/client-a", bytes.NewReader(body), "client-a", ""))
-	if put.Code != http.StatusOK || put.Header().Get("Clear-Site-Data") != `"cache"` || clientChecks != 1 {
+	if put.Code != http.StatusOK || put.Header().Get("Clear-Site-Data") != `"cache"` || clientChecks != 2 {
 		t.Fatalf("PUT status=%d headers=%v clientChecks=%d", put.Code, put.Header(), clientChecks)
 	}
 	got, err = store.GetDefault(ctx, "client-a")
@@ -143,7 +143,7 @@ func TestThemeHandlerBrowserAdminReadAndGuardedMutations(t *testing.T) {
 		t.Fatalf("DELETE status=%d headers=%v", delete.Code, delete.Header())
 	}
 	got, err = store.GetDefault(ctx, "client-a")
-	if err != nil || !reflect.DeepEqual(got, DefaultTheme("rauthy")) {
+	if err != nil || !reflect.DeepEqual(got, DefaultTheme(GlobalBrandID)) {
 		t.Fatalf("DELETE did not reveal default theme: %#v err=%v", got, err)
 	}
 	if len(mutationCalls) != 3 || mutationCalls[0] || !mutationCalls[1] || !mutationCalls[2] {
@@ -262,7 +262,7 @@ func TestThemeHandlerIgnoresNonTextAcceptEncoding(t *testing.T) {
 	request.Header.Set("Accept-Encoding", "br, \u0080")
 	response := httptest.NewRecorder()
 	handler.Theme(response, request)
-	if response.Code != http.StatusOK || len(response.Header().Values("Content-Encoding")) != 0 || response.Body.String() != DefaultTheme("rauthy").CSS() {
+	if response.Code != http.StatusOK || len(response.Header().Values("Content-Encoding")) != 0 || response.Body.String() != DefaultTheme(GlobalBrandID).CSS() {
 		t.Fatal("invalid header text selected compressed encoding")
 	}
 }
@@ -286,7 +286,7 @@ func TestThemeEncodingNegotiationAndCacheVariation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	css := DefaultTheme("rauthy").CSS()
+	css := DefaultTheme(GlobalBrandID).CSS()
 	fetch := func(acceptEncoding string) *httptest.ResponseRecorder {
 		request := themeRequest(http.MethodGet, "/auth/v1/theme/missing/1", nil, "missing", "1")
 		if acceptEncoding != "" {

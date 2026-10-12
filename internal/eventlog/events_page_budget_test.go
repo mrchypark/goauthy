@@ -19,7 +19,7 @@ import (
 // 4,096-byte text, so one page of these rows is the worst case the budget covers.
 const eventBudgetSeedSQL = `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<?)
 INSERT INTO event_log(id,timestamp,level,typ,ip,data,text,prev_hash,integrity_hash)
-SELECT substr(printf('%042d',x),1,42)||'A', ?-x, 0, 'RauthyHealthy', ?, ?, ?, ?, ? FROM n`
+SELECT substr(printf('%042d',x),1,42)||'A', ?-x, 0, 'GoAuthyHealthy', ?, ?, ?, ?, ? FROM n`
 
 // TestListGuardedEncodedPageBudget covers GA66-EVENTS-001: Rhiza also checks the
 // JSON encoding of a query result against 16 MiB, and its encoder spends six

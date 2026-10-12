@@ -38,12 +38,12 @@ func TestForceLogoutUserDelegatedScope(t *testing.T) {
 		name, role, group, target string
 		want                      int
 	}{
-		{"exact match", "rauthy_admin:team/a", "team/a", "member", http.StatusOK},
-		{"wildcard match", "rauthy_admin:team/*", "team/a", "member", http.StatusOK},
-		{"unmanaged group", "rauthy_admin:team/*", "other/x", "member", http.StatusForbidden},
-		{"no target group", "rauthy_admin:team/*", "", "member", http.StatusForbidden},
-		{"admin target", "rauthy_admin:team/*", "team/a", "admin", http.StatusForbidden},
-		{"delegated self", "rauthy_admin:team/*", "team/a", "delegated", http.StatusForbidden},
+		{"exact match", "goauthy_admin:team/a", "team/a", "member", http.StatusOK},
+		{"wildcard match", "goauthy_admin:team/*", "team/a", "member", http.StatusOK},
+		{"unmanaged group", "goauthy_admin:team/*", "other/x", "member", http.StatusForbidden},
+		{"no target group", "goauthy_admin:team/*", "", "member", http.StatusForbidden},
+		{"admin target", "goauthy_admin:team/*", "team/a", "admin", http.StatusForbidden},
+		{"delegated self", "goauthy_admin:team/*", "team/a", "delegated", http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, store, _, _ := membershipHTTPFixture(t)

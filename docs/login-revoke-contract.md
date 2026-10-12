@@ -52,8 +52,8 @@ A browser sends an `/auth` cookie only on matching paths; requests to local
 applicable cookie. Full upstream route/cookie configuration parity, including
 session cookies, remains a separate unfinished requirement.
 
-Login-location mail uses `GOAUTHY_EMAIL_SUB_PREFIX`, defaulting to the pinned
-`Rauthy IAM` value when unset. Explicit empty values are preserved; CR/LF are
+Login-location mail uses `GOAUTHY_EMAIL_SUB_PREFIX`, defaulting to
+`GoAuthy IAM` when unset. Explicit empty values are preserved; CR/LF are
 rejected at startup. Subject composition and its real SMTP propagation have
 focused coverage. Login-warning email rendering uses validated typed variables from the persisted
 global theme, with built-in fallback; other themed page surfaces remain incomplete.

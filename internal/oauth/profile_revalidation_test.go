@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/dcr"
 	"github.com/mrchypark/goauthy/internal/identity"
@@ -350,23 +351,26 @@ func TestProfileRevalidationConcurrentProfileMutationDeniesCode(t *testing.T) {
 	}
 }
 
-func TestProfileRevalidationRauthyClientExempt(t *testing.T) {
+func TestProfileRevalidationCanonicalClientExempt(t *testing.T) {
 	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)
 	seedOAuthUser(t, db, "user-1")
 
-	const rauthyClientID = "rauthy"
-	const rauthyRedirectURI = "https://rauthy.example.test/callback"
+	const clientID = branding.GlobalBrandID
+	const redirectURI = "https://goauthy.example.test/callback"
+	// Seed the privileged special client directly; production anonymous DCR
+	// reservation is covered separately in the server wiring test.
+	server.store.dynamicClients = dcr.NewStore(db, dcr.Config{})
 	_, err := server.store.dynamicClients.Create(context.Background(), dcr.CreateRequest{
-		ClientID:                rauthyClientID,
-		RedirectURIs:            []string{rauthyRedirectURI},
+		ClientID:                clientID,
+		RedirectURIs:            []string{redirectURI},
 		GrantTypes:              []string{"authorization_code"},
 		ResponseTypes:           []string{"code"},
 		Scopes:                  []string{"goauthy.read"},
 		TokenEndpointAuthMethod: dcr.TokenEndpointAuthNone,
-		Name:                    "Rauthy",
+		Name:                    "GoAuthy",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -383,8 +387,8 @@ func TestProfileRevalidationRauthyClientExempt(t *testing.T) {
 	digest := sha256.Sum256([]byte(verifier))
 	values := url.Values{
 		"response_type":         {"code"},
-		"client_id":             {rauthyClientID},
-		"redirect_uri":          {rauthyRedirectURI},
+		"client_id":             {clientID},
+		"redirect_uri":          {redirectURI},
 		"scope":                 {"goauthy.read"},
 		"state":                 {strings.Repeat("x", 32)},
 		"code_challenge":        {base64.RawURLEncoding.EncodeToString(digest[:])},
@@ -397,7 +401,7 @@ func TestProfileRevalidationRauthyClientExempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if location.Query().Get("code") == "" {
-		t.Fatalf("rauthy client must bypass profile gate, got error=%q", location.Query().Get("error"))
+		t.Fatalf("canonical client must bypass profile gate, got error=%q", location.Query().Get("error"))
 	}
 }
 

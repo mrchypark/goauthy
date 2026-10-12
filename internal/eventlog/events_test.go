@@ -21,8 +21,11 @@ func TestCreationIsDeterministicAndUsesPublicContract(t *testing.T) {
 		t.Fatalf("creation mismatch: %#v %#v", a, b)
 	}
 	admin := eventlog.Creation("request-1", "u@example.test", "", true, at)
-	if admin.Level != eventlog.Notice || admin.Type != eventlog.NewRauthyAdmin || admin.IP != nil {
+	if admin.Level != eventlog.Notice || admin.Type != eventlog.NewGoAuthyAdmin || admin.IP != nil {
 		t.Fatalf("admin event=%#v", admin)
+	}
+	if admin.ID == a.ID {
+		t.Fatal("canonical event type did not reserve a distinct event ID")
 	}
 	jsonBytes, err := json.Marshal(admin)
 	if err != nil || !strings.Contains(string(jsonBytes), `"ip":null`) || !strings.Contains(string(jsonBytes), `"data":null`) {
@@ -34,6 +37,28 @@ func TestValidationAndStatement(t *testing.T) {
 	q := eventlog.Query{From: 1_719_784_800, Level: eventlog.Info}
 	if q.Validate() != nil || (eventlog.Level("INFO")).Valid() || eventlog.Type("bad").Valid() {
 		t.Fatal("validation contract failed")
+	}
+	for _, typ := range []eventlog.Type{
+		eventlog.NewGoAuthyAdmin,
+		eventlog.NewGoAuthyVersion,
+		eventlog.GoAuthyStarted,
+		eventlog.GoAuthyHealthy,
+		eventlog.GoAuthyUnhealthy,
+	} {
+		if !typ.Valid() {
+			t.Errorf("canonical type %q rejected", typ)
+		}
+	}
+	for _, typ := range []eventlog.Type{
+		"NewRauthyAdmin",
+		"NewRauthyVersion",
+		"RauthyStarted",
+		"RauthyHealthy",
+		"RauthyUnhealthy",
+	} {
+		if typ.Valid() {
+			t.Errorf("legacy type %q accepted", typ)
+		}
 	}
 	e := eventlog.Creation("r", "u@example.test", "", false, time.Unix(1_800_000_000, 0))
 	s, err := e.Statement("request_id=?", "r")
@@ -132,7 +157,7 @@ func TestListGuardedBoundariesOrderingThresholdAndType(t *testing.T) {
 		t.Fatalf("threshold rows=%#v ok=%v err=%v", rows, ok, err)
 	}
 	q.Level = eventlog.Info
-	typ := eventlog.NewRauthyAdmin
+	typ := eventlog.NewGoAuthyAdmin
 	q.Type = &typ
 	rows, _, ok, err = store.ListGuarded(ctx, eventlog.Query{From: base.Unix() - 1, Until: ptr(base.Unix() + 1), Level: eventlog.Info, Type: &typ}, base.Add(999*time.Millisecond), nil, eventlog.MaxPageSize, "1=1")
 	if err != nil || !ok || len(rows) != 1 || rows[0].Type != typ {

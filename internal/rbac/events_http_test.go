@@ -190,7 +190,7 @@ func TestEventsQueryRejectsCaseAliases(t *testing.T) {
 	for _, body := range []string{
 		`{"From":1719784800,"level":"info"}`,
 		`{"from":1719784800,"level":"info","Level":"critical"}`,
-		`{"from":1719784800,"level":"info","TYP":"NewRauthyAdmin"}`,
+		`{"from":1719784800,"level":"info","TYP":"NewGoAuthyAdmin"}`,
 	} {
 		r := httptest.NewRequest(http.MethodPost, "/auth/v1/events", strings.NewReader(body))
 		r.Header.Set("Content-Type", "application/json")

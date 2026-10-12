@@ -2,6 +2,7 @@ package apidocs
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -41,5 +42,8 @@ func TestThemeContractAcceptsPinnedActionAndRejectsMissingTuple(t *testing.T) {
 	}
 	if public.Responses.Status(200).Value.Content.Get("text/css") == nil {
 		t.Fatal("missing CSS content type")
+	}
+	if !strings.Contains(public.Description, "global GoAuthy theme") || strings.Contains(strings.ToLower(public.Description), "rauthy") {
+		t.Fatalf("unexpected public theme description: %q", public.Description)
 	}
 }

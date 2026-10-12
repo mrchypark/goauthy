@@ -242,7 +242,7 @@ func (s *Service) beginLogin(ctx context.Context, subject, username, interaction
 	return opts, code, expires, err
 }
 
-// BeginModificationProof starts the service WebAuthn ceremony Rauthy uses to
+// BeginModificationProof starts the service WebAuthn ceremony used to
 // authorize MFA-key changes. The proof returned by FinishModificationProof is
 // generated here but is kept only inside this encrypted ceremony state.
 func (s *Service) BeginModificationProof(ctx context.Context, subject, username, sessionDigest string) (*protocol.CredentialAssertion, string, time.Time, error) {
@@ -610,7 +610,7 @@ func (s *Service) Delete(ctx context.Context, subject, name string) error {
 
 // DeleteForAdministrator is the administrative reset operation. Unlike Delete,
 // it intentionally permits removal of the final user-verified passkey, matching
-// Rauthy. The replicated DELETE itself checks the active actor's current admin
+// GoAuthy. The replicated DELETE itself checks the active actor's current admin
 // membership, so a role revocation between a request check and this mutation
 // cannot authorize a reset.
 func (s *Service) DeleteForAdministrator(ctx context.Context, actor, subject, name string) error {
@@ -629,7 +629,7 @@ func (s *Service) DeleteForAdministrator(ctx context.Context, actor, subject, na
 	if !iok || !vok || version < 0 {
 		return ErrInvalid
 	}
-	res, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: rid("passkey-admin-delete", actor, subject, id, strconv.FormatInt(version, 10)), SQL: `DELETE FROM identity_webauthn_credentials WHERE subject=? AND credential_id=? AND credential_version=? AND EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='rauthy_admin')`, Args: []any{subject, id, version, actor}})
+	res, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: rid("passkey-admin-delete", actor, subject, id, strconv.FormatInt(version, 10)), SQL: `DELETE FROM identity_webauthn_credentials WHERE subject=? AND credential_id=? AND credential_version=? AND EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='goauthy_admin')`, Args: []any{subject, id, version, actor}})
 	if err != nil || res.RowsAffected != 1 {
 		return ErrConflict
 	}
@@ -653,7 +653,7 @@ func (s *Service) HasCredentials(ctx context.Context, subject string) (bool, err
 }
 
 // IssuePasswordModificationToken is deliberately unavailable once an account
-// has a passkey: Rauthy requires a fresh mfa_code in that case.
+// has a passkey: GoAuthy requires a fresh mfa_code in that case.
 func (s *Service) IssuePasswordModificationToken(ctx context.Context, subject, sessionDigest string) (string, time.Time, error) {
 	if !validSubject(subject) || !validDigest(sessionDigest) {
 		return "", time.Time{}, ErrInvalid
@@ -1253,7 +1253,7 @@ func nilIfEmpty(v string) any {
 }
 func validSubject(v string) bool { return len(v) > 0 && len(v) <= 512 }
 
-// validName mirrors Rauthy's passkey-name character class. unicode.IsSpace is
+// validName uses GoAuthy's passkey-name character class. unicode.IsSpace is
 // used for its Unicode whitespace semantics, matching Rust regex's Unicode
 // \s behaviour; names are limited by code points, not UTF-8 bytes.
 func validName(v string) bool {

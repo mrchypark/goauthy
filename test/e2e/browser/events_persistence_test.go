@@ -58,11 +58,11 @@ func TestCreationEventsPersisted(t *testing.T) {
 			t.Fatalf("ordinary event ID differs after restart node=%s", base)
 		}
 		streamEvents := collectStreamEvents(t, client, base, "latest=1000&level=info", func(events []eventlog.Event) bool {
-			return hasEvent(events, "admin-created@goauthy.e2e", eventlog.NewUserRegistered) && hasEvent(events, "admin-created@goauthy.e2e", eventlog.NewRauthyAdmin) && hasEvent(events, "open@goauthy.e2e", eventlog.NewUserRegistered)
+			return hasEvent(events, "admin-created@goauthy.e2e", eventlog.NewUserRegistered) && hasEvent(events, "admin-created@goauthy.e2e", eventlog.NewGoAuthyAdmin) && hasEvent(events, "open@goauthy.e2e", eventlog.NewUserRegistered)
 		})
 		for typ, expectedID := range map[eventlog.Type]string{
 			eventlog.NewUserRegistered: adminIDs[eventlog.NewUserRegistered],
-			eventlog.NewRauthyAdmin:    adminIDs[eventlog.NewRauthyAdmin],
+			eventlog.NewGoAuthyAdmin:   adminIDs[eventlog.NewGoAuthyAdmin],
 		} {
 			matches := matchingEvents(streamEvents, "admin-created@goauthy.e2e", typ)
 			if len(matches) != 1 || matches[0].ID != expectedID {

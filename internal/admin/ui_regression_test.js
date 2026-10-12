@@ -83,6 +83,7 @@ const ctx = {document, console, FormData, confirm: () => true, setTimeout: fn =>
     }
     return {ok: true, headers: ctx.pageHeaders || {get: () => null}, json: async () => replies.shift() || {}};
   }};
+vm.runInNewContext(fs.readFileSync(__dirname + '/themes.js', 'utf8'), ctx);
 const ready = vm.runInNewContext(source, ctx);
 (async () => {
   await ready; // The actual route promise, no wall-clock delay.
@@ -332,5 +333,8 @@ const ready = vm.runInNewContext(source, ctx);
   ctx.location.pathname = '/auth/v1/admin/clients/client-a/theme';
   await ctx.route();
   assert.equal(themedClient, 'client-a');
+  ctx.location.pathname = '/auth/v1/admin/branding';
+  await ctx.route();
+  assert.equal(themedClient, 'goauthy');
   console.log('admin UI behavioral checks passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

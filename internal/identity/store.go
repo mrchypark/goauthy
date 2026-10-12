@@ -43,7 +43,7 @@ var (
 	ErrPasswordExpired           = errors.New("password expired")
 	ErrPasswordResetUnavailable  = errors.New("password reset unavailable")
 	ErrInvalidPasswordReset      = errors.New("invalid password reset")
-	ErrFinalAdmin                = errors.New("cannot delete the last active direct rauthy_admin")
+	ErrFinalAdmin                = errors.New("cannot delete the last active direct goauthy_admin")
 	ErrLastActiveAdmin           = ErrFinalAdmin
 	ErrDeleteUnauthorized        = errors.New("user deletion authorization failed")
 	// ErrPasswordAuthenticationDisabled is intentionally internal: HTTP
@@ -614,8 +614,8 @@ func (s *Store) deleteUser(ctx context.Context, subject, authoritySQL string, au
 	// expired administrator must not count as the remaining administrator that
 	// allows this deletion. The eligibility predicate matches ValidateSubject.
 	guard := `EXISTS (SELECT 1 FROM identity_users WHERE subject = ?) AND NOT (
-		EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.subject = ? AND u.disabled = 0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name = 'rauthy_admin')
-		AND (SELECT COUNT(DISTINCT u.subject) FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.disabled = 0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name = 'rauthy_admin') = 1
+		EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.subject = ? AND u.disabled = 0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name = 'goauthy_admin')
+		AND (SELECT COUNT(DISTINCT u.subject) FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.disabled = 0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name = 'goauthy_admin') = 1
 	)`
 	requestID := mutationID("delete-user", subject, generation, strconv.FormatInt(now, 10))
 	guardedMutation := strings.TrimSpace(authoritySQL) != ""
@@ -1299,7 +1299,7 @@ func (s *Store) ResetPassword(ctx context.Context, subject, raw, cookie, csrf st
 
 // ConvertToPasskeyOnly irreversibly removes the local password verifier after
 // a user-verified WebAuthn credential exists. It deliberately leaves browser
-// and OAuth sessions intact, matching Rauthy's conversion contract.
+// and OAuth sessions intact.
 func (s *Store) ConvertToPasskeyOnly(ctx context.Context, subject string) error {
 	return s.convertToPasskeyOnly(ctx, subject, "", nil)
 }

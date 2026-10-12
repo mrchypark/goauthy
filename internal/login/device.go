@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/device"
 )
@@ -65,7 +66,7 @@ func (h *Handler) deviceLoginGet(w http.ResponseWriter, r *http.Request, forceMF
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	themeURL, err := h.resolveThemeURL(r.Context(), "rauthy")
+	themeURL, err := h.resolveThemeURL(r.Context(), branding.GlobalBrandID)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
@@ -261,7 +262,7 @@ func (h *Handler) connectionHandoffLoginGet(w http.ResponseWriter, r *http.Reque
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	themeURL, err := h.resolveThemeURL(r.Context(), "rauthy")
+	themeURL, err := h.resolveThemeURL(r.Context(), branding.GlobalBrandID)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return

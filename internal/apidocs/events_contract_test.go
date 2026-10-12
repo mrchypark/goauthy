@@ -30,12 +30,16 @@ func TestEventsQueryContract(t *testing.T) {
 	if err := body.VisitJSON(map[string]any{"from": float64(math.MaxInt64 / 1000), "until": nil, "level": "critical", "typ": "TokenIssued"}); err != nil {
 		t.Fatalf("full valid query rejected: %v", err)
 	}
+	if err := body.VisitJSON(map[string]any{"from": float64(1719784800), "level": "notice", "typ": "NewGoAuthyAdmin"}); err != nil {
+		t.Fatalf("canonical admin event query rejected: %v", err)
+	}
 	for _, invalid := range []map[string]any{
 		{"level": "info"},
 		{"from": float64(1719784799), "level": "info"},
 		{"from": float64(1719784800), "level": "INFO"},
 		{"from": float64(1719784800), "level": "info", "typ": "not-an-event"},
 		{"from": float64(1719784800), "level": "info", "typ": "1234567890123456789012345"},
+		{"from": float64(1719784800), "level": "info", "typ": "NewRauthyAdmin"},
 	} {
 		if err := body.VisitJSON(invalid); err == nil {
 			t.Errorf("invalid query accepted: %#v", invalid)

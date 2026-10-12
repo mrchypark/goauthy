@@ -95,7 +95,7 @@ func (s *Store) CreateUserWithGuard(ctx context.Context, input UserCreation, aut
 		return OpenRegistrationResult{}, err
 	}
 	statements = append(statements, registered)
-	admin, err := eventlog.Creation(requestID, email, input.SourceIP, true, now).Statement(condition+` AND EXISTS (SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject=? AND r.name='rauthy_admin')`, requestID, subject, email, subject, email, digest, subject, subject)
+	admin, err := eventlog.Creation(requestID, email, input.SourceIP, true, now).Statement(condition+` AND EXISTS (SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject=? AND r.name='goauthy_admin')`, requestID, subject, email, subject, email, digest, subject, subject)
 	if err != nil {
 		return OpenRegistrationResult{}, err
 	}
@@ -180,7 +180,7 @@ func (s *Store) CreatePasskeyOnlyUser(ctx context.Context, input UserCreation, a
 		return "", err
 	}
 	statements = append(statements, registered)
-	admin, err := eventlog.Creation(requestID, email, input.SourceIP, true, now).Statement(condition+` AND EXISTS (SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject=? AND r.name='rauthy_admin')`, requestID, subject, email, subject, email, subject)
+	admin, err := eventlog.Creation(requestID, email, input.SourceIP, true, now).Statement(condition+` AND EXISTS (SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject=? AND r.name='goauthy_admin')`, requestID, subject, email, subject, email, subject)
 	if err != nil {
 		return "", err
 	}

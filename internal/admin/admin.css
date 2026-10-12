@@ -11,6 +11,9 @@
   font-family: var(--brand-font, sans-serif);
 }
 * { box-sizing: border-box; }
+.common-brand { --ink:hsl(var(--text-high)); --muted:hsl(var(--text)); --paper:hsl(var(--bg)); --surface:hsl(var(--bg-high)); --line:hsl(var(--bg-high)); --accent:hsl(var(--action)); --accent-dark:hsl(var(--action)); --wash:hsl(var(--bg-high)); }
+.common-brand .top { background:var(--paper); }
+.common-brand-logo { width:auto; max-width:72px; height:36px; object-fit:contain; }
 [hidden] { display: none !important; }
 #prov-oauth-fields { display: grid; gap: 12px; }
 body { margin: 0; background: var(--paper); color: var(--ink); font: 14px/1.6 var(--brand-font, sans-serif); }

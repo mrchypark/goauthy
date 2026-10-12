@@ -1,11 +1,31 @@
 package admin
 
 import (
+	"context"
+	"github.com/mrchypark/goauthy/internal/branding"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestUICommonBrandEscapingAndIssuerPaths(t *testing.T) {
+	u, _ := NewUI(func(http.ResponseWriter, *http.Request, bool) bool { return true })
+	u.SetIssuer("https://id.example/tenant")
+	u.SetBrandResolver(func(context.Context) (branding.Brand, error) {
+		return branding.Brand{Name: `ID "<operator>"`, LogoURL: "/auth/v1/clients/rauthy/logo?updated=7", ThemeURL: "/auth/v1/theme/rauthy/9"}, nil
+	})
+	w := httptest.NewRecorder()
+	u.ServeHTTP(w, httptest.NewRequest("GET", "/auth/v1/admin/branding", nil))
+	for _, want := range []string{`ID &#34;&lt;operator&gt;&#34;`, `href="/tenant/auth/v1/admin/branding"`, `src="/tenant/auth/v1/clients/rauthy/logo?updated=7"`, `href="/tenant/auth/v1/theme/rauthy/9"`} {
+		if w.Code != 200 || !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("status=%d missing %q body=%s", w.Code, want, w.Body.String())
+		}
+	}
+	if strings.Contains(w.Body.String(), `<operator>`) {
+		t.Fatal("brand name rendered as HTML")
+	}
+}
 
 func TestUIServesSameOriginAssetsAndCSRFProvider(t *testing.T) {
 	h, err := NewUI(func(w http.ResponseWriter, _ *http.Request, mutation bool) bool {

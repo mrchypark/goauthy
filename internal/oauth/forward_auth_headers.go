@@ -148,7 +148,7 @@ func (identity ForwardAuthIdentity) forwardAuthHeaderValues() (map[string]string
 		ForwardAuthGivenNameHeader:     givenName,
 		ForwardAuthMFAHeader:           strconv.FormatBool(identity.MFAEnabled),
 	}
-	// Rauthy emits this optional header only when a preferred username exists.
+	// Emit this optional header only when a preferred username exists.
 	if preferredUsername != "" {
 		values[ForwardAuthPreferredUsernameHeader] = preferredUsername
 	}
@@ -176,7 +176,7 @@ func canonicalForwardAuthList(values []string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Rauthy uses comma-joined CSV for these headers. Reject the delimiter
+		// These headers use comma-joined CSV. Reject the delimiter
 		// rather than emitting an ambiguous value a downstream app may parse
 		// as a different set of roles/groups.
 		if strings.Contains(value, ",") {

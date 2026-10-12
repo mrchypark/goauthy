@@ -284,7 +284,7 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 	if _, err := browserIDPolicyFromEnv(getenv, cfg.Issuer); err != nil {
 		return err
 	}
-	if strings.ContainsAny(envValue(getenv, "GOAUTHY_EMAIL_SUB_PREFIX", "Rauthy IAM"), "\r\n") {
+	if strings.ContainsAny(envValue(getenv, "GOAUTHY_EMAIL_SUB_PREFIX", "GoAuthy IAM"), "\r\n") {
 		return errors.New("GOAUTHY_EMAIL_SUB_PREFIX must not contain line breaks")
 	}
 

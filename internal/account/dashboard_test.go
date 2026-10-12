@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
 )
 
@@ -82,6 +83,27 @@ func TestDashboardCurrentAccountBoundary(t *testing.T) {
 	h.Dashboard(w, r)
 	if w.Code != 401 {
 		t.Fatalf("revoked session status=%d", w.Code)
+	}
+}
+
+func TestDashboardCommonBrandEscapingAndIssuerPaths(t *testing.T) {
+	h, _, _, cookie, _ := testPasswordHandler(t)
+	h.issuer = "http://localhost/tenant"
+	cookie.Name, _ = browser.CookieName(h.issuer)
+	h.SetBrandResolver(func(context.Context) (branding.Brand, error) {
+		return branding.Brand{Name: `ID "<operator>"`, LogoURL: "/auth/v1/clients/rauthy/logo?updated=7", ThemeURL: "/auth/v1/theme/rauthy/9"}, nil
+	})
+	r := httptest.NewRequest("GET", "/account", nil)
+	r.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	h.Dashboard(w, r)
+	for _, want := range []string{`ID &#34;&lt;operator&gt;&#34;`, `src="/tenant/auth/v1/clients/rauthy/logo?updated=7"`, `href="/tenant/auth/v1/theme/rauthy/9"`} {
+		if w.Code != 200 || !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("status=%d missing %q body=%s", w.Code, want, w.Body.String())
+		}
+	}
+	if !strings.Contains(w.Header().Get("Content-Security-Policy"), "img-src 'self'") || strings.Contains(w.Body.String(), `<operator>`) {
+		t.Fatal("unsafe brand projection")
 	}
 }
 

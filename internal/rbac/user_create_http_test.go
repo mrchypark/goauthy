@@ -271,7 +271,7 @@ func TestCreateUserHTTPDelegatedExactWildcardAndRejections(t *testing.T) {
 	h, store, sender, _, _ := userCreateHTTPFixture(t)
 	ctx := context.Background()
 	insertActive(t, store.db, "delegated")
-	role, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/*", nil)
+	role, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/*", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +287,7 @@ func TestCreateUserHTTPDelegatedExactWildcardAndRejections(t *testing.T) {
 	if _, err := store.CreateGroup(ctx, "admin", "other/x", nil); err != nil {
 		t.Fatal(err)
 	}
-	exactRole, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/exact", nil)
+	exactRole, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/exact", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

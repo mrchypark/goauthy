@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/dcr"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/storage"
@@ -225,6 +226,15 @@ func TestDynamicClientsResolveForTokenAndAuthorize(t *testing.T) {
 	}
 	if dynamic, err := server.store.dynamicClients.GetClient(ctx, testClientID); !errors.Is(err, fosite.ErrNotFound) {
 		t.Fatalf("bootstrap shadow row client=%#v err=%v", dynamic, err)
+	}
+	if _, err := server.store.dynamicClients.Create(ctx, dcr.CreateRequest{
+		ClientID: branding.GlobalBrandID, RedirectURIs: []string{"https://brand-shadow.example.test/callback"}, GrantTypes: []string{"authorization_code"}, ResponseTypes: []string{"code"},
+		Scopes: []string{"goauthy.read"}, TokenEndpointAuthMethod: dcr.TokenEndpointAuthNone, Name: "Brand namespace shadow",
+	}); !errors.Is(err, dcr.ErrReservedClientID) {
+		t.Fatalf("brand ID dynamic registration err=%v", err)
+	}
+	if dynamic, err := server.store.dynamicClients.GetClient(ctx, branding.GlobalBrandID); !errors.Is(err, fosite.ErrNotFound) {
+		t.Fatalf("brand ID shadow row client=%#v err=%v", dynamic, err)
 	}
 	bootstrap, err := server.store.GetClient(ctx, testClientID)
 	if err != nil || len(bootstrap.GetRedirectURIs()) != 1 || bootstrap.GetRedirectURIs()[0] != testRedirectURI {

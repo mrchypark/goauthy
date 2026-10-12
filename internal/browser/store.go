@@ -104,7 +104,7 @@ type Store struct {
 	now         func() time.Time
 }
 
-// NewStore uses Rauthy's 90 minute idle lifetime unless one explicit positive
+// NewStore uses a 90 minute idle lifetime unless one explicit positive
 // duration is supplied. The optional argument preserves the original call
 // shape while allowing deployments to set a stricter policy.
 func NewStore(db *rhiza.DB, idleTimeout ...time.Duration) (*Store, error) {

@@ -455,7 +455,7 @@ func (s *Store) selfUserValues(ctx context.Context, actor, subject string) (map[
 }
 
 // PutSelfUserValues accepts only currently editable keys. Unknown and
-// non-editable valid keys are intentionally ignored to match Rauthy.
+// non-editable valid keys are intentionally ignored.
 func (s *Store) PutSelfUserValues(ctx context.Context, actor, subject string, expected int64, values map[string]json.RawMessage) (int64, error) {
 	if actor != subject || !validSubject(subject) || len(values) > 64 {
 		return 0, ErrUnauthorized
@@ -835,7 +835,7 @@ func (s *Store) admin(ctx context.Context, actor string) error {
 	if !validSubject(actor) || s == nil || s.db == nil {
 		return ErrUnauthorized
 	}
-	row, e := s.one(ctx, `SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='rauthy_admin'`, []any{actor})
+	row, e := s.one(ctx, `SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='goauthy_admin'`, []any{actor})
 	if e != nil {
 		return ErrUnauthorized
 	}
@@ -1308,7 +1308,7 @@ func valueFor(n string, values map[string]json.RawMessage, attrs map[string]Attr
 	return nil, false
 }
 func adminGuard() string {
-	return `EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='rauthy_admin')`
+	return `EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='goauthy_admin')`
 }
 func requestID(parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))

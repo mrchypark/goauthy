@@ -166,7 +166,7 @@ func TestUpdatePreferredUsernameDelegatedScopeAndRequestGates(t *testing.T) {
 	insertActive(t, store.db, "delegated")
 	insertActive(t, store.db, "target")
 	seedPreferred(t, store, "target", "target@example.test", "")
-	role, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/*", nil)
+	role, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/*", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,7 @@ func TestUpdatePreferredUsernameCapturedGuard(t *testing.T) {
 		insertActive(t, store.db, "delegated-captured")
 		insertActive(t, store.db, "group-target")
 		seedPreferred(t, store, "group-target", "group-target@example.test", "")
-		role, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/*", nil)
+		role, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/*", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

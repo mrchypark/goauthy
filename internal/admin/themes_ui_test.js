@@ -6,13 +6,13 @@ const source = fs.readFileSync(__dirname + '/themes.js', 'utf8');
 const clone = value => JSON.parse(JSON.stringify(value));
 const makeTheme = client_id => ({client_id, light: {text: [200, 5, 37], text_high: [200, 15, 25], bg: [34, 25, 97], bg_high: [34, 20, 90], action: [34, 100, 40], accent: [265, 100, 53], error: [15, 100, 37], btn_text: 'white', theme_sun: 'hsla(var(--action) / .7)', theme_moon: 'hsla(var(--accent) / .85)'}, dark: {text: [34, 5, 75], text_high: [34, 7, 90], bg: [200, 40, 6], bg_high: [200, 20, 17], action: [34, 100, 59], accent: [265, 100, 53], error: [15, 100, 37], btn_text: 'hsl(var(--bg))', theme_sun: 'hsla(var(--action) / .7)', theme_moon: 'hsla(var(--accent) / .85)'}, border_radius: '5px'});
 
-function harness() {
+function harness(messages = {}) {
   const nodes = new Map(), calls = [], vars = new Map(), removedVars = [], sampleVars = new Map(), frameBody = {style: {setProperty: (key, value) => vars.set(key, value), removeProperty: key => { removedVars.push(key); vars.delete(key); }}, dataset: {}};
   const sampleFields = {style: {setProperty: (key, value) => sampleVars.set(key, value)}};
   let sampleReady = true;
   const node = id => {
     if (!nodes.has(id)) {
-      const el = {id, value: '', textContent: '', className: '', disabled: false, dataset: {}, attrs: {}, naturalWidth: 0, complete: false, style: {setProperty() {}, removeProperty() {}}, setAttribute(key, value) { this.attrs[key] = value; }, querySelectorAll() { return []; }, querySelector(selector) { const field = selector.match(/data-theme-hsl="([^"]+)"/)?.[1]; return field ? outputs.get(field) : null; }};
+      const el = {id, value: '', textContent: '', className: '', disabled: false, dataset: {}, attrs: {}, naturalWidth: 0, complete: false, style: {setProperty() {}, removeProperty() {}}, setAttribute(key, value) { this.attrs[key] = value; }, querySelectorAll() { return []; }, querySelector(selector) { const field = selector.match(/data-theme-hsl="([^"]+)"/)?.[1]; return field ? outputs.get(field) : null; }, insertAdjacentHTML(position, html) { this.html = html + this.html; }};
       Object.defineProperty(el, 'innerHTML', {get() { return el.html || ''; }, set(html) {
         el.html = html;
         if (id !== 'theme-fields') return;
@@ -49,23 +49,23 @@ function harness() {
   const copyLanguage = {value: 'en'};
   const modes = ['light', 'dark'].map(value => ({dataset: {themeMode: value}, attrs: {}, disabled: false, setAttribute(key, val) { this.attrs[key] = val; }}));
   const frame = node('theme-preview-frame');
-  const previewNodes = new Map(['theme-sample-fields','theme-sample-title','theme-sample-description','theme-sample-button','theme-logo-image','theme-default-brand'].map(id => [id, {id, textContent: '', hidden: false, dataset: {}, style: {setProperty() {}}, set src(value) { this._src = value; }, get src() { return this._src; }}]));
+  const previewNodes = new Map(['theme-sample-fields','theme-sample-title','theme-sample-description','theme-sample-button','theme-logo-image','theme-default-brand','theme-brand-label'].map(id => [id, {id, textContent: '', hidden: false, dataset: {}, style: {setProperty() {}}, set src(value) { this._src = value; }, get src() { return this._src; }}]));
   const previewPanel = {style: {setProperty(name, value) { this[name] = value; }}}, brand = {style: {setProperty(name, value) { this[name] = value; }}}, topbar = {classList: {toggle(name, value) { this[name] = value; }}};
   frame.contentDocument = {body: frameBody, getElementById: id => id === 'theme-sample-fields' ? (sampleReady ? sampleFields : null) : previewNodes.get(id) || null, querySelector: selector => selector === '.auth-panel' ? previewPanel : selector === '.auth-topbar .auth-brand' ? brand : topbar};
   const root = {innerHTML: ''};
-  const globalTheme = makeTheme('rauthy');
+  const globalTheme = makeTheme('goauthy');
   let saved = null, failNextPut = false, failNextPost = false, holdNextPut = false, resolvePut, rejectPut, confirmCount = 0;
   const document = {documentElement: {lang: 'ko'}, getElementById: node, querySelectorAll: selector => selector === '[data-theme-mode]' ? modes : []};
   const ctx = {
     document, console, root, confirm: () => { confirmCount++; return true; }, encodeURIComponent, Date, FormData: class { append(key, value) { this[key] = value; } },
     esc: value => String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c])),
-    GoAuthyI18n: {t(key, values = {}) { return String(key).replace(/\{(\w+)\}/g, (_, name) => Object.hasOwn(values, name) ? values[name] : `{${name}}`); }},
+    GoAuthyI18n: {t(key, values = {}) { return String(messages[key] || key).replace(/\{(\w+)\}/g, (_, name) => Object.hasOwn(values, name) ? values[name] : `{${name}}`); }},
     shell(title, subtitle, body) { root.innerHTML = `${title}\n${subtitle}\n${body}`; for (const match of body.matchAll(/id="([^"]+)"/g)) node(match[1]); },
     api: async (path, opts = {}) => {
       calls.push({path, opts});
       if (opts.method === 'POST') {
         if (failNextPost) { failNextPost = false; throw Error('read unavailable'); }
-        if (path.endsWith('/rauthy')) return clone(globalTheme);
+        if (path.endsWith('/goauthy')) return clone(saved?.client_id === 'goauthy' ? saved : globalTheme);
         return clone(saved || globalTheme);
       }
       if (opts.method === 'PUT') {
@@ -87,7 +87,7 @@ function harness() {
   const h = harness(), id = 'client<& /id';
   await h.ctx.clientTheme(id);
   const endpoint = '/auth/v1/theme/' + encodeURIComponent(id);
-  assert.deepEqual(h.calls.slice(0, 2).map(x => [x.path, x.opts.method]), [[endpoint, 'POST'], ['/auth/v1/theme/rauthy', 'POST']]);
+  assert.deepEqual(h.calls.slice(0, 2).map(x => [x.path, x.opts.method]), [[endpoint, 'POST'], ['/auth/v1/theme/goauthy', 'POST']]);
   assert.match(h.root.innerHTML, /Client login theme/);
   assert.match(h.root.innerHTML, /href="\/auth\/v1\/admin\/clients"/);
   assert.match(h.root.innerHTML, /theme-workspace/);
@@ -214,7 +214,7 @@ function harness() {
   await h.node('theme-reset').onclick();
   await h.node('theme-reset-confirm').onclick();
   const resetCalls = h.calls.slice(beforeReset);
-  assert.deepEqual(resetCalls.map(x => [x.path, x.opts.method]), [[endpoint, 'DELETE'], [endpoint, 'POST'], ['/auth/v1/theme/rauthy', 'POST']]);
+  assert.deepEqual(resetCalls.map(x => [x.path, x.opts.method]), [[endpoint, 'DELETE'], [endpoint, 'POST'], ['/auth/v1/theme/goauthy', 'POST']]);
   assert.match(h.node('theme-notice').textContent, /inherits the global theme/i);
   assert.equal(h.outputs.get('text').textContent, '200 5 37');
   assert.equal(h.confirmCount, 0);
@@ -255,5 +255,58 @@ function harness() {
   delayedFrame.setSampleReady(true);
   delayedFrame.frame.onload();
   assert.equal(delayedFrame.sampleVars.get('display'), 'grid');
+
+  const renamed = harness();
+  renamed.globalTheme.brand_name = 'Original ID';
+  await renamed.ctx.clientTheme('app-b');
+  await renamed.node('theme-save').onclick();
+  assert.equal(renamed.saved.brand_name, 'Original ID');
+  renamed.globalTheme.brand_name = `Current ID "<operator>"`;
+  await renamed.node('theme-reload').onclick();
+  assert.equal(renamed.saved.brand_name, 'Original ID', 'client override stays intact');
+  assert.equal(renamed.previewNodes.get('theme-brand-label').textContent, renamed.globalTheme.brand_name, 'preview uses the current common name after a rename');
+  delete renamed.saved.brand_name;
+  await renamed.node('theme-reload').onclick();
+  assert.equal(renamed.previewNodes.get('theme-brand-label').textContent, renamed.globalTheme.brand_name, 'override without a name also uses the common name');
+  delete renamed.globalTheme.brand_name;
+  await renamed.node('theme-reload').onclick();
+  assert.equal(renamed.previewNodes.get('theme-brand-label').textContent, 'GoAuthy');
+
+  const common = harness();
+  await common.ctx.clientTheme('goauthy');
+  assert.match(common.root.innerHTML, /Common brand/);
+  assert.match(common.node('theme-fields').innerHTML, /Common brand name/);
+  assert.equal(common.node('theme-reset').textContent, 'Reset common theme to defaults');
+  const name = `GoAuthy ID "<operator>"`;
+  common.node('theme-brand-name').value = name;
+  common.node('theme-brand-name').oninput();
+  await common.node('theme-save').onclick();
+  assert.equal(common.saved.brand_name, name);
+  assert.equal(common.saved.client_id, 'goauthy');
+  assert.equal(common.saved.login, undefined, 'brand name is independent of login title');
+  await common.node('theme-reload').onclick();
+  assert.match(common.node('theme-fields').innerHTML, /GoAuthy ID &quot;&lt;operator&gt;&quot;/);
+  assert.doesNotMatch(common.node('theme-fields').innerHTML, /"<operator>"/);
+  assert.ok(common.calls.some(call => call.path === '/auth/v1/theme/goauthy' && call.opts.method === 'PUT'));
+  await common.node('theme-reset-confirm').onclick();
+  assert.equal(common.saved, null);
+  assert.equal(common.node('theme-status').textContent, 'Common theme reset to defaults.');
+  assert.equal(common.previewNodes.get('theme-sample-title').textContent, 'Sign in');
+  assert.doesNotMatch(common.frame.srcdoc, /rauthy/);
+
+  const koreanMessages = {'Sign in': '로그인'};
+  vm.runInNewContext(fs.readFileSync(__dirname + '/module_locale.js', 'utf8'), {globalThis: {GoAuthyI18n: {messages: koreanMessages}}});
+  const koreanCommon = harness(koreanMessages);
+  koreanCommon.globalTheme.brand_name = 'GoAuthy ID';
+  await koreanCommon.ctx.clientTheme('goauthy');
+  assert.equal(koreanCommon.previewNodes.get('theme-sample-title').textContent, '로그인');
+  assert.equal(koreanCommon.previewNodes.get('theme-brand-label').textContent, 'GoAuthy ID');
+  assert.match(koreanCommon.root.innerHTML, /대시보드로 돌아가기/);
+  assert.match(koreanCommon.root.innerHTML, /공통 로고/);
+  assert.doesNotMatch(koreanCommon.frame.srcdoc, /rauthy/);
+  assert.doesNotMatch(koreanCommon.root.innerHTML, /Back to dashboard|Common logo|Current common logo|Remove this common logo/);
+  const koreanClient = harness(koreanMessages);
+  await koreanClient.ctx.clientTheme('app-b');
+  assert.equal(koreanClient.previewNodes.get('theme-sample-title').textContent, 'app-b 로그인');
   console.log('client theme UI checks passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

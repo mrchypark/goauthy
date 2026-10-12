@@ -28,7 +28,7 @@ INSERT INTO event_log(id,timestamp,level,typ,text)
 SELECT substr(printf('%042d',x),1,42)||'A',
        CASE WHEN x=1 THEN ? WHEN x<=1201 THEN ? ELSE ?-(x-1201) END,
        0,
-       'RauthyHealthy',
+       'GoAuthyHealthy',
 	       substr(replace(hex(zeroblob(2048)),'0','x'),1,CASE WHEN x BETWEEN 902 AND 1201 THEN 4096 ELSE 8 END)
 FROM n`
 
@@ -171,7 +171,7 @@ func eventPageRow(row eventlog.Event, base time.Time) (int, int, bool) {
 		return 0, 0, false
 	}
 	index, err := strconv.Atoi(row.ID[37:42])
-	if err != nil || index < 1 || index > 10_000 || row.Text == nil || row.Type != eventlog.RauthyHealthy || row.Level != eventlog.Info {
+	if err != nil || index < 1 || index > 10_000 || row.Text == nil || row.Type != eventlog.GoAuthyHealthy || row.Level != eventlog.Info {
 		return 0, 0, false
 	}
 	wantTimestamp := base.UnixMilli()

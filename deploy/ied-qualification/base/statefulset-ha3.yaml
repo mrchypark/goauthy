@@ -120,7 +120,7 @@ spec:
             - name: GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE
               value: /run/secrets/bootstrap-user-password-phc
             - name: GOAUTHY_BOOTSTRAP_USER_ROLES
-              value: '["rauthy_admin"]'
+              value: '["goauthy_admin"]'
             - name: GOAUTHY_BOOTSTRAP_ALLOWED_RESOURCES
               value: '["https://api.example.test/v1"]'
             - name: GOAUTHY_RFC8252_LOOPBACK_REDIRECTS

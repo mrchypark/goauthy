@@ -1,10 +1,13 @@
 package admin
 
 import (
+	"bytes"
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"html/template"
 	"net/http"
@@ -14,6 +17,8 @@ import (
 
 //go:embed admin.html admin.css locale.js module_locale.js admin.js dashboard.js catalog.js sessions.js collections.js clients.js themes.js providers.js blacklist.js events.js templates.js
 var uiFS embed.FS
+
+var adminTemplate = template.Must(template.ParseFS(uiFS, "admin.html"))
 
 type CSRFTokenProvider func(http.ResponseWriter, *http.Request) bool
 
@@ -39,6 +44,7 @@ type UI struct {
 	basePath     string
 	csrf         CSRFTokenProvider
 	templates    EmailTemplateProvider
+	brand        func(context.Context) (branding.Brand, error)
 }
 
 func NewUI(browserAdmin BrowserAdministrator) (*UI, error) {
@@ -72,6 +78,9 @@ func (u *UI) localPaths(data []byte) []byte {
 
 func (u *UI) SetCSRFTokenProvider(provider CSRFTokenProvider) { u.csrf = provider }
 func (u *UI) SetTemplateProvider(p EmailTemplateProvider)     { u.templates = p }
+func (u *UI) SetBrandResolver(resolve func(context.Context) (branding.Brand, error)) {
+	u.brand = resolve
+}
 
 func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -133,12 +142,28 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	data, _ := uiFS.ReadFile("admin.html")
+	brand := branding.Brand{Name: "GoAuthy"}
+	if u.brand != nil {
+		var err error
+		brand, err = u.brand(r.Context())
+		if err != nil {
+			http.Error(w, "Brand unavailable", http.StatusServiceUnavailable)
+			return
+		}
+	}
 	language := i18n.UILanguageFromRequest(r)
 	w.Header().Set("Content-Language", language)
 	w.Header().Add("Vary", "Accept-Language")
 	w.Header().Add("Vary", "Cookie")
-	_, _ = w.Write(u.localPaths([]byte(strings.Replace(string(data), `<html lang="en">`, `<html lang="`+language+`" data-base-path="`+template.HTMLEscapeString(u.basePath)+`">`, 1))))
+	var data bytes.Buffer
+	if err := adminTemplate.Execute(&data, struct {
+		Language, BasePath string
+		Brand              branding.Brand
+	}{language, u.basePath, brand}); err != nil {
+		http.Error(w, "Brand unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	_, _ = w.Write(u.localPaths(data.Bytes()))
 }
 
 func (u *UI) handleEmailTemplateList(w http.ResponseWriter, r *http.Request) {

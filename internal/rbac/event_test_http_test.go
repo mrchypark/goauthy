@@ -187,7 +187,7 @@ func TestEventsTestDelegatedGroupAdminIsReadOnly(t *testing.T) {
 	h, store, _, _, _ := userCreateHTTPFixture(t)
 	ctx := context.Background()
 	insertActive(t, store.db, "delegated-events")
-	role, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/*", nil)
+	role, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/*", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

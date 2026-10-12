@@ -1,6 +1,10 @@
 package identity
 
-import "context"
+import (
+	"context"
+
+	"github.com/mrchypark/goauthy/internal/branding"
+)
 
 // NeedsProfileUpdate reports whether the stored profile for subject fails
 // the current deployment validation policy. A false result with a nil error
@@ -10,7 +14,7 @@ func (s *Store) NeedsProfileUpdate(ctx context.Context, policy UserValuesPolicy,
 	if !policy.RevalidateDuringLogin {
 		return false, nil
 	}
-	if clientID == "rauthy" {
+	if clientID == branding.GlobalBrandID {
 		return false, nil
 	}
 	if err := policy.Validate(); err != nil {
