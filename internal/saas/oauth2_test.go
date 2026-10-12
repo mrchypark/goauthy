@@ -127,3 +127,65 @@ func TestOAuth2RejectsInvalidConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestOAuth2LocalhostCallbackBoundary(t *testing.T) {
+	t.Parallel()
+	const callback = "http://localhost:18080/auth/v1/saas/callback/google-personal"
+	for _, tc := range []struct {
+		callback string
+		want     bool
+	}{
+		{callback, true},
+		{"http://LOCALHOST:18080/auth/v1/saas/callback/google-personal", true},
+		{"http://127.0.0.1:18080/callback", true},
+		{"http://[::1]:18080/callback", true},
+		{"https://auth.example/callback", true},
+		{"http://192.168.1.2:18080/callback", false},
+		{"http://provider.example/callback", false},
+		{"http://app.localhost:18080/callback", false},
+		{"http://localhost.example:18080/callback", false},
+		{"http://127.example:18080/callback", false},
+		{"http://user@localhost:18080/callback", false},
+		{callback + "?state=fixed", false},
+		{callback + "#fragment", false},
+		{"http:localhost:18080/callback", false},
+		{"http://localhost:18080", false},
+	} {
+		t.Run(tc.callback, func(t *testing.T) {
+			if got := validCallback(tc.callback); got != tc.want {
+				t.Fatalf("validCallback=%v, want %v", got, tc.want)
+			}
+		})
+	}
+	base := OAuth2Config{ClientID: "client", AuthorizationURL: "https://accounts.google.com/o/oauth2/v2/auth", TokenURL: "https://oauth2.googleapis.com/token", CallbackURL: callback, Scopes: []string{"openid", "email", "profile"}, AuthStyle: oauth2.AuthStyleInParams, IdentityEndpoint: "https://openidconnect.googleapis.com/v1/userinfo", SubjectField: "sub"}
+	o, err := NewOAuth2(base, "synthetic-client-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := o.AuthorizationURL("fixed-state", strings.Repeat("v", 43))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Query().Get("redirect_uri") != callback {
+		t.Fatal("authorization did not preserve the exact localhost callback")
+	}
+	for _, endpoint := range []string{callback, "http://127.0.0.1:18080/endpoint", "http://192.168.1.2/endpoint"} {
+		for _, field := range []string{"authorization", "token", "identity"} {
+			t.Run(field+"/"+endpoint, func(t *testing.T) {
+				cfg := base
+				switch field {
+				case "authorization":
+					cfg.AuthorizationURL = endpoint
+				case "token":
+					cfg.TokenURL = endpoint
+				case "identity":
+					cfg.IdentityEndpoint = endpoint
+				}
+				if _, err := NewOAuth2(cfg, "synthetic-client-secret"); !errors.Is(err, ErrOAuth2Config) {
+					t.Fatal("HTTP outbound endpoint accepted")
+				}
+			})
+		}
+	}
+}

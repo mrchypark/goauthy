@@ -91,7 +91,7 @@ func validateProviderInput(in ProviderInput, requireSecret bool) (string, error)
 		if in.Connector != nil {
 			return "", ErrProviderInvalid
 		}
-		if requireSecret && !validText(in.ClientSecret) || !validText(in.ClientID) || !validCallback(in.CallbackURI) || !oauthEndpoint(in.AuthorizationURL) || !oauthEndpoint(in.TokenURL) || len(in.Scopes) == 0 || len(in.Scopes) > 64 || (in.AuthStyle != "header" && in.AuthStyle != "params") {
+		if requireSecret && !validText(in.ClientSecret) || !validText(in.ClientID) || !validCallback(in.CallbackURI) || !oauthEndpoint(in.AuthorizationURL) || !oauthEndpoint(in.TokenURL) || len(in.Scopes) > 64 || (in.AuthStyle != "header" && in.AuthStyle != "params") {
 			return "", ErrProviderInvalid
 		}
 		style := oauth2.AuthStyleInHeader
@@ -101,7 +101,7 @@ func validateProviderInput(in ProviderInput, requireSecret bool) (string, error)
 		if _, err := NewOAuth2(OAuth2Config{ClientID: in.ClientID, AuthorizationURL: in.AuthorizationURL, TokenURL: in.TokenURL, CallbackURL: in.CallbackURI, Scopes: in.Scopes, AuthStyle: style, IdentityEndpoint: in.IdentityEndpoint, SubjectField: in.SubjectField}, in.ClientSecretOrPlaceholder(requireSecret)); err != nil {
 			return "", ErrProviderInvalid
 		}
-		b, _ := json.Marshal(in.Scopes)
+		b, _ := json.Marshal(append([]string{}, in.Scopes...))
 		return string(b), nil
 	}
 	if in.CallbackURI != "" {

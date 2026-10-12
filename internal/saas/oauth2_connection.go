@@ -94,7 +94,8 @@ func (s *CredentialStore) BeginOAuth2(ctx context.Context, providers *ProviderSt
 	return OAuth2Start{AuthorizationURL: url}, nil
 }
 
-func (s *CredentialStore) CompleteOAuth2(ctx context.Context, providers *ProviderStore, owner, collection, connection, provider, sessionDigest, callback, state, code string, authority func() (string, []any)) (OAuth2ConnectionStatus, error) {
+// Google and GitHub require their response issuer; generic providers may omit it.
+func (s *CredentialStore) CompleteOAuth2(ctx context.Context, providers *ProviderStore, owner, collection, connection, provider, sessionDigest, callback, state, code string, authority func() (string, []any), responseIssuer ...string) (OAuth2ConnectionStatus, error) {
 	p, guard, err := oauth2Provider(ctx, providers, provider, callback, authority)
 	if err != nil {
 		return OAuth2ConnectionStatus{}, err
@@ -103,22 +104,52 @@ func (s *CredentialStore) CompleteOAuth2(ctx context.Context, providers *Provide
 	if err != nil {
 		return OAuth2ConnectionStatus{}, err
 	}
-	return s.completeOAuth2(ctx, o, p, owner, collection, connection, sessionDigest, state, code, guard)
+	return s.completeOAuth2(ctx, o, p, owner, collection, connection, sessionDigest, state, code, guard, responseIssuer...)
+}
+
+// RejectOAuth2 validates a denial's binding without consuming state or exchanging a code.
+func (s *CredentialStore) RejectOAuth2(ctx context.Context, providers *ProviderStore, owner, provider, sessionDigest, callback, state, issuer string, authority func() (string, []any)) error {
+	p, guard, err := oauth2Provider(ctx, providers, provider, callback, authority)
+	if err != nil {
+		return err
+	}
+	_, _, err = s.callbackAuthorization(ctx, p, owner, "", "", sessionDigest, state, guard, []string{issuer})
+	return err
+}
+
+func (s *CredentialStore) callbackAuthorization(ctx context.Context, p Provider, owner, collection, connection, sessionDigest, state string, guard func() (string, []any), responseIssuer []string) (credentialBinding, string, error) {
+	if s == nil || ctx == nil || !validState(state) || !validAuthorizationDigest(sessionDigest) {
+		return credentialBinding{}, "", errAuthorization
+	}
+	issuer := ""
+	if googleOAuth2Profile(p.AuthorizationURL, p.TokenURL, p.IdentityEndpoint) {
+		issuer = "https://accounts.google.com"
+	} else if githubPublicOAuth2Profile(p.AuthorizationURL, p.TokenURL, p.IdentityEndpoint, p.SubjectField) {
+		issuer = "https://github.com/login/oauth"
+	}
+	if len(responseIssuer) > 1 || issuer != "" && (len(responseIssuer) != 1 || responseIssuer[0] != issuer) || issuer == "" && len(responseIssuer) == 1 && responseIssuer[0] != "" {
+		return credentialBinding{}, "", ErrOAuth2Exchange
+	}
+	b, verifier, err := s.loadAuthorizationVerifier(ctx, authorizationDigest(state), sessionDigest, oauth2ProviderDigest(p), guard)
+	if err != nil {
+		return credentialBinding{}, "", err
+	}
+	if b.Owner != owner || (collection != "" && b.CollectionID != collection) || (connection != "" && b.ConnectionID != connection) || b.ProviderID != p.ID {
+		return credentialBinding{}, "", ErrAuthorizationNotFound
+	}
+	return b, verifier, nil
 }
 
 // The adapter argument keeps external HTTP at the test boundary. The public
 // entry point always loads administrator-registered settings and the restricted client.
-func (s *CredentialStore) completeOAuth2(ctx context.Context, o *OAuth2, p Provider, owner, collection, connection, sessionDigest, state, code string, guard func() (string, []any)) (OAuth2ConnectionStatus, error) {
-	if s == nil || ctx == nil || !validState(state) || !validText(code) || !validAuthorizationDigest(sessionDigest) {
+func (s *CredentialStore) completeOAuth2(ctx context.Context, o *OAuth2, p Provider, owner, collection, connection, sessionDigest, state, code string, guard func() (string, []any), responseIssuer ...string) (OAuth2ConnectionStatus, error) {
+	if !validText(code) {
 		return OAuth2ConnectionStatus{}, errAuthorization
 	}
 	digest, providerDigest := authorizationDigest(state), oauth2ProviderDigest(p)
-	b, verifier, err := s.loadAuthorizationVerifier(ctx, digest, sessionDigest, providerDigest, guard)
+	b, verifier, err := s.callbackAuthorization(ctx, p, owner, collection, connection, sessionDigest, state, guard, responseIssuer)
 	if err != nil {
 		return OAuth2ConnectionStatus{}, err
-	}
-	if b.Owner != owner || (collection != "" && b.CollectionID != collection) || (connection != "" && b.ConnectionID != connection) || b.ProviderID != p.ID {
-		return OAuth2ConnectionStatus{}, ErrAuthorizationNotFound
 	}
 	consumed, err := s.ConsumeAuthorization(ctx, digest, authorizationDigest(verifier), sessionDigest, providerDigest, guard)
 	if err != nil || consumed != b {
@@ -132,7 +163,7 @@ func (s *CredentialStore) completeOAuth2(ctx context.Context, o *OAuth2, p Provi
 	if err != nil {
 		return OAuth2ConnectionStatus{}, ErrOAuth2Exchange
 	}
-	scopes, err := oauthGrantedScopes(token, p.Scopes)
+	scopes, err := o.grantedScopes(token, p.Scopes)
 	if err != nil {
 		return OAuth2ConnectionStatus{}, err
 	}

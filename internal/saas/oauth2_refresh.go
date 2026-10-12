@@ -63,7 +63,7 @@ func (s *CredentialStore) refreshOAuth2(ctx context.Context, oauthClient *OAuth2
 				return credential{}, ErrOAuth2Exchange
 			}
 		}
-		scopes, err := oauthGrantedScopes(token, old.Scopes)
+		scopes, err := oauthClient.grantedScopes(token, old.Scopes)
 		if err != nil {
 			return credential{}, err
 		}
