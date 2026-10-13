@@ -46,3 +46,36 @@ func TestResetHTMLNavigationDoesNotReplaceAPIBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestElyRecoveryControlsAndScripts(t *testing.T) {
+	for _, mode := range []string{"request", "register", "reset"} {
+		t.Run(mode, func(t *testing.T) {
+			var out strings.Builder
+			if err := recoveryPage.Execute(&out, struct {
+				Base, Mode, Language string
+				Blocked              bool
+			}{"/tenant", mode, "ko", false}); err != nil {
+				t.Fatal(err)
+			}
+			body := out.String()
+			for _, want := range []string{`/tenant/auth/v1/ui/`, `data-slot="input"`, `data-slot="button"`, `/tenant/auth/v1/branding/locale.js`, `/tenant/auth/v1/users/recovery.js`} {
+				if !strings.Contains(body, want) {
+					t.Errorf("missing %s", want)
+				}
+			}
+			if strings.Count(body, "<script") != 2 || strings.Contains(body, "hx-") {
+				t.Fatal("added script or enhanced submission")
+			}
+			if mode == "register" && !strings.Contains(body, `id="registration-input"`) {
+				t.Fatal("dynamic inputs need Ely prototype")
+			}
+			if mode == "reset" {
+				for _, want := range []string{`id="reset-form" hidden`, `name="password"`, `name="confirm"`, `autocomplete="new-password"`, `maxlength="256"`, `id="reset-start"`} {
+					if !strings.Contains(body, want) {
+						t.Errorf("missing %s", want)
+					}
+				}
+			}
+		})
+	}
+}

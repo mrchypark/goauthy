@@ -113,6 +113,9 @@ function harness(messages = {}, language = 'ko') {
   assert.ok(h.controls.some(control => control.dataset?.themeLayout === 'logo_alignment'), 'alignment select participates in busy state');
   assert.match(h.root.innerHTML, /theme-preview/);
   assert.match(h.frame.srcdoc, /href="\/auth\/v1\/theme\/global\.css"/);
+  for (const asset of ['app.css', 'ely-controls.css', 'ely-patterns.css', 'brand.css']) {
+    assert.ok(h.frame.srcdoc.includes(`href="/auth/v1/ui/${asset}"`));
+  }
   assert.match(h.frame.srcdoc, /class="auth-page"/);
   assert.match(h.frame.srcdoc, /class="auth-panel"/);
   assert.match(h.frame.srcdoc, /class="brand-symbol"/);

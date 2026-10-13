@@ -14,12 +14,13 @@ import (
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/ui"
 )
 
 //go:embed dashboard.html dashboard.js dashboard.css locale.js connections.js connection_grants.js devices.js
 var dashboardFS embed.FS
 
-var dashboardTemplate = template.Must(template.ParseFS(dashboardFS, "dashboard.html"))
+var dashboardTemplate = template.Must(template.Must(ui.NewTemplates("dashboard.html")).ParseFS(dashboardFS, "dashboard.html"))
 
 func (h *Handler) SetBrandResolver(resolve func(context.Context) (branding.Brand, error)) {
 	h.brand = resolve

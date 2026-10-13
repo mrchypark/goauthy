@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/i18n"
+	"github.com/mrchypark/goauthy/internal/ui"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -18,7 +19,7 @@ import (
 //go:embed admin.html admin.css locale.js module_locale.js admin.js dashboard.js catalog.js sessions.js collections.js clients.js themes.js providers.js blacklist.js events.js templates.js
 var uiFS embed.FS
 
-var adminTemplate = template.Must(template.ParseFS(uiFS, "admin.html"))
+var adminTemplate = template.Must(template.Must(ui.NewTemplates("admin.html")).ParseFS(uiFS, "admin.html"))
 
 type CSRFTokenProvider func(http.ResponseWriter, *http.Request) bool
 
@@ -215,8 +216,14 @@ func (u *UI) handleEmailTemplatePreview(w http.ResponseWriter, r *http.Request) 
 	case "email_change_confirm":
 		info.Text = strings.ReplaceAll(info.Text, "{{.NewEmail}}", sampleNewEmail)
 	}
+	var head bytes.Buffer
+	if err := adminTemplate.ExecuteTemplate(&head, "goauthy-head", u.basePath); err != nil {
+		http.Error(w, "Preview unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	_, _ = fmt.Fprintf(w, `<!doctype html>
 <html><head><meta charset="utf-8"><title>Email Preview</title>
+%s
 <link rel="stylesheet" href="../admin.css"><link rel="stylesheet" href="../../branding/brand.css">
 </head><body class="email-preview">
 <h1>%s</h1>
@@ -227,6 +234,7 @@ func (u *UI) handleEmailTemplatePreview(w http.ResponseWriter, r *http.Request) 
 %s
 <footer><p>%s</p></footer>
 </body></html>`,
+		head.String(),
 		template.HTMLEscapeString(info.Header),
 		template.HTMLEscapeString(info.Text),
 		func() string {

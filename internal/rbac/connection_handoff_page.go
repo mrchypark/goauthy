@@ -7,22 +7,25 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/saas"
+	"github.com/mrchypark/goauthy/internal/ui"
 )
 
 //go:embed connection_handoff_page.html
 var connectionHandoffHTML string
 
-var connectionHandoffPage = template.Must(template.New("connection-handoff").Parse(connectionHandoffHTML))
+var connectionHandoffPage = template.Must(template.Must(ui.NewTemplates("connection-handoff")).Parse(connectionHandoffHTML))
 
 type connectionHandoffPageData struct {
 	Review                                                                    saas.UseHandoffReview
 	Action, CSS, CSRF, GrantExpiry, TicketExpiry, ReturnURI, Account, Message string
 	Language                                                                  string
+	BasePath                                                                  string
 	Complete, Approved                                                        bool
 }
 
@@ -40,6 +43,8 @@ func (h *Handler) ConnectionHandoffPage(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 	render := func(status int, data connectionHandoffPageData) {
+		issuerURL, _ := url.Parse(h.issuer)
+		data.BasePath = strings.TrimRight(issuerURL.Path, "/")
 		data.CSS = h.issuer + "/account/account.css"
 		data.Account = h.issuer + "/account"
 		data.Language = i18n.UILanguageFromRequest(r)
