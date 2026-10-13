@@ -19,9 +19,24 @@ GoAuthy browser frontend migration to `github.com/mrchypark/ely-htmx`.
 
 ## Runnable checks
 
-The repository has no frontend package manifest, Playwright configuration, or
-browser fixture command. Existing deterministic UI checks are Node programs
-invoked directly, for example:
+The repository-native disposable browser runner uses Go and `chromedp`.
+After allocation of the serial execution slot, run the 21 HTTP gates and the
+separate HTTPS boundary gate sequentially:
+
+```sh
+sh scripts/test-e2e-ely-standalone.sh
+GOAUTHY_ELY_E2E_SLOT=granted sh scripts/e2e-ely-standalone.sh --run
+GOAUTHY_ELY_E2E_SLOT=granted sh scripts/e2e-ely-standalone.sh --run-boundary
+```
+
+These two execution commands select 22 distinct gates. `--run-extra` selects
+only theme, virtual passkey, provider catalog, and provider registration (four
+HTTP gates). The OAuth2 boundary runs exclusively under `--run-boundary` with
+a disposable local CA, server certificate, and verified client trust. There
+is no `--run-all` mode, and an HTTP run cannot establish this HTTPS boundary.
+See [the executable coverage matrix](../test/e2e/ELY-COVERAGE.md) for evidence
+and limits. Existing deterministic UI checks are Node programs invoked
+directly, for example:
 
 ```sh
 node --check internal/admin/admin.js
@@ -37,15 +52,15 @@ workers finish. The first pass is expected to include:
 go test ./internal/ui ./internal/admin ./internal/account ./internal/login ./internal/device ./internal/recovery ./internal/branding ./internal/i18n ./internal/rbac ./cmd/goauthy
 ```
 
-The existing `test/e2e/browser` package is an opt-in deployed-fixture suite.
-Its Chromium tests require `GOAUTHY_E2E_*` fixture settings and a local
-Chromium executable, so it is not a substitute for the requested local
-synthetic browser fixture.
+The runner supplies the existing `test/e2e/browser` suite with isolated
+`GOAUTHY_E2E_*` settings, fresh standalone storage, local SMTP, and synthetic
+accounts. Chromium tests use fresh profiles. Tests named `AcrossPods` point
+to the same local server here and provide no replication or HA evidence.
 
 ## Required synthetic browser coverage
 
-Before this migration is called verified, a repository-native Go fixture or
-test must render and inspect, without credentials or deployment:
+Template and synthetic page checks complement the real-server gates. Their
+coverage targets include:
 
 - admin branding and an admin page under a nested issuer prefix;
 - login and account pages in English and Korean;
@@ -55,10 +70,9 @@ test must render and inspect, without credentials or deployment:
 - response CSPs with no new `unsafe-inline`, `unsafe-eval`, CDN, or external
   font dependency.
 
-The fixture should use the existing Go HTTP/template test tooling and, if real
-browser pixels are required, the already-declared `chromedp` dependency. It
-must not add a JS helper runtime. Chrome is available as an installed macOS app;
-the binary is not on `PATH`.
+The fixtures use Go HTTP/template tooling and the existing `chromedp`
+dependency. Chrome is available as an installed macOS app; its binary is not
+on `PATH`.
 
 ## Current status
 
@@ -102,11 +116,35 @@ The saved artifacts are:
 - `/Users/cypark/.codex/task-state/goauthy-ely-frontend/admin-visual/admin-branding-ko-1440.png`
 - `/Users/cypark/.codex/task-state/goauthy-ely-frontend/admin-visual/admin-branding-ko-375.png`
 
-The parent visually inspected both screenshots and found them good. Real
-authentication, save mutations, and upload mutations remain excluded from the
-synthetic fixture. Logout confirmation and SaaS OAuth2 completion are separate
-worker scope; Swagger/API docs, email HTML, and demo consumers remain outside
-the browser frontend migration. All other reported focused and broad checks
-passed.
+The parent visually inspected both screenshots and found them good. That
+page-rendering fixture does not exercise authentication or persisted mutations.
+Separate disposable real-server runs do exercise browser login/logout,
+admin CRUD, account edits/password changes, brand save/reload, logo upload and
+deletion, Demo A/B SSO, device approval, and recovery through local SMTP.
+
+Those runs have passing results for **22 distinct gates** on product commit
+`c93b0f3`: the original 18, virtual passkey management, SaaS provider catalog,
+provider registration, and the separately corrected HTTPS OAuth2 boundary.
+This is cumulative evidence across runs, not a single unified execution:
+the original 18, four additions, and a targeted rerun of the strengthened
+theme gate. Arendt's final `TestThemeLoginUI` passed in 7.32 seconds, preserving
+the exact-six stylesheet, ordering, loaded-sheet, response/CSP, and computed
+brand-color assertions. The rerun replaces the earlier theme evidence and
+does not increase the distinct-gate count above 22.
+
+The theme timeout was a harness selector issue: `BySearch` also matched
+selector text inside a hidden passkey script. Using `ByQuery` for the actual
+username input resolved it without weakening assertions or changing product
+behavior.
+
+The initial HTTP boundary failure (`503` instead of `401`) reflected the
+server's deliberate HTTPS prerequisite. The local TLS rerun passed without
+changing that production requirement. Provider management and boundary checks
+do not establish external provider OAuth consent or successful external
+account connection. Passkey evidence uses a Chromium virtual authenticator,
+not physical hardware. HA, production deployment, and exhaustive viewport or
+localization coverage remain excluded. Swagger/API docs and email HTML are
+outside this frontend migration; local Demo A/B behavior was nevertheless
+tested as an integration consumer.
 
 No live IED or production check is part of this verification record.
