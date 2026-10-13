@@ -11,7 +11,42 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/rhiza"
 )
+
+func TestAccountLoginFreshGETSingleMutation(t *testing.T) {
+	h, db := testHandlerWithDB(t, false)
+	readSlot := func() uint64 {
+		t.Helper()
+		result, err := db.Query(t.Context(), rhiza.QueryRequest{SQL: "SELECT 1", Consistency: rhiza.ConsistencyLinearizable})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.AppliedSlot
+	}
+	before := readSlot()
+	started := time.Now()
+	cookie, interactionToken, csrf := accountLoginPage(t, h)
+	after := readSlot()
+	if got := after - before; got != 1 {
+		t.Fatalf("fresh account GET committed mutations=%d want=1", got)
+	}
+	session, err := h.browser.LoadSessionReadOnlyForPeer(t.Context(), cookie.Value, "203.0.113.8")
+	if err != nil || session.Authenticated() {
+		t.Fatalf("init session invalid: %v", err)
+	}
+	interaction, err := h.browser.LoadAuthorizationInteractionReadOnly(t.Context(), cookie.Value, interactionToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if browser.ValidateCSRFToken(cookie.Value, csrf) != nil || !interaction.ExpiresAt.Equal(session.ExpiresAt) || session.ExpiresAt.Before(started.Add(interactionLifetime-time.Second)) || session.ExpiresAt.After(time.Now().Add(interactionLifetime)) {
+		t.Fatal("CSRF binding or session/interaction TTL changed")
+	}
+	if _, err := h.browser.LoadSessionReadOnlyForPeer(t.Context(), cookie.Value, "203.0.113.9"); err == nil {
+		t.Fatal("wrong peer accepted")
+	}
+	t.Logf("fresh account GET committed mutations=%d; peer/CSRF/TTL verified", after-before)
+}
 
 func accountLoginPage(t *testing.T, h *Handler) (*http.Cookie, string, string) {
 	t.Helper()

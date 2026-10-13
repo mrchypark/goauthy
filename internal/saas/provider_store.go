@@ -186,6 +186,46 @@ func (s *ProviderStore) Create(ctx context.Context, in ProviderInput, authority 
 func (s *ProviderStore) Get(ctx context.Context, id string, authority func() (string, []any)) (Provider, error) {
 	return s.get(ctx, id, authority)
 }
+
+// GetMany reads up to 32 distinct providers in one linearizable query. Like Get,
+// missing, deleted or authority-hidden rows return ErrProviderNotFound. Results
+// are ordered by ID; no partial result is returned.
+func (s *ProviderStore) GetMany(ctx context.Context, ids []string, authority func() (string, []any)) ([]Provider, error) {
+	if ctx == nil || s == nil || s.db == nil || len(ids) == 0 || len(ids) > 32 {
+		return nil, ErrProviderInvalid
+	}
+	seen := make(map[string]bool, len(ids))
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		if !providerID(id) || seen[id] {
+			return nil, ErrProviderInvalid
+		}
+		seen[id] = true
+		args = append(args, id)
+	}
+	g, ga, err := providerGuard(authority)
+	if err != nil {
+		return nil, err
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	q, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT id,name,kind,enabled,revision,callback_uri,client_id,auth_endpoint,token_endpoint,scopes_json,auth_style,identity_endpoint,subject_field,connector_json FROM saas_providers WHERE id IN (` + placeholders + `) AND deleted=0 AND (` + g + `) ORDER BY id`, Args: append(args, ga...), Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return nil, err
+	}
+	if len(q.Rows) != len(ids) {
+		return nil, ErrProviderNotFound
+	}
+	out := make([]Provider, 0, len(ids))
+	for _, row := range q.Rows {
+		provider, err := decodeProvider(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, provider)
+	}
+	return out, nil
+}
+
 func (s *ProviderStore) List(ctx context.Context, authority func() (string, []any)) ([]Provider, error) {
 	if ctx == nil || s == nil || s.db == nil {
 		return nil, ErrProviderInvalid

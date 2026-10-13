@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/mrchypark/rhiza"
@@ -70,54 +71,56 @@ func TestGCSMutationGateCancellationAndReadBypass(t *testing.T) {
 }
 
 func TestGCSMutationGateErrorCooldownCASBody(t *testing.T) {
-	sentinel := errors.New("synthetic failure")
-	var mu sync.Mutex
-	var last time.Time
-	calls := 0
-	interval := 20 * time.Millisecond
-	g := newGCSMutationGate(gateRoundTripper(func(r *http.Request) (*http.Response, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		if !last.IsZero() && time.Since(last) < interval {
-			t.Error("cooldown violated")
-		}
-		data, _ := io.ReadAll(r.Body)
-		_ = r.Body.Close()
-		if string(data) != "payload" || r.URL.Query().Get("ifGenerationMatch") != "42" || r.Header.Get("X-Test") != "preserve" {
-			t.Error("request changed")
-		}
-		calls++
-		time.Sleep(time.Millisecond)
-		last = time.Now()
-		return nil, sentinel
-	}), interval)
-	var wg sync.WaitGroup
-	for _, method := range []string{"POST", "PUT", "PATCH", "DELETE"} {
-		wg.Add(1)
-		go func(method string) {
-			defer wg.Done()
-			r := gateRequest(context.Background(), method)
-			r.Body = io.NopCloser(strings.NewReader("payload"))
-			r.Header.Set("X-Test", "preserve")
-			resp, e := g.RoundTrip(r)
-			if resp != nil || e != sentinel {
-				t.Error("response/error changed")
+	synctest.Test(t, func(t *testing.T) {
+		sentinel := errors.New("synthetic failure")
+		var mu sync.Mutex
+		var last time.Time
+		calls := 0
+		interval := 20 * time.Millisecond
+		g := newGCSMutationGate(gateRoundTripper(func(r *http.Request) (*http.Response, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			if !last.IsZero() && time.Since(last) < interval {
+				t.Error("cooldown violated")
 			}
-		}(method)
-	}
-	wg.Wait()
-	if calls != 4 {
-		t.Fatal(calls)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	body := &gateBody{Reader: strings.NewReader("payload")}
-	r := gateRequest(ctx, "PUT")
-	r.Body = body
-	go func() { time.Sleep(time.Millisecond); cancel() }()
-	_, err := g.RoundTrip(r)
-	if !errors.Is(err, context.Canceled) || !body.closed {
-		t.Fatalf("cooldown cancel=%v closed=%v", err, body.closed)
-	}
+			data, _ := io.ReadAll(r.Body)
+			_ = r.Body.Close()
+			if string(data) != "payload" || r.URL.Query().Get("ifGenerationMatch") != "42" || r.Header.Get("X-Test") != "preserve" {
+				t.Error("request changed")
+			}
+			calls++
+			time.Sleep(time.Millisecond)
+			last = time.Now()
+			return nil, sentinel
+		}), interval)
+		var wg sync.WaitGroup
+		for _, method := range []string{"POST", "PUT", "PATCH", "DELETE"} {
+			wg.Add(1)
+			go func(method string) {
+				defer wg.Done()
+				r := gateRequest(context.Background(), method)
+				r.Body = io.NopCloser(strings.NewReader("payload"))
+				r.Header.Set("X-Test", "preserve")
+				resp, e := g.RoundTrip(r)
+				if resp != nil || e != sentinel {
+					t.Error("response/error changed")
+				}
+			}(method)
+		}
+		wg.Wait()
+		if calls != 4 {
+			t.Fatal(calls)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		body := &gateBody{Reader: strings.NewReader("payload")}
+		r := gateRequest(ctx, "PUT")
+		r.Body = body
+		go func() { time.Sleep(time.Millisecond); cancel() }()
+		_, err := g.RoundTrip(r)
+		if !errors.Is(err, context.Canceled) || !body.closed {
+			t.Fatalf("cooldown cancel=%v closed=%v", err, body.closed)
+		}
+	})
 }
 
 func TestGCSMutationGateConfig(t *testing.T) {
@@ -147,12 +150,24 @@ func TestGCSMutationGateConfig(t *testing.T) {
 		})
 	}
 	cfg := gcs.DefaultConfig
+	config.ObjStoreBucket = "synthetic"
+	config.ObjStorePrefix = "fixture//nested/.."
+	config.ClusterID = "cluster"
 	original := gcs.DefaultConfig.HTTPConfig.Transport
-	if err := installGCSMutationGate(&cfg); err != nil {
+	if err := installGCSMutationGate(&cfg, config); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := cfg.HTTPConfig.Transport.(*gcsMutationGate); !ok {
 		t.Fatal("not installed")
+	}
+	installed := cfg.HTTPConfig.Transport.(*gcsMutationGate)
+	if installed.prefix != gateTestPrefix {
+		t.Fatalf("Rhiza path.Join mismatch: %s", installed.prefix)
+	}
+	for name, want := range map[string]uint8{gateTestPrefix + "/archive/PUBLISH_LOCK": gcsPublicationLane, gateTestPrefix + "/archive/head.bin": gcsHeadLane} {
+		if got := installed.requestLanes(namedGateRequest(context.Background(), name)); got != want {
+			t.Fatalf("configured object mask=%d want=%d", got, want)
+		}
 	}
 	if gcs.DefaultConfig.HTTPConfig.Transport != original {
 		t.Fatal("test mutated global")

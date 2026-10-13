@@ -27,13 +27,14 @@ func TestGCSMutationGateSDKUploads(t *testing.T) {
 				payload = bytes.Repeat([]byte("r"), 600<<10)
 			}
 			var received []byte
+			objectName := gateTestPrefix + "/archive/head.bin"
 			posts, puts, retries := 0, 0, 0
 			var server *httptest.Server
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				t.Logf("synthetic SDK request method=%s path=%s uploadType=%s range=%s", r.Method, r.URL.Path, r.URL.Query().Get("uploadType"), r.Header.Get("Content-Range"))
 				if r.Method == "POST" && r.URL.Path != "/session" {
 					posts++
-					if r.URL.Query().Get("ifGenerationMatch") != "42" || r.URL.Query().Get("name") != "synthetic-object" {
+					if r.URL.Query().Get("ifGenerationMatch") != "42" || r.URL.Query().Get("name") != objectName {
 						t.Error("missing CAS/name")
 					}
 					if !resumable && posts == 1 {
@@ -72,6 +73,13 @@ func TestGCSMutationGateSDKUploads(t *testing.T) {
 				} else if r.URL.Path == "/session" && (r.Method == "PUT" || r.Method == "POST") {
 					puts++
 					data, _ := io.ReadAll(r.Body)
+					if puts == 1 {
+						retries++
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(429)
+						_, _ = io.WriteString(w, `{"error":{"code":429,"message":"synthetic chunk retry"}}`)
+						return
+					}
 					received = append(received, data...)
 					if len(received) < len(payload) {
 						w.Header().Set("Range", fmt.Sprintf("bytes=0-%d", len(received)-1))
@@ -85,16 +93,24 @@ func TestGCSMutationGateSDKUploads(t *testing.T) {
 					return
 				}
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = fmt.Fprintf(w, `{"name":"synthetic-object","bucket":"synthetic","generation":"43","size":"%d"}`, len(received))
+				_, _ = fmt.Fprintf(w, `{"name":%q,"bucket":"synthetic","generation":"43","size":"%d"}`, objectName, len(received))
 			}))
 			defer server.Close()
 			interval := 10 * time.Millisecond
 			var mu sync.Mutex
 			var completed time.Time
 			attempts := 0
+			var gate *gcsMutationGate
 			base := http.DefaultTransport.(*http.Transport).Clone()
 			defer base.CloseIdleConnections()
 			next := gateRoundTripper(func(r *http.Request) (*http.Response, error) {
+				want := gcsHeadLane
+				if resumable {
+					want = gcsAllLanes
+				}
+				if got := gate.requestLanes(r); got != want {
+					t.Errorf("SDK lane mask=%d want=%d", got, want)
+				}
 				mu.Lock()
 				if !completed.IsZero() && time.Since(completed) < interval {
 					t.Error("SDK attempt bypassed cooldown")
@@ -107,7 +123,8 @@ func TestGCSMutationGateSDKUploads(t *testing.T) {
 				mu.Unlock()
 				return response, err
 			})
-			gate := newGCSMutationGate(next, interval)
+			gate = newGCSMutationGate(next, interval)
+			gate.bucket, gate.prefix, gate.origin = "synthetic", gateTestPrefix, server.URL
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			client, err := cloudstorage.NewClient(ctx, option.WithEndpoint(server.URL), option.WithHTTPClient(&http.Client{Transport: gate}), option.WithoutAuthentication())
@@ -115,7 +132,7 @@ func TestGCSMutationGateSDKUploads(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer client.Close()
-			writer := client.Bucket("synthetic").Object("synthetic-object").If(cloudstorage.Conditions{GenerationMatch: 42}).NewWriter(ctx)
+			writer := client.Bucket("synthetic").Object(objectName).If(cloudstorage.Conditions{GenerationMatch: 42}).NewWriter(ctx)
 			writer.ChunkSize = 256 << 10
 			if _, err = writer.Write(payload); err != nil {
 				t.Fatal(err)
@@ -126,13 +143,13 @@ func TestGCSMutationGateSDKUploads(t *testing.T) {
 			if !bytes.Equal(received, payload) {
 				t.Fatalf("payload mismatch bytes=%d want=%d", len(received), len(payload))
 			}
-			if resumable && puts < 3 {
+			if resumable && (puts < 4 || retries != 1) {
 				t.Fatalf("resumable chunks=%d", puts)
 			}
 			if !resumable && (posts < 2 || retries != 1) {
 				t.Fatalf("retry posts=%d retries=%d", posts, retries)
 			}
-			t.Logf("SDK attempts=%d POST=%d PUT=%d synthetic429=%d", attempts, posts, puts, retries)
+			t.Logf("SDK attempts=%d initiationPOST=%d continuationAttempts=%d synthetic429=%d", attempts, posts, puts, retries)
 		})
 	}
 }

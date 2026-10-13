@@ -177,21 +177,18 @@ func randomDeviceLoginID() (string, error) {
 }
 
 func (h *Handler) createLoginInteraction(r *http.Request, peerIP string, payload []byte) (browser.IssuedAuthorizationInteraction, string, *http.Cookie, error) {
-	var session browser.IssuedSession
-	if current, token, ok := h.session(r); ok && !current.Authenticated() && current.PeerIP != "" {
-		session = browser.IssuedSession{Session: current, Token: token}
-	} else {
-		var err error
-		session, err = h.browser.CreateInitSession(r.Context(), h.now().Add(interactionLifetime), peerIP)
-		if err != nil {
-			return browser.IssuedAuthorizationInteraction{}, "", nil, err
-		}
-	}
 	interactionToken, err := randomDeviceLoginID()
 	if err != nil {
 		return browser.IssuedAuthorizationInteraction{}, "", nil, err
 	}
-	interaction, err := h.browser.CreateAuthorizationInteraction(r.Context(), session.Token, interactionToken, payload, h.now().Add(interactionLifetime))
+	var session browser.IssuedSession
+	var interaction browser.IssuedAuthorizationInteraction
+	if current, token, ok := h.session(r); ok && !current.Authenticated() && current.PeerIP != "" {
+		session = browser.IssuedSession{Session: current, Token: token}
+		interaction, err = h.browser.CreateAuthorizationInteraction(r.Context(), session.Token, interactionToken, payload, h.now().Add(interactionLifetime))
+	} else {
+		session, interaction, err = h.browser.CreateInitSessionWithAuthorizationInteraction(r.Context(), peerIP, interactionToken, payload, h.now().Add(interactionLifetime))
+	}
 	if err != nil {
 		return browser.IssuedAuthorizationInteraction{}, "", nil, err
 	}

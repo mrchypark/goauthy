@@ -11,7 +11,46 @@ import (
 
 	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/storage"
+	"github.com/mrchypark/rhiza"
 )
+
+func TestDashboardDataModeFailureAndDueTouch(t *testing.T) {
+	h, _, db, cookie, _, _ := testConversionHandler(t)
+	digest, err := browser.CanonicalTokenDigest(cookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldSeen := time.Now().Add(-11 * time.Second).UnixMilli()
+	if _, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{RequestID: "dashboard-due", SQL: `UPDATE browser_sessions SET last_seen_at_unix_ms=? WHERE token_digest=?`, Args: []any{oldSeen, digest}}); err != nil {
+		t.Fatal(err)
+	}
+	read := func(path string, status int) {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r.AddCookie(cookie)
+		r = r.WithContext(browser.ContextWithPeerIP(r.Context(), "203.0.113.8"))
+		w := httptest.NewRecorder()
+		h.Dashboard(w, r)
+		if w.Code != status {
+			t.Fatalf("%s status=%d want=%d", path, w.Code, status)
+		}
+	}
+	read("/account/data", http.StatusOK)
+	seen, err := db.Query(t.Context(), rhiza.QueryRequest{SQL: `SELECT last_seen_at_unix_ms FROM browser_sessions WHERE token_digest=?`, Args: []any{digest}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(seen.Rows) != 1 || seen.Rows[0][0].(int64) <= oldSeen {
+		t.Fatalf("due account read did not touch session: %v", err)
+	}
+	if _, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{RequestID: "dashboard-mode-missing", SQL: `DELETE FROM identity_authentication_modes WHERE subject='subject-1'`}); err != nil {
+		t.Fatal(err)
+	}
+	read("/account/data", http.StatusServiceUnavailable)
+	read("/account", http.StatusOK)
+	if _, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{RequestID: "dashboard-disabled", SQL: `UPDATE identity_users SET disabled=1 WHERE subject='subject-1'`}); err != nil {
+		t.Fatal(err)
+	}
+	read("/account/data", http.StatusUnauthorized)
+}
 
 func TestDashboardCurrentAccountBoundary(t *testing.T) {
 	t.Parallel()
