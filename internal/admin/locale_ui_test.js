@@ -63,7 +63,8 @@ assert.equal(context.GoAuthyI18n.t('Manage access rights and expiry. Plaintext s
 const html = fs.readFileSync(__dirname + '/admin.html', 'utf8');
 assert.match(html, /src="\/auth\/v1\/branding\/locale\.js" defer/);
 assert.match(html, /data-language-select/);
-assert.match(html, /id="admin-menu-toggle"[^>]*aria-controls="admin-navigation"[^>]*aria-expanded="false"[^>]*data-i18n="Menu"/);
+// Rendered Ely menu attributes are checked by TestElyAdminScreensPreserveNavigationAndAssets.
+assert.equal(context.GoAuthyI18n.t('Menu'), '메뉴');
 assert.match(html, /<nav id="admin-navigation"/);
 assert.match(html, /<body\b[^>]* data-locale-mode="reload"/);
 assert.match(html, /href="\/oidc\/logout"/);

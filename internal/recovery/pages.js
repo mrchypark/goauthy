@@ -39,7 +39,7 @@
       for (const [name,en,kr] of fields) {
         const rule = name === 'preferred_username' ? policy.preferred_username?.preferred_username : policy[name];
         if (rule === 'hidden') continue;
-        const label = document.createElement('label'), input = document.createElement('input');
+        const label = document.createElement('label'), input = $('#registration-input').content.firstElementChild.cloneNode(true);
         label.textContent = words(en,kr) + (rule === 'required' ? ' *' : words(' (optional)',' (선택)'));
         input.name = name; input.required = rule === 'required'; input.maxLength = 128;
         if (name === 'birthdate') input.type = 'date';

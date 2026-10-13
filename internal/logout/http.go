@@ -19,6 +19,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/oauth"
 	"github.com/mrchypark/goauthy/internal/oidc"
+	"github.com/mrchypark/goauthy/internal/ui"
 	"github.com/mrchypark/rhiza"
 )
 
@@ -29,7 +30,7 @@ const (
 	logoutRequestPrefix   = "logout-"
 )
 
-var confirmationPage = template.Must(template.New("logout-confirmation").Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="{{.BasePath}}/auth/v1/theme/global.css"><title>{{.SignOut}}</title></head><body class="auth-page"><header class="auth-brand"><span class="brand-symbol" aria-hidden="true"></span><span>GoAuthy</span></header><main class="auth-panel"><h1>{{.SignOut}}</h1><p>{{.ConfirmSignOut}}</p><form method="post" action="logout"><input type="hidden" name="confirmation" value="{{.Interaction}}"><button type="submit">{{.SignOut}}</button></form><a class="auth-return" href="{{.BasePath}}/account">{{if eq .Language "ko"}}취소하고 내 계정으로{{else}}Cancel and return to my account{{end}}</a></main></body></html>`))
+var confirmationPage = template.Must(template.Must(ui.NewTemplates("logout-confirmation")).Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{template "goauthy-head" .BasePath}}<link rel="stylesheet" href="{{.BasePath}}/auth/v1/theme/global.css"><title>{{.SignOut}}</title></head><body class="auth-page"><header class="auth-brand"><span class="brand-symbol" aria-hidden="true"></span><span>GoAuthy</span></header><main class="auth-panel"><h1>{{.SignOut}}</h1><p>{{.ConfirmSignOut}}</p><form method="post" action="logout"><input type="hidden" name="confirmation" value="{{.Interaction}}">{{template "button" (dict "Type" "submit" "Label" .SignOut)}}</form><a class="auth-return" href="{{.BasePath}}/account">{{if eq .Language "ko"}}취소하고 내 계정으로{{else}}Cancel and return to my account{{end}}</a></main></body></html>`))
 
 var errLogoutUnavailable = errors.New("logout state unavailable")
 

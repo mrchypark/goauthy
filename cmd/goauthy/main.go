@@ -60,6 +60,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/goauthy/internal/tlsconfig"
 	"github.com/mrchypark/goauthy/internal/tracing"
+	"github.com/mrchypark/goauthy/internal/ui"
 	"github.com/mrchypark/goauthy/internal/upstreamprovider"
 	"github.com/mrchypark/goauthy/internal/webid"
 	"github.com/mrchypark/rhiza"
@@ -1393,6 +1394,9 @@ func run() (err error) {
 	handler.HandleFunc("PUT /auth/v1/clients/{id}/login-restriction", rbacHandler.LoginRestriction)
 	handler.Handle("GET /auth/v1/theme/global.css", branding.GlobalCSSHandler())
 	handler.Handle("GET /auth/v1/branding/{name}", branding.BrandAssetHandler())
+	if err := ui.BindAssets(handler); err != nil {
+		return fmt.Errorf("configure UI assets: %w", err)
+	}
 	handler.HandleFunc("GET /auth/v1/theme/{client_id}/{timestamp}", themeHandler.Theme)
 	handler.HandleFunc("POST /auth/v1/theme/{client_id}", themeHandler.Theme)
 	handler.HandleFunc("PUT /auth/v1/theme/{client_id}", themeHandler.Theme)

@@ -1,0 +1,38 @@
+/* Defaults are layered so the existing per-client/theme CSS always wins. */
+@layer theme {
+  body {
+    --text: 150 8% 32%; --text-high: 150 16% 13%;
+    --bg: 45 23% 96%; --bg-high: 42 17% 89%;
+    --action: 153 28% 25%; --accent: 18 88% 60%; --error: 0 60% 40%;
+    --btn-text: #faf9f5; --border-radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { --text: 150 8% 75%; --text-high: 150 12% 92%; --bg: 150 12% 9%; --bg-high: 150 10% 17%; --action: 153 32% 66%; --error: 0 70% 72%; --btn-text: #10231b; }
+  }
+}
+/* Resolve aliases on body, where server-managed brand variables are defined. */
+body {
+  --color-paper: hsl(var(--bg)); --surface: hsl(var(--bg));
+  --color-ink: hsl(var(--text-high)); --color-muted: hsl(var(--text));
+  --color-line: hsl(var(--text) / .22); --border: hsl(var(--text) / .4);
+  --color-accent: hsl(var(--action)); --focus: hsl(var(--action));
+  --accent-hover: color-mix(in srgb, hsl(var(--action)), hsl(var(--text-high)) 15%);
+  --accent-tint: hsl(var(--bg-high)); --on-accent: var(--btn-text);
+  --color-background: var(--color-paper); --color-foreground: var(--color-ink);
+  --color-primary: var(--color-accent); --color-primary-foreground: var(--on-accent);
+  --color-secondary: var(--accent-tint); --color-secondary-foreground: var(--color-ink);
+  --color-card: var(--surface); --color-card-foreground: var(--color-ink);
+  --color-muted-foreground: var(--color-muted); --color-accent-foreground: var(--on-accent);
+  --color-border: var(--color-line); --color-input: var(--border); --color-ring: var(--focus);
+  --goauthy-error: hsl(var(--error)); --color-destructive: var(--goauthy-error);
+  --error-tint: hsl(var(--error) / .1);
+  --radius-sm: var(--border-radius); --radius-md: var(--border-radius); --radius-lg: var(--border-radius);
+  --ely-control-radius: var(--border-radius);
+  background: var(--color-paper); color: var(--color-ink);
+  font-family: var(--brand-font, Geist, Pretendard, system-ui, sans-serif);
+}
+/* Advanced Ely components use a color token; GoAuthy stores HSL channels. */
+[data-ely-family] { --error: var(--goauthy-error); }
+/* Ely expects a color here too; retain GoAuthy's HSL channels for legacy CSS. */
+[data-slot="button"][data-variant="destructive"] { color: var(--goauthy-error); border-color: var(--goauthy-error); }
+:is([data-slot="button"], [data-slot="input"], [data-slot="select"], [data-slot="textarea"]):not(.native-preview *) { border-radius: var(--border-radius); }
