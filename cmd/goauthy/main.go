@@ -178,6 +178,9 @@ func run() (err error) {
 	}
 
 	rhizaConfig := appConfig.Rhiza
+	if err := configureGCSMutationGate(os.Getenv, rhizaConfig); err != nil {
+		return err
+	}
 	backupConfig, err := scheduledBackupFromEnv(os.Getenv, rhizaConfig)
 	if err != nil {
 		return err

@@ -200,6 +200,9 @@ func validCallback(raw string) bool {
 		return false
 	}
 	host := u.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
 }

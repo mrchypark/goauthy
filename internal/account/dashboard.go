@@ -63,9 +63,16 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		unauthorized(w)
 		return
 	}
-	profile, err := h.identity.AccountProfileBySubject(r.Context(), session.Subject)
+	var profile identity.AccountProfile
+	var passkeyOnly bool
+	var err error
+	if r.URL.Path == "/account/data" {
+		profile, passkeyOnly, err = h.identity.AccountDataBySubject(r.Context(), session.Subject)
+	} else {
+		profile, err = h.identity.AccountProfileBySubject(r.Context(), session.Subject)
+	}
 	if err != nil {
-		if errors.Is(err, identity.ErrInactiveSubject) {
+		if errors.Is(err, identity.ErrInactiveSubject) && !errors.Is(err, identity.ErrAccountDataMode) {
 			unauthorized(w)
 		} else {
 			http.Error(w, "Account unavailable", http.StatusServiceUnavailable)
@@ -78,11 +85,6 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		csrf, err := browser.DeriveCSRFToken(token)
 		if err != nil {
 			unauthorized(w)
-			return
-		}
-		passkeyOnly, err := h.identity.IsPasskeyOnly(r.Context(), session.Subject)
-		if err != nil {
-			http.Error(w, "Account unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

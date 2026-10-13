@@ -257,15 +257,21 @@ func (h *Handler) collectionProviderAuthority(r *http.Request, authMethod string
 			}
 			continue
 		}
+		dynamicIDs = append(dynamicIDs, id)
+	}
+	if len(dynamicIDs) != 0 {
 		if h.saasProviderStore == nil {
 			return nil, false
 		}
-		provider, err := h.saasProviderStore.Get(r.Context(), id, authority)
-		wantKind := authMethod
-		if err != nil || !provider.Enabled || provider.Kind != wantKind {
+		providers, err := h.saasProviderStore.GetMany(r.Context(), dynamicIDs, authority)
+		if err != nil {
 			return nil, false
 		}
-		dynamicIDs = append(dynamicIDs, id)
+		for _, provider := range providers {
+			if !provider.Enabled || provider.Kind != authMethod {
+				return nil, false
+			}
+		}
 	}
 	return func() (string, []any) {
 		guard, args := authority()

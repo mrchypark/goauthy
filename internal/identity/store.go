@@ -911,7 +911,13 @@ func (s *Store) AccountProfileBySubject(ctx context.Context, subject string) (Ac
 	if len(result.Rows) != 1 || len(result.Rows[0]) != 8 {
 		return AccountProfile{}, errors.New("invalid identity profile row")
 	}
-	row := result.Rows[0]
+	return decodeAccountProfile(result.Rows[0])
+}
+
+func decodeAccountProfile(row []any) (AccountProfile, error) {
+	if len(row) != 8 {
+		return AccountProfile{}, errors.New("invalid identity profile row")
+	}
 	user, ok := decodeUser(row[:3])
 	if !ok {
 		return AccountProfile{}, errors.New("invalid identity profile row")
@@ -1551,11 +1557,15 @@ func (s *Store) authenticationMode(ctx context.Context, subject string) (int64, 
 	if err != nil {
 		return 0, false, err
 	}
-	if len(result.Rows) != 1 || len(result.Rows[0]) != 2 {
+	return decodeAuthenticationMode(result.Rows)
+}
+
+func decodeAuthenticationMode(rows [][]any) (int64, bool, error) {
+	if len(rows) != 1 || len(rows[0]) != 2 {
 		return 0, false, ErrInactiveSubject
 	}
-	mode, ok := result.Rows[0][0].(string)
-	generation, generationOK := result.Rows[0][1].(int64)
+	mode, ok := rows[0][0].(string)
+	generation, generationOK := rows[0][1].(int64)
 	if !ok || !generationOK || generation < 1 || (mode != "password" && mode != "passkey") {
 		return 0, false, errors.New("invalid authentication mode")
 	}

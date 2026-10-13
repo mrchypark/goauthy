@@ -44,7 +44,7 @@ func TestAdminUIBrowserAcrossPods(t *testing.T) {
 			go func() { _ = chromedp.Run(browserCtx, page.HandleJavaScriptDialog(accept)) }()
 		}
 	})
-	if err := chromedp.Run(browserCtx, chromedp.Navigate(primary)); err != nil {
+	if err := chromedp.Run(browserCtx, englishUILocale(primary), chromedp.Navigate(primary)); err != nil {
 		t.Fatalf("Chromium unavailable: %v", err)
 	}
 	if err := chromedp.Run(browserCtx, network.SetCookie(cookie.Name, cookie.Value).WithDomain(parsed.Hostname()).WithPath("/").WithSecure(parsed.Scheme == "https")); err != nil {
@@ -71,7 +71,7 @@ func TestAdminUIBrowserAcrossPods(t *testing.T) {
 			t.Fatalf("%s edit UI: %v", tc.kind, err)
 		}
 		rbacAssertListed(t, client, primary, tc.kind, rbacEntity{Name: updated})
-		expectedDialog.Store("Delete this " + strings.TrimSuffix(tc.kind, "s") + " permanently?")
+		expectedDialog.Store("Delete " + strings.TrimSuffix(tc.kind, "s") + " permanently?")
 		if err := chromedp.Run(browserCtx, chromedp.Navigate(base), adminUIListReady(), chromedp.Click(`a[href="/auth/v1/admin/`+tc.kind+`/`+entity.ID+`"]`), chromedp.WaitVisible("#entity"), chromedp.Click("#delete", chromedp.ByQuery), adminUIListReady(), chromedp.WaitNotPresent(`a[href="/auth/v1/admin/`+tc.kind+`/`+entity.ID+`"]`)); err != nil {
 			t.Fatalf("%s delete UI: %v", tc.kind, err)
 		}
