@@ -10,7 +10,11 @@
   const refresh = document.querySelector('#devices-refresh');
   const state = { devices: [], busy: false, generation: 0 };
   const text = (value) => value === undefined || value === null ? '' : String(value);
-  const timestamp = (value) => value === undefined || value === null ? '' : text(value);
+  const timestamp = (value) => {
+    if (value === undefined || value === null || value === '') return '';
+    const date = new Date(Number(value));
+    return Number.isFinite(date.getTime()) ? date.toISOString() : text(value);
+  };
   function setBusy(busy) {
     state.busy = busy;
     refresh.disabled = busy;

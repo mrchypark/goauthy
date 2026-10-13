@@ -104,6 +104,7 @@ func TestAccountDashboardAcrossPods(t *testing.T) {
 	pageCtx, cancelPage := chromedp.NewContext(alloc)
 	defer cancelPage()
 	if err := chromedp.Run(pageCtx,
+		englishUILocale(primary),
 		chromedp.Navigate(primary),
 		network.SetCookie(cookie.Name, cookie.Value).WithDomain(parsed.Hostname()).WithPath("/").WithSecure(parsed.Scheme == "https"),
 		chromedp.Navigate(primary+"/account"), chromedp.WaitVisible("#profile"),

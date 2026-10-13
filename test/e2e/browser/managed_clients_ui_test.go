@@ -214,7 +214,7 @@ func managedUIContext(t *testing.T, base string, cookie *http.Cookie, deleteID s
 		}
 	})
 	u := mustE2EURL(t, base+"/")
-	if err := chromedp.Run(browser, network.SetCookie(cookie.Name, cookie.Value).WithDomain(u.Hostname()).WithPath("/").WithSecure(u.Scheme == "https")); err != nil {
+	if err := chromedp.Run(browser, englishUILocale(base), network.SetCookie(cookie.Name, cookie.Value).WithDomain(u.Hostname()).WithPath("/").WithSecure(u.Scheme == "https")); err != nil {
 		stopBrowser()
 		stopAlloc()
 		cancel()

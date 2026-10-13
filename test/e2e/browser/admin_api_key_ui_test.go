@@ -53,6 +53,7 @@ func TestAdminAPIKeyUIAcrossPods(t *testing.T) {
 	})
 
 	if err := chromedp.Run(browser,
+		englishUILocale(primary),
 		network.SetCookie(cookie.Name, cookie.Value).WithDomain(parsed.Hostname()).WithPath("/").WithSecure(parsed.Scheme == "https"),
 		chromedp.Navigate(primary+"/auth/v1/admin/api-keys"),
 		apiKeyUIListReady(),

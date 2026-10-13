@@ -243,7 +243,7 @@ func (a *accountPasskeyAuthenticator) credentials(t *testing.T) []*cdpwebauthn.C
 
 func setPasskeyBrowserCookies(t *testing.T, ctx context.Context, base string, cookies []*http.Cookie) {
 	t.Helper()
-	if err := chromedp.Run(ctx, chromedp.Navigate(base)); err != nil {
+	if err := chromedp.Run(ctx, englishUILocale(base), chromedp.Navigate(base)); err != nil {
 		t.Fatal(err)
 	}
 	for _, cookie := range cookies {

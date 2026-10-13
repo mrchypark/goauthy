@@ -220,6 +220,12 @@ func newCollectionUIContext(t *testing.T, cookie *http.Cookie, base string) (con
 	}
 	alloc, cancelAlloc := chromedp.NewExecAllocator(ctx, options...)
 	browser, cancelBrowser := chromedp.NewContext(alloc)
+	if err := chromedp.Run(browser, englishUILocale(base)); err != nil {
+		cancelBrowser()
+		cancelAlloc()
+		cancel()
+		t.Fatal(err)
+	}
 	if cookie != nil {
 		u := mustE2EURL(t, base+"/")
 		if err := chromedp.Run(browser, network.SetCookie(cookie.Name, cookie.Value).WithDomain(u.Hostname()).WithPath("/").WithSecure(u.Scheme == "https")); err != nil {

@@ -100,11 +100,15 @@ func loginAndApproveDeviceUI(t *testing.T, grant deviceLoginGrant, primary, user
 	case <-ctx.Done():
 		t.Fatal("device approval response was not observed")
 	}
+	var language, message string
 	if err := chromedp.Run(ctx,
-		// Approval navigates to a text/plain document. A selector wait survives
-		// that navigation; a JS promise in the previous document does not.
-		chromedp.WaitVisible(`//pre[normalize-space(.)='Device approved']`, chromedp.BySearch),
+		chromedp.WaitVisible(`#device-account-link`),
+		chromedp.AttributeValue(`html`, "lang", &language, nil),
+		chromedp.Text(`p[role="alert"]`, &message),
 	); err != nil {
 		t.Fatal("approve device verification failed")
+	}
+	if !(language == "en" && message == "Device approved" || language == "ko" && message == "기기가 승인되었습니다.") {
+		t.Fatal("device verification page did not show the localized approval message")
 	}
 }

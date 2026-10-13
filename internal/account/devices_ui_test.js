@@ -52,5 +52,19 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/devices.js', 'utf8'), fixture.c
   await fixture.context.accountDashboard.devices.revokeDevice(second, button);
   assert.match(fixture.elements['devices-status'].textContent, /503/);
   assert.equal(fixture.context.accountDashboard.devices.state.devices.length, 2, 'failed revoke preserves list');
+  for (const [value, expected] of [
+    [1791882800322, '2026-10-13T09:13:20.322Z'],
+    ['1791882800322', '2026-10-13T09:13:20.322Z'],
+    [0, '1970-01-01T00:00:00.000Z'],
+    [null, ''], [undefined, ''], ['', ''],
+    ['invalid', 'invalid'], [8640000000000001, '8640000000000001'],
+  ]) {
+    fixture.context.accountDashboard.devices.state.devices = [{ id: 'date-check', client_id: 'client-a', scopes: [], created_at_unix_ms: value, revoked_at_unix_ms: value }];
+    fixture.context.accountDashboard.devices.render();
+    const row = fixture.elements['devices-list'].children.at(-1);
+    assert.equal(row.children[1].textContent, `Client: client-a · Scopes:  · Created: ${expected}`);
+    if (value !== null && value !== undefined) assert.equal(row.children[2].textContent, `Revoked: ${expected}`);
+    assert.equal(fixture.context.accountDashboard.devices.state.devices[0].created_at_unix_ms, value, 'render preserves API milliseconds');
+  }
   console.log('devices UI checks passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });
