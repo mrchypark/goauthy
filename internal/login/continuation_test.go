@@ -215,20 +215,23 @@ func TestApprovalEntryOffersSharedPasskeyAndUpstreamMethods(t *testing.T) {
 		return []UpstreamProvider{{ID: "upstream", Name: "Company login", CallbackURI: "http://localhost/upstream/upstream/callback"}}, nil
 	})
 	for _, tc := range []struct {
-		entry   string
-		handler http.Handler
+		entry, action string
+		handler       http.Handler
 	}{
-		{"/oidc/device/login?user_code=AB12CD34", h.DeviceLoginHandler(true)},
-		{"/account/connection-login?handoff_id=" + testHandoffID, h.ConnectionHandoffLoginHandler(true)},
-		{"/account/login", h.AccountLoginHandler(true)},
+		{"/oidc/device/login?user_code=AB12CD34", "/oidc/device/login", h.DeviceLoginHandler(true)},
+		{"/account/connection-login?handoff_id=" + testHandoffID, "/account/connection-login", h.ConnectionHandoffLoginHandler(true)},
+		{"/account/login", "/account/login", h.AccountLoginHandler(true)},
 	} {
 		page := httptest.NewRecorder()
 		tc.handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, tc.entry, nil))
 		body := page.Body.String()
-		for _, want := range []string{`id="passkey-btn"`, `document.getElementById('login-form')`, `/auth/v1/users/webauthn_start`, `/auth/v1/users/webauthn_finish`, `/upstream/upstream/start?`} {
+		for _, want := range []string{`<form id="login-form" method="post" action="` + tc.action + `"`, `name="csrf_token" value="`, `id="passkey-btn"`, `/auth/v1/users/webauthn_start`, `/auth/v1/users/webauthn_finish`, `/upstream/upstream/start?`} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s missing %s", tc.entry, want)
 			}
+		}
+		if strings.Contains(body, `document.getElementById('login-form')`) {
+			t.Fatalf("%s intercepts native form submission", tc.entry)
 		}
 		r := httptest.NewRequest(http.MethodGet, "/upstream/upstream/start", nil)
 		r.AddCookie(page.Result().Cookies()[0])

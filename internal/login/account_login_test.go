@@ -101,8 +101,10 @@ func TestAccountLoginWrongPasswordKeepsInteraction(t *testing.T) {
 	cookie, interaction, csrf := accountLoginPage(t, h)
 
 	wrong := httptest.NewRecorder()
-	h.AccountLoginHandler(false).ServeHTTP(wrong, accountLoginPost(cookie, interaction, csrf, "wrong password"))
-	if wrong.Code != http.StatusUnauthorized || wrong.Header().Get("Location") != "" {
+	wrongRequest := accountLoginPost(cookie, interaction, csrf, "wrong password")
+	wrongRequest.Header.Set("Accept", "text/html")
+	h.AccountLoginHandler(false).ServeHTTP(wrong, wrongRequest)
+	if wrong.Code != http.StatusUnauthorized || wrong.Header().Get("Location") != "" || wrong.Body.String() != "Invalid user credentials\n" || strings.Contains(wrong.Body.String(), `action="/auth/login"`) {
 		t.Fatalf("wrong password status=%d location=%q body=%q", wrong.Code, wrong.Header().Get("Location"), wrong.Body.String())
 	}
 

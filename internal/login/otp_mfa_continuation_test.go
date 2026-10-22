@@ -491,10 +491,9 @@ func TestForcedMFAOTPStepUpPersistsOnlyTheInteractionDigest(t *testing.T) {
 	}
 }
 
-// TestAuthorizeRendersForcedMFAContinuationScript proves the shipped password
-// page continues a forced-MFA challenge in the browser instead of navigating to
-// the raw JSON, and that the nonce policy that permits the script is present.
-func TestAuthorizeRendersForcedMFAContinuationScript(t *testing.T) {
+// TestAuthorizeUsesNativeFormForForcedMFA keeps callback navigation in the
+// browser while the server returns its existing HTML WebAuthn continuation.
+func TestAuthorizeUsesNativeFormForForcedMFA(t *testing.T) {
 	t.Parallel()
 	h := testHandlerWithForceMFA(t)
 	page := httptest.NewRecorder()
@@ -503,20 +502,13 @@ func TestAuthorizeRendersForcedMFAContinuationScript(t *testing.T) {
 		t.Fatalf("authorize status=%d", page.Code)
 	}
 	body := page.Body.String()
-	for _, want := range []string{
-		// The continuation must re-encode the form: the login boundary accepts
-		// only urlencoded bodies, so a multipart FormData post would be rejected.
-		"new URLSearchParams(new FormData(loginForm))",
-		"challenge.rcr",
-		"/auth/v1/users/webauthn_finish",
-		"navigator.credentials.get",
-	} {
+	for _, want := range []string{`method="post" action="/auth/login"`, `id="login-form"`} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("forced-MFA page missing %q in body=%q", want, body)
+			t.Fatalf("forced-MFA page missing native form %q in body=%q", want, body)
 		}
 	}
-	if !strings.Contains(page.Header().Get("Content-Security-Policy"), "script-src 'nonce-") || !strings.Contains(body, "nonce=") {
-		t.Fatalf("forced-MFA page script policy=%q body=%q", page.Header().Get("Content-Security-Policy"), body)
+	if strings.Contains(body, "loginForm.addEventListener('submit'") || strings.Contains(body, "new URLSearchParams(new FormData(loginForm))") {
+		t.Fatalf("forced-MFA form intercepted its callback navigation: %s", body)
 	}
 }
 
@@ -532,7 +524,7 @@ func TestAuthorizeOmitsMFAContinuationForUnforcedClient(t *testing.T) {
 		t.Fatalf("authorize status=%d", page.Code)
 	}
 	body := page.Body.String()
-	if strings.Contains(body, "URLSearchParams(new FormData(loginForm))") || strings.Contains(body, "challenge.rcr") {
+	if strings.Contains(body, "loginForm.addEventListener('submit'") || strings.Contains(body, "challenge.rcr") {
 		t.Fatalf("unforced client rendered the MFA continuation body=%q", body)
 	}
 	if !strings.Contains(body, "/auth/v1/users/webauthn_start") {
