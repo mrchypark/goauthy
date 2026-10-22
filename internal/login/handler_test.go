@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/clients"
 	"github.com/mrchypark/goauthy/internal/credential"
@@ -31,6 +32,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/oauth"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/passkey"
+	"github.com/mrchypark/goauthy/internal/rbac"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -96,7 +98,10 @@ func TestPasswordLoginRejectionLogsOnlyFixedDiagnostics(t *testing.T) {
 
 func TestLoginCompletesAuthorizationAndRotatesSession(t *testing.T) {
 	t.Parallel()
-	h := testHandler(t)
+	h, db := testHandlerWithDB(t, false)
+	if _, err := rbac.NewStore(db).EnsureBootstrapPrincipal(context.Background(), "user-1", []string{rbac.AdminRole}, nil); err != nil {
+		t.Fatalf("assign admin role: %v", err)
+	}
 	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
 	page := httptest.NewRecorder()
 	h.Authorize(page, get)
@@ -132,7 +137,7 @@ func TestLoginCompletesAuthorizationAndRotatesSession(t *testing.T) {
 	completed := httptest.NewRecorder()
 	h.Login(completed, postLogin(init, interaction, "alice", "correct password"))
 	location, err := url.Parse(completed.Header().Get("Location"))
-	if err != nil || completed.Code != http.StatusSeeOther || location.Query().Get("code") == "" || location.Query().Get("state") != strings.Repeat("s", 32) {
+	if err != nil || completed.Code != http.StatusSeeOther || location.Scheme+"://"+location.Host+location.Path != authorizeValues().Get("redirect_uri") || location.Query().Get("code") == "" || location.Query().Get("state") != strings.Repeat("s", 32) {
 		t.Fatalf("login status=%d location=%q err=%v", completed.Code, completed.Header().Get("Location"), err)
 	}
 	rotated := completed.Result().Cookies()[0]
@@ -143,6 +148,62 @@ func TestLoginCompletesAuthorizationAndRotatesSession(t *testing.T) {
 	h.Login(replay, postLogin(init, interaction, "alice", "correct password"))
 	if replay.Code != http.StatusForbidden {
 		t.Fatalf("replay status=%d body=%q", replay.Code, replay.Body.String())
+	}
+}
+
+func TestHTMLLoginFailureKeepsOAuthInteractionForRetry(t *testing.T) {
+	t.Parallel()
+	h := testHandler(t)
+	h.SetThemeURLResolver(func(_ context.Context, clientID string) (string, error) {
+		if clientID != "browser-client" {
+			t.Fatalf("theme client=%q", clientID)
+		}
+		return "/auth/v1/theme/browser-client.css?v=2", nil
+	})
+	h.SetLoginBrandingResolver(func(_ context.Context, clientID string) (LoginBranding, error) {
+		if clientID != "browser-client" {
+			t.Fatalf("branding client=%q", clientID)
+		}
+		return LoginBranding{LogoURL: "/auth/v1/clients/browser-client/logo?v=2"}, nil
+	})
+	page := httptest.NewRecorder()
+	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
+	init := page.Result().Cookies()[0]
+	interaction := interactionToken(t, page.Body.String())
+
+	failedRequest := postLogin(init, interaction, "alice", "wrong password")
+	failedRequest.Header.Set("Accept", "text/html")
+	failedRequest.Header.Set("Accept-Language", "ko")
+	failed := httptest.NewRecorder()
+	branding.BrowserPageErrors(h.issuer, http.HandlerFunc(h.Login)).ServeHTTP(failed, failedRequest)
+	if failed.Code != http.StatusUnauthorized || !strings.HasPrefix(failed.Header().Get("Content-Type"), "text/html") || failed.Header().Get("Content-Language") != "ko" || failed.Header().Get("Location") != "" || len(failed.Result().Cookies()) != 0 {
+		t.Fatalf("HTML failure status=%d headers=%v cookies=%#v", failed.Code, failed.Header(), failed.Result().Cookies())
+	}
+	for _, want := range []string{
+		`role="alert"`, "사용자 이름 또는 비밀번호를 확인하고 다시 시도하세요.",
+		`action="/auth/login"`, `value="` + interaction + `"`,
+		`href="/auth/v1/theme/browser-client.css?v=2"`,
+		`src="/auth/v1/clients/browser-client/logo?v=2"`,
+	} {
+		if !strings.Contains(failed.Body.String(), want) {
+			t.Errorf("retry page missing %q: %s", want, failed.Body.String())
+		}
+	}
+	if !strings.Contains(failed.Header().Get("Content-Security-Policy"), "form-action 'self' http://localhost") {
+		t.Fatalf("retry CSP lost registered callback origin: %q", failed.Header().Get("Content-Security-Policy"))
+	}
+	if strings.Contains(failed.Body.String(), "alice") || strings.Contains(failed.Body.String(), "wrong password") || strings.Contains(failed.Body.String(), "Unable to continue") {
+		t.Fatal("failed login exposed user input or generic browser error page")
+	}
+	if _, err := h.browser.LoadAuthorizationInteractionReadOnly(context.Background(), init.Value, interaction); err != nil {
+		t.Fatalf("failed login consumed interaction: %v", err)
+	}
+
+	completed := httptest.NewRecorder()
+	h.Login(completed, postLogin(init, interaction, "alice", "correct password"))
+	location, err := url.Parse(completed.Header().Get("Location"))
+	if err != nil || completed.Code != http.StatusSeeOther || location.Scheme+"://"+location.Host+location.Path != authorizeValues().Get("redirect_uri") || location.Query().Get("state") != strings.Repeat("s", 32) || location.Query().Get("code") == "" || strings.Contains(location.Path, "dashboard") {
+		t.Fatalf("OAuth login status=%d location=%q err=%v", completed.Code, completed.Header().Get("Location"), err)
 	}
 }
 
@@ -504,6 +565,18 @@ func TestExpiredRecoveryDoesNotRunForWrongPassword(t *testing.T) {
 func TestLoginPolicyBlocksWithoutConsumingInteraction(t *testing.T) {
 	t.Parallel()
 	h := testHandler(t)
+	h.SetThemeURLResolver(func(_ context.Context, clientID string) (string, error) {
+		if clientID != "browser-client" {
+			t.Fatalf("theme client=%q", clientID)
+		}
+		return "/auth/v1/theme/browser-client.css?v=3", nil
+	})
+	h.SetLoginBrandingResolver(func(_ context.Context, clientID string) (LoginBranding, error) {
+		if clientID != "browser-client" {
+			t.Fatalf("branding client=%q", clientID)
+		}
+		return LoginBranding{LogoURL: "/auth/v1/clients/browser-client/logo?v=3"}, nil
+	})
 	ip := "198.51.100.40"
 	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
 	h.now = func() time.Time { return now }
@@ -527,6 +600,23 @@ func TestLoginPolicyBlocksWithoutConsumingInteraction(t *testing.T) {
 	h.Login(response, blocked)
 	if response.Code != http.StatusTooManyRequests || response.Header().Get("Retry-After") == "" || strings.Contains(response.Body.String(), "alice") {
 		t.Fatalf("blocked status=%d headers=%v body=%q", response.Code, response.Header(), response.Body.String())
+	}
+	htmlBlocked := postLogin(init, interaction, "alice", "correct password")
+	htmlBlocked.RemoteAddr = ip + ":1234"
+	htmlBlocked.Header.Set("Accept", "text/html")
+	htmlBlocked.Header.Set("Accept-Language", "ko")
+	htmlResponse := httptest.NewRecorder()
+	branding.BrowserPageErrors(h.issuer, http.HandlerFunc(h.Login)).ServeHTTP(htmlResponse, htmlBlocked)
+	if htmlResponse.Code != http.StatusTooManyRequests || htmlResponse.Header().Get("Retry-After") != response.Header().Get("Retry-After") || !strings.HasPrefix(htmlResponse.Header().Get("Content-Type"), "text/html") || htmlResponse.Header().Get("Location") != "" || len(htmlResponse.Result().Cookies()) != 0 {
+		t.Fatalf("HTML block status=%d headers=%v cookies=%#v", htmlResponse.Code, htmlResponse.Header(), htmlResponse.Result().Cookies())
+	}
+	for _, want := range []string{
+		"시도 횟수가 많습니다. 잠시 후 다시 시도하세요.", `value="` + interaction + `"`,
+		`href="/auth/v1/theme/browser-client.css?v=3"`, `src="/auth/v1/clients/browser-client/logo?v=3"`,
+	} {
+		if !strings.Contains(htmlResponse.Body.String(), want) {
+			t.Fatalf("HTML block missing %q: %s", want, htmlResponse.Body.String())
+		}
 	}
 	// Clearing the test-only block demonstrates the rejected request did not
 	// consume the authorization interaction.

@@ -149,3 +149,90 @@ func TestApprovalPasskeySignedCompletion(t *testing.T) {
 		}
 	}
 }
+
+func TestForcedMFAHTMLPasskeyFinishesAtOAuthCallback(t *testing.T) {
+	t.Parallel()
+	h, db := testHandlerWithDB(t, true)
+	ctx := context.Background()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKey, err := cbor.Marshal(map[int]any{1: 2, 3: -7, -1: 1, -2: key.X.FillBytes(make([]byte, 32)), -3: key.Y.FillBytes(make([]byte, 32))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialID := []byte("oauth-mfa-test-credential")
+	credentialJSON, err := json.Marshal(wa.Credential{ID: credentialID, PublicKey: publicKey})
+	if err != nil {
+		t.Fatal(err)
+	}
+	envelope, err := testOIDCKeyring(t).SealEnvelope(credentialEnvelopePurpose("user-1"), credentialJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b64 := base64.RawURLEncoding.EncodeToString
+	userHandle := []byte(strings.Repeat("u", 32))
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "oauth-mfa-passkey-fixture", Statements: []rhiza.SQLStatement{
+		{SQL: `INSERT INTO identity_webauthn_users(subject,user_handle,created_at_unix_ms) VALUES('user-1',?,0)`, Args: []any{b64(userHandle)}},
+		{SQL: `INSERT INTO identity_webauthn_credentials(credential_id,subject,name,credential_json,sign_count,user_verified,registered_at_unix_ms,last_used_at_unix_ms) VALUES(?,'user-1','key',?,0,1,0,0)`, Args: []any{b64(credentialID), b64(envelope)}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	page := httptest.NewRecorder()
+	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
+	init := page.Result().Cookies()[0]
+	interaction := interactionToken(t, page.Body.String())
+	password := postLogin(init, interaction, "alice", "correct password")
+	password.Header.Set("Accept", "text/html")
+	challengePage := httptest.NewRecorder()
+	h.Login(challengePage, password)
+	if challengePage.Code != http.StatusOK || !strings.Contains(challengePage.Header().Get("Content-Type"), "text/html") || strings.Contains(challengePage.Body.String(), "loginForm.addEventListener('submit'") {
+		t.Fatalf("challenge response status=%d headers=%v body=%s", challengePage.Code, challengePage.Header(), challengePage.Body.String())
+	}
+	start := strings.Index(challengePage.Body.String(), "try{await finishPasskey(")
+	if start < 0 {
+		t.Fatal("HTML response omitted the WebAuthn challenge")
+	}
+	start += len("try{await finishPasskey(")
+	end := strings.Index(challengePage.Body.String()[start:], ");")
+	if end < 0 {
+		t.Fatal("HTML response has malformed WebAuthn challenge")
+	}
+	var challenge struct {
+		Code string                       `json:"code"`
+		RCR  protocol.CredentialAssertion `json:"rcr"`
+	}
+	if err := json.Unmarshal([]byte(challengePage.Body.String()[start:start+end]), &challenge); err != nil || challenge.Code == "" {
+		t.Fatalf("decode challenge=%v err=%v", challenge, err)
+	}
+
+	clientData, err := json.Marshal(map[string]any{"type": "webauthn.get", "challenge": b64(challenge.RCR.Response.Challenge), "origin": h.issuer, "crossOrigin": false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpHash := sha256.Sum256([]byte("localhost"))
+	authenticatorData := append(rpHash[:], byte(5), 0, 0, 0, 1)
+	clientHash := sha256.Sum256(clientData)
+	signed := append(append([]byte{}, authenticatorData...), clientHash[:]...)
+	digest := sha256.Sum256(signed)
+	signature, err := ecdsa.SignASN1(rand.Reader, key, digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertion, err := json.Marshal(map[string]any{"id": b64(credentialID), "rawId": b64(credentialID), "type": "public-key", "response": map[string]string{"authenticatorData": b64(authenticatorData), "clientDataJSON": b64(clientData), "signature": b64(signature), "userHandle": b64(userHandle)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{"code": {challenge.Code}, "data": {string(assertion)}}
+	finish := httptest.NewRequest(http.MethodPost, "/auth/v1/users/webauthn_finish", strings.NewReader(form.Encode()))
+	finish.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	finish.AddCookie(init)
+	result := httptest.NewRecorder()
+	h.WebAuthnFinish(result, finish)
+	location, err := url.Parse(result.Header().Get("Location"))
+	if err != nil || result.Code != http.StatusSeeOther || location.Scheme+"://"+location.Host+location.Path != authorizeValues().Get("redirect_uri") || location.Query().Get("state") != strings.Repeat("s", 32) || location.Query().Get("code") == "" || strings.Contains(location.Path, "dashboard") {
+		t.Fatalf("MFA finish status=%d location=%q err=%v body=%s", result.Code, result.Header().Get("Location"), err, result.Body.String())
+	}
+}
