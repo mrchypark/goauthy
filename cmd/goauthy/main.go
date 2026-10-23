@@ -1434,7 +1434,7 @@ func run() (err error) {
 
 	// --- Metrics server (opt-in, disabled by default) -----------------------
 	var metricsServer *http.Server
-	var appHandler http.Handler = branding.BrowserPageErrors(issuer, handler)
+	var appHandler http.Handler = branding.BrowserPageErrorsWithBrand(issuer, handler, commonBrand)
 	if geoConfig.Enabled {
 		appHandler = geoblock.Middleware(geoConfig.Policy, geoConfig.Header, trustedProxies, geoReader, appHandler)
 	}

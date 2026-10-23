@@ -1,6 +1,8 @@
 package branding
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -65,5 +67,64 @@ func TestBrowserErrorNavigationPreservesAuthority(t *testing.T) {
 		} else if w.Body.String() != "original" {
 			t.Fatal("protocol response changed")
 		}
+	}
+}
+
+func TestBrowserErrorsUseOnlyResolvedGlobalBrand(t *testing.T) {
+	resolved := 0
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/auth/login?client_id=attacker", nil)
+	r.Header.Set("Accept", "text/html")
+	BrowserPageErrorsWithBrand("https://auth.test/tenant", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "invalid interaction", http.StatusForbidden)
+	}), func(_ context.Context) (Brand, error) {
+		resolved++
+		return Brand{Name: "Trusted IAM", LogoURL: "/auth/v1/clients/goauthy/logo?v=2", ThemeURL: "/auth/v1/theme/goauthy/9"}, nil
+	}).ServeHTTP(w, r)
+
+	if resolved != 1 || w.Code != http.StatusForbidden {
+		t.Fatalf("resolver calls=%d status=%d", resolved, w.Code)
+	}
+	for _, directive := range []string{"default-src 'none'", "style-src 'self'", "font-src 'self'", "img-src 'self'", "base-uri 'none'", "frame-ancestors 'none'", "form-action 'none'"} {
+		if !strings.Contains(w.Header().Get("Content-Security-Policy"), directive) {
+			t.Errorf("global error CSP missing %q: %q", directive, w.Header().Get("Content-Security-Policy"))
+		}
+	}
+	for _, want := range []string{
+		`<title>Trusted IAM</title>`,
+		`href="/tenant/auth/v1/theme/goauthy/9"`,
+		`src="/tenant/auth/v1/clients/goauthy/logo?v=2"`,
+	} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("global-branded error page missing %q: %s", want, w.Body.String())
+		}
+	}
+	if strings.Contains(w.Body.String(), "attacker") {
+		t.Fatal("request-supplied client ID appeared in error branding")
+	}
+}
+
+func TestBrowserErrorsFallBackWhenGlobalBrandUnavailable(t *testing.T) {
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/auth/login", nil)
+	r.Header.Set("Accept", "text/html")
+	BrowserPageErrorsWithBrand("https://auth.test", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "invalid interaction", http.StatusForbidden)
+	}), func(context.Context) (Brand, error) {
+		return Brand{}, errors.New("global brand unavailable")
+	}).ServeHTTP(w, r)
+
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "GoAuthy") || strings.Contains(w.Body.String(), "/auth/v1/theme/goauthy/") {
+		t.Fatalf("fallback status=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestLoginErrorRuleWinsOverPanelParagraphStyle(t *testing.T) {
+	css := string(globalCSS)
+	if !strings.Contains(css, `.auth-error { padding: 14px 16px; border: 1px solid hsl(var(--text) / .18); border-radius: var(--border-radius); color: hsl(var(--error)); font-size: 14px; }`) {
+		t.Fatal("nested auth errors must retain their shared styling and theme error color")
+	}
+	if !strings.Contains(css, `.auth-panel > p.auth-error { color: hsl(var(--error)); font-size: 14px; }`) {
+		t.Fatal("login error selector must override the panel paragraph style and use the theme error color")
 	}
 }
