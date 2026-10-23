@@ -7,6 +7,7 @@
   const messages = {
      'Enter a device code': '기기 코드 입력', 'Language': '언어', 'Change language': '언어 변경', 'Keep editing': '계속 편집',
     'Sign in': '로그인', 'Username': '사용자 이름', 'Password': '비밀번호',
+    'Signing in…': '로그인 중…',
     'Continue to': '계속할 서비스:', 'Sign in with a passkey': '패스키로 로그인',
     'YOUR SECURE CONNECTION': '나만의 안전한 연결',
     'Complete the security key verification to continue.': '계속하려면 등록된 보안 키로 본인을 확인하세요.',
@@ -34,6 +35,19 @@
   globalThis.GoAuthyI18n = {language, messages, t, translate, setBusy};
   document.addEventListener('DOMContentLoaded', () => {
     translate();
+    const loginForm = document.getElementById('login-form');
+    if (loginForm) {
+      const progress = document.querySelector('[data-login-progress]');
+      loginForm.addEventListener('submit', event => {
+        if (event.defaultPrevented) return;
+        if (progress) progress.hidden = false;
+        loginForm.setAttribute('aria-busy', 'true');
+      });
+      window.addEventListener('pageshow', () => {
+        if (progress) progress.hidden = true;
+        loginForm.removeAttribute('aria-busy');
+      });
+    }
     let dirty = false;
     document.addEventListener('input', event => {
       if (event.target.matches('input,textarea,select') && !event.target.matches('[data-language-select]')) dirty = true;

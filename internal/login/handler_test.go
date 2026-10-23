@@ -180,14 +180,25 @@ func TestHTMLLoginFailureKeepsOAuthInteractionForRetry(t *testing.T) {
 		t.Fatalf("HTML failure status=%d headers=%v cookies=%#v", failed.Code, failed.Header(), failed.Result().Cookies())
 	}
 	for _, want := range []string{
-		`role="alert"`, "사용자 이름 또는 비밀번호를 확인하고 다시 시도하세요.",
-		`action="/auth/login"`, `value="` + interaction + `"`,
+		`class="auth-error" role="alert"`, "사용자 이름 또는 비밀번호를 확인하고 다시 시도하세요.",
+		`data-login-progress hidden data-i18n="Signing in…">Signing in…</p>`,
+		`method="post" action="/auth/login"`, `value="` + interaction + `"`,
 		`href="/auth/v1/theme/browser-client.css?v=2"`,
 		`src="/auth/v1/clients/browser-client/logo?v=2"`,
 	} {
 		if !strings.Contains(failed.Body.String(), want) {
 			t.Errorf("retry page missing %q: %s", want, failed.Body.String())
 		}
+	}
+	var submitButton string
+	for _, tag := range regexp.MustCompile(`<button\b[^>]*>`).FindAllString(failed.Body.String(), -1) {
+		if strings.Contains(tag, `type="submit"`) {
+			submitButton = tag
+			break
+		}
+	}
+	if submitButton == "" || regexp.MustCompile(`\s(?:name|value)=`).MatchString(submitButton) {
+		t.Fatalf("login submit button missing or has a named value: %q", submitButton)
 	}
 	if !strings.Contains(failed.Header().Get("Content-Security-Policy"), "form-action 'self' http://localhost") {
 		t.Fatalf("retry CSP lost registered callback origin: %q", failed.Header().Get("Content-Security-Policy"))
