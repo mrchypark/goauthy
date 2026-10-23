@@ -113,13 +113,13 @@ func (s *Service) GetReset(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
-	if crossSite(r) {
-		forbidden(w)
-		return
-	}
 	// HTML navigation is presentation only; explicit continuation bootstraps JSON.
 	if strings.Contains(r.Header.Get("Accept"), "text/html") {
 		s.renderPage(w, r, "reset")
+		return
+	}
+	if crossSite(r) {
+		forbidden(w)
 		return
 	}
 	w.Header().Add("Vary", "Accept")
