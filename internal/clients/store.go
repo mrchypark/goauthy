@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/mrchypark/goauthy/internal/oidc"
@@ -37,6 +38,7 @@ var (
 type NewRequest struct {
 	BackchannelLogoutURI *string  `json:"backchannel_logout_uri"`
 	RestrictGroupPrefix  *string  `json:"restrict_group_prefix"`
+	ClientURI            *string  `json:"client_uri"`
 	ID                   string   `json:"id"`
 	Name                 *string  `json:"name"`
 	Confidential         bool     `json:"confidential"`
@@ -51,6 +53,8 @@ type NewRequest struct {
 type UpdateRequest struct {
 	BackchannelLogoutURI *string  `json:"backchannel_logout_uri"`
 	RestrictGroupPrefix  *string  `json:"restrict_group_prefix"`
+	ClientURI            *string  `json:"client_uri"`
+	ClientURIPresent     bool     `json:"-"`
 	Name                 *string  `json:"name"`
 	Confidential         bool     `json:"confidential"`
 	RedirectURIs         []string `json:"redirect_uris"`
@@ -65,6 +69,7 @@ type UpdateRequest struct {
 type Client struct {
 	BackchannelLogoutURI *string  `json:"backchannel_logout_uri"`
 	RestrictGroupPrefix  *string  `json:"restrict_group_prefix"`
+	ClientURI            *string  `json:"client_uri"`
 	ID                   string   `json:"id"`
 	Name                 *string  `json:"name"`
 	Confidential         bool     `json:"confidential"`
@@ -160,7 +165,7 @@ func (s *Store) CreateWithGuard(ctx context.Context, in NewRequest, authority fu
 		return Client{}, err
 	}
 	scopes, defaults, grants := managedDefaults(in)
-	c := Client{BackchannelLogoutURI: in.BackchannelLogoutURI, RestrictGroupPrefix: in.RestrictGroupPrefix, ID: in.ID, Name: in.Name, Confidential: in.Confidential, RedirectURIs: append([]string{}, in.RedirectURIs...), Enabled: true, Scopes: scopes, DefaultScopes: defaults, GrantTypes: grants, Audiences: append([]string{}, in.Audiences...), DefaultAudiences: append([]string{}, in.DefaultAudiences...), Revision: 1, Generation: randomGeneration(), ForceMFA: in.ForceMFA}
+	c := Client{BackchannelLogoutURI: in.BackchannelLogoutURI, RestrictGroupPrefix: in.RestrictGroupPrefix, ClientURI: in.ClientURI, ID: in.ID, Name: in.Name, Confidential: in.Confidential, RedirectURIs: append([]string{}, in.RedirectURIs...), Enabled: true, Scopes: scopes, DefaultScopes: defaults, GrantTypes: grants, Audiences: append([]string{}, in.Audiences...), DefaultAudiences: append([]string{}, in.DefaultAudiences...), Revision: 1, Generation: randomGeneration(), ForceMFA: in.ForceMFA}
 	if in.Confidential {
 		if err := sealSecret(s, &c); err != nil {
 			return Client{}, err
@@ -202,6 +207,9 @@ func (s *Store) updateWithGuard(ctx context.Context, id string, rev int64, in Up
 	c.Name = in.Name
 	c.BackchannelLogoutURI = in.BackchannelLogoutURI
 	c.RestrictGroupPrefix = in.RestrictGroupPrefix
+	if in.ClientURIPresent || in.ClientURI != nil {
+		c.ClientURI = in.ClientURI
+	}
 	c.Confidential = in.Confidential
 	c.RedirectURIs = append([]string{}, in.RedirectURIs...)
 	c.Enabled = in.Enabled
@@ -301,7 +309,7 @@ func (s *Store) RotateSecretWithGuard(ctx context.Context, id string, rev int64,
 	if e != nil {
 		return Client{}, e
 	}
-	return s.updateWithGuard(ctx, id, rev, UpdateRequest{BackchannelLogoutURI: c.BackchannelLogoutURI, RestrictGroupPrefix: c.RestrictGroupPrefix, Name: c.Name, Confidential: true, RedirectURIs: c.RedirectURIs, Enabled: c.Enabled, Scopes: c.Scopes, DefaultScopes: c.DefaultScopes, GrantTypes: c.GrantTypes, Audiences: c.Audiences, DefaultAudiences: c.DefaultAudiences, ForceMFA: c.ForceMFA}, authority, true)
+	return s.updateWithGuard(ctx, id, rev, UpdateRequest{ClientURI: c.ClientURI, BackchannelLogoutURI: c.BackchannelLogoutURI, RestrictGroupPrefix: c.RestrictGroupPrefix, Name: c.Name, Confidential: true, RedirectURIs: c.RedirectURIs, Enabled: c.Enabled, Scopes: c.Scopes, DefaultScopes: c.DefaultScopes, GrantTypes: c.GrantTypes, Audiences: c.Audiences, DefaultAudiences: c.DefaultAudiences, ForceMFA: c.ForceMFA}, authority, true)
 }
 
 func (s *Store) execute(ctx context.Context, request rhiza.ExecuteRequest, envelope bool) (rhiza.ExecuteResponse, error) {
@@ -441,7 +449,7 @@ func guardArgs(fn func() (string, []any)) (string, []any) {
 	return g, a
 }
 func (c Client) metadata() map[string]any {
-	return map[string]any{"backchannel_logout_uri": c.BackchannelLogoutURI, "restrict_group_prefix": c.RestrictGroupPrefix, "name": c.Name, "confidential": c.Confidential, "redirect_uris": c.RedirectURIs, "scopes": c.Scopes, "default_scopes": c.DefaultScopes, "enabled_flows": c.GrantTypes, "audience": c.Audiences, "default_aud": c.DefaultAudiences}
+	return map[string]any{"backchannel_logout_uri": c.BackchannelLogoutURI, "restrict_group_prefix": c.RestrictGroupPrefix, "client_uri": c.ClientURI, "name": c.Name, "confidential": c.Confidential, "redirect_uris": c.RedirectURIs, "scopes": c.Scopes, "default_scopes": c.DefaultScopes, "enabled_flows": c.GrantTypes, "audience": c.Audiences, "default_aud": c.DefaultAudiences}
 }
 func decode(row []any) (Client, error) {
 	if len(row) != 8 {
@@ -460,6 +468,9 @@ func decode(row []any) (Client, error) {
 		return Client{}, ErrInvalid
 	}
 	if c.RestrictGroupPrefix != nil && !groupPrefixPattern.MatchString(*c.RestrictGroupPrefix) {
+		return Client{}, ErrInvalid
+	}
+	if validateClientURI(c.ClientURI) != nil {
 		return Client{}, ErrInvalid
 	}
 	c.ID = id
@@ -522,6 +533,9 @@ func boolInt(v bool) int64 {
 	return 0
 }
 func validateNew(in NewRequest, reserved map[string]bool) error {
+	if err := validateClientURI(in.ClientURI); err != nil {
+		return err
+	}
 	if in.BackchannelLogoutURI != nil && !backchannelURIPattern.MatchString(*in.BackchannelLogoutURI) {
 		return ErrInvalid
 	}
@@ -552,6 +566,9 @@ func validateNew(in NewRequest, reserved map[string]bool) error {
 	return validateAudiences(in.DefaultAudiences)
 }
 func validateUpdate(in UpdateRequest) error {
+	if err := validateClientURI(in.ClientURI); err != nil {
+		return err
+	}
 	if in.BackchannelLogoutURI != nil && !backchannelURIPattern.MatchString(*in.BackchannelLogoutURI) {
 		return ErrInvalid
 	}
@@ -574,6 +591,24 @@ func validateUpdate(in UpdateRequest) error {
 	}
 	if in.DefaultAudiences != nil {
 		return validateAudiences(in.DefaultAudiences)
+	}
+	return nil
+}
+
+func validateClientURI(value *string) error {
+	if value == nil {
+		return nil
+	}
+	// Landing pages use the same bounded HTTPS-only policy as resource URLs.
+	if err := validateAudiences([]string{*value}); err != nil {
+		return err
+	}
+	u, _ := url.Parse(*value)
+	if port := u.Port(); port != "" {
+		n, err := strconv.ParseUint(port, 10, 16)
+		if err != nil || n == 0 {
+			return ErrInvalid
+		}
 	}
 	return nil
 }

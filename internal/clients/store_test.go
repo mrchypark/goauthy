@@ -245,6 +245,104 @@ func TestManagedBackchannelURIPersistenceAndSecretRotation(t *testing.T) {
 	}
 }
 
+func TestManagedClientURIPreservesLegacyMetadataAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "managed-client-uri-test", DataDir: dataDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if db != nil {
+			_ = db.Close()
+		}
+	})
+	if err := storage.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "managed-client-uri-barrier", SQL: `INSERT INTO master_key_retirement_barrier(barrier_id,epoch,old_key_id,replacement_key_id,membership_digest,state,prepared_at_unix_ms) VALUES (1,1,'old','master',?, 'prepared',1)`, Args: []any{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}); err != nil {
+		t.Fatal(err)
+	}
+	keyDir := t.TempDir()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(keyDir, "master"), []byte(base64.RawURLEncoding.EncodeToString(key)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keyring, err := oidc.LoadKeyring(keyDir, "master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewStore(db, keyring)
+	c, err := s.CreateWithGuard(ctx, newClient(true), auth())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const clientURI = "https://RP.example.test:65535/legacy/path"
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "seed-legacy-client-uri", SQL: `UPDATE managed_oauth_clients SET metadata_json=json_set(metadata_json,'$.client_uri',?) WHERE id=?`, Args: []any{clientURI, c.ID}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db = nil
+	db, err = rhiza.Open(ctx, rhiza.Config{NodeID: "managed-client-uri-test", DataDir: dataDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s = NewStore(db, keyring)
+	loaded, err := s.GetWithGuard(ctx, c.ID, auth())
+	if err != nil || loaded.ClientURI == nil || *loaded.ClientURI != clientURI {
+		t.Fatalf("reopened legacy client_uri=%v err=%v", loaded.ClientURI, err)
+	}
+	updated, err := s.UpdateWithGuard(ctx, loaded.ID, loaded.Revision, updateOf(loaded, true, true), auth())
+	if err != nil || updated.ClientURI == nil || *updated.ClientURI != clientURI {
+		t.Fatalf("omitted client_uri update=%v err=%v", updated.ClientURI, err)
+	}
+	rotated, err := s.RotateSecretWithGuard(ctx, updated.ID, updated.Revision, auth())
+	if err != nil || rotated.ClientURI == nil || *rotated.ClientURI != clientURI {
+		t.Fatalf("rotation client_uri=%v err=%v", rotated.ClientURI, err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db = nil
+	db, err = rhiza.Open(ctx, rhiza.Config{NodeID: "managed-client-uri-test", DataDir: dataDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := NewStore(db, keyring).GetWithGuard(ctx, c.ID, auth())
+	if err != nil || got.ClientURI == nil || *got.ClientURI != clientURI {
+		t.Fatalf("final reopened client_uri=%v err=%v", got.ClientURI, err)
+	}
+}
+
+func TestManagedClientURIValidation(t *testing.T) {
+	s, ctx := testStore(t)
+	for _, value := range []string{"http://rp.example.test/", "https://user@rp.example.test/", "https://rp.example.test/?x=1", "https://rp.example.test/#fragment", "https://rp.example.test/ bad", "https://rp.example.test:0/", "https://rp.example.test:65536/", ""} {
+		in := newClient(false)
+		in.ClientURI = &value
+		if _, err := s.CreateWithGuard(ctx, in, auth()); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("create accepted client_uri %q: %v", value, err)
+		}
+	}
+	in := newClient(false)
+	uri := "https://RP.example.test:65535/legacy/path"
+	in.ClientURI = &uri
+	c, err := s.CreateWithGuard(ctx, in, auth())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := "https://rp.example.test/?x=1"
+	u := updateOf(c, false, true)
+	u.ClientURI = &bad
+	if _, err := s.UpdateWithGuard(ctx, c.ID, c.Revision, u, auth()); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("update accepted invalid client_uri: %v", err)
+	}
+}
+
 func TestBackchannelURIUpdatesAssociationsAtomically(t *testing.T) {
 	s, ctx := testStore(t)
 	c, err := s.CreateWithGuard(ctx, newClient(false), auth())

@@ -247,3 +247,36 @@ func TestManagedClientHTTPGroupPrefixMetadata(t *testing.T) {
 		etag = w.Header().Get("ETag")
 	}
 }
+
+func TestManagedClientHTTPClientURIHasPresenceSemantics(t *testing.T) {
+	t.Parallel()
+	h, store, cookie, csrf := membershipHTTPFixture(t)
+	h.BindClients(managedHTTPStore(t, store))
+	w := httptest.NewRecorder()
+	h.Clients(w, managedRequest(http.MethodPost, "/auth/v1/clients", `{"id":"managed-http-client","confidential":false,"redirect_uris":["https://app.example/cb"],"client_uri":"https://rp.example.test/"}`, cookie, csrf, ""))
+	if w.Code != http.StatusCreated || !strings.Contains(w.Body.String(), `"client_uri":"https://rp.example.test/"`) {
+		t.Fatalf("create status=%d body=%s", w.Code, w.Body.String())
+	}
+	etag := w.Header().Get("ETag")
+	base := `"confidential":false,"redirect_uris":["https://app.example/cb"],"enabled":true,"scopes":["openid"],"default_scopes":["openid"],"enabled_flows":["authorization_code"]`
+	update := func(extra string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		h.Client(response, managedRequest(http.MethodPut, "/auth/v1/clients/managed-http-client", `{`+base+extra+`}`, cookie, csrf, etag))
+		if response.Code == http.StatusOK {
+			etag = response.Header().Get("ETag")
+		}
+		return response
+	}
+	if got := update(""); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"client_uri":"https://rp.example.test/"`) {
+		t.Fatalf("omitted URI update status=%d body=%s", got.Code, got.Body.String())
+	}
+	if got := update(`,"client_uri":"https://NEW.example.test:65535/legacy/path"`); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"client_uri":"https://NEW.example.test:65535/legacy/path"`) {
+		t.Fatalf("URI update status=%d body=%s", got.Code, got.Body.String())
+	}
+	if got := update(`,"client_uri":"http://new.example.test/"`); got.Code != http.StatusBadRequest {
+		t.Fatalf("invalid URI status=%d body=%s", got.Code, got.Body.String())
+	}
+	if got := update(`,"client_uri":null`); got.Code != http.StatusOK || strings.Contains(got.Body.String(), `"client_uri":"https://`) {
+		t.Fatalf("URI clear status=%d body=%s", got.Code, got.Body.String())
+	}
+}
