@@ -189,11 +189,25 @@ func (h *Handler) clientSecret(w http.ResponseWriter, r *http.Request, rotate bo
 
 func decodeManagedClient(r *http.Request) (clients.NewRequest, error) {
 	var v clients.NewRequest
-	return v, decodeJSON(r, &v, map[string]bool{"backchannel_logout_uri": true, "restrict_group_prefix": true, "id": true, "name": true, "confidential": true, "redirect_uris": true, "scopes": true, "default_scopes": true, "enabled_flows": true, "audience": true, "default_aud": true, "force_mfa": true}, []string{"id", "confidential", "redirect_uris"}, map[string]bool{"name": true, "backchannel_logout_uri": true, "restrict_group_prefix": true})
+	return v, decodeJSON(r, &v, map[string]bool{"backchannel_logout_uri": true, "restrict_group_prefix": true, "client_uri": true, "id": true, "name": true, "confidential": true, "redirect_uris": true, "scopes": true, "default_scopes": true, "enabled_flows": true, "audience": true, "default_aud": true, "force_mfa": true}, []string{"id", "confidential", "redirect_uris"}, map[string]bool{"name": true, "backchannel_logout_uri": true, "restrict_group_prefix": true})
 }
 func decodeManagedUpdate(r *http.Request) (clients.UpdateRequest, error) {
 	var v clients.UpdateRequest
-	return v, decodeJSON(r, &v, map[string]bool{"backchannel_logout_uri": true, "restrict_group_prefix": true, "name": true, "confidential": true, "redirect_uris": true, "enabled": true, "scopes": true, "default_scopes": true, "enabled_flows": true, "audience": true, "default_aud": true, "force_mfa": true}, []string{"confidential", "redirect_uris", "enabled", "scopes", "default_scopes", "enabled_flows"}, map[string]bool{"name": true, "backchannel_logout_uri": true, "restrict_group_prefix": true})
+	if r.Body == nil {
+		return v, errors.New("body")
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, adminRequestLimit+1))
+	if err != nil {
+		return v, err
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	err = decodeJSON(r, &v, map[string]bool{"backchannel_logout_uri": true, "restrict_group_prefix": true, "client_uri": true, "name": true, "confidential": true, "redirect_uris": true, "enabled": true, "scopes": true, "default_scopes": true, "enabled_flows": true, "audience": true, "default_aud": true, "force_mfa": true}, []string{"confidential", "redirect_uris", "enabled", "scopes", "default_scopes", "enabled_flows"}, map[string]bool{"name": true, "backchannel_logout_uri": true, "restrict_group_prefix": true, "client_uri": true})
+	if err == nil {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(body, &fields)
+		_, v.ClientURIPresent = fields["client_uri"]
+	}
+	return v, err
 }
 func decodeJSON(r *http.Request, v any, fields map[string]bool, required []string, nullable map[string]bool) error {
 	if r.Body == nil || len(r.Header.Values("Content-Type")) != 1 {

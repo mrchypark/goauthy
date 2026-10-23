@@ -13,6 +13,12 @@ func addManagedClientOperations(doc *openapi3.T) {
 	prefix.Description = "Raw case-sensitive group-name prefix required for user admission. Null or omission on PUT clears the restriction."
 	backchannel := openapi3.NewStringSchema().WithNullable().WithPattern(`^[a-zA-Z0-9,.:/_\-&?=~#!$'()*+%@]+$`)
 	backchannel.Description = "Registered backchannel logout URI metadata. Null or omission on PUT clears it. Updates synchronize existing login associations; logout queues delivery to the registered URI with separate outbound network security checks."
+	clientURI := openapi3.NewStringSchema().WithMaxLength(2048)
+	clientURI.Description = "Optional absolute HTTPS client information URI without userinfo, query, or fragment; it is stored as metadata and never fetched."
+	responseClientURI := openapi3.NewStringSchema().WithNullable().WithMaxLength(2048)
+	responseClientURI.Description = "Optional HTTPS client information URI metadata."
+	updateClientURI := openapi3.NewStringSchema().WithNullable().WithMaxLength(2048)
+	updateClientURI.Description = "Omission preserves the current value; null clears it. A supplied value must be an absolute HTTPS URI without userinfo, query, or fragment."
 	list := openapi3.NewArraySchema().WithItems(str)
 	object := func(fields map[string]*openapi3.Schema, required ...string) *openapi3.Schema {
 		s := openapi3.NewObjectSchema().WithoutAdditionalProperties().WithRequired(required)
@@ -23,19 +29,22 @@ func addManagedClientOperations(doc *openapi3.T) {
 	}
 	fields := func() map[string]*openapi3.Schema {
 		return map[string]*openapi3.Schema{
-			"backchannel_logout_uri": backchannel, "restrict_group_prefix": prefix, "name": openapi3.NewStringSchema().WithNullable(), "confidential": openapi3.NewBoolSchema(),
+			"backchannel_logout_uri": backchannel, "restrict_group_prefix": prefix, "client_uri": clientURI, "name": openapi3.NewStringSchema().WithNullable(), "confidential": openapi3.NewBoolSchema(),
 			"redirect_uris": list, "enabled": openapi3.NewBoolSchema(), "scopes": list,
 			"default_scopes": list, "enabled_flows": list, "audience": openapi3.NewArraySchema().WithItems(str), "default_aud": openapi3.NewArraySchema().WithItems(str),
 		}
 	}
-	update := object(fields(), "confidential", "redirect_uris", "enabled", "scopes", "default_scopes", "enabled_flows")
+	updateFields := fields()
+	updateFields["client_uri"] = updateClientURI
+	update := object(updateFields, "confidential", "redirect_uris", "enabled", "scopes", "default_scopes", "enabled_flows")
 	responseFields := fields()
+	responseFields["client_uri"] = responseClientURI
 	responseFields["id"], responseFields["revision"] = str, openapi3.NewInt64Schema().WithMin(1)
 	client := object(responseFields, "id", "revision", "name", "confidential", "redirect_uris", "enabled", "scopes", "default_scopes", "enabled_flows", "audience", "default_aud")
-	create := object(map[string]*openapi3.Schema{"id": str, "backchannel_logout_uri": backchannel, "restrict_group_prefix": prefix, "name": openapi3.NewStringSchema().WithNullable(), "confidential": openapi3.NewBoolSchema(), "redirect_uris": list, "audience": openapi3.NewArraySchema().WithItems(str), "default_aud": openapi3.NewArraySchema().WithItems(str)}, "id", "confidential", "redirect_uris")
+	create := object(map[string]*openapi3.Schema{"id": str, "backchannel_logout_uri": backchannel, "restrict_group_prefix": prefix, "client_uri": clientURI, "name": openapi3.NewStringSchema().WithNullable(), "confidential": openapi3.NewBoolSchema(), "redirect_uris": list, "audience": openapi3.NewArraySchema().WithItems(str), "default_aud": openapi3.NewArraySchema().WithItems(str)}, "id", "confidential", "redirect_uris")
 	create.WithProperty("scopes", list).WithProperty("default_scopes", list).WithProperty("enabled_flows", list)
 	create.Description = "default_aud configures independent default access-token audiences across grants, included alongside any explicitly granted resource. Defaults do not expand the resource request allow-list. Token exchange is admitted only for confidential clients with the explicit token-exchange enabled_flow. Optional initial scopes, default_scopes, enabled_flows and audience configure the client atomically. Omitted or empty audience allows no explicitly requested resource audience. Entries must be unique absolute HTTPS URLs without userinfo, query or fragment, at most 32 entries of 2048 bytes each. Token requests also require the resource in the server allow-list. Empty redirect_uris are valid only when authorization_code is not enabled. Device-only public clients require no client secret or synthetic callback URL."
-	update.Description = "Omit audience or default_aud to preserve that policy; send [] to clear it. A changed audience policy invalidates the previous client generation and its tokens."
+	update.Description = "Omit audience or default_aud to preserve that policy; send [] to clear it. Omit client_uri to preserve it; send null to clear it. A changed audience policy invalidates the previous client generation and its tokens."
 	secret := object(map[string]*openapi3.Schema{"secret": str}, "secret")
 	read := &openapi3.SecurityRequirements{{"browserSession": {}}, {"apiKey": {}}}
 	write := &openapi3.SecurityRequirements{{"browserSession": {}, "csrfToken": {}}, {"apiKey": {}}}
@@ -72,7 +81,7 @@ func addManagedClientOperations(doc *openapi3.T) {
 	add("POST", "/auth/v1/clients", "Create managed client", "Clients.Create", 201, create, client, write, false)
 	add("GET", "/auth/v1/clients/{id}", "Read managed client", "Clients.Read", 200, nil, client, read, false)
 	add("PUT", "/auth/v1/clients/{id}", "Replace managed client configuration", "Clients.Update", 200, update, client, write, true)
-	doc.Paths.Value("/auth/v1/clients/{id}").Put.Description += " Omit audience or default_aud to preserve that policy; send [] to clear it. A changed audience policy invalidates the previous client generation and its tokens."
+	doc.Paths.Value("/auth/v1/clients/{id}").Put.Description += " Omit audience or default_aud to preserve that policy; send [] to clear it. Omit client_uri to preserve it; send null to clear it. A changed audience policy invalidates the previous client generation and its tokens."
 	add("DELETE", "/auth/v1/clients/{id}", "Delete managed client", "Clients.Delete", 204, nil, nil, write, true)
 	add("POST", "/auth/v1/clients/{id}/secret", "Read client secret", "Secrets.Read", 200, nil, secret, write, false)
 	add("PUT", "/auth/v1/clients/{id}/secret", "Rotate client secret", "Secrets.Update", 200, nil, secret, write, true)

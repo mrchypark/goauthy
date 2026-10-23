@@ -25,6 +25,20 @@ func TestManagedClientInitialPolicyCatalog(t *testing.T) {
 	if create.Properties["audience"] == nil || doc.Paths.Value("/auth/v1/clients/{id}").Put.RequestBody.Value.Content.Get("application/json").Schema.Value.Properties["audience"] == nil {
 		t.Fatal("audience must be accepted on managed client create/update")
 	}
+	update := doc.Paths.Value("/auth/v1/clients/{id}").Put.RequestBody.Value.Content.Get("application/json").Schema.Value
+	if create.Properties["client_uri"] == nil || update.Properties["client_uri"] == nil || update.Properties["client_uri"].Value.Nullable == false {
+		t.Fatal("client_uri must be documented on create and nullable update")
+	}
+	if err := update.Properties["client_uri"].Value.VisitJSON(nil); err != nil {
+		t.Fatalf("null client_uri clear rejected: %v", err)
+	}
+	clientResponse := doc.Paths.Value("/auth/v1/clients/{id}").Get.Responses.Status(200).Value.Content.Get("application/json").Schema.Value
+	if clientResponse.Properties["client_uri"] == nil || !clientResponse.Properties["client_uri"].Value.Nullable {
+		t.Fatal("client_uri response must allow a missing stored value")
+	}
+	if !strings.Contains(doc.Paths.Value("/auth/v1/clients/{id}").Put.Description, "Omit client_uri to preserve it") {
+		t.Fatal("client_uri omission/clear semantics missing")
+	}
 	response := doc.Paths.Value("/auth/v1/clients/{id}").Get.Responses.Status(200).Value.Content.Get("application/json").Schema.Value
 	if response.Properties["audience"] == nil || !slices.Contains(response.Required, "audience") {
 		t.Fatal("managed client response must require audience")
