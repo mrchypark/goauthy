@@ -212,8 +212,10 @@ IdP 로그아웃의 서로 다른 결과도 검사한다. 콜백 재사용·잘�
 
 ## 증거의 버전 경계
 
-현재 checkout의 source는 dirty worktree이므로 HEAD만으로 실행 구현을 재현할 수 없다.
-`go.mod`의 Rhiza dependency는 `v0.19.1-0.20261008214459-3895b723e194`이고 GoAuthy schema는
-v112다. 이 버전 표시는 release/production 배포나 runtime qualification의 증거가 아니다.
+당시 로컬 검증·측정에 사용한 worktree에는 커밋되지 않은 변경이 포함되어 있었고,
+측정 시점의 소스 snapshot을 별도로 보존하지 않았으므로 당시 HEAD만으로 실행 구현을 재현할 수 없다.
+현재 문서가 설명하는 소스의 `go.mod` Rhiza dependency는 `v0.19.1-0.20261008214459-3895b723e194`이고
+GoAuthy schema는 v112다. 이 버전 표시는 당시 측정 소스의 정확한 식별이나
+release/production 배포 또는 runtime qualification의 증거가 아니다.
 기존 Compos 연동 결과는 해당 시험 시점의 로컬 worktree 기반이며 release/production 증거가 아니다.
 세부 성공·거절·SKIP은 [소비자 연동 기록](consumer-integrations.md)에 분리해 기록한다.
