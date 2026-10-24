@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/eventlog"
+	"github.com/mrchypark/goauthy/internal/smtptransport"
 	gomail "github.com/wneessen/go-mail"
 )
 
@@ -49,6 +50,8 @@ func (s *EmailSender) Send(ctx context.Context, e eventlog.Event) error {
 	if err := ctx.Err(); err != nil {
 		return errors.New("SMTP delivery cancelled")
 	}
+	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
+	defer cancel()
 	m := gomail.NewMsg()
 	if err := m.From(s.cfg.From); err != nil {
 		return errors.New("email sender unavailable")
@@ -65,7 +68,9 @@ func (s *EmailSender) Send(ctx context.Context, e eventlog.Event) error {
 	return nil
 }
 func (s *EmailSender) deliver(ctx context.Context, m *gomail.Msg) error {
-	opts := []gomail.Option{gomail.WithPort(s.cfg.Port), gomail.WithTimeout(s.cfg.Timeout), gomail.WithTLSConfig(&tls.Config{ServerName: s.cfg.Host, MinVersion: tls.VersionTLS12})}
+	tlsConfig := &tls.Config{ServerName: s.cfg.Host, MinVersion: tls.VersionTLS12}
+	dial, implicitTLSAuth := smtptransport.Dialer(ctx, s.cfg.ImplicitTLS, tlsConfig)
+	opts := []gomail.Option{gomail.WithPort(s.cfg.Port), gomail.WithTimeout(s.cfg.Timeout), gomail.WithTLSConfig(tlsConfig), gomail.WithDialContextFunc(dial)}
 	if s.cfg.ImplicitTLS {
 		opts = append(opts, gomail.WithSSL())
 	} else if s.cfg.AllowInsecure {
@@ -74,7 +79,11 @@ func (s *EmailSender) deliver(ctx context.Context, m *gomail.Msg) error {
 		opts = append(opts, gomail.WithTLSPolicy(gomail.TLSMandatory))
 	}
 	if s.cfg.Username != "" || s.cfg.Password != "" {
-		opts = append(opts, gomail.WithSMTPAuth(gomail.SMTPAuthAutoDiscover), gomail.WithUsername(s.cfg.Username), gomail.WithPassword(s.cfg.Password))
+		auth := gomail.WithSMTPAuth(gomail.SMTPAuthAutoDiscover)
+		if s.cfg.ImplicitTLS {
+			auth = implicitTLSAuth(s.cfg.Username, s.cfg.Password)
+		}
+		opts = append(opts, auth, gomail.WithUsername(s.cfg.Username), gomail.WithPassword(s.cfg.Password))
 	}
 	c, err := gomail.NewClient(s.cfg.Host, opts...)
 	if err != nil {

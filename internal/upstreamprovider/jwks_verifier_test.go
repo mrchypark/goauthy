@@ -106,6 +106,126 @@ func TestJWKSVerifierColdFetchIsDeduplicatedAndWaitersCancel(t *testing.T) {
 	}
 }
 
+func TestJWKSVerifierUnknownKidWaiterJoinsRefreshBeforeMissSuppression(t *testing.T) {
+	t.Parallel()
+	oldKeys := jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{KeyID: "old"}}}
+	newKeys := jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{KeyID: "new"}}}
+	active := &jwksFetch{done: make(chan struct{})}
+	v := newTestJWKSVerifier("https://issuer.example.test/jwks", nil)
+	v.entries["issuer"] = jwksCacheEntry{keys: oldKeys, expires: jwksTestNow().Add(jwksCacheTTL), missRefreshUntil: jwksTestNow().Add(time.Second)}
+	v.fetching["issuer"] = active
+	if keys, err := v.keys(context.Background(), "issuer", v.jwksByIssuer["issuer"], false); err != nil || len(keys.Key("old")) != 1 {
+		t.Fatalf("known key unavailable during refresh: keys=%v err=%v", keys, err)
+	}
+	entered, resume := make(chan struct{}), make(chan struct{})
+	v.now = func() time.Time { close(entered); <-resume; return jwksTestNow() }
+	t.Cleanup(func() {
+		select {
+		case <-active.done:
+		default:
+			active.keys = newKeys
+			close(active.done)
+		}
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	type keyResult struct {
+		keys jose.JSONWebKeySet
+		err  error
+	}
+	waiter := make(chan keyResult, 1)
+	go func() {
+		keys, err := v.keys(ctx, "issuer", v.jwksByIssuer["issuer"], true)
+		waiter <- keyResult{keys: keys, err: err}
+	}()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatalf("waiter did not reach keys lookup: %v", ctx.Err())
+	}
+	close(resume)
+	var completed *keyResult
+	select {
+	case early := <-waiter:
+		if early.err != nil {
+			t.Fatal(early.err)
+		}
+		if got := early.keys.Key("new"); len(got) != 1 {
+			t.Fatalf("in-flight waiter returned stale key set: %v", early.keys.Key("old"))
+		}
+		completed = &early
+	case <-time.After(25 * time.Millisecond):
+	}
+	if completed == nil {
+		select {
+		case <-active.done:
+		default:
+			active.keys = newKeys
+			close(active.done)
+		}
+		select {
+		case earlyResult := <-waiter:
+			completed = &earlyResult
+		case <-ctx.Done():
+			t.Fatalf("waiter did not complete after refresh: %v", ctx.Err())
+		}
+	}
+	if completed.err != nil {
+		t.Fatal(completed.err)
+	}
+	if got := completed.keys.Key("new"); len(got) != 1 {
+		t.Fatalf("waiter keys = %v, want refreshed new key", completed.keys)
+	}
+}
+
+func TestJWKSVerifierFailedUnknownKidRefreshRetriesAfterShortInterval(t *testing.T) {
+	t.Parallel()
+	oldKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		switch calls.Add(1) {
+		case 1:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &oldKey.PublicKey, KeyID: "old"}}})
+		case 2:
+			http.Error(w, "temporary", http.StatusServiceUnavailable)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &newKey.PublicKey, KeyID: "new"}}})
+		}
+	}))
+	defer server.Close()
+	v := newTestJWKSVerifier(server.URL, server.Client())
+	now := jwksTestNow()
+	v.now = func() time.Time { return now }
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if _, err := v.keys(ctx, "issuer", server.URL, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.keys(ctx, "issuer", server.URL, true); err == nil {
+		t.Fatal("temporary refresh failure was lost")
+	}
+	now = now.Add(time.Second)
+	keys, err := v.keys(ctx, "issuer", server.URL, true)
+	if err != nil {
+		t.Fatalf("retry after short interval: %v", err)
+	}
+	if got := keys.Key("new"); len(got) != 1 {
+		t.Fatalf("retry keys = %v, want new key", got)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("fetches = %d, want initial, failed, successful", got)
+	}
+}
+
 func TestNewJWKSVerifierRejectsInvalidAndConflictingIssuer(t *testing.T) {
 	t.Parallel()
 	valid := func(jwks string) Config {
@@ -173,6 +293,8 @@ func TestJWKSVerifierIsInstanceLocalAndBoundsUnknownKidRefresh(t *testing.T) {
 	defer first.Close()
 	defer second.Close()
 	v1, v2 := newTestJWKSVerifier(first.URL, first.Client()), newTestJWKSVerifier(second.URL, second.Client())
+	now := jwksTestNow()
+	v1.now = func() time.Time { return now }
 	if _, err := v1.VerifyIDToken(context.Background(), signedToken(t, key1, "same", "issuer", "client"), "issuer", "client"); err != nil {
 		t.Fatal(err)
 	}
@@ -186,6 +308,20 @@ func TestJWKSVerifierIsInstanceLocalAndBoundsUnknownKidRefresh(t *testing.T) {
 	}
 	if got := firstCalls.Load(); got != 2 {
 		t.Fatalf("unknown-kid fetches = %d, want 2", got)
+	}
+	now = now.Add(time.Second)
+	if _, err := v1.VerifyIDToken(context.Background(), signedToken(t, key1, "unknown", "issuer", "client"), "issuer", "client"); !errors.Is(err, ErrIDTokenVerification) {
+		t.Fatal(err)
+	}
+	if got := firstCalls.Load(); got != 2 {
+		t.Fatalf("successful unknown-kid refresh was retried before cache expiry: fetches = %d, want 2", got)
+	}
+	now = now.Add(jwksCacheTTL - time.Second)
+	if _, err := v1.VerifyIDToken(context.Background(), signedToken(t, key1, "unknown", "issuer", "client"), "issuer", "client"); !errors.Is(err, ErrIDTokenVerification) {
+		t.Fatal(err)
+	}
+	if got := firstCalls.Load(); got != 4 {
+		t.Fatalf("unknown-kid fetches after cache expiry = %d, want 4", got)
 	}
 	if got := secondCalls.Load(); got != 1 {
 		t.Fatalf("second instance fetches = %d, want 1", got)

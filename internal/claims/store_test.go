@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -41,6 +42,62 @@ func TestAPIKeyScopeAndUserAttributeMutationsAreGuarded(t *testing.T) {
 	}
 	if _, err = store.CreateAttributeAPIKey(ctx, p, 2, Attribute{Name: "blocked"}); err == nil {
 		t.Fatal("revoked key mutated catalog")
+	}
+}
+
+func TestPutUserValuesStatementBudgetAt64ValueBoundary(t *testing.T) {
+	ctx, store := claimsTestStore(t)
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
+		RequestID: "claims-seed-64-attributes",
+		Statements: []rhiza.SQLStatement{{
+			SQL: `WITH RECURSIVE n(x) AS (VALUES(0) UNION ALL SELECT x+1 FROM n WHERE x<63)
+				INSERT INTO user_attribute_configs (name,revision,created_at_unix_ms,updated_at_unix_ms)
+				SELECT printf('a-%02d',x),1,0,0 FROM n`,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	values := make(map[string]json.RawMessage, 64)
+	for i := 0; i < 64; i++ {
+		values[fmt.Sprintf("a-%02d", i)] = json.RawMessage(`"value"`)
+	}
+
+	keys, err := apikey.NewStore(store.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.BindAPIKeys(keys)
+	_, writerToken, err := keys.Create(ctx, nil, apikey.Request{Name: "claims-boundary-writer", Access: []apikey.Access{{Group: "Users", AccessRights: []apikey.Right{apikey.Update}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := store.AuthenticateAPIKey(ctx, "API-Key "+writerToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revision, err := store.PutUserValuesAPIKey(ctx, writer, "member", 1, values); err != nil || revision != 2 {
+		t.Fatalf("64-value API-key update revision=%d err=%v", revision, err)
+	}
+	got, revision, err := store.userValues(ctx, "member")
+	if err != nil || revision != 2 || len(got) != 64 {
+		t.Fatalf("stored values=%d revision=%d err=%v", len(got), revision, err)
+	}
+
+	_, readerToken, err := keys.Create(ctx, nil, apikey.Request{Name: "claims-boundary-reader", Access: []apikey.Access{{Group: "Users", AccessRights: []apikey.Right{apikey.Read}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := store.AuthenticateAPIKey(ctx, "API-Key "+readerToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.PutUserValuesAPIKey(ctx, reader, "member", 2, values); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("read-only API key update err=%v, want ErrUnauthorized", err)
+	}
+	got, revision, err = store.userValues(ctx, "member")
+	if err != nil || revision != 2 || len(got) != 64 {
+		t.Fatalf("unauthorized update changed values=%d revision=%d err=%v", len(got), revision, err)
 	}
 }
 

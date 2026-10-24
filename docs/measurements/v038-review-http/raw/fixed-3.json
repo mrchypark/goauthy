@@ -1,0 +1,269 @@
+[
+  {
+    "stage": "authorization_code_token",
+    "unrelated_records": 0,
+    "concurrency": 1,
+    "samples": 200,
+    "errors": 0,
+    "profile_resolver_calls": 200,
+    "status_codes": {
+      "200": 200
+    },
+    "request_body_bytes": 46800,
+    "authorization_header_bytes": 13200,
+    "response_body_bytes": 308000,
+    "elapsed_ms": 4405,
+    "requests_per_second": 45.39531831685998,
+    "p50_ms": 18.426958,
+    "p95_ms": 41.717209,
+    "p99_ms": 67.508166
+  },
+  {
+    "stage": "userinfo",
+    "unrelated_records": 0,
+    "concurrency": 1,
+    "samples": 200,
+    "errors": 0,
+    "profile_resolver_calls": 200,
+    "status_codes": {
+      "200": 200
+    },
+    "request_body_bytes": 0,
+    "authorization_header_bytes": 112800,
+    "response_body_bytes": 30000,
+    "elapsed_ms": 170,
+    "requests_per_second": 1172.3801882402938,
+    "p50_ms": 0.686917,
+    "p95_ms": 1.758042,
+    "p99_ms": 2.285584
+  },
+  {
+    "stage": "refresh_grant",
+    "unrelated_records": 0,
+    "concurrency": 1,
+    "samples": 200,
+    "errors": 0,
+    "profile_resolver_calls": 200,
+    "status_codes": {
+      "200": 200
+    },
+    "request_body_bytes": 26600,
+    "authorization_header_bytes": 13200,
+    "response_body_bytes": 300000,
+    "elapsed_ms": 4427,
+    "requests_per_second": 45.17539658644353,
+    "p50_ms": 19.349625,
+    "p95_ms": 39.043125,
+    "p99_ms": 53.311083
+  },
+  {
+    "stage": "authorization_code_token",
+    "unrelated_records": 0,
+    "concurrency": 8,
+    "samples": 200,
+    "errors": 0,
+    "profile_resolver_calls": 200,
+    "status_codes": {
+      "200": 200
+    },
+    "request_body_bytes": 46800,
+    "authorization_header_bytes": 13200,
+    "response_body_bytes": 308000,
+    "elapsed_ms": 1301,
+    "requests_per_second": 153.6253222904676,
+    "p50_ms": 45.44825,
+    "p95_ms": 90.234416,
+    "p99_ms": 112.528875
+  },
+  {
+    "stage": "userinfo",
+    "unrelated_records": 0,
+    "concurrency": 8,
+    "samples": 200,
+    "errors": 0,
+    "profile_resolver_calls": 200,
+    "status_codes": {
+      "200": 200
+    },
+    "request_body_bytes": 0,
+    "authorization_header_bytes": 112800,
+    "response_body_bytes": 30000,
+    "elapsed_ms": 51,
+    "requests_per_second": 3853.0912628747433,
+    "p50_ms": 1.361625,
+    "p95_ms": 5.195292,
+    "p99_ms": 6.673958
+  },
+  {
+    "stage": "refresh_grant",
+    "unrelated_records": 0,
+    "concurrency": 8,
+    "samples": 200,
+    "errors": 0,
+    "profile_resolver_calls": 200,
+    "status_codes": {
+      "200": 200
+    },
+    "request_body_bytes": 26600,
+    "authorization_header_bytes": 13200,
+    "response_body_bytes": 300000,
+    "elapsed_ms": 2127,
+    "requests_per_second": 94.02718918598714,
+    "p50_ms": 74.965375,
+    "p95_ms": 205.189583,
+    "p99_ms": 235.904542
+  },
+  {
+    "stage": "authorization_code_token",
+    "unrelated_records": 1000,
+    "concurrency": 1,
+    "samples": 200,
+    "errors": 0,
+    "profile_resolver_calls": 200,
+    "status_codes": {
+      "200": 200
+    },
+    "request_body_bytes": 46800,
+    "authorization_header_bytes": 13200,
+    "response_body_bytes": 308000,
+    "elapsed_ms": 4043,
+    "requests_per_second": 49.46025058545808,
+    "p50_ms": 17.826125,
+    "p95_ms": 32.570166,
+    "p99_ms": 37.976459
+  },
+  {
+    "stage": "userinfo",
+    "unrelated_records": 1000,
+    "concurrency": 1,
+    "samples": 200,
+    "errors": 0,
+    "profile_resolver_calls": 200,
+    "status_codes": {
+      "200": 200
+    },
+    "request_body_bytes": 0,
+    "authorization_header_bytes": 112800,
+    "response_body_bytes": 30000,
+    "elapsed_ms": 115,
+    "requests_per_second": 1728.2929110825703,
+    "p50_ms": 0.43625,
+    "p95_ms": 1.383208,
+    "p99_ms": 2.081417
+  },
+  {
+    "stage": "refresh_grant",
+    "unrelated_records": 1000,
+    "concurrency": 1,
+    "samples": 200,
+    "errors": 0,
+    "profile_resolver_calls": 200,
+    "status_codes": {
+      "200": 200
+    },
+    "request_body_bytes": 26600,
+    "authorization_header_bytes": 13200,
+    "response_body_bytes": 300000,
+    "elapsed_ms": 4697,
+    "requests_per_second": 42.5716546801295,
+    "p50_ms": 19.274583,
+    "p95_ms": 39.457083,
+    "p99_ms": 84.401708
+  },
+  {
+    "stage": "authorization_code_token",
+    "unrelated_records": 1000,
+    "concurrency": 8,
+    "samples": 200,
+    "errors": 0,
+    "profile_resolver_calls": 200,
+    "status_codes": {
+      "200": 200
+    },
+    "request_body_bytes": 46800,
+    "authorization_header_bytes": 13200,
+    "response_body_bytes": 308000,
+    "elapsed_ms": 2604,
+    "requests_per_second": 76.78510861300452,
+    "p50_ms": 87.891959,
+    "p95_ms": 179.73225,
+    "p99_ms": 216.219833
+  },
+  {
+    "stage": "userinfo",
+    "unrelated_records": 1000,
+    "concurrency": 8,
+    "samples": 200,
+    "errors": 0,
+    "profile_resolver_calls": 200,
+    "status_codes": {
+      "200": 200
+    },
+    "request_body_bytes": 0,
+    "authorization_header_bytes": 112800,
+    "response_body_bytes": 30000,
+    "elapsed_ms": 120,
+    "requests_per_second": 1666.032061170966,
+    "p50_ms": 3.545792,
+    "p95_ms": 8.347417,
+    "p99_ms": 11.547958
+  },
+  {
+    "stage": "refresh_grant",
+    "unrelated_records": 1000,
+    "concurrency": 8,
+    "samples": 200,
+    "errors": 0,
+    "profile_resolver_calls": 200,
+    "status_codes": {
+      "200": 200
+    },
+    "request_body_bytes": 26600,
+    "authorization_header_bytes": 13200,
+    "response_body_bytes": 300000,
+    "elapsed_ms": 3978,
+    "requests_per_second": 50.27518489460914,
+    "p50_ms": 120.428875,
+    "p95_ms": 447.273208,
+    "p99_ms": 570.371125
+  },
+  {
+    "stage": "argon2_verify",
+    "unrelated_records": 0,
+    "concurrency": 1,
+    "samples": 200,
+    "errors": 0,
+    "profile_resolver_calls": 0,
+    "status_codes": {
+      "200": 200
+    },
+    "request_body_bytes": 0,
+    "authorization_header_bytes": 0,
+    "response_body_bytes": 0,
+    "elapsed_ms": 11555,
+    "requests_per_second": 17.307960685097115,
+    "p50_ms": 44.961833,
+    "p95_ms": 119.21475,
+    "p99_ms": 198.402417
+  },
+  {
+    "stage": "argon2_verify",
+    "unrelated_records": 0,
+    "concurrency": 8,
+    "samples": 200,
+    "errors": 10,
+    "profile_resolver_calls": 0,
+    "status_codes": {
+      "200": 190,
+      "429": 10
+    },
+    "request_body_bytes": 0,
+    "authorization_header_bytes": 0,
+    "response_body_bytes": 0,
+    "elapsed_ms": 5253,
+    "requests_per_second": 38.071766249448814,
+    "p50_ms": 186.732375,
+    "p95_ms": 430.165541,
+    "p99_ms": 504.64375
+  }
+]

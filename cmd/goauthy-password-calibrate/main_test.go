@@ -27,8 +27,8 @@ func TestRunUsesInjectedMeasurementsAndReturnsDescendingMedians(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 5 {
-		t.Fatalf("recommendations = %d, want 5", len(got))
+	if len(got) != 4 {
+		t.Fatalf("recommendations = %d, want 4", len(got))
 	}
 	for i, value := range got {
 		wantIterations := uint32(5 - i)
@@ -42,8 +42,25 @@ func TestRunUsesInjectedMeasurementsAndReturnsDescendingMedians(t *testing.T) {
 			t.Fatalf("within target[%d] = %t", i, value.WithinTarget)
 		}
 	}
-	if want := []uint32{5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 2, 1, 1, 1}; !reflect.DeepEqual(calls, want) {
+	if want := []uint32{5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 2}; !reflect.DeepEqual(calls, want) {
 		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+}
+
+func TestCalibrateRecommendationsRespectPasswordIterationFloor(t *testing.T) {
+	result, err := calibrate(32768, 2, 1, minTarget, func(uint32, uint32, uint8) (time.Duration, error) {
+		return minTarget, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result) == 0 || result[len(result)-1].Iterations != 2 {
+		t.Fatalf("lowest recommendation = %#v, want iteration floor 2", result)
+	}
+	for _, recommendation := range result {
+		if recommendation.Iterations < 2 {
+			t.Fatalf("recommendation iteration count = %d, below password policy floor 2", recommendation.Iterations)
+		}
 	}
 }
 

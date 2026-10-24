@@ -23,6 +23,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/passkey"
 	"github.com/mrchypark/goauthy/internal/upstreamprovider"
+	"github.com/mrchypark/rhiza"
 )
 
 const (
@@ -90,7 +91,7 @@ func (h *Handler) IssueModificationToken(w http.ResponseWriter, r *http.Request)
 		}
 		id, exp, err = h.passkeys.ExchangeModificationProof(r.Context(), session.Subject, session.ID, *payload.MFACode)
 	} else {
-		if payload.Password == nil || !boundedPassword([]byte(*payload.Password)) {
+		if payload.Password == nil || !boundedPassword([]byte(*payload.Password), h.rules.LengthMax) {
 			badRequest(w, "invalid MFA modification request")
 			return
 		}
@@ -299,7 +300,7 @@ func (h *Handler) FinishPasskeyRegistration(w http.ResponseWriter, r *http.Reque
 		unauthorized(w)
 		return
 	}
-	value, err := h.passkeys.PasswordlessCookie(subject)
+	value, err := h.passkeys.PasswordlessCookie(r.Context(), subject)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
@@ -832,13 +833,13 @@ func (h *Handler) PutSelfPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	next := []byte(*payload.Next)
 	defer clear(next)
-	if !boundedPassword(next) || (payload.Current != nil && *payload.Current == "") || (payload.MFACode != nil && *payload.MFACode == "") {
+	if !boundedPassword(next, h.rules.LengthMax) || (payload.Current != nil && *payload.Current == "") || (payload.MFACode != nil && *payload.MFACode == "") {
 		badRequest(w, "invalid password change request")
 		return
 	}
 	passkeyOnly, err := h.identity.IsPasskeyOnly(r.Context(), session.Subject)
 	if err != nil {
-		unauthorized(w)
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
 	if passkeyOnly != (payload.MFACode != nil) {
@@ -848,7 +849,7 @@ func (h *Handler) PutSelfPassword(w http.ResponseWriter, r *http.Request) {
 	if !passkeyOnly {
 		current := []byte(*payload.Current)
 		defer clear(current)
-		if !boundedPassword(current) {
+		if !boundedPassword(current, h.rules.LengthMax) {
 			badRequest(w, "invalid password change request")
 			return
 		}
@@ -858,14 +859,23 @@ func (h *Handler) PutSelfPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		switch {
+		case errors.Is(err, rhiza.ErrCommitUnknown):
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_ = json.NewEncoder(w).Encode(struct {
+				ErrorCode string `json:"error_code"`
+			}{ErrorCode: "mutation_outcome_unknown"})
 		case errors.Is(err, identity.ErrPasswordRejected), errors.Is(err, identity.ErrPasswordReuse):
 			badRequest(w, "password rejected")
-		case passkeyOnly:
+		case passkeyOnly && errors.Is(err, identity.ErrPasswordAuthenticationDisabled):
 			badRequest(w, "invalid password change request")
-		case errors.Is(err, identity.ErrInvalidCredentials), errors.Is(err, identity.ErrInactiveSubject), errors.Is(err, identity.ErrPasswordChangeConflict), errors.Is(err, identity.ErrPasswordAuthenticationDisabled):
+		case !passkeyOnly && errors.Is(err, identity.ErrInvalidCredentials):
+			invalidCurrentPassword(w)
+		case !passkeyOnly && (errors.Is(err, identity.ErrInactiveSubject) || errors.Is(err, identity.ErrPasswordChangeConflict) || errors.Is(err, identity.ErrPasswordAuthenticationDisabled)):
 			unauthorized(w)
 		default:
-			unauthorized(w)
+			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		}
 		return
 	}
@@ -1005,8 +1015,19 @@ func requireEmptyBody(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
-func boundedPassword(value []byte) bool {
-	return len(value) <= maxPasswordLength && utf8.Valid(value) && utf8.RuneCount(value) <= maxPasswordLength
+func boundedPassword(value []byte, maxRunes int) bool {
+	if maxRunes <= 0 || maxRunes > maxPasswordLength {
+		return false
+	}
+	return len(value) > 0 && len(value) <= maxRunes*utf8.UTFMax && utf8.Valid(value) && utf8.RuneCount(value) <= maxRunes
+}
+
+func invalidCurrentPassword(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(struct {
+		ErrorCode string `json:"error_code"`
+	}{ErrorCode: "invalid_current_password"})
 }
 
 func crossSite(r *http.Request) bool {

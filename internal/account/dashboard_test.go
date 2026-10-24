@@ -11,7 +11,9 @@ import (
 
 	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/storage"
+	"github.com/mrchypark/goauthy/internal/upstreamprovider"
 	"github.com/mrchypark/rhiza"
 )
 
@@ -210,6 +212,83 @@ func TestDashboardConversionCapability(t *testing.T) {
 			read(false)
 			h.passkeys = service
 		})
+	}
+}
+
+func TestFederatedPasswordlessAccountExposesActualCapabilities(t *testing.T) {
+	h, db, _, _, _, _ := testPasskeyAccountHandler(t)
+	const providerID = "AbCdEfGhIjKlMnOpQrStUvWx"
+	const issuer = "https://accounts.google.com"
+	const clientID = "account-test-client"
+	if _, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{
+		RequestID: "account-federated-capability-provider",
+		Statements: []rhiza.SQLStatement{
+			{SQL: `INSERT INTO auth_providers(id,enabled,name,typ,issuer,authorization_endpoint,token_endpoint,userinfo_endpoint,client_id,secret,scope,use_pkce,client_secret_basic,client_secret_post,auto_onboarding,auto_link) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, Args: []any{
+				providerID, int64(1), "synthetic-provider", "oidc", issuer,
+				"https://accounts.google.com/o/oauth2/v2/auth", "https://oauth2.googleapis.com/token",
+				"https://openidconnect.googleapis.com/v1/userinfo", clientID, nil, "openid email profile",
+				int64(1), int64(1), int64(0), int64(1), int64(0),
+			}},
+			{SQL: `INSERT INTO auth_provider_runtime_versions(provider_id, version) VALUES(?, ?)`, Args: []any{providerID, "v1"}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	namespace := upstreamprovider.ComputeNamespace(issuer, clientID)
+	created, err := h.identity.CreateFederatedIdentity(t.Context(), identity.FederatedCreationInput{
+		Subject: upstreamprovider.SubjectResult{ProviderID: providerID, Subject: "synthetic-upstream-subject", IdentityNamespace: namespace},
+		Config:  identity.FederatedConfigSnapshot{Source: "registry", Version: "v1", Issuer: issuer, ClientID: clientID, Kind: "oidc", AutoOnboarding: true},
+		Email:   "federated@example.test", EmailVerified: true,
+	})
+	if err != nil || !created.Created {
+		t.Fatalf("CreateFederatedIdentity result=%#v err=%v", created, err)
+	}
+	issued, err := h.browser.CreateSession(t.Context(), created.Subject, "external", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie, err := browser.SessionCookie(h.issuer, issued.Token, issued.ExpiresAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /account/data", h.Dashboard)
+	mux.HandleFunc("GET /auth/v1/users/{subject}/webauthn", h.ListPasskeys)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	client := server.Client()
+	request := func(path string) *http.Response {
+		t.Helper()
+		r, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.AddCookie(cookie)
+		response, err := client.Do(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	response := request("/account/data")
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("account data status=%d", response.StatusCode)
+	}
+	var data struct {
+		Features map[string]bool `json:"features"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&data); err != nil {
+		t.Fatal(err)
+	}
+	if data.Features["password"] || !data.Features["passkeys"] {
+		t.Fatalf("federated passwordless capabilities=%v", data.Features)
+	}
+	response = request("/auth/v1/users/" + created.Subject + "/webauthn")
+	defer response.Body.Close()
+	var passkeys []PasskeyResponse
+	if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(&passkeys) != nil || len(passkeys) != 0 {
+		t.Fatalf("empty federated passkey inventory status=%d items=%v", response.StatusCode, passkeys)
 	}
 }
 

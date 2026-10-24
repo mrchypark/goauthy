@@ -559,11 +559,13 @@ func (s *Store) putUserValues(ctx context.Context, actor string, key *apikey.Pri
 			return 0, e
 		}
 		names = append(names, n)
-		if c != "null" {
-			canon[n] = c
-		}
+		canon[n] = c
 	}
 	sort.Strings(names)
+	encodedValues, e := json.Marshal(canon)
+	if e != nil {
+		return 0, e
+	}
 	_, current, e := s.userValues(ctx, subject)
 	if e != nil {
 		return 0, e
@@ -571,13 +573,18 @@ func (s *Store) putUserValues(ctx context.Context, actor string, key *apikey.Pri
 	if current != expected {
 		return 0, ErrConflict
 	}
-	stmts := []rhiza.SQLStatement{{SQL: `UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=updated_at_unix_ms+1 WHERE subject=? AND revision=? AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0) AND ` + adminGuard(), Args: []any{subject, expected, subject, actor}, ExpectedRowsAffected: &one}}
-	for _, n := range names {
-		if c, ok := canon[n]; ok {
-			stmts = append(stmts, rhiza.SQLStatement{SQL: `INSERT INTO user_attribute_values (subject,key,value_json,updated_at_unix_ms) SELECT ?,?,?,0 WHERE EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=?) AND EXISTS (SELECT 1 FROM rbac_principal_versions WHERE subject=? AND revision=?) ON CONFLICT(subject,key) DO UPDATE SET value_json=excluded.value_json,updated_at_unix_ms=user_attribute_values.updated_at_unix_ms+1`, Args: []any{subject, n, c, n, subject, expected + 1}})
-		} else {
-			stmts = append(stmts, rhiza.SQLStatement{SQL: `DELETE FROM user_attribute_values WHERE subject=? AND key=? AND EXISTS (SELECT 1 FROM rbac_principal_versions WHERE subject=? AND revision=?)`, Args: []any{subject, n, subject, expected + 1}})
-		}
+	stmts := []rhiza.SQLStatement{
+		{SQL: `UPDATE rbac_principal_versions SET revision=revision+1,updated_at_unix_ms=updated_at_unix_ms+1 WHERE subject=? AND revision=? AND EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0) AND ` + adminGuard(), Args: []any{subject, expected, subject, actor}, ExpectedRowsAffected: &one},
+		{SQL: `INSERT INTO user_attribute_values (subject,key,value_json,updated_at_unix_ms)
+			SELECT ?,j.key,j.value,0 FROM json_each(?) AS j
+			WHERE j.value<>'null'
+			AND EXISTS (SELECT 1 FROM user_attribute_configs WHERE name=j.key)
+			AND EXISTS (SELECT 1 FROM rbac_principal_versions WHERE subject=? AND revision=?)
+			ON CONFLICT(subject,key) DO UPDATE SET value_json=excluded.value_json,updated_at_unix_ms=user_attribute_values.updated_at_unix_ms+1`, Args: []any{subject, string(encodedValues), subject, expected + 1}},
+		{SQL: `DELETE FROM user_attribute_values
+			WHERE subject=?
+			AND key IN (SELECT j.key FROM json_each(?) AS j WHERE j.value='null')
+			AND EXISTS (SELECT 1 FROM rbac_principal_versions WHERE subject=? AND revision=?)`, Args: []any{subject, string(encodedValues), subject, expected + 1}},
 	}
 	id := requestID("values", actor, subject, fmt.Sprint(expected), strings.Join(names, "\x00"))
 	e = s.run(ctx, actor, key, "Users", apikey.Update, id, stmts)

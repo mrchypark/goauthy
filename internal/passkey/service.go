@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -81,6 +82,14 @@ type Service struct {
 	keyring                           EnvelopeKeyring
 	now                               func() time.Time
 	random                            io.Reader
+	retentionMu                       sync.Mutex
+	retentionRegistered               map[string]struct{}
+	retentionInFlight                 map[string]*cookieRetentionRegistration
+}
+
+type cookieRetentionRegistration struct {
+	done chan struct{}
+	err  error
 }
 
 type Credential struct {
@@ -772,8 +781,8 @@ func (s *Service) ConsumeModificationToken(ctx context.Context, subject, session
 	return nil
 }
 
-func (s *Service) PasswordlessCookie(subject string) (string, error) {
-	if !validSubject(subject) {
+func (s *Service) PasswordlessCookie(ctx context.Context, subject string) (string, error) {
+	if s == nil || ctx == nil || ctx.Err() != nil || s.db == nil || s.keyring == nil || s.renewTTL <= 0 || !validSubject(subject) {
 		return "", ErrInvalid
 	}
 	exp := s.now().UTC().Add(s.renewTTL).Unix()
@@ -782,8 +791,92 @@ func (s *Service) PasswordlessCookie(subject string) (string, error) {
 	if err != nil {
 		return "", ErrInvalid
 	}
+	// Read the key identifier from the exact envelope that will be returned.
+	// Consulting the active key separately races with key rotation between
+	// selecting a key and sealing the cookie.
+	keyID, err := s.keyring.PurposeEnvelopeKeyID(passwordlessCookiePurpose, envelope)
+	if err != nil || keyID == "" {
+		return "", ErrInvalid
+	}
+	if err := s.registerPasswordlessCookieKeyTTL(ctx, keyID); err != nil {
+		return "", ErrInvalid
+	}
+	// TTL registration is only retention evidence, never issuance permission.
+	// Recheck the writer fence for every cookie, after fixing the cookie expiry
+	// above and using the key ID parsed from that exact envelope.
+	if err := storage.CheckEnvelopeWriterAllowed(ctx, s.db, keyID); err != nil {
+		return "", ErrInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return "", ErrInvalid
+	}
 	return base64.RawURLEncoding.EncodeToString(envelope), nil
 }
+
+func (s *Service) registerPasswordlessCookieKeyTTL(ctx context.Context, keyID string) error {
+	for {
+		s.retentionMu.Lock()
+		if _, ok := s.retentionRegistered[keyID]; ok {
+			s.retentionMu.Unlock()
+			return ctx.Err()
+		}
+		if pending := s.retentionInFlight[keyID]; pending != nil {
+			s.retentionMu.Unlock()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-pending.done:
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return pending.err
+			}
+		}
+		pending := &cookieRetentionRegistration{done: make(chan struct{})}
+		if s.retentionInFlight == nil {
+			s.retentionInFlight = make(map[string]*cookieRetentionRegistration)
+		}
+		s.retentionInFlight[keyID] = pending
+		s.retentionMu.Unlock()
+
+		err := storage.RegisterPasswordlessCookieKeyTTL(ctx, s.db, keyID, s.renewTTL)
+
+		s.retentionMu.Lock()
+		if err == nil {
+			if s.retentionRegistered == nil {
+				s.retentionRegistered = make(map[string]struct{})
+			}
+			s.retentionRegistered[keyID] = struct{}{}
+		}
+		pending.err = err
+		delete(s.retentionInFlight, keyID)
+		close(pending.done)
+		s.retentionMu.Unlock()
+		return err
+	}
+}
+
+// PasswordlessCookieTTL returns the configured lifetime for newly issued
+// passwordless cookies. Retirement uses it to retain the master key long
+// enough to decrypt cookies issued before the key was fenced.
+func (s *Service) PasswordlessCookieTTL() time.Duration {
+	if s == nil {
+		return 0
+	}
+	return s.renewTTL
+}
+
+// PasswordlessCookieTTLForConfig returns a conservative lifetime for cookie
+// decryption during key retirement. Even with passkeys currently disabled, an
+// older cookie may have been issued under the default lifetime.
+func PasswordlessCookieTTLForConfig(config *Config) time.Duration {
+	ttl := defaultRenewTTL
+	if config != nil && config.RenewTTL > ttl {
+		ttl = config.RenewTTL
+	}
+	return ttl
+}
+
 func (s *Service) SubjectFromCookie(v string) (string, error) {
 	if len(v) == 0 || len(v) > maxPasswordlessCookieLength {
 		return "", ErrInvalid

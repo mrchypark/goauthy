@@ -2,7 +2,11 @@
 
 `go build -o goauthy-backup ./cmd/goauthy-backup` builds the offline operator.
 The main container image also includes `/goauthy-backup`.
-It uses Rhiza v0.12.3 public recovery/checkpoint APIs and never opens a DB.
+It uses the public recovery/checkpoint APIs from the Rhiza version pinned in
+[`go.mod`](../go.mod) and never opens a DB. This identifies the build input; it
+does not by itself qualify restore compatibility with another Rhiza version.
+Dated integration and Kind results below are historical; unless a result names
+its tested Rhiza build, it does not qualify the current source pin.
 The source may remain live during export. The restore target must remain offline
 and exclusively owned until the command exits successfully.
 
@@ -277,13 +281,16 @@ signer's public key); it does not prove PUT permission. Untrusted existing
 receipts fail closed. Keep keys independently recoverable outside disposable
 GoAuthy storage and use the overlap procedure above when changing signers.
 
-Each successful Create is followed by Prune. Limits are 65536 files, 1 GiB per
-file and 8 GiB total. Work is serial per process and uses a replicated cooperative
-lease and completion marker; this is not exactly-once publication fencing. See
+For server-scheduled jobs, a successful `Create` is followed by the configured
+catalog-retention pass; the standalone operator's `create` command does not
+prune. Limits are 65536 files, 1 GiB per file and 8 GiB total. Work is serial
+per process and uses a replicated cooperative lease and completion marker; this
+is not exactly-once publication fencing. See
 [the scheduling contract](backup-scheduling.md) for failure and verification limits.
 
-`create` retries snapshot acquisition at most six times for Rhiza v0.12.3's
-exact moving-head, archive-maintenance-busy or checkpoint-publisher-busy error.
+`create` retries snapshot acquisition at most six times for the exact
+moving-head, archive-maintenance-busy or checkpoint-publisher-busy errors
+recognized by this build.
 Backoff is 100, 200, 400,
 800 and 1600 ms, cancellable by the caller context. Every attempt resets the
 private ciphertext file; publication is attempted only once after a successful
