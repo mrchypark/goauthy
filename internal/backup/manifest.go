@@ -10,19 +10,25 @@ import (
 	"math"
 	"os"
 	"path"
+	"runtime/debug"
 	"strings"
 	"unicode/utf8"
+
+	"golang.org/x/mod/semver"
 )
 
 const (
 	// ManifestEntry is reserved for the JSON inventory of a snapshot bundle.
 	ManifestEntry = "manifest.json"
 	// ObjectEntryPrefix contains objects named relative to SourcePrefix.
-	ObjectEntryPrefix = "objects/"
-	maxManifestBytes  = 1 << 20
+	ObjectEntryPrefix    = "objects/"
+	maxManifestBytes     = 1 << 20
+	maxRhizaVersionBytes = 128
 )
 
-// SnapshotManifest describes one complete Rhiza v0.12.3 recovery snapshot.
+const rhizaModulePath = "github.com/mrchypark/rhiza"
+
+// SnapshotManifest describes one complete Rhiza recovery snapshot.
 type SnapshotManifest struct {
 	FormatVersion       int              `json:"format_version"`
 	RhizaVersion        string           `json:"rhiza_version"`
@@ -174,7 +180,7 @@ func decodeManifest(raw []byte) (SnapshotManifest, error) {
 }
 
 func validateManifest(manifest SnapshotManifest) error {
-	if (manifest.FormatVersion != 1 && manifest.FormatVersion != 2) || manifest.RhizaVersion != "v0.12.3" || !validName(manifest.SourcePrefix) || !validName(manifest.ClusterID) || strings.Contains(manifest.ClusterID, "/") || (manifest.SourcePrefix != manifest.ClusterID && !strings.HasSuffix(manifest.SourcePrefix, "/"+manifest.ClusterID)) || manifest.ConfigID != 1 {
+	if (manifest.FormatVersion != 1 && manifest.FormatVersion != 2) || !validRhizaVersion(manifest.RhizaVersion) || !validName(manifest.SourcePrefix) || !validName(manifest.ClusterID) || strings.Contains(manifest.ClusterID, "/") || (manifest.SourcePrefix != manifest.ClusterID && !strings.HasSuffix(manifest.SourcePrefix, "/"+manifest.ClusterID)) || manifest.ConfigID != 1 {
 		return errors.New("invalid backup manifest")
 	}
 	if manifest.FormatVersion == 1 && (manifest.CheckpointIndex == 0 || !validHash(manifest.CheckpointRootHash) || !validHash(manifest.CheckpointStateHash) || manifest.RecoveryMode != "" || manifest.ArchiveTip != 0) {
@@ -208,6 +214,45 @@ func validateManifest(manifest SnapshotManifest) error {
 		return errors.New("invalid backup manifest")
 	}
 	return nil
+}
+
+func validRhizaVersion(version string) bool {
+	if version == "unknown" {
+		return true
+	}
+	if len(version) > maxRhizaVersionBytes || !semver.IsValid(version) {
+		return false
+	}
+	core := version[1:]
+	if suffix := strings.IndexAny(core, "-+"); suffix >= 0 {
+		core = core[:suffix]
+	}
+	return strings.Count(core, ".") == 2
+}
+
+func rhizaVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	return rhizaVersionFromBuildInfo(info, ok)
+}
+
+func rhizaVersionFromBuildInfo(info *debug.BuildInfo, ok bool) string {
+	if !ok || info == nil {
+		return "unknown"
+	}
+	for _, dependency := range info.Deps {
+		if dependency == nil || dependency.Path != rhizaModulePath {
+			continue
+		}
+		version := dependency.Version
+		if dependency.Replace != nil {
+			version = dependency.Replace.Version
+		}
+		if validRhizaVersion(version) && version != "unknown" {
+			return version
+		}
+		return "unknown"
+	}
+	return "unknown"
 }
 
 func validObjectName(name string) bool {

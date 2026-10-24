@@ -203,10 +203,11 @@ type OpenRegistration struct {
 }
 
 type OpenRegistrationResult struct {
-	Subject   string
-	Token     string
-	ExpiresAt time.Time
-	Created   bool
+	Subject             string
+	Token               string
+	ExpiresAt           time.Time
+	Created             bool
+	ReissuedPasswordNew bool
 }
 
 // SetMetrics attaches a metrics registry for authentication stage timing.
@@ -292,7 +293,7 @@ func ValidateUsername(username string) error {
 // identities. Passing time in keeps scheduler tests deterministic.
 func (s *Store) CleanupExpiredOpenRegistrations(ctx context.Context, now time.Time) error {
 	unixMillis := now.UTC().Truncate(time.Millisecond).UnixMilli()
-	statements, err := s.expiredOpenRegistrationStatements(unixMillis)
+	statements, err := s.expiredOpenRegistrationStatements(unixMillis, "")
 	if err != nil {
 		return err
 	}
@@ -306,11 +307,11 @@ func (s *Store) CleanupExpiredOpenRegistrations(ctx context.Context, now time.Ti
 	return err
 }
 
-func (s *Store) expiredOpenRegistrationStatements(now int64) ([]rhiza.SQLStatement, error) {
+func (s *Store) expiredOpenRegistrationStatements(now int64, keepEmail string) ([]rhiza.SQLStatement, error) {
 	// Reuse this exact ordered set throughout the atomic batch. Identity rows
 	// are deleted last, so all metadata and provider obligations cover the same
 	// at-most-64 identities, including concurrent password completion checks.
-	const candidates = `SELECT t.subject FROM identity_password_reset_tokens t JOIN identity_users u ON u.subject=t.subject WHERE t.usage='password_new' AND t.consumed_attempt IS NULL AND t.expires_at_unix_ms<=? AND u.password_phc='' AND NOT EXISTS(SELECT 1 FROM identity_webauthn_credentials c WHERE c.subject=u.subject) ORDER BY t.expires_at_unix_ms,t.subject LIMIT 64`
+	const candidates = `SELECT t.subject FROM identity_password_reset_tokens t JOIN identity_users u ON u.subject=t.subject WHERE t.usage='password_new' AND t.consumed_attempt IS NULL AND t.expires_at_unix_ms<=? AND u.password_phc='' AND u.disabled=0 AND NOT EXISTS(SELECT 1 FROM identity_authentication_modes m WHERE m.subject=u.subject AND m.mode='passkey') AND NOT EXISTS(SELECT 1 FROM identity_external_links l WHERE l.local_subject=u.subject) AND NOT EXISTS(SELECT 1 FROM identity_webauthn_credentials c WHERE c.subject=u.subject) AND (?='' OR (u.username<>? AND NOT EXISTS(SELECT 1 FROM identity_user_profiles p WHERE p.subject=u.subject AND p.email=?) AND NOT EXISTS(SELECT 1 FROM identity_recovery_emails r WHERE r.subject=u.subject AND r.email=?))) ORDER BY t.expires_at_unix_ms,t.subject LIMIT 64`
 	providers := s.freezeSCIMTombstoneProviders()
 	statements := make([]rhiza.SQLStatement, 0, 10+len(providers))
 	if len(providers) != 0 {
@@ -318,13 +319,13 @@ func (s *Store) expiredOpenRegistrationStatements(now int64) ([]rhiza.SQLStateme
 		if err != nil {
 			return nil, ErrSCIMTombstoneGenerationUnavailable
 		}
-		statements = append(statements, rhiza.SQLStatement{SQL: `INSERT INTO scim_user_tombstones(local_external_id,user_name,active,hard_delete,provider_snapshot_complete,generation,deleted_at_unix_ms) SELECT u.subject,u.username,0,1,1,?,? FROM identity_users u WHERE u.subject IN (` + candidates + `) AND NOT EXISTS(SELECT 1 FROM scim_user_tombstones t WHERE t.local_external_id=u.subject)`, Args: []any{generation, now, now}})
+		statements = append(statements, rhiza.SQLStatement{SQL: `INSERT INTO scim_user_tombstones(local_external_id,user_name,active,hard_delete,provider_snapshot_complete,generation,deleted_at_unix_ms) SELECT u.subject,u.username,0,1,1,?,? FROM identity_users u WHERE u.subject IN (` + candidates + `) AND NOT EXISTS(SELECT 1 FROM scim_user_tombstones t WHERE t.local_external_id=u.subject)`, Args: []any{generation, now, now, keepEmail, keepEmail, keepEmail, keepEmail}})
 		for _, provider := range providers {
 			statements = append(statements, rhiza.SQLStatement{SQL: `INSERT INTO scim_user_tombstone_providers(local_external_id,client_id,delete_policy) SELECT local_external_id,?,? FROM scim_user_tombstones WHERE generation=?`, Args: []any{provider.ID, int64(scim.DeleteRemote), generation}})
 		}
 	}
 	for _, target := range []struct{ table, column string }{{"identity_recovery_emails", "subject"}, {"identity_user_profiles", "subject"}, {"identity_authentication_modes", "subject"}, {"identity_external_links", "local_subject"}, {"rbac_user_roles", "subject"}, {"rbac_user_groups", "subject"}, {"rbac_principal_versions", "subject"}, {"identity_users", "subject"}} {
-		statements = append(statements, rhiza.SQLStatement{SQL: `DELETE FROM ` + target.table + ` WHERE ` + target.column + ` IN (` + candidates + `)`, Args: []any{now}})
+		statements = append(statements, rhiza.SQLStatement{SQL: `DELETE FROM ` + target.table + ` WHERE ` + target.column + ` IN (` + candidates + `)`, Args: []any{now, keepEmail, keepEmail, keepEmail, keepEmail}})
 	}
 	statements = append(statements, rhiza.SQLStatement{SQL: `DELETE FROM identity_password_reset_tokens WHERE usage='password_new' AND consumed_attempt IS NULL AND expires_at_unix_ms<=? AND NOT EXISTS(SELECT 1 FROM identity_users u WHERE u.subject=identity_password_reset_tokens.subject)`, Args: []any{now}})
 	return statements, nil
@@ -377,7 +378,7 @@ func (s *Store) RegisterOpenUser(ctx context.Context, input OpenRegistration) (O
 	now := s.now().UTC().Truncate(time.Millisecond)
 	expires := now.Add(input.TTL)
 	digest := s.resetDigest(raw)
-	cleanup, err := s.expiredOpenRegistrationStatements(now.UnixMilli())
+	cleanup, err := s.expiredOpenRegistrationStatements(now.UnixMilli(), email)
 	if err != nil {
 		return OpenRegistrationResult{}, err
 	}
@@ -407,6 +408,13 @@ func (s *Store) RegisterOpenUser(ctx context.Context, input OpenRegistration) (O
 	}
 	result := OpenRegistrationResult{Subject: owner}
 	if owner != subject {
+		reissued, ok, err := s.reissuePendingOpenRegistration(ctx, owner, email, input.RedirectURI, input.TTL)
+		if err != nil {
+			return OpenRegistrationResult{}, err
+		}
+		if ok {
+			return reissued, nil
+		}
 		return result, nil
 	}
 	issued, found, err := s.resetRecord(ctx, digest)
@@ -417,6 +425,78 @@ func (s *Store) RegisterOpenUser(ctx context.Context, input OpenRegistration) (O
 		return OpenRegistrationResult{}, ErrInvalidPasswordReset
 	}
 	return OpenRegistrationResult{Subject: subject, Token: raw, ExpiresAt: expires, Created: true}, nil
+}
+
+// reissuePendingOpenRegistration restores a lost or expired setup proof only
+// while every persisted marker still describes the original local, unverified
+// password-first account. The insert is generation- and state-guarded so a
+// concurrent activation or identity conversion cannot receive a setup token.
+func (s *Store) reissuePendingOpenRegistration(ctx context.Context, subject, email, redirectURI string, ttl time.Duration) (OpenRegistrationResult, bool, error) {
+	if len(s.resetKey) != sha256.Size {
+		return OpenRegistrationResult{}, false, ErrPasswordResetUnavailable
+	}
+	now := s.now().UTC().Truncate(time.Millisecond)
+	nowMS := now.UnixMilli()
+	state, err := s.db.Query(ctx, rhiza.QueryRequest{
+		SQL: `SELECT u.password_generation,m.generation FROM identity_users u
+			JOIN identity_authentication_modes m ON m.subject=u.subject
+			JOIN identity_user_profiles p ON p.subject=u.subject
+			JOIN identity_recovery_emails r ON r.subject=u.subject
+			WHERE u.subject=? AND u.username=? AND u.password_phc='' AND u.disabled=0
+			AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?)
+			AND m.mode='password' AND p.email=? AND p.email_verified=0 AND r.email=p.email
+			AND NOT EXISTS(SELECT 1 FROM identity_external_links l WHERE l.local_subject=u.subject)
+			AND NOT EXISTS(SELECT 1 FROM identity_webauthn_credentials c WHERE c.subject=u.subject)
+			AND NOT EXISTS(SELECT 1 FROM identity_password_reset_tokens t WHERE t.subject=u.subject AND t.usage='password_new' AND t.consumed_attempt IS NULL AND t.expires_at_unix_ms>?)`,
+		Args: []any{subject, email, nowMS, email, nowMS}, Consistency: rhiza.ConsistencyLinearizable,
+	})
+	if err != nil {
+		return OpenRegistrationResult{}, false, err
+	}
+	if len(state.Rows) == 0 {
+		return OpenRegistrationResult{}, false, nil
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 2 {
+		return OpenRegistrationResult{}, false, errors.New("invalid pending registration state")
+	}
+	passwordGeneration, ok := state.Rows[0][0].(int64)
+	if !ok || passwordGeneration < 1 {
+		return OpenRegistrationResult{}, false, errors.New("invalid pending password generation")
+	}
+	modeGeneration, ok := state.Rows[0][1].(int64)
+	if !ok || modeGeneration < 1 {
+		return OpenRegistrationResult{}, false, errors.New("invalid pending authentication generation")
+	}
+	raw, err := s.randomID(32)
+	if err != nil {
+		return OpenRegistrationResult{}, false, ErrPasswordResetUnavailable
+	}
+	digest := s.resetDigest(raw)
+	expires := now.Add(ttl)
+	one := int64(1)
+	guard := `EXISTS(SELECT 1 FROM identity_users u JOIN identity_authentication_modes m ON m.subject=u.subject JOIN identity_user_profiles p ON p.subject=u.subject JOIN identity_recovery_emails r ON r.subject=u.subject WHERE u.subject=? AND u.username=? AND u.password_phc='' AND u.password_generation=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND m.mode='password' AND m.generation=? AND p.email=? AND p.email_verified=0 AND r.email=p.email AND NOT EXISTS(SELECT 1 FROM identity_external_links l WHERE l.local_subject=u.subject) AND NOT EXISTS(SELECT 1 FROM identity_webauthn_credentials c WHERE c.subject=u.subject) AND NOT EXISTS(SELECT 1 FROM identity_password_reset_tokens t WHERE t.subject=u.subject AND t.usage='password_new' AND t.consumed_attempt IS NULL AND t.expires_at_unix_ms>?))`
+	args := []any{subject, email, passwordGeneration, nowMS, modeGeneration, email, nowMS}
+	statements := []rhiza.SQLStatement{
+		{SQL: `DELETE FROM identity_password_reset_tokens WHERE subject=? AND usage='password_new' AND consumed_attempt IS NULL AND ` + guard, Args: append([]any{subject}, args...)},
+		{SQL: `INSERT INTO identity_password_reset_tokens(token_digest,subject,password_generation,issued_at_unix_ms,expires_at_unix_ms,usage,redirect_uri) SELECT ?,?,?,?,?,'password_new',? WHERE ` + guard, Args: append([]any{digest, subject, passwordGeneration, nowMS, expires.UnixMilli(), nullableString(redirectURI)}, args...), ExpectedRowsAffected: &one},
+	}
+	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
+		RequestID: mutationID("password-new-reissue", subject, digest, strconv.FormatInt(nowMS, 10)), Statements: statements,
+	})
+	if response.ErrorCode == rhiza.MutationErrorCodePreconditionFailed {
+		return OpenRegistrationResult{}, false, nil
+	}
+	if err != nil {
+		return OpenRegistrationResult{}, false, err
+	}
+	issued, found, err := s.resetRecord(ctx, digest)
+	if err != nil {
+		return OpenRegistrationResult{}, false, err
+	}
+	if !found || issued.subject != subject || issued.generation != passwordGeneration || issued.usage != "password_new" || issued.expiresAt != expires.UnixMilli() || issued.consumed || issued.binding != "" {
+		return OpenRegistrationResult{}, false, ErrInvalidPasswordReset
+	}
+	return OpenRegistrationResult{Subject: subject, Token: raw, ExpiresAt: expires, ReissuedPasswordNew: true}, true, nil
 }
 
 // RegisterPasskeyUser creates a passkey-only pending account without a
@@ -453,7 +533,7 @@ func (s *Store) RegisterPasskeyUser(ctx context.Context, input OpenRegistration)
 		return "", ErrPasswordResetUnavailable
 	}
 	now := s.now().UTC().Truncate(time.Millisecond)
-	cleanup, err := s.expiredOpenRegistrationStatements(now.UnixMilli())
+	cleanup, err := s.expiredOpenRegistrationStatements(now.UnixMilli(), email)
 	if err != nil {
 		return "", err
 	}
@@ -1121,7 +1201,7 @@ func (s *Store) issuePasswordReset(ctx context.Context, subject string, ttl time
 		})
 	}
 	statements = append(statements,
-		rhiza.SQLStatement{SQL: `DELETE FROM identity_password_reset_tokens WHERE token_digest IN (SELECT token_digest FROM identity_password_reset_tokens WHERE expires_at_unix_ms <= ? ORDER BY expires_at_unix_ms LIMIT 64)`, Args: []any{now.UnixMilli()}},
+		rhiza.SQLStatement{SQL: `DELETE FROM identity_password_reset_tokens WHERE token_digest IN (SELECT token_digest FROM identity_password_reset_tokens WHERE usage='password_reset' AND expires_at_unix_ms <= ? ORDER BY expires_at_unix_ms LIMIT 64)`, Args: []any{now.UnixMilli()}},
 		rhiza.SQLStatement{SQL: `DELETE FROM identity_password_reset_tokens WHERE subject = ? AND usage = 'password_reset' AND consumed_attempt IS NULL AND EXISTS (SELECT 1 FROM identity_users WHERE subject = ? AND password_generation = ? AND password_phc <> '' AND disabled = 0 AND (user_expires_at_unix_ms IS NULL OR user_expires_at_unix_ms > ?))`, Args: []any{subject, subject, record.generation, now.UnixMilli()}},
 		rhiza.SQLStatement{SQL: `INSERT INTO identity_password_reset_tokens (token_digest,subject,password_generation,issued_at_unix_ms,expires_at_unix_ms,usage,redirect_uri) SELECT ?,?,?,?,?,'password_reset',NULL WHERE EXISTS (SELECT 1 FROM identity_users WHERE subject = ? AND password_generation = ? AND password_phc <> '' AND disabled = 0 AND (user_expires_at_unix_ms IS NULL OR user_expires_at_unix_ms > ?))`, Args: []any{digest, subject, record.generation, now.UnixMilli(), expires.UnixMilli(), subject, record.generation, now.UnixMilli()}},
 	)

@@ -3,11 +3,14 @@ package upstreamprovider
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -150,6 +153,87 @@ func TestOAuth2TokenExchangerClientPolicy(t *testing.T) {
 	}
 	if caller.Timeout != 20*upstreamTokenExchangeTimeout || caller.CheckRedirect(nil, nil).Error() != "caller redirect" {
 		t.Fatal("caller client was mutated")
+	}
+}
+
+func TestOAuth2TokenExchangerReusesConnectionWithFreshRuntimeSnapshot(t *testing.T) {
+	type requestSnapshot struct {
+		path     string
+		clientID string
+		secret   string
+	}
+	requests := make(chan requestSnapshot, 2)
+	var accepted atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, secret, _ := r.BasicAuth()
+		requests <- requestSnapshot{path: r.URL.Path, clientID: id, secret: secret}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"access","id_token":"id"}`))
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			accepted.Add(1)
+		}
+	}
+	server.StartTLS()
+	defer server.Close()
+
+	makeExchanger := func(path, clientID, secret string) *OAuth2TokenExchanger {
+		exchanger, err := NewOAuth2TokenExchanger(map[string]Config{"provider": {
+			Issuer: "https://issuer.example.test", AuthorizationEndpoint: "https://issuer.example.test/auth",
+			TokenEndpoint: server.URL + path, ClientID: clientID,
+		}}, map[string]string{"provider": secret}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return exchanger
+	}
+	first := makeExchanger("/token", "client-one", "secret-one")
+	second := makeExchanger("/token-v2", "client-two", "secret-two")
+	originalTLSConfigs := make(map[*http.Transport]*tls.Config)
+	t.Cleanup(func() {
+		for transport, tlsConfig := range originalTLSConfigs {
+			transport.CloseIdleConnections()
+			transport.TLSClientConfig = tlsConfig
+		}
+	})
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	for _, exchanger := range []*OAuth2TokenExchanger{first, second} {
+		transport, ok := exchanger.client.Transport.(*http.Transport)
+		if !ok {
+			t.Fatalf("default transport type = %T", exchanger.client.Transport)
+		}
+		if _, ok := originalTLSConfigs[transport]; !ok {
+			originalTLSConfigs[transport] = nil
+			if transport.TLSClientConfig != nil {
+				originalTLSConfigs[transport] = transport.TLSClientConfig.Clone()
+			}
+		}
+		tlsConfig := transport.TLSClientConfig
+		if tlsConfig == nil {
+			tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		} else {
+			tlsConfig = tlsConfig.Clone()
+		}
+		tlsConfig.RootCAs = roots
+		transport.TLSClientConfig = tlsConfig
+	}
+	for _, exchanger := range []*OAuth2TokenExchanger{first, second} {
+		if _, err := exchanger.ExchangeCode(context.Background(), "provider", "https://app.example.test/callback", "code", "verifier"); err != nil {
+			t.Fatalf("ExchangeCode: %v", err)
+		}
+	}
+	for i, want := range []requestSnapshot{
+		{path: "/token", clientID: "client-one", secret: "secret-one"},
+		{path: "/token-v2", clientID: "client-two", secret: "secret-two"},
+	} {
+		if got := <-requests; got != want {
+			t.Errorf("request %d = %+v, want %+v", i, got, want)
+		}
+	}
+	if got := accepted.Load(); got != 1 {
+		t.Fatalf("accepted TCP connections = %d, want 1 reused connection", got)
 	}
 }
 

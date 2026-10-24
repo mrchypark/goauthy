@@ -1856,7 +1856,7 @@ func (h *Handler) WebAuthnFinish(w http.ResponseWriter, r *http.Request) {
 		h.passkeyFailure(w, r, peerIP)
 		return
 	}
-	if refreshed, err := h.passkeys.PasswordlessCookie(result.Subject); err == nil {
+	if refreshed, err := h.passkeys.PasswordlessCookie(r.Context(), result.Subject); err == nil {
 		if cookie, err := h.passwordlessCookie(refreshed); err == nil {
 			http.SetCookie(w, cookie)
 		}

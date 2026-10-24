@@ -4,11 +4,14 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -16,15 +19,153 @@ import (
 
 	"github.com/go-jose/go-jose/v4"
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/clients"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/oauth"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
+	"github.com/ory/fosite"
 )
 
 const logoutRedirect = "https://rp.example.test/logout?from=goauthy"
+
+func TestHandlerAcceptsManagedClientLogoutWithoutPostLogoutRedirect(t *testing.T) {
+	h, _, _, session, hint, clientID, _ := testManagedLogout(t)
+	req := managedLogoutRequest(hint, clientID, "")
+	setSessionCookie(t, req, session.Token)
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, req)
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != strings.TrimRight(testIssuer, "/")+"/" {
+		t.Fatalf("managed client logout status=%d location=%q, want local issuer root", response.Code, response.Header().Get("Location"))
+	}
+}
+
+func TestHandlerRejectsDeletedManagedClientAndOAuthCallbackAsLogoutRedirect(t *testing.T) {
+	t.Run("disabled client", func(t *testing.T) {
+		h, sessions, managed, session, hint, clientID, redirect := testManagedLogout(t)
+		ctx := context.Background()
+		current, err := managed.GetWithGuard(ctx, clientID, func() (string, []any) { return "1", nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := managed.UpdateWithGuard(ctx, clientID, current.Revision, clients.UpdateRequest{
+			BackchannelLogoutURI: current.BackchannelLogoutURI, RestrictGroupPrefix: current.RestrictGroupPrefix,
+			ClientURI: current.ClientURI, ClientURIPresent: true, Name: current.Name,
+			Confidential: current.Confidential, RedirectURIs: current.RedirectURIs, Enabled: false,
+			Scopes: current.Scopes, DefaultScopes: current.DefaultScopes, GrantTypes: current.GrantTypes,
+			Audiences: current.Audiences, DefaultAudiences: current.DefaultAudiences, ForceMFA: current.ForceMFA,
+		}, func() (string, []any) { return "1", nil }); err != nil {
+			t.Fatal(err)
+		}
+		req := managedLogoutRequest(hint, clientID, redirect)
+		setSessionCookie(t, req, session.Token)
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, req)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("disabled client logout status=%d, want 400", response.Code)
+		}
+		if _, err := sessions.LoadSessionReadOnly(ctx, session.Token); err != nil {
+			t.Fatalf("disabled client logout revoked session: %v", err)
+		}
+	})
+	t.Run("deleted client", func(t *testing.T) {
+		h, sessions, managed, session, hint, clientID, redirect := testManagedLogout(t)
+		if err := managed.DeleteWithGuard(context.Background(), clientID, 1, func() (string, []any) { return "1", nil }); err != nil {
+			t.Fatal(err)
+		}
+		req := managedLogoutRequest(hint, clientID, redirect)
+		setSessionCookie(t, req, session.Token)
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, req)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("deleted client logout status=%d, want 400", response.Code)
+		}
+		if _, err := sessions.LoadSessionReadOnly(context.Background(), session.Token); err != nil {
+			t.Fatalf("deleted client logout revoked session: %v", err)
+		}
+	})
+	t.Run("OAuth callback is not a logout redirect", func(t *testing.T) {
+		h, sessions, _, session, hint, clientID, callbackURI := testManagedLogout(t)
+		req := managedLogoutRequest(hint, clientID, callbackURI)
+		setSessionCookie(t, req, session.Token)
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, req)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("OAuth callback logout status=%d, want 400", response.Code)
+		}
+		if _, err := sessions.LoadSessionReadOnly(context.Background(), session.Token); err != nil {
+			t.Fatalf("OAuth callback logout revoked session: %v", err)
+		}
+	})
+}
+
+func testManagedLogout(t *testing.T) (*Handler, *browser.Store, *clients.Store, browser.IssuedSession, string, string, string) {
+	t.Helper()
+	h, sessions, key := testLogoutHandler(t)
+	ctx := context.Background()
+	if _, err := storage.Execute(ctx, h.db, rhiza.ExecuteRequest{RequestID: "logout-managed-barrier",
+		SQL:  `INSERT INTO master_key_retirement_barrier(barrier_id,epoch,old_key_id,replacement_key_id,membership_digest,state,prepared_at_unix_ms) VALUES (1,1,'old','master',?, 'prepared',1)`,
+		Args: []any{"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	managed := clients.NewStore(h.db, logoutTestKeyring(t))
+	const clientID = "managed-logout-client"
+	const redirect = "https://rp.example.test/managed-logout"
+	if _, err := managed.CreateWithGuard(ctx, clients.NewRequest{ID: clientID, RedirectURIs: []string{redirect}}, func() (string, []any) { return "1", nil }); err != nil {
+		t.Fatal(err)
+	}
+	h.resolveClient = func(ctx context.Context, id string) (Client, bool, error) {
+		registered, err := managed.GetClient(ctx, id)
+		if errors.Is(err, fosite.ErrNotFound) {
+			return Client{}, false, nil
+		}
+		if err != nil {
+			return Client{}, false, err
+		}
+		return Client{ID: registered.GetID()}, true, nil
+	}
+	session, err := sessions.CreateSession(ctx, "user-1", "pwd", time.Now().Add(time.Hour), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hint, err := oidc.SignIDToken(key, oidc.IDTokenClaims{
+		Issuer: testIssuer, Subject: "user-1", Audience: []string{clientID}, AuthorizedParty: clientID,
+		SessionID: session.ID, IssuedAt: time.Now().Add(-time.Minute), NotBefore: time.Now().Add(-time.Minute), ExpiresAt: time.Now().Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h, sessions, managed, session, hint, clientID, redirect
+}
+
+func logoutTestKeyring(t *testing.T) *oidc.Keyring {
+	t.Helper()
+	dir := t.TempDir()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "master"), []byte(base64.RawURLEncoding.EncodeToString(key)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keyring, err := oidc.LoadKeyring(dir, "master")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keyring
+}
+
+func managedLogoutRequest(hint, clientID, redirect string) *http.Request {
+	values := url.Values{"id_token_hint": {hint}, "client_id": {clientID}}
+	if redirect != "" {
+		values.Set("post_logout_redirect_uri", redirect)
+		values.Set("state", "opaque-state")
+	}
+	return httptest.NewRequest(http.MethodGet, "/oidc/logout?"+values.Encode(), nil)
+}
 
 func TestEnableFedCMIsHTTPSOnlyAndDeletesSeparateCookie(t *testing.T) {
 	h, _, _ := testLogoutHandler(t)

@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -715,25 +716,35 @@ func (o *Outbox) retryDelay(job Job, attempt int) time.Duration {
 		return 0
 	}
 	// Deterministic bounded exponential delay avoids synchronized retries
-	// without adding another random source to persisted state.
-	d := o.RetryBase
-	for i := 1; i < attempt && d < maxRetryDelay; i++ {
-		if d > maxRetryDelay/2 {
-			d = maxRetryDelay
+	// without adding another random source to persisted state. Retry timestamps
+	// are stored in milliseconds, so calculate the delay at that same precision.
+	const maxRetryDelayMillis = int64(maxRetryDelay / time.Millisecond)
+	retryBaseMillis := o.RetryBase.Milliseconds()
+	if retryBaseMillis == 0 {
+		retryBaseMillis = 1
+	}
+	delayMillis := retryBaseMillis
+	for i := 1; i < attempt && delayMillis < maxRetryDelayMillis; i++ {
+		if delayMillis > maxRetryDelayMillis/2 {
+			delayMillis = maxRetryDelayMillis
 			break
 		}
-		d *= 2
+		delayMillis *= 2
 	}
-	if d > maxRetryDelay {
-		d = maxRetryDelay
+	if delayMillis > maxRetryDelayMillis {
+		delayMillis = maxRetryDelayMillis
 	}
 	sum := sha256.Sum256([]byte(job.ID + "/" + fmt.Sprint(attempt)))
-	remaining := maxRetryDelay - d
-	jitterBase := o.RetryBase
-	if jitterBase > remaining {
-		jitterBase = remaining
+	remainingMillis := maxRetryDelayMillis - delayMillis
+	jitterBaseMillis := retryBaseMillis
+	if jitterBaseMillis > remainingMillis {
+		jitterBaseMillis = remainingMillis
 	}
-	return d + time.Duration(uint64(sum[0])%uint64(jitterBase+1))
+	var jitterMillis int64
+	if jitterBaseMillis > 0 {
+		jitterMillis = int64(binary.BigEndian.Uint64(sum[:8]) % uint64(jitterBaseMillis+1))
+	}
+	return time.Duration(delayMillis+jitterMillis) * time.Millisecond
 }
 
 func (o *Outbox) lookup(ctx context.Context, jobID string) (Job, bool, error) {

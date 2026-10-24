@@ -38,15 +38,21 @@ var errLogoutUnavailable = errors.New("logout state unavailable")
 // reloads public keys from Rhiza for every request so key rotation does not
 // leave a stale verifier in process memory.
 type Handler struct {
-	issuer       string
-	db           *rhiza.DB
-	browser      *browser.Store
-	oauth        *oauth.Server
-	clients      []Client
-	fedcmEnabled bool
+	issuer        string
+	db            *rhiza.DB
+	browser       *browser.Store
+	oauth         *oauth.Server
+	clients       []Client
+	resolveClient ClientResolver
+	fedcmEnabled  bool
 }
 
-func NewHandler(issuer string, db *rhiza.DB, browserStore *browser.Store, oauthServer *oauth.Server, clients []Client) (*Handler, error) {
+// ClientResolver returns the current registry view for a client ID. The
+// handler calls it for each logout request so disabled or deleted clients do
+// not remain authorized by a startup snapshot.
+type ClientResolver func(context.Context, string) (Client, bool, error)
+
+func NewHandler(issuer string, db *rhiza.DB, browserStore *browser.Store, oauthServer *oauth.Server, clients []Client, resolvers ...ClientResolver) (*Handler, error) {
 	normalized, err := oidc.NormalizeIssuer(issuer)
 	if err != nil {
 		return nil, err
@@ -61,7 +67,14 @@ func NewHandler(issuer string, db *rhiza.DB, browserStore *browser.Store, oauthS
 	if _, err := validateClients(clients); err != nil {
 		return nil, err
 	}
-	return &Handler{issuer: issuer, db: db, browser: browserStore, oauth: oauthServer, clients: append([]Client(nil), clients...)}, nil
+	if len(resolvers) > 1 {
+		return nil, errors.New("logout handler accepts at most one client resolver")
+	}
+	var resolveClient ClientResolver
+	if len(resolvers) == 1 {
+		resolveClient = resolvers[0]
+	}
+	return &Handler{issuer: issuer, db: db, browser: browserStore, oauth: oauthServer, clients: append([]Client(nil), clients...), resolveClient: resolveClient}, nil
 }
 
 // EnableFedCM opts this handler into deleting the separate cross-site session
@@ -193,11 +206,69 @@ func (h *Handler) plan(ctx context.Context, request Request) (Decision, error) {
 	if err != nil {
 		return Decision{}, fmt.Errorf("%w: load signing keys", errLogoutUnavailable)
 	}
-	engine, err := New(Config{Issuer: h.issuer, Keys: jose.JSONWebKeySet{Keys: keys}, Clients: h.clients})
+	configured := append([]Client(nil), h.clients...)
+	if h.resolveClient != nil {
+		known := make(map[string]struct{}, len(configured))
+		for _, client := range configured {
+			known[client.ID] = struct{}{}
+		}
+		clientIDs := []string{request.ClientID}
+		if request.IDTokenHint != "" && request.ClientID == "" {
+			clientIDs = append(clientIDs, hintedAudienceCandidates(request.IDTokenHint)...)
+		}
+		for _, clientID := range clientIDs {
+			if clientID == "" {
+				continue
+			}
+			if _, exists := known[clientID]; exists {
+				continue
+			}
+			client, exists, err := h.resolveClient(ctx, clientID)
+			if err != nil {
+				return Decision{}, fmt.Errorf("%w: resolve logout client", errLogoutUnavailable)
+			}
+			if exists {
+				configured = append(configured, client)
+				known[client.ID] = struct{}{}
+			}
+		}
+	}
+	engine, err := New(Config{Issuer: h.issuer, Keys: jose.JSONWebKeySet{Keys: keys}, Clients: configured})
 	if err != nil {
 		return Decision{}, err
 	}
 	return engine.Plan(request)
+}
+
+// hintedAudienceCandidates reads only the untrusted audience claim to find
+// current registry candidates. Engine.Plan still verifies the token signature,
+// issuer, audience, authorized party, and session claims before acting.
+func hintedAudienceCandidates(hint string) []string {
+	parts := strings.Split(hint, ".")
+	if len(parts) != 3 || len(parts[1]) > maxHintLength {
+		return nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil
+	}
+	var claims struct {
+		Audience json.RawMessage `json:"aud"`
+	}
+	if json.Unmarshal(payload, &claims) != nil {
+		return nil
+	}
+	var candidates []string
+	var single string
+	if json.Unmarshal(claims.Audience, &single) == nil {
+		candidates = append(candidates, single)
+	} else {
+		_ = json.Unmarshal(claims.Audience, &candidates)
+	}
+	if len(candidates) > 32 {
+		candidates = candidates[:32]
+	}
+	return candidates
 }
 
 func (h *Handler) currentSession(r *http.Request) (browser.Session, string, bool, error) {

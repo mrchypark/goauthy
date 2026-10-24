@@ -135,6 +135,26 @@ func (w *masterKeyRetirementWorker) Step(ctx context.Context) error {
 		return fmt.Errorf("master-key retirement attestation requires replacement key %q, active key is %q", barrier.ReplacementKeyID, activeID)
 	}
 	now := w.now().UTC().Truncate(time.Millisecond)
+	if barrier.FencedAt.IsZero() {
+		return errors.New("master-key retirement fence time unavailable")
+	}
+	retention := passkey.PasswordlessCookieTTLForConfig(nil)
+	if cookieTTL := w.passkey.PasswordlessCookieTTL(); cookieTTL > retention {
+		retention = cookieTTL
+	}
+	issuedTTL, err := storage.PasswordlessCookieKeyTTL(ctx, w.db, barrier.OldKeyID)
+	if err != nil {
+		return fmt.Errorf("load passwordless-cookie retention for retired key: %w", err)
+	}
+	if issuedTTL > retention {
+		retention = issuedTTL
+	}
+	if retiredKeyOverlapPeriod > retention {
+		retention = retiredKeyOverlapPeriod
+	}
+	if now.Before(barrier.FencedAt.Add(retention)) {
+		return nil
+	}
 	status, err := w.inspect(ctx, w.db, w.keyring, w.issuer, w.passkey, barrier.OldKeyID, now)
 	if err != nil {
 		return err

@@ -9,6 +9,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/housekeeping"
 	"github.com/mrchypark/goauthy/internal/loginpolicy"
 	"github.com/mrchypark/goauthy/internal/oidc"
+	"github.com/mrchypark/goauthy/internal/passkey"
 	"github.com/mrchypark/goauthy/internal/recovery"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
@@ -26,6 +27,7 @@ func buildHousekeepingJobs(
 	loginpolicyStore *loginpolicy.Store,
 	keyring *oidc.Keyring,
 	emailOutbox *recovery.EmailOutbox,
+	passkeyConfig *passkey.Config,
 ) []housekeeping.Job {
 	var jobs []housekeeping.Job
 
@@ -54,7 +56,7 @@ func buildHousekeepingJobs(
 			Name:     "key-removal",
 			Interval: time.Hour,
 			Step: func(ctx context.Context) error {
-				return keyRemovalStep(ctx, db, keyring)
+				return keyRemovalStep(ctx, db, keyring, passkey.PasswordlessCookieTTLForConfig(passkeyConfig))
 			},
 		})
 	}
@@ -116,13 +118,13 @@ func emailOutboxCleanupStep(ctx context.Context, outbox *recovery.EmailOutbox) e
 }
 
 func housekeepingErrorHandler(job string, err error) {
-	slog.Error("housekeeping job failed", "job", job, "error", err)
+	logWorkerFailure("housekeeping", job, err)
 }
 
 const retiredKeyOverlapPeriod = 24 * time.Hour
 
-func keyRemovalStep(ctx context.Context, db *rhiza.DB, keyring *oidc.Keyring) error {
-	return removeRetiredMasterKey(ctx, db, keyring, time.Now, storage.AcknowledgeMasterKeyRetirementArchival)
+func keyRemovalStep(ctx context.Context, db *rhiza.DB, keyring *oidc.Keyring, cookieTTL time.Duration) error {
+	return removeRetiredMasterKey(ctx, db, keyring, cookieTTL, time.Now, storage.AcknowledgeMasterKeyRetirementArchival)
 }
 
 // removeRetiredMasterKey is the single owner of retired-key deletion. It walks
@@ -135,20 +137,59 @@ func keyRemovalStep(ctx context.Context, db *rhiza.DB, keyring *oidc.Keyring) er
 // (GA66-RETIRE-002). The removal receipt is recorded but not used as a filter,
 // so a member that has not yet dropped its own copy of the key still sees the
 // generation and cleans up.
-func removeRetiredMasterKey(ctx context.Context, db *rhiza.DB, keyring *oidc.Keyring, now func() time.Time, acknowledge func(context.Context, *rhiza.DB, int64) error) error {
+func removeRetiredMasterKey(ctx context.Context, db *rhiza.DB, keyring *oidc.Keyring, cookieTTL time.Duration, now func() time.Time, acknowledge func(context.Context, *rhiza.DB, int64) error) error {
 	if db == nil || keyring == nil || now == nil || acknowledge == nil {
 		return fmt.Errorf("key-removal: db, keyring, clock, or acknowledgment is nil")
+	}
+	if cookieTTL < 0 {
+		return fmt.Errorf("key-removal: passwordless-cookie lifetime is negative")
 	}
 	generations, err := storage.LoadMasterKeyRetirementGenerations(ctx, db)
 	if err != nil {
 		return fmt.Errorf("key-removal: load retired generations: %w", err)
+	}
+	var currentBarrier storage.MasterKeyRetirement
+	if cookieTTL > 0 && len(generations) > 0 {
+		currentBarrier, err = storage.LoadMasterKeyRetirement(ctx, db)
+		if err != nil {
+			return fmt.Errorf("key-removal: load retirement fence: %w", err)
+		}
+	}
+	keyTTLs := make(map[string]time.Duration, len(generations))
+	for _, generation := range generations {
+		issuedTTL, err := storage.PasswordlessCookieKeyTTL(ctx, db, generation.OldKeyID)
+		if err != nil {
+			return fmt.Errorf("key-removal: load passwordless-cookie retention for epoch %d: %w", generation.Epoch, err)
+		}
+		if issuedTTL > cookieTTL {
+			keyTTLs[generation.OldKeyID] = issuedTTL
+		} else {
+			keyTTLs[generation.OldKeyID] = cookieTTL
+		}
 	}
 	for _, generation := range generations {
 		if !keyring.HasKey(generation.OldKeyID) {
 			continue
 		}
 		when := now().UTC()
-		if when.Sub(generation.ReadyAt) <= retiredKeyOverlapPeriod {
+		retentionDeadline := generation.ReadyAt.Add(retiredKeyOverlapPeriod)
+		if keyTTL := keyTTLs[generation.OldKeyID]; keyTTL > 0 {
+			// The singleton barrier retains the fence time only for the newest
+			// generation. For older generations ReadyAt is necessarily later than
+			// FencedAt, so ReadyAt+TTL is a conservative fallback that protects
+			// cookies even after the singleton barrier advances.
+			cookieDeadline := generation.ReadyAt.Add(keyTTL)
+			if currentBarrier.Epoch == generation.Epoch {
+				if currentBarrier.FencedAt.IsZero() {
+					return fmt.Errorf("key-removal: fence time unavailable for epoch %d", generation.Epoch)
+				}
+				cookieDeadline = currentBarrier.FencedAt.Add(keyTTL)
+			}
+			if cookieDeadline.After(retentionDeadline) {
+				retentionDeadline = cookieDeadline
+			}
+		}
+		if when.Before(retentionDeadline) {
 			continue
 		}
 		if err := acknowledge(ctx, db, generation.Epoch); err != nil {

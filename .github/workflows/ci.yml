@@ -116,14 +116,15 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Admin JavaScript tests
+      - name: Internal JavaScript tests
         run: |
-          command -v node >/dev/null 2>&1 || { echo "node is required for admin JavaScript tests" >&2; exit 1; }
-          node internal/admin/bundle_ui_test.js
-          node internal/admin/themes_ui_test.js
-          node internal/admin/ui_regression_test.js
-          node internal/admin/locale_ui_test.js
-          node internal/admin/module_locale_ui_test.js
+          command -v node >/dev/null 2>&1 || { echo "node is required for internal JavaScript tests" >&2; exit 1; }
+          find internal -type d -name vendor -prune -o -type f \( -name '*_test.js' -o -name '*_test.cjs' -o -name '*.test.js' -o -name '*.test.cjs' \) -print \
+            | LC_ALL=C sort \
+            | while IFS= read -r test_file; do
+                echo "Running $test_file"
+                node "$test_file" || exit 1
+              done
 
       - name: test
         run: go test -timeout=60m -p 3 ./...

@@ -12,7 +12,7 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-const schemaVersion = 111
+const schemaVersion = 112
 
 // migrateThroughV97 applies schema versions v1 through v97. It is the
 // unchanged prefix of Migrate, extracted so tests can reach a clean v97
@@ -426,6 +426,9 @@ func Migrate(ctx context.Context, db *rhiza.DB) error {
 	}
 	if err := migrateSchemaV111(ctx, db); err != nil {
 		return fmt.Errorf("migrate schema v111: %w", err)
+	}
+	if err := migrateSchemaV112(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v112: %w", err)
 	}
 	return nil
 }

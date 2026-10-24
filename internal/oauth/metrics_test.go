@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -241,7 +242,7 @@ func TestForwardAuthMetricsRevokedToken(t *testing.T) {
 func TestForwardAuthMetricsDisabledSubject(t *testing.T) {
 	t.Parallel()
 	db := oauthTestDB(t)
-	server := userInfoTestServer(t, db, assertError("disabled"))
+	server := userInfoTestServer(t, db, identity.ErrInactiveSubject)
 	reg := metrics.NewRegistry()
 	server.SetMetrics(reg)
 
