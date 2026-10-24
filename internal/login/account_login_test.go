@@ -113,7 +113,7 @@ func TestAccountLoginWrongPasswordKeepsInteraction(t *testing.T) {
 	wrongRequest.Header.Set("Accept", "text/html")
 	h.AccountLoginHandler(false).ServeHTTP(wrong, wrongRequest)
 	body := wrong.Body.String()
-	for _, want := range []string{`id="login-error" class="auth-error" role="alert"`, "Check your username or password", `action="/prefix/account/login"`, `name="interaction" value="` + interaction + `"`, `name="csrf_token" value="` + csrf + `"`, `name="username" value="alice"`} {
+	for _, want := range []string{`id="login-error" class="auth-error" role="alert"`, `data-i18n="Login failed">Login failed`, "Check your username or password", `action="/prefix/account/login"`, `name="interaction" value="` + interaction + `"`, `name="csrf_token" value="` + csrf + `"`, `name="username" value="alice"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("wrong-password page missing %q: %s", want, body)
 		}

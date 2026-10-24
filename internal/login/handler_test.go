@@ -181,7 +181,8 @@ func TestHTMLLoginFailureKeepsOAuthInteractionForRetry(t *testing.T) {
 		t.Fatalf("HTML failure status=%d headers=%v cookies=%#v", failed.Code, failed.Header(), failed.Result().Cookies())
 	}
 	for _, want := range []string{
-		`class="auth-error" role="alert"`, "사용자 이름 또는 비밀번호를 확인하세요.",
+		`id="login-error" class="auth-error" role="alert"`, `data-i18n="Login failed">로그인하지 못했습니다`,
+		`aria-hidden="true">⚠</span>`, `data-i18n="Check your username or password">사용자 이름 또는 비밀번호를 확인하세요.`,
 		`data-i18n="Check your username or password"`, `data-brand-ko="계속할 서비스: browser-client"`,
 		`id="login-client-context"><span data-i18n="Continue to">다음으로 계속</span> browser-client</p>`,
 		`data-login-progress hidden data-i18n="Signing in…">Signing in…</p>`,
@@ -256,13 +257,13 @@ func TestBoundedLoginUsernamePreservesSupportedEmailLength(t *testing.T) {
 
 func TestLoginPageLocalizesEachFailureStatus(t *testing.T) {
 	for _, test := range []struct {
-		status int
-		key    string
-		copy   string
+		status                             int
+		titleKey, title, detailKey, detail string
+		credentialGuidance                 bool
 	}{
-		{http.StatusUnauthorized, "Check your username or password", "사용자 이름 또는 비밀번호를 확인하세요."},
-		{http.StatusTooManyRequests, "Too many attempts. Please wait before trying again.", "시도 횟수가 많습니다. 잠시 후 다시 시도하세요."},
-		{http.StatusServiceUnavailable, "Sign-in is temporarily unavailable. Please try again shortly.", "로그인 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요."},
+		{http.StatusUnauthorized, "Login failed", "로그인하지 못했습니다", "Check your username or password", "사용자 이름 또는 비밀번호를 확인하세요.", true},
+		{http.StatusTooManyRequests, "Too many attempts", "시도 횟수가 많습니다.", "Please wait before trying again.", "잠시 후 다시 시도하세요.", false},
+		{http.StatusServiceUnavailable, "Sign-in temporarily unavailable", "로그인 서비스를 일시적으로 사용할 수 없습니다.", "Please try again shortly.", "잠시 후 다시 시도하세요.", false},
 	} {
 		t.Run(strconv.Itoa(test.status), func(t *testing.T) {
 			h := testHandler(t)
@@ -270,8 +271,15 @@ func TestLoginPageLocalizesEachFailureStatus(t *testing.T) {
 			request.Header.Set("Accept-Language", "ko")
 			response := httptest.NewRecorder()
 			h.renderAuthenticationPage(response, request, oauth.AuthorizationRequest{ClientID: "browser-client", RedirectURI: "http://client.example/callback"}, loginPageData{Status: test.status})
-			if !strings.Contains(response.Body.String(), `data-i18n="`+test.key+`"`) || !strings.Contains(response.Body.String(), test.copy) {
+			body := response.Body.String()
+			if !strings.Contains(body, `role="alert"`) || !strings.Contains(body, `aria-hidden="true">⚠</span>`) ||
+				!strings.Contains(body, `data-i18n="`+test.titleKey+`">`+test.title+`</strong>`) ||
+				!strings.Contains(body, `data-i18n="`+test.detailKey+`">`+test.detail+`</span>`) {
 				t.Fatalf("status %d error did not retain localized guidance: %s", test.status, response.Body.String())
+			}
+			if strings.Index(body, `id="login-error"`) > strings.Index(body, `name="password"`) ||
+				strings.Contains(body, `data-i18n="Check your username or password"`) != test.credentialGuidance {
+				t.Fatalf("status %d alert placement or guidance is incorrect: %s", test.status, body)
 			}
 		})
 	}
@@ -681,7 +689,7 @@ func TestLoginPolicyBlocksWithoutConsumingInteraction(t *testing.T) {
 		t.Fatalf("HTML block status=%d headers=%v cookies=%#v", htmlResponse.Code, htmlResponse.Header(), htmlResponse.Result().Cookies())
 	}
 	for _, want := range []string{
-		"시도 횟수가 많습니다. 잠시 후 다시 시도하세요.", `value="` + interaction + `"`,
+		"시도 횟수가 많습니다.", "잠시 후 다시 시도하세요.", `value="` + interaction + `"`,
 		`href="/auth/v1/theme/browser-client.css?v=3"`, `src="/auth/v1/clients/browser-client/logo?v=3"`,
 	} {
 		if !strings.Contains(htmlResponse.Body.String(), want) {

@@ -79,33 +79,47 @@ func TestLoginFailureRetryAppReturnAndLogout(t *testing.T) {
 	})
 
 	// Allocate Chrome on the journey context, not a short-lived stage context.
-	if err := chromedp.Run(browser, network.Enable(), network.SetExtraHTTPHeaders(network.Headers{"Accept-Language": "en"})); err != nil {
+	// Keep this desktop journey independent of the host's headless viewport;
+	// the branded sign-in page and its controls extend below a small viewport.
+	if err := chromedp.Run(browser,
+		network.Enable(),
+		network.SetExtraHTTPHeaders(network.Headers{"Accept-Language": "en"}),
+		chromedp.EmulateViewport(1280, 1000),
+	); err != nil {
 		t.Fatal("stage browser-start failed")
 	}
 
+	// CSS locators use DOM.querySelector: BySearch also matches selector text in
+	// inline scripts, returning text nodes to visibility checks.
 	stage = "app-start"
 	if err := runLoginJourney(browser, 15*time.Second,
 		chromedp.Navigate(app+"/"),
-		chromedp.WaitVisible(`a[href="/login"]`),
+		chromedp.WaitVisible(`a[href="/login"]`, chromedp.ByQuery),
 	); err != nil {
 		t.Fatal("stage app-start failed")
 	}
 	var signedOut string
-	if err := runLoginJourney(browser, 10*time.Second, chromedp.Text(`.badge.out`, &signedOut)); err != nil || signedOut != "Signed out" {
+	if err := runLoginJourney(browser, 10*time.Second, chromedp.Text(`.badge.out`, &signedOut, chromedp.ByQuery)); err != nil || signedOut != "Signed out" {
 		t.Fatal("stage initial-signed-out failed")
 	}
 
-	stage = "login-form"
-	if err := runLoginJourney(browser, 15*time.Second,
-		chromedp.Click(`a[href="/login"]`),
-		chromedp.WaitVisible(`input[name="username"]`),
-		chromedp.WaitVisible(`input[name="password"]`),
-		chromedp.WaitVisible(`#login-client-context`),
-		chromedp.WaitVisible(`#login-submit`),
-		chromedp.Poll(`document.readyState === 'complete' && !!globalThis.GoAuthyI18n`, nil),
-	); err != nil {
-		t.Fatal("stage login-form failed")
+	loginFormDeadline := time.Now().Add(15 * time.Second)
+	runLoginFormStep := func(name string, action chromedp.Action) {
+		stage = "login-form-" + name
+		remaining := time.Until(loginFormDeadline)
+		if remaining <= 0 {
+			t.Fatalf("stage %s failed: shared 15s login-form deadline exceeded", stage)
+		}
+		if err := runLoginJourney(browser, remaining, action); err != nil {
+			t.Fatalf("stage %s failed: %v", stage, err)
+		}
 	}
+	runLoginFormStep("click-link", chromedp.Click(`a[href="/login"]`, chromedp.ByQuery))
+	runLoginFormStep("wait-username", chromedp.WaitVisible(`input[name="username"]`, chromedp.ByQuery))
+	runLoginFormStep("wait-password", chromedp.WaitVisible(`input[name="password"]`, chromedp.ByQuery))
+	runLoginFormStep("wait-client-context", chromedp.WaitVisible(`#login-client-context`, chromedp.ByQuery))
+	runLoginFormStep("wait-submit", chromedp.WaitVisible(`#login-submit`, chromedp.ByQuery))
+	runLoginFormStep("wait-document-and-i18n", chromedp.Poll(`document.readyState === 'complete' && !!globalThis.GoAuthyI18n`, nil))
 	var before loginJourneyPresentation
 	if err := runLoginJourney(browser, 10*time.Second, chromedp.Evaluate(loginJourneyPresentationJS, &before)); err != nil || before.Brand != "Login Journey Brand" || before.Heading == "" || before.Context != "Continue to login-journey-demo" || before.PanelRadius != "19px" || before.Interaction == "" || !hasLoginJourneyThemeLink(before.ThemeLinks) {
 		t.Fatal("stage login-brand failed")
@@ -113,8 +127,8 @@ func TestLoginFailureRetryAppReturnAndLogout(t *testing.T) {
 
 	stage = "bad-password"
 	if err := runLoginJourney(browser, 10*time.Second,
-		chromedp.SendKeys(`input[name="username"]`, username),
-		chromedp.SendKeys(`input[name="password"]`, "Definitely-Wrong-Login-9!"),
+		chromedp.SendKeys(`input[name="username"]`, username, chromedp.ByQuery),
+		chromedp.SendKeys(`input[name="password"]`, "Definitely-Wrong-Login-9!", chromedp.ByQuery),
 	); err != nil {
 		t.Fatal("stage bad-password-input failed")
 	}
@@ -136,10 +150,10 @@ func TestLoginFailureRetryAppReturnAndLogout(t *testing.T) {
 	})()`, &submitGuards)); err != nil || !submitGuards.FirstBusy || !submitGuards.SecondPrevented || !submitGuards.PageshowReset {
 		t.Fatal("stage pending-submit-guard failed")
 	}
-	if err := runLoginJourney(browser, 10*time.Second, chromedp.Click(`#login-submit`)); err != nil {
+	if err := runLoginJourney(browser, 10*time.Second, chromedp.Click(`#login-submit`, chromedp.ByQuery)); err != nil {
 		t.Fatal("stage bad-password-submit failed")
 	}
-	if err := runLoginJourney(browser, 20*time.Second, chromedp.WaitVisible(`#login-error`)); err != nil {
+	if err := runLoginJourney(browser, 20*time.Second, chromedp.WaitVisible(`#login-error`, chromedp.ByQuery)); err != nil {
 		t.Fatal("stage bad-password-response failed")
 	}
 	if got := loginPostCount.Load(); got != 1 {
@@ -147,9 +161,9 @@ func TestLoginFailureRetryAppReturnAndLogout(t *testing.T) {
 	}
 	var enteredUsername, clearedPassword, interaction string
 	if err := runLoginJourney(browser, 10*time.Second,
-		chromedp.Value(`input[name="username"]`, &enteredUsername),
-		chromedp.Value(`input[name="password"]`, &clearedPassword),
-		chromedp.Value(`input[name="interaction"]`, &interaction),
+		chromedp.Value(`input[name="username"]`, &enteredUsername, chromedp.ByQuery),
+		chromedp.Value(`input[name="password"]`, &clearedPassword, chromedp.ByQuery),
+		chromedp.Value(`input[name="interaction"]`, &interaction, chromedp.ByQuery),
 	); err != nil || enteredUsername != username || clearedPassword != "" || interaction == "" {
 		t.Fatal("stage retry-context-preserved failed")
 	}
@@ -160,22 +174,37 @@ func TestLoginFailureRetryAppReturnAndLogout(t *testing.T) {
 	if err := runLoginJourney(browser, 10*time.Second, chromedp.Evaluate(loginJourneyPresentationJS, &after)); err != nil || !sameLoginJourneyPresentation(before, after) {
 		t.Fatal("stage branded-context-preserved failed")
 	}
-	var alertText string
-	if err := runLoginJourney(browser, 10*time.Second, chromedp.Text(`#login-error`, &alertText)); err != nil || alertText != "Check your username or password" {
+	var errorTitle, errorDetail, errorRole, iconHidden string
+	if err := runLoginJourney(browser, 10*time.Second,
+		chromedp.Text(`#login-error .auth-error-title`, &errorTitle, chromedp.ByQuery),
+		chromedp.Text(`#login-error .auth-error-detail`, &errorDetail, chromedp.ByQuery),
+		chromedp.AttributeValue(`#login-error`, "role", &errorRole, nil, chromedp.ByQuery),
+		chromedp.AttributeValue(`#login-error .auth-error-icon`, "aria-hidden", &iconHidden, nil, chromedp.ByQuery),
+	); err != nil || errorTitle != "Login failed" || errorDetail != "Check your username or password" || errorRole != "alert" || iconHidden != "true" {
 		t.Fatal("stage branded-login-error failed")
+	}
+	stage = "login-progress-status-color"
+	var progressStatusColorOK bool
+	if err := runLoginJourney(browser, 5*time.Second, chromedp.Evaluate(`(() => {
+		const progress = document.querySelector('p[data-login-progress]');
+		const title = document.querySelector('#login-error .auth-error-title');
+		return !!progress && !!title && progress.getAttribute('role') === 'status' &&
+			getComputedStyle(progress).color === getComputedStyle(title).color;
+	})()`, &progressStatusColorOK)); err != nil || !progressStatusColorOK {
+		t.Fatal("stage login-progress-status-color failed")
 	}
 
 	stage = "correct-password-retry"
 	if err := runLoginJourney(browser, 20*time.Second,
-		chromedp.Clear(`input[name="password"]`),
-		chromedp.SendKeys(`input[name="password"]`, password),
-		chromedp.Click(`#login-submit`),
-		chromedp.WaitVisible(`#account-subject`),
+		chromedp.Clear(`input[name="password"]`, chromedp.ByQuery),
+		chromedp.SendKeys(`input[name="password"]`, password, chromedp.ByQuery),
+		chromedp.Click(`#login-submit`, chromedp.ByQuery),
+		chromedp.WaitVisible(`#account-subject`, chromedp.ByQuery),
 	); err != nil {
 		t.Fatal("stage correct-password-retry failed")
 	}
 	var subject string
-	if err := runLoginJourney(browser, 10*time.Second, chromedp.Text(`#account-subject`, &subject)); err != nil || subject != wantSubject {
+	if err := runLoginJourney(browser, 10*time.Second, chromedp.Text(`#account-subject`, &subject, chromedp.ByQuery)); err != nil || subject != wantSubject {
 		t.Fatal("stage app-return-identity failed")
 	}
 	callbackMu.Lock()
@@ -191,20 +220,20 @@ func TestLoginFailureRetryAppReturnAndLogout(t *testing.T) {
 	}
 	if err := runLoginJourney(browser, 20*time.Second,
 		chromedp.Navigate(app+"/"),
-		chromedp.WaitVisible(`#account-subject`),
+		chromedp.WaitVisible(`#account-subject`, chromedp.ByQuery),
 	); err != nil {
 		t.Fatal("stage admin-role-and-app-session failed")
 	}
 
 	stage = "app-logout"
 	if err := runLoginJourney(browser, 20*time.Second,
-		chromedp.Click(`form[action="/logout"] button[type="submit"]`),
-		chromedp.WaitVisible(`a[href="/login"]`),
+		chromedp.Click(`form[action="/logout"] button[type="submit"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(`a[href="/login"]`, chromedp.ByQuery),
 	); err != nil {
 		t.Fatal("stage app-logout failed")
 	}
 	stage = "app-reload-signed-out"
-	if err := runLoginJourney(browser, 15*time.Second, chromedp.Reload(), chromedp.WaitVisible(`a[href="/login"]`), chromedp.Text(`.badge.out`, &signedOut)); err != nil || signedOut != "Signed out" {
+	if err := runLoginJourney(browser, 15*time.Second, chromedp.Reload(), chromedp.WaitVisible(`a[href="/login"]`, chromedp.ByQuery), chromedp.Text(`.badge.out`, &signedOut, chromedp.ByQuery)); err != nil || signedOut != "Signed out" {
 		t.Fatal("stage app-reload-signed-out failed")
 	}
 	stage = "identity-provider-session-retained"
@@ -322,7 +351,7 @@ func openAdminDashboardThroughVisibleLogin(ctx context.Context, issuer string) e
 	var loginLinkVisible bool
 	if err := runLoginJourney(ctx, 15*time.Second,
 		chromedp.Navigate(issuer+"/auth/v1/admin/dashboard"),
-		chromedp.WaitVisible(`#overview-identity, a[href="/account/login"]`),
+		chromedp.WaitVisible(`#overview-identity, a[href="/account/login"]`, chromedp.ByQuery),
 		chromedp.Evaluate(`(() => {
 			const link = document.querySelector('a[href="/account/login"]');
 			return !!link && link.getClientRects().length > 0 && getComputedStyle(link).visibility !== 'hidden';
@@ -331,11 +360,11 @@ func openAdminDashboardThroughVisibleLogin(ctx context.Context, issuer string) e
 		return err
 	}
 	if loginLinkVisible {
-		if err := runLoginJourney(ctx, 15*time.Second, chromedp.Click(`a[href="/account/login"]`)); err != nil {
+		if err := runLoginJourney(ctx, 15*time.Second, chromedp.Click(`a[href="/account/login"]`, chromedp.ByQuery)); err != nil {
 			return err
 		}
 	}
-	return runLoginJourney(ctx, 15*time.Second, chromedp.WaitVisible(`#overview-identity`))
+	return runLoginJourney(ctx, 15*time.Second, chromedp.WaitVisible(`#overview-identity`, chromedp.ByQuery))
 }
 
 func writeLoginJourneyFailureArtifact(ctx context.Context, directory, stage string) {

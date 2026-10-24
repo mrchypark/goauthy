@@ -34,7 +34,7 @@ fi
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 cd "$root"
-for source in cmd/goauthy/main.go cmd/goauthy-demo/main.go test/e2e/browser/login_journey_test.go scripts/e2e-port-lock.sh; do
+for source in cmd/goauthy/main.go cmd/goauthy-demo/main.go test/e2e/browser/login_journey_test.go test/e2e/browser/account_error_feedback_ui_test.go scripts/e2e-port-lock.sh; do
 	[ -f "$source" ] || { echo "missing fixture source: $source" >&2; exit 1; }
 done
 if [ "$mode" = --check ]; then
@@ -189,6 +189,7 @@ fi
 fixture_stage=browser-test
 set +e
 GOAUTHY_E2E_LOGIN_JOURNEY=1 \
+GOAUTHY_E2E_ACCOUNT_ERROR_UI=1 \
 GOAUTHY_E2E_URL="$issuer" \
 GOAUTHY_E2E_APP_URL="$app" \
 GOAUTHY_E2E_BROWSER_USERNAME=admin \
@@ -197,11 +198,15 @@ GOAUTHY_E2E_BROWSER_SUBJECT=login-journey-admin \
 GOAUTHY_E2E_BROWSER_EMAIL=admin@login-journey.example.test \
 GOAUTHY_E2E_CHROME_BIN="$chrome_bin" \
 GOAUTHY_E2E_ARTIFACT_DIR="$temp_dir/artifacts" \
-go test -mod=readonly -p=1 -count=1 -v -timeout=4m ./test/e2e/browser -run '^TestLoginFailureRetryAppReturnAndLogout$' >"$temp_dir/test.log" 2>&1
+go test -mod=readonly -p=1 -count=1 -v -timeout=4m ./test/e2e/browser -run '^Test(LoginFailureRetryAppReturnAndLogout|AccountErrorFeedbackUI)$' >"$temp_dir/test.log" 2>&1
 test_status=$?
 set -e
-if [ "$test_status" -ne 0 ] || ! grep -q '^--- PASS: TestLoginFailureRetryAppReturnAndLogout ' "$temp_dir/test.log" || grep -q '^--- SKIP: TestLoginFailureRetryAppReturnAndLogout' "$temp_dir/test.log"; then
-	echo 'login journey did not produce an actual PASS (no retry was attempted)' >&2
+if [ "$test_status" -ne 0 ] || \
+	! grep -q '^--- PASS: TestLoginFailureRetryAppReturnAndLogout ' "$temp_dir/test.log" || \
+	! grep -q '^--- PASS: TestAccountErrorFeedbackUI ' "$temp_dir/test.log" || \
+	grep -Eq '^--- SKIP: Test(LoginFailureRetryAppReturnAndLogout|AccountErrorFeedbackUI)( |$)' "$temp_dir/test.log"; then
+	echo 'both browser tests must produce actual PASS results (no retry was attempted)' >&2
 	exit 1
 fi
 echo 'PASS TestLoginFailureRetryAppReturnAndLogout (count=1; no retry).'
+echo 'PASS TestAccountErrorFeedbackUI (count=1; no retry).'

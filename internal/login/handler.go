@@ -50,10 +50,19 @@ const (
 	failureWriteGrace   = 5 * time.Second
 )
 
-var loginPage = template.Must(template.Must(ui.NewTemplates("login")).Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{template "goauthy-head" .IssuerPath}}<link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title data-i18n="Sign in" data-brand-en="{{.Brand.English.Title}}" data-brand-ko="{{.Brand.Korean.Title}}">{{if .BrandTitle}}{{.BrandTitle}}{{else}}{{.SignIn}}{{end}}</title></head><body class="auth-page" data-locale-mode="in-place"><header class="auth-topbar"><a class="auth-brand" href="{{.IssuerPath}}/">{{if .Brand.LogoURL}}<img class="client-login-logo" src="{{.Brand.LogoURL}}" alt="{{.Brand.Name}}">{{else}}<span class="brand-symbol" aria-hidden="true"></span><span>{{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}}</span>{{end}}</a><select class="language-select" data-language-select aria-label="Language"><option value="en">English</option><option value="ko">한국어</option></select></header><main class="auth-panel"><p class="auth-eyebrow" data-i18n="YOUR SECURE CONNECTION">{{if eq .Language "ko"}}나만의 안전한 연결{{else}}YOUR SECURE CONNECTION{{end}}</p><h1 data-i18n="Sign in" data-brand-en="{{.Brand.English.Title}}" data-brand-ko="{{.Brand.Korean.Title}}">{{if .BrandTitle}}{{.BrandTitle}}{{else}}{{.SignIn}}{{end}}</h1>{{if .PasskeyChallenge}}<p class="auth-intro" data-i18n="Complete the security key verification to continue.">{{if eq .Language "ko"}}계속하려면 등록된 보안 키로 본인을 확인하세요.{{else}}Complete the security key verification to continue.{{end}}</p>{{ $buttonLabel := "" }}{{if eq .Language "ko"}}{{$buttonLabel = "보안 키로 계속"}}{{else}}{{$buttonLabel = "Continue with security key"}}{{end}}{{template "button" (dict "Label" $buttonLabel "Type" "button" "ID" "passkey-challenge-btn" "Attrs" (dict "data-i18n" "Continue with security key"))}}<div id="passkey-error" role="status" aria-live="polite"></div>{{else}}{{if .ClientID}}<p class="auth-intro" id="login-client-context"><span data-i18n="Continue to">{{.ContinueTo}}</span> {{.ClientID}}</p>{{end}}{{if or .BrandDescription .Intro}}<p class="auth-intro">{{if .BrandDescription}}<span data-i18n="Continue to" data-brand-en="{{.Brand.English.Description}}" data-brand-ko="{{.Brand.Korean.Description}}">{{.BrandDescription}}</span>{{else if .Intro}}<span data-i18n="{{.IntroKey}}">{{.Intro}}</span>{{end}}</p>{{end}}{{if or (eq .Status 401) (eq .Status 429) (eq .Status 503)}}<p id="login-error" class="auth-error" role="alert" tabindex="-1" {{if eq .Status 429}}data-i18n="Too many attempts. Please wait before trying again."{{else if eq .Status 503}}data-i18n="Sign-in is temporarily unavailable. Please try again shortly."{{else}}data-i18n="Check your username or password"{{end}}>{{if eq .Status 429}}{{if eq .Language "ko"}}시도 횟수가 많습니다. 잠시 후 다시 시도하세요.{{else}}Too many attempts. Please wait before trying again.{{end}}{{else if eq .Status 503}}{{if eq .Language "ko"}}로그인 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.{{else}}Sign-in is temporarily unavailable. Please try again shortly.{{end}}{{else if eq .Language "ko"}}사용자 이름 또는 비밀번호를 확인하세요.{{else}}Check your username or password{{end}}</p>{{end}}<p class="auth-intro auth-login-progress" role="status" aria-live="polite" data-login-progress hidden data-i18n="Signing in…">Signing in…</p><form id="login-form" method="post" action="{{.Action}}"><input type="hidden" name="interaction" value="{{.Interaction}}">{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<label><span data-i18n="Username">{{.Username}}</span> {{template "input" (dict "Name" "username" "Autocomplete" "username" "Value" .UsernameValue "MaxLength" "254" "Required" true)}}</label><label><span data-i18n="Password">{{.Password}}</span> {{template "input" (dict "Type" "password" "Name" "password" "Autocomplete" "current-password" "Required" true)}}</label>{{ $buttonLabel := "" }}{{if .BrandButton}}{{$buttonLabel = .BrandButton}}{{else}}{{$buttonLabel = .SignIn}}{{end}}{{template "button" (dict "Label" $buttonLabel "Type" "submit" "ID" "login-submit" "Attrs" (dict "data-i18n" "Sign in" "data-brand-en" .Brand.English.Button "data-brand-ko" .Brand.Korean.Button))}}{{if .PasskeyLogin}}{{$buttonLabel := .PasskeyButton}}{{template "button" (dict "Label" $buttonLabel "Class" "secondary passkey-button" "Variant" "secondary" "Type" "button" "ID" "passkey-btn" "Attrs" (dict "data-i18n" "Sign in with a passkey"))}}<div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div class="auth-divider"><span data-i18n="or continue with">{{if eq .Language "ko"}}또는{{else}}or continue with{{end}}</span></div>{{range .Providers}}<a href="{{$.IssuerPath}}/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" class="provider-button">{{.Name}}</a>{{end}}{{end}}{{end}}{{if not .PasskeyChallenge}}<nav class="auth-links" aria-label="Account help"><a href="{{.IssuerPath}}/oidc/device/verify" data-i18n="Enter a device code">{{if eq .Language "ko"}}기기 코드 입력{{else}}Enter a device code{{end}}</a>{{if .RecoveryPage}}<a href="{{.IssuerPath}}/auth/v1/users/password_reset" target="_blank" rel="noopener noreferrer" data-i18n="Forgot password?">{{if eq .Language "ko"}}비밀번호를 잊으셨나요?{{else}}Forgot password?{{end}}</a>{{end}}{{if .RegistrationPage}}<a href="{{.IssuerPath}}/auth/v1/users/register" target="_blank" rel="noopener noreferrer" data-i18n="Create an account">{{if eq .Language "ko"}}계정 만들기{{else}}Create an account{{end}}</a>{{end}}</nav>{{end}}</main><footer class="auth-footer"><span>{{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}}</span><span data-i18n="Your access. In your hands.">{{if eq .Language "ko"}}접근 권한은 언제나 내 손안에.{{else}}Your access. In your hands.{{end}}</span></footer><script src="{{.IssuerPath}}/auth/v1/branding/locale.js" nonce="{{.PasskeyNonce}}" defer></script>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
+var loginPage = template.Must(template.Must(ui.NewTemplates("login")).Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{template "goauthy-head" .IssuerPath}}<link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title data-i18n="Sign in" data-brand-en="{{.Brand.English.Title}}" data-brand-ko="{{.Brand.Korean.Title}}">{{if .BrandTitle}}{{.BrandTitle}}{{else}}{{.SignIn}}{{end}}</title></head><body class="auth-page" data-locale-mode="in-place"><header class="auth-topbar"><a class="auth-brand" href="{{.IssuerPath}}/">{{if .Brand.LogoURL}}<img class="client-login-logo" src="{{.Brand.LogoURL}}" alt="{{.Brand.Name}}">{{else}}<span class="brand-symbol" aria-hidden="true"></span><span>{{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}}</span>{{end}}</a><select class="language-select" data-language-select aria-label="Language"><option value="en">English</option><option value="ko">한국어</option></select></header><main class="auth-panel"><p class="auth-eyebrow" data-i18n="YOUR SECURE CONNECTION">{{if eq .Language "ko"}}나만의 안전한 연결{{else}}YOUR SECURE CONNECTION{{end}}</p><h1 data-i18n="Sign in" data-brand-en="{{.Brand.English.Title}}" data-brand-ko="{{.Brand.Korean.Title}}">{{if .BrandTitle}}{{.BrandTitle}}{{else}}{{.SignIn}}{{end}}</h1>{{if .PasskeyChallenge}}<p class="auth-intro" data-i18n="Complete the security key verification to continue.">{{if eq .Language "ko"}}계속하려면 등록된 보안 키로 본인을 확인하세요.{{else}}Complete the security key verification to continue.{{end}}</p>{{ $buttonLabel := "" }}{{if eq .Language "ko"}}{{$buttonLabel = "보안 키로 계속"}}{{else}}{{$buttonLabel = "Continue with security key"}}{{end}}{{template "button" (dict "Label" $buttonLabel "Type" "button" "ID" "passkey-challenge-btn" "Attrs" (dict "data-i18n" "Continue with security key"))}}<div id="passkey-error" role="status" aria-live="polite"></div>{{else}}{{if .ClientID}}<p class="auth-intro" id="login-client-context"><span data-i18n="Continue to">{{.ContinueTo}}</span> {{.ClientID}}</p>{{end}}{{if or .BrandDescription .Intro}}<p class="auth-intro">{{if .BrandDescription}}<span data-i18n="Continue to" data-brand-en="{{.Brand.English.Description}}" data-brand-ko="{{.Brand.Korean.Description}}">{{.BrandDescription}}</span>{{else if .Intro}}<span data-i18n="{{.IntroKey}}">{{.Intro}}</span>{{end}}</p>{{end}}<p class="auth-intro auth-login-progress" role="status" aria-live="polite" data-login-progress hidden data-i18n="Signing in…">Signing in…</p><form id="login-form" method="post" action="{{.Action}}"><input type="hidden" name="interaction" value="{{.Interaction}}">{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<label><span data-i18n="Username">{{.Username}}</span> {{template "input" (dict "Name" "username" "Autocomplete" "username" "Value" .UsernameValue "MaxLength" "254" "Required" true)}}</label>{{if or (eq .Status 401) (eq .Status 429) (eq .Status 503)}}<p id="login-error" class="auth-error" role="alert" tabindex="-1"><span class="auth-error-icon" aria-hidden="true">⚠</span><span><strong class="auth-error-title" data-i18n="{{if eq .Status 429}}Too many attempts{{else if eq .Status 503}}Sign-in temporarily unavailable{{else}}Login failed{{end}}">{{if eq .Status 429}}{{if eq .Language "ko"}}시도 횟수가 많습니다.{{else}}Too many attempts{{end}}{{else if eq .Status 503}}{{if eq .Language "ko"}}로그인 서비스를 일시적으로 사용할 수 없습니다.{{else}}Sign-in temporarily unavailable{{end}}{{else if eq .Language "ko"}}로그인하지 못했습니다{{else}}Login failed{{end}}</strong> <span class="auth-error-detail" data-i18n="{{if eq .Status 429}}Please wait before trying again.{{else if eq .Status 503}}Please try again shortly.{{else}}Check your username or password{{end}}">{{if eq .Status 429}}{{if eq .Language "ko"}}잠시 후 다시 시도하세요.{{else}}Please wait before trying again.{{end}}{{else if eq .Status 503}}{{if eq .Language "ko"}}잠시 후 다시 시도하세요.{{else}}Please try again shortly.{{end}}{{else if eq .Language "ko"}}사용자 이름 또는 비밀번호를 확인하세요.{{else}}Check your username or password{{end}}</span></span></p>{{end}}<label><span data-i18n="Password">{{.Password}}</span> {{template "input" (dict "Type" "password" "Name" "password" "Autocomplete" "current-password" "Required" true)}}</label>{{ $buttonLabel := "" }}{{if .BrandButton}}{{$buttonLabel = .BrandButton}}{{else}}{{$buttonLabel = .SignIn}}{{end}}{{template "button" (dict "Label" $buttonLabel "Type" "submit" "ID" "login-submit" "Attrs" (dict "data-i18n" "Sign in" "data-brand-en" .Brand.English.Button "data-brand-ko" .Brand.Korean.Button))}}{{if .PasskeyLogin}}{{$buttonLabel := .PasskeyButton}}{{template "button" (dict "Label" $buttonLabel "Class" "secondary passkey-button" "Variant" "secondary" "Type" "button" "ID" "passkey-btn" "Attrs" (dict "data-i18n" "Sign in with a passkey"))}}<div id="passkey-error" role="status" aria-live="polite"></div>{{end}}</form>{{if .Providers}}<div class="auth-divider"><span data-i18n="or continue with">{{if eq .Language "ko"}}또는{{else}}or continue with{{end}}</span></div>{{range .Providers}}<a href="{{$.IssuerPath}}/upstream/{{.ID}}/start?redirect_uri={{.CallbackURI}}&amp;interaction={{$.Interaction}}" class="provider-button">{{.Name}}</a>{{end}}{{end}}{{end}}{{if not .PasskeyChallenge}}<nav class="auth-links" aria-label="Account help"><a href="{{.IssuerPath}}/oidc/device/verify" data-i18n="Enter a device code">{{if eq .Language "ko"}}기기 코드 입력{{else}}Enter a device code{{end}}</a>{{if .RecoveryPage}}<a href="{{.IssuerPath}}/auth/v1/users/password_reset" target="_blank" rel="noopener noreferrer" data-i18n="Forgot password?">{{if eq .Language "ko"}}비밀번호를 잊으셨나요?{{else}}Forgot password?{{end}}</a>{{end}}{{if .RegistrationPage}}<a href="{{.IssuerPath}}/auth/v1/users/register" target="_blank" rel="noopener noreferrer" data-i18n="Create an account">{{if eq .Language "ko"}}계정 만들기{{else}}Create an account{{end}}</a>{{end}}</nav>{{end}}</main><footer class="auth-footer"><span>{{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}}</span><span data-i18n="Your access. In your hands.">{{if eq .Language "ko"}}접근 권한은 언제나 내 손안에.{{else}}Your access. In your hands.{{end}}</span></footer><script src="{{.IssuerPath}}/auth/v1/branding/locale.js" nonce="{{.PasskeyNonce}}" defer></script>{{if .PasskeyLogin}}<script nonce="{{.PasskeyNonce}}">
 (function(){
   var btn=document.getElementById('passkey-btn');
   var err=document.getElementById('passkey-error');
+  function translatePasskeyMessage(key){return globalThis.GoAuthyI18n&&typeof globalThis.GoAuthyI18n.t==='function'?globalThis.GoAuthyI18n.t(key):key;}
+  function clearPasskeyError(){err.replaceChildren();err.classList.remove('auth-error');err.setAttribute('role','status');err.setAttribute('aria-live','polite');}
+  function showPasskeyError(titleKey,detailKey){
+    var icon=document.createElement('span');icon.className='auth-error-icon';icon.setAttribute('aria-hidden','true');icon.textContent='⚠';
+    var title=document.createElement('strong');title.className='auth-error-title';title.setAttribute('data-i18n',titleKey);title.textContent=translatePasskeyMessage(titleKey);
+    var detail=document.createElement('span');detail.className='auth-error-detail';detail.setAttribute('data-i18n',detailKey);detail.textContent=translatePasskeyMessage(detailKey);
+    err.classList.add('auth-error');err.removeAttribute('aria-live');err.setAttribute('role','alert');
+    var text=document.createElement('span');text.append(title,document.createTextNode(' '),detail);err.replaceChildren(icon,text);
+  }
   function toBase64URL(buf){return btoa(String.fromCharCode.apply(null,new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
   function padB64(s){return s+Array((4-s.length%4)%4+1).join('=');}
   function b64urlToBytes(s){return Uint8Array.from(atob(padB64(s.replace(/-/g,'+').replace(/_/g,'/'))),function(c){return c.charCodeAt(0);});}
@@ -89,9 +98,9 @@ var loginPage = template.Must(template.Must(ui.NewTemplates("login")).Parse(`<!d
   var challengeButton=document.getElementById('passkey-challenge-btn');
   challengeButton.addEventListener('click',async function(){
     challengeButton.disabled=true;
-    err.textContent='';
+    clearPasskeyError();
     try{await finishPasskey({{.PasskeyChallenge}});}
-    catch(e){err.textContent='Security key verification failed. Try again.';challengeButton.disabled=false;}
+    catch(e){showPasskeyError('Passkey sign-in failed','Please try your passkey again.');challengeButton.disabled=false;}
   });
 {{end}}
   if(!btn||!err)return;
@@ -99,12 +108,12 @@ var loginPage = template.Must(template.Must(ui.NewTemplates("login")).Parse(`<!d
     var usernameField=document.querySelector('input[name="username"]');
     if(!usernameField||!usernameField.reportValidity())return;
     btn.disabled=true;
-    err.textContent='';
+    clearPasskeyError();
     try{
       var startResp=await fetch('{{.IssuerPath}}/auth/v1/users/webauthn_start',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({purpose:{Login:document.querySelector('input[name="interaction"]').value},username:usernameField.value})});
-      if(!startResp.ok){err.textContent='Passkey login failed';btn.disabled=false;return;}
+      if(!startResp.ok){showPasskeyError('Passkey sign-in failed','Please try your passkey again.');btn.disabled=false;return;}
       await finishPasskey(await startResp.json());
-    }catch(e){err.textContent='Passkey login failed';btn.disabled=false;}
+    }catch(e){showPasskeyError('Passkey sign-in failed','Please try your passkey again.');btn.disabled=false;}
   });
 })();
 </script>{{end}}</body></html>`))
@@ -114,7 +123,11 @@ var loginPage = template.Must(template.Must(ui.NewTemplates("login")).Parse(`<!d
 // OTP. The native form posts the code to the OTP verify boundary, which keeps
 // the one-time authorization interaction and the session protections of the
 // shared completion path authoritative.
-var otpStepUpPage = template.Must(template.Must(ui.NewTemplates("otp-stepup")).Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{template "goauthy-head" .IssuerPath}}<link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head><body class="auth-page"><header class="auth-brand"><span class="brand-symbol" aria-hidden="true"></span><span>{{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}}</span></header><main class="auth-panel"><p class="auth-eyebrow">{{if eq .Language "ko"}}나만의 안전한 연결{{else}}YOUR SECURE CONNECTION{{end}}</p><h1>{{.SignIn}}</h1><p role="status" aria-live="polite">{{if eq .Language "ko"}}이메일로 전송된 일회용 코드를 입력하세요.{{else}}Enter the one-time code sent to your email.{{end}}</p><form method="post" action="{{.IssuerPath}}/auth/v1/users/otp/verify"><label>{{if eq .Language "ko"}}인증 코드{{else}}One-time code{{end}} {{template "input" (dict "Name" "code" "Class" "otp-input" "Pattern" "[0-9]{6}" "InputMode" "numeric" "Autocomplete" "one-time-code" "MaxLength" "6" "Required" true "Autofocus" true)}}</label>{{$buttonLabel := .SignIn}}{{template "button" (dict "Label" $buttonLabel "Type" "submit")}}</form></main></body></html>`))
+var otpStepUpPage = template.Must(template.Must(ui.NewTemplates("otp-stepup")).Parse(`<!doctype html>
+<html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{template "goauthy-head" .IssuerPath}}<link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{.SignIn}}</title></head>
+<body class="auth-page"><header class="auth-brand"><span class="brand-symbol" aria-hidden="true"></span><span>{{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}}</span></header><main class="auth-panel"><p class="auth-eyebrow">{{if eq .Language "ko"}}나만의 안전한 연결{{else}}YOUR SECURE CONNECTION{{end}}</p><h1>{{.SignIn}}</h1>
+{{if eq .Status 401}}<div class="auth-error" role="alert"><span class="auth-error-icon" aria-hidden="true">⚠</span><span><strong class="auth-error-title" data-i18n="Please check this message.">{{if eq .Language "ko"}}메시지를 확인해 주세요.{{else}}Please check this message.{{end}}</strong> <span class="auth-error-detail" data-i18n="Check the code and try again.">{{if eq .Language "ko"}}인증 코드를 확인하고 다시 시도하세요.{{else}}Check the code and try again.{{end}}</span></span></div>{{end}}
+<p role="status" aria-live="polite">{{if eq .Language "ko"}}이메일로 전송된 일회용 코드를 입력하세요.{{else}}Enter the one-time code sent to your email.{{end}}</p><form method="post" action="{{.IssuerPath}}/auth/v1/users/otp/verify"><label>{{if eq .Language "ko"}}인증 코드{{else}}One-time code{{end}} {{template "input" (dict "Name" "code" "Class" "otp-input" "Pattern" "[0-9]{6}" "InputMode" "numeric" "Autocomplete" "one-time-code" "MaxLength" "6" "Required" true "Autofocus" true)}}</label>{{$buttonLabel := .SignIn}}{{template "button" (dict "Label" $buttonLabel "Type" "submit")}}</form></main></body></html>`))
 
 const fedCMLandingPayload = "goauthy-fedcm-login/v1"
 
@@ -703,7 +716,7 @@ func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request, form log
 				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 				return
 			}
-			h.renderOTPStepUp(w, r, request)
+			h.renderOTPStepUp(w, r, request, http.StatusOK)
 			return
 		}
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
@@ -718,15 +731,23 @@ func (h *Handler) loginPassword(w http.ResponseWriter, r *http.Request, form log
 // with the OTP continuation page instead of a JSON body no form can consume.
 // The page only collects the code; the OTP verify boundary owns verification,
 // the session binding and the interaction consumption.
-func (h *Handler) renderOTPStepUp(w http.ResponseWriter, r *http.Request, request oauth.AuthorizationRequest) {
+func (h *Handler) renderOTPStepUp(w http.ResponseWriter, r *http.Request, request oauth.AuthorizationRequest, status int) {
 	themeURL, err := h.resolveThemeURL(r.Context(), request.ClientID)
 	if err != nil {
-		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		if status == http.StatusUnauthorized {
+			http.Error(w, "Invalid OTP", status)
+		} else {
+			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		}
 		return
 	}
 	brand, err := h.resolveBranding(r.Context(), request.ClientID)
 	if err != nil {
-		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		if status == http.StatusUnauthorized {
+			http.Error(w, "Invalid OTP", status)
+		} else {
+			http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		}
 		return
 	}
 	messages := i18n.MessagesFor(i18n.UILanguageFromRequest(r))
@@ -735,8 +756,11 @@ func (h *Handler) renderOTPStepUp(w http.ResponseWriter, r *http.Request, reques
 	// redirect that follows it. Use only this already-validated request origin.
 	w.Header().Set("Content-Security-Policy", authorizationFormCSP(request.RedirectURI))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if status != http.StatusOK {
+		w.WriteHeader(status)
+	}
 	issuerURL, _ := url.Parse(h.issuer)
-	_ = otpStepUpPage.Execute(w, loginPageData{IssuerPath: strings.TrimRight(issuerURL.Path, "/"), ThemeURL: themeURL, Brand: brand, Messages: messages})
+	_ = otpStepUpPage.Execute(w, loginPageData{IssuerPath: strings.TrimRight(issuerURL.Path, "/"), ThemeURL: themeURL, Brand: brand, Status: status, Messages: messages})
 }
 
 // FedCMLanding serves the same password authentication and browser-session
@@ -1915,6 +1939,21 @@ func (h *Handler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 	if verifyErr != nil || !verified {
 		if h.metrics != nil {
 			h.metrics.AuthFailure()
+		}
+		if !verified && errors.Is(verifyErr, recovery.ErrOTPInvalid) && len(r.Header.Values("Content-Type")) == 1 {
+			mediaType, _, mediaErr := mime.ParseMediaType(r.Header.Get("Content-Type"))
+			if mediaErr == nil && mediaType == "application/x-www-form-urlencoded" {
+				currentSubject, currentDigest, currentPasswordGeneration, currentAuthenticationGeneration, loadErr := h.otp.LoadInteractionWithAuthenticationGenerations(r.Context(), session.ID)
+				if loadErr == nil && currentSubject == subject && currentDigest == interactionDigest && currentPasswordGeneration == passwordGeneration && currentAuthenticationGeneration == authenticationGeneration {
+					interaction, interactionErr := h.browser.LoadAuthorizationInteractionReadOnlyByDigest(r.Context(), sessionToken, interactionDigest)
+					if interactionErr == nil {
+						if target, targetErr := h.resolveAuthenticationRequest(r, interaction.Payload); targetErr == nil {
+							h.renderOTPStepUp(w, r, target.policy, http.StatusUnauthorized)
+							return
+						}
+					}
+				}
+			}
 		}
 		http.Error(w, "Invalid OTP", http.StatusUnauthorized)
 		return

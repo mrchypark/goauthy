@@ -4,8 +4,22 @@
   const base = document.body.dataset.base, mode = document.body.dataset.mode;
   const ko = document.documentElement.lang === 'ko';
   const words = (en, kr) => ko ? kr : en;
-  const status = (text, error = false) => { const el = $('#page-status'); el.textContent = text; el.classList.toggle('auth-error', error); el.focus(); };
-  const unknown = () => status(words('We could not confirm the result. Do not resubmit. Check your email or request a fresh link before starting again.', '결과를 확인하지 못했습니다. 다시 제출하지 마세요. 이메일을 확인하거나 새 링크를 요청한 뒤 다시 시작하세요.'), true);
+  const status = (title, detail = '', error = false) => {
+    const el = $('#page-status');
+    el.replaceChildren();
+    el.classList.toggle('auth-error', error);
+    el.setAttribute('role', error ? 'alert' : 'status');
+    el.setAttribute('aria-live', error ? 'assertive' : 'polite');
+    if (error) {
+      const icon = document.createElement('span'); icon.className = 'auth-error-icon'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = '⚠';
+      const heading = document.createElement('strong'); heading.className = 'auth-error-title'; heading.textContent = title;
+      const message = document.createElement('span'); message.className = 'auth-error-detail'; message.textContent = detail;
+      const content = document.createElement('span'); content.append(heading, message);
+      el.append(icon, content);
+    } else el.textContent = [title, detail].filter(Boolean).join(' ');
+    el.focus();
+  };
+  const unknown = () => status(words('We could not confirm the result.', '결과를 확인하지 못했습니다.'), words('Do not resubmit. Check your email or request a fresh link before starting again.', '다시 제출하지 마세요. 이메일을 확인하거나 새 링크를 요청한 뒤 다시 시작하세요.'), true);
   const api = (path, options = {}) => fetch(base + path, {credentials:'same-origin', cache:'no-store', ...options});
   const failure = (response) => words(response.status === 429 ? 'Too many attempts. Wait before trying again.' : 'This request could not be completed. Check the details or request a fresh link.', response.status === 429 ? '시도 횟수가 많습니다. 잠시 후 다시 시도하세요.' : '요청을 완료하지 못했습니다. 입력 내용을 확인하거나 새 링크를 요청하세요.');
   async function proof() {
@@ -28,7 +42,7 @@
   const form = $('#request-form');
   async function initialize() {
     if (!form) return;
-    if (!globalThis.crypto?.subtle) { status(words('Use a secure browser connection to continue.', '안전한 브라우저 연결에서 다시 시도하세요.'), true); return; }
+    if (!globalThis.crypto?.subtle) { status(words('Unable to continue.', '계속할 수 없습니다.'), words('Use a secure browser connection to continue.', '안전한 브라우저 연결에서 다시 시도하세요.'), true); return; }
     if (mode === 'register') {
       const response = await api('/auth/v1/users/values_config');
       if (!response.ok) throw new Error(failure(response));
@@ -69,7 +83,7 @@
       if (!response.ok) { if (response.status < 500) submitted = false; throw new Error(failure(response)); }
       form.hidden = true;
       status(words('Check your inbox. If this address is eligible, an email with the next steps will arrive shortly. You can close this tab.', '받은편지함을 확인하세요. 요청 가능한 주소라면 다음 단계가 담긴 이메일이 도착합니다. 이 탭을 닫아도 됩니다.'));
-    } catch (error) { if (submitted) unknown(); else { status(error.message,true); button.disabled = false; } } finally { globalThis.GoAuthyI18n?.setBusy?.(false); }
+    } catch (error) { if (submitted) unknown(); else { status(words('Unable to continue.', '계속할 수 없습니다.'), error.message, true); button.disabled = false; } } finally { globalThis.GoAuthyI18n?.setBusy?.(false); }
   });
   const start = $('#reset-start'), reset = $('#reset-form');
   let csrf = '', resetPath = '', token = '';
@@ -86,19 +100,19 @@
       if (!csrf || !p) throw new Error(words('The link could not be verified.', '링크를 확인하지 못했습니다.'));
       $('#password-policy').textContent = words(`Use ${p.length_min}–${p.length_max} characters; at least ${p.lower_case} lowercase, ${p.upper_case} uppercase, ${p.digits} digits and ${p.special} special characters. Previously used passwords may be rejected.`, `${p.length_min}~${p.length_max}자, 소문자 ${p.lower_case}개·대문자 ${p.upper_case}개·숫자 ${p.digits}개·특수문자 ${p.special}개 이상을 사용하세요. 이전 비밀번호는 거부될 수 있습니다.`);
       start.hidden = true; reset.hidden = false; reset.elements.password.focus();
-    } catch (error) { status(error.message,true); } finally { globalThis.GoAuthyI18n?.setBusy?.(false); }
+    } catch (error) { status(words('Unable to verify this link.', '이 링크를 확인할 수 없습니다.'), error.message, true); } finally { globalThis.GoAuthyI18n?.setBusy?.(false); }
   });
   if (reset) reset.addEventListener('submit', async (event) => {
     event.preventDefault(); const button = reset.querySelector('button'); if (button.disabled) return;
-    if (reset.elements.password.value !== reset.elements.confirm.value) { status(words('Passwords do not match.', '비밀번호가 일치하지 않습니다.'),true); return; }
+    if (reset.elements.password.value !== reset.elements.confirm.value) { status(words('Passwords do not match.', '비밀번호가 일치하지 않습니다.'), words('Enter the same password in both fields.', '두 입력란에 같은 비밀번호를 입력하세요.'), true); return; }
     button.disabled = true;
     globalThis.GoAuthyI18n?.setBusy?.(true);
     try {
       const response = await api(resetPath, json('PUT',{magic_link_id:token,password:reset.elements.password.value},{'X-Pwd-CSRF-Token':csrf}));
-      if (response.status !== 202) { if (response.status >= 500) { reset.reset(); unknown(); } else { status(failure(response),true); button.disabled = false; } return; }
+      if (response.status !== 202) { if (response.status >= 500) { reset.reset(); unknown(); } else { status(words('Password was not saved.', '비밀번호를 저장하지 못했습니다.'), failure(response), true); button.disabled = false; } return; }
       reset.reset(); reset.hidden = true; csrf = ''; token = '';
       status(words('Password saved. Return to your app and sign in with your new password.', '비밀번호를 저장했습니다. 앱으로 돌아가 새 비밀번호로 로그인하세요.'));
     } catch { reset.reset(); unknown(); } finally { globalThis.GoAuthyI18n?.setBusy?.(false); }
   });
-  initialize().catch((error) => status(error.message,true));
+  initialize().catch((error) => status(words('Unable to load this page.', '페이지를 불러올 수 없습니다.'), error.message, true));
 })();

@@ -3,7 +3,19 @@
   const t = globalThis.GoAuthyI18n?.t || ((s, values) => String(s).replace(/\{(\w+)\}/g, (_, key) => values?.[key] ?? `{${key}}`));
   const state = { account: null, csrf: '', attributes: [], attributeValues: {}, attributesLoaded: false, passkeys: [], passkeysLoaded: false, passkeyBusy: false, actionBusy: false, selfDeleteAllowed: false };
   const $ = (selector) => document.querySelector(selector);
-  const status = (id, message, error) => { const el = document.getElementById(id); if (el) { el.textContent = message; el.className = `status${error ? ' error' : ''}`; } };
+  const status = (id, message, error) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.className = `status${error ? ' error' : ''}`;
+    el.setAttribute('role', error ? 'alert' : 'status');
+    el.setAttribute('aria-live', error ? 'assertive' : 'polite');
+    if (!error) { el.textContent = message; return; }
+    const title = id === 'profile-status' ? 'Your account could not be loaded.' : 'Please check this message.';
+    const icon = document.createElement('span'); icon.className = 'status-icon'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = '⚠';
+    const heading = document.createElement('strong'); heading.textContent = t(title);
+    const detail = document.createElement('span'); detail.className = 'status-detail'; detail.textContent = message;
+    el.replaceChildren(icon, heading, detail);
+  };
   const basePath = () => { const path = window.location.pathname; const marker = path.lastIndexOf('/account'); return marker < 0 ? '' : path.slice(0, marker); };
   const endpoint = (path) => `${basePath()}${path}`;
   const request = (url, options = {}) => {
@@ -29,8 +41,8 @@
   const syncNavigation = () => document.querySelectorAll?.('.account-nav a').forEach((link) => { const section = document.querySelector(link.getAttribute('href')); link.hidden = !section || section.hidden; });
 
   function displayProfile(account) {
-    const profile = $('#profile'); profile.textContent = '';
-    const heading = document.createElement('h2'); heading.id = 'profile-heading'; heading.textContent = [account.given_name, account.family_name].filter(Boolean).join(' ') || account.email || t('Your profile'); profile.append(heading);
+    const profile = $('#profile-content'); profile.textContent = '';
+    const heading = document.createElement('h3'); heading.id = 'profile-name'; heading.textContent = [account.given_name, account.family_name].filter(Boolean).join(' ') || account.email || t('Your profile'); profile.append(heading);
     const email = document.createElement('p'); email.textContent = account.email || ''; profile.append(email);
     if (account.email_verified === false) { const note = document.createElement('p'); note.className = 'hint'; note.textContent = t('Email address is not verified.'); profile.append(note); }
     $('#preferred-username').value = account.preferred_username || '';
@@ -95,6 +107,7 @@
   async function refreshAccount() {
     const account = await request('/account/data').then((r) => r.json());
     state.account = account; state.csrf = account.csrf_token || ''; displayProfile(account);
+    status('profile-status', '');
     return account;
   }
 
@@ -104,7 +117,13 @@
     try {
       const account = await refreshAccount(); const passkeySection = $('#passkeys-section'); passkeySection.hidden = !(account.features && account.features.passkeys); if (account.features && account.features.passkeys) { $('#passkeys-unsupported').hidden = webauthnAvailable('create') && webauthnAvailable('get'); try { await loadPasskeys(); } catch (error) { state.passkeysLoaded = false; status('passkey-status', t('Unable to load passkeys.'), true); } }
       if (account.subject) { try { const result = await request(`/auth/v1/users/${encodeURIComponent(account.subject)}/attr/editable`).then((r) => r.json()); state.attributes = result.values || []; renderAttributes(state.attributes); } catch (_) { $('#attributes-section').hidden = false; status('attributes-status', t('Unable to load editable details.'), true); } } await checkSelfDelete();
-    } catch (error) { $('#profile').textContent = error.message; } finally { syncNavigation(); }
+    } catch (error) {
+      state.account = null; state.csrf = ''; state.attributes = []; state.attributeValues = {}; state.attributesLoaded = false; state.passkeys = []; state.passkeysLoaded = false;
+      $('#profile-content').textContent = ''; $('#preferred-username').value = ''; $('#attributes').textContent = ''; $('#passkeys-list').textContent = '';
+      for (const id of ['password-current', 'password-new', 'password-confirm', 'passkey-current-password', 'password-restore-new', 'password-restore-confirm', 'self-delete-confirm']) $(`#${id}`).value = '';
+      for (const id of ['password-section', 'attributes-section', 'passkeys-section', 'passwordless-section', 'password-restore-section', 'self-delete-section']) $(`#${id}`).hidden = true;
+      status('profile-status', error.message, true);
+    } finally { syncNavigation(); }
   }
 
   async function submitUsername(event) {
