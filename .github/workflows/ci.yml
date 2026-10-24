@@ -14,6 +14,42 @@ permissions:
   contents: read
 
 jobs:
+  browser-login-journey:
+    name: Browser login journey
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        name: Checkout
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        name: Setup Go
+        with:
+          go-version-file: go.mod
+
+      - name: Require preinstalled Chrome
+        run: |
+          chrome=$(command -v google-chrome || command -v google-chrome-stable || true)
+          [ -n "$chrome" ] || { echo "preinstalled Google Chrome is required for the browser login journey" >&2; exit 1; }
+          "$chrome" --version
+          echo "GOAUTHY_E2E_CHROME_BIN=$chrome" >> "$GITHUB_ENV"
+
+      - name: Check login journey preflight guards
+        run: sh scripts/test-e2e-login-journey-standalone.sh
+
+      - name: Run isolated login journey
+        env:
+          GOAUTHY_LOGIN_JOURNEY_SLOT: granted
+        run: sh scripts/e2e-login-journey-standalone.sh --run
+
+      - name: Upload sanitized browser failure artifact
+        if: failure()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: browser-login-journey-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/goauthy-login-journey-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+
   manifests:
     name: Manifest checks
     runs-on: ubuntu-latest
