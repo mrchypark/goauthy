@@ -6,12 +6,12 @@ const source = fs.readFileSync(__dirname + '/pages.js', 'utf8');
 async function check(outcome) {
   let begin, submit, writes = 0, cleared = 0;
   const button = {disabled:false};
-  const status = {textContent:'',classList:{toggle(){}},focus(){}};
+  const status = {textContent:'',children:[],classList:{toggle(name,on){this[name]=on;}},setAttribute(name,value){this[name]=value;},replaceChildren(){this.children=[];this.textContent='';},append(...nodes){this.children.push(...nodes);this.textContent=nodes.map(node=>node.textContent).join(' ');},focus(){}};
   const start = {addEventListener(_,fn){begin=fn;}};
   const reset = {hidden:true,elements:{password:{value:'fixture-password',focus(){}},confirm:{value:'different'}},
     querySelector(){return button;},addEventListener(_,fn){submit=fn;},reset(){cleared++;this.elements.password.value='';this.elements.confirm.value='';}};
   const nodes = {'#reset-start':start,'#reset-form':reset,'#page-status':status,'#password-policy':{}};
-  vm.runInNewContext(source, {document:{body:{dataset:{base:'/tenant',mode:'reset'}},documentElement:{lang:'en'},querySelector:s=>nodes[s]},
+  vm.runInNewContext(source, {document:{body:{dataset:{base:'/tenant',mode:'reset'}},documentElement:{lang:'en'},querySelector:s=>nodes[s],createElement:()=>({children:[],setAttribute(name,value){this[name]=value;},append(...nodes){this.children.push(...nodes);this.textContent=nodes.map(node=>node.textContent).join(' ');}})},
     location:{pathname:'/tenant/auth/v1/users/subject/reset/test-token'},
     fetch:async (url,options)=>{
       assert.equal(options.credentials,'same-origin');
@@ -32,13 +32,13 @@ async function check(outcome) {
   assert.equal(reset.hidden,false); assert.equal(start.hidden,true);
   assert.match(nodes['#password-policy'].textContent,/12–128/);
   await submit({preventDefault(){}});
-  assert.equal(writes,0); assert.match(status.textContent,/do not match/);
+  assert.equal(writes,0); assert.match(status.textContent,/do not match/); assert.equal(status.role,'alert'); assert.equal(status.children[1].children[0].className,'auth-error-title'); assert.equal(status.children[1].children[1].className,'auth-error-detail');
   reset.elements.confirm.value='fixture-password';
   await submit({preventDefault(){}});
   assert.equal(writes,1);
-  if(outcome===202){assert.equal(reset.hidden,true);assert.equal(cleared,1);assert.match(status.textContent,/Password saved/);}
-  else if(outcome===400){assert.equal(button.disabled,false);assert.equal(cleared,0);}
-  else {assert.equal(cleared,1);assert.equal(button.disabled,true);assert.match(status.textContent,/Do not resubmit/);}
+  if(outcome===202){assert.equal(reset.hidden,true);assert.equal(cleared,1);assert.match(status.textContent,/Password saved/);assert.equal(status.role,'status');assert.equal(status['aria-live'],'polite');}
+  else if(outcome===400){assert.equal(button.disabled,false);assert.equal(cleared,0);assert.equal(status.role,'alert');}
+  else {assert.equal(cleared,1);assert.equal(button.disabled,true);assert.match(status.textContent,/Do not resubmit/);assert.equal(status.role,'alert');}
   if(outcome!==400){await submit({preventDefault(){}});assert.equal(writes,1);}
 }
 (async()=>{for(const outcome of [202,400,503,'lost'])await check(outcome);console.log('reset UI outcomes passed');})().catch(e=>{console.error(e);process.exitCode=1;});

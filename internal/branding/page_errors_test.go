@@ -121,10 +121,26 @@ func TestBrowserErrorsFallBackWhenGlobalBrandUnavailable(t *testing.T) {
 
 func TestLoginErrorRuleWinsOverPanelParagraphStyle(t *testing.T) {
 	css := string(globalCSS)
+	statusRule := `.auth-panel [role=status]:not(:empty) { color: hsl(var(--text-high)); }`
+	if statusIndex := strings.Index(css, statusRule); statusIndex < 0 || statusIndex < strings.Index(css, `.auth-panel [role=status]:not(:empty), .auth-error {`) {
+		t.Fatal("normal status messages must override the shared error color with high-contrast text")
+	}
 	if !strings.Contains(css, `.auth-error { padding: 14px 16px; border: 1px solid hsl(var(--text) / .18); border-radius: var(--border-radius); color: hsl(var(--error)); font-size: 14px; }`) {
 		t.Fatal("nested auth errors must retain their shared styling and theme error color")
 	}
 	if !strings.Contains(css, `body.auth-page .auth-panel > p.auth-error { color: hsl(var(--text-high)); font-size: 14px; }`) {
 		t.Fatal("login error selector must use high-contrast theme text without changing shared errors")
+	}
+	for _, rule := range []string{
+		`.auth-panel .auth-error[role=alert] { display: flex; align-items: flex-start; gap: 10px; background: color-mix(in srgb, hsl(var(--error)) 8%, hsl(var(--bg))); border-color: hsl(var(--error) / .45); color: hsl(var(--text-high)); }`,
+		`.auth-panel .auth-error[role=alert] .auth-error-icon { color: hsl(var(--error)); line-height: 1.5; }`,
+		`.auth-panel .auth-error[role=alert] .auth-error-title { color: hsl(var(--text-high)); font-weight: 700; }`,
+	} {
+		if !strings.Contains(css, rule) {
+			t.Errorf("alert error theme rule missing %q", rule)
+		}
+	}
+	if strings.Contains(css, `.auth-panel #login-error {`) {
+		t.Fatal("alert emphasis must apply by role and class, not one page's ID")
 	}
 }
