@@ -91,7 +91,7 @@ func (h *Handler) IssueModificationToken(w http.ResponseWriter, r *http.Request)
 		}
 		id, exp, err = h.passkeys.ExchangeModificationProof(r.Context(), session.Subject, session.ID, *payload.MFACode)
 	} else {
-		if payload.Password == nil || !boundedPassword([]byte(*payload.Password), h.rules.LengthMax) {
+		if payload.Password == nil || !boundedPassword([]byte(*payload.Password), maxPasswordLength) {
 			badRequest(w, "invalid MFA modification request")
 			return
 		}
@@ -849,7 +849,7 @@ func (h *Handler) PutSelfPassword(w http.ResponseWriter, r *http.Request) {
 	if !passkeyOnly {
 		current := []byte(*payload.Current)
 		defer clear(current)
-		if !boundedPassword(current, h.rules.LengthMax) {
+		if !boundedPassword(current, maxPasswordLength) {
 			badRequest(w, "invalid password change request")
 			return
 		}
