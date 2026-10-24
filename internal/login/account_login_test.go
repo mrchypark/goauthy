@@ -57,6 +57,9 @@ func accountLoginPage(t *testing.T, h *Handler) (*http.Cookie, string, string) {
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Sign in to manage your account.") {
 		t.Fatalf("GET status=%d body=%s", w.Code, w.Body.String())
 	}
+	if !strings.Contains(w.Body.String(), `name="username" value=""`) {
+		t.Fatalf("fresh account login username should default empty: %s", w.Body.String())
+	}
 	interaction := regexp.MustCompile(`name="interaction" value="([^"]+)"`).FindStringSubmatch(w.Body.String())
 	csrf := regexp.MustCompile(`name="csrf_token" value="([^"]+)"`).FindStringSubmatch(w.Body.String())
 	if len(interaction) != 2 || len(csrf) != 2 || len(w.Result().Cookies()) != 1 {
@@ -66,7 +69,11 @@ func accountLoginPage(t *testing.T, h *Handler) (*http.Cookie, string, string) {
 }
 
 func accountLoginPost(cookie *http.Cookie, interaction, csrf, password string) *http.Request {
-	form := url.Values{"interaction": {interaction}, "csrf_token": {csrf}, "username": {"alice"}, "password": {password}}
+	return accountLoginPostUser(cookie, interaction, csrf, "alice", password)
+}
+
+func accountLoginPostUser(cookie *http.Cookie, interaction, csrf, username, password string) *http.Request {
+	form := url.Values{"interaction": {interaction}, "csrf_token": {csrf}, "username": {username}, "password": {password}}
 	r := httptest.NewRequest(http.MethodPost, "/account/login", strings.NewReader(form.Encode()))
 	r.RemoteAddr = "203.0.113.8:1234"
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -98,14 +105,46 @@ func TestAccountLoginAuthenticatesAndRedirects(t *testing.T) {
 func TestAccountLoginWrongPasswordKeepsInteraction(t *testing.T) {
 	t.Parallel()
 	h := testHandler(t)
+	h.issuer = "http://localhost/prefix"
 	cookie, interaction, csrf := accountLoginPage(t, h)
 
 	wrong := httptest.NewRecorder()
 	wrongRequest := accountLoginPost(cookie, interaction, csrf, "wrong password")
 	wrongRequest.Header.Set("Accept", "text/html")
 	h.AccountLoginHandler(false).ServeHTTP(wrong, wrongRequest)
-	if wrong.Code != http.StatusUnauthorized || wrong.Header().Get("Location") != "" || wrong.Body.String() != "Invalid user credentials\n" || strings.Contains(wrong.Body.String(), `action="/auth/login"`) {
+	body := wrong.Body.String()
+	for _, want := range []string{`id="login-error" class="auth-error" role="alert"`, "Check your username or password", `action="/prefix/account/login"`, `name="interaction" value="` + interaction + `"`, `name="csrf_token" value="` + csrf + `"`, `name="username" value="alice"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("wrong-password page missing %q: %s", want, body)
+		}
+	}
+	if wrong.Code != http.StatusUnauthorized || wrong.Header().Get("Location") != "" || strings.Contains(body, "wrong password") || strings.Contains(body, `action="/auth/login"`) {
 		t.Fatalf("wrong password status=%d location=%q body=%q", wrong.Code, wrong.Header().Get("Location"), wrong.Body.String())
+	}
+	if browser.ValidateCSRFToken(cookie.Value, csrf) != nil {
+		t.Fatal("failed login did not retain the valid CSRF binding")
+	}
+
+	invalidCSRF := httptest.NewRecorder()
+	invalidRequest := accountLoginPost(cookie, interaction, "invalid-csrf", "wrong password")
+	invalidRequest.Header.Set("Accept", "text/html")
+	h.AccountLoginHandler(false).ServeHTTP(invalidCSRF, invalidRequest)
+	if invalidCSRF.Code != http.StatusForbidden || strings.Contains(invalidCSRF.Body.String(), `id="login-form"`) || strings.Contains(invalidCSRF.Body.String(), `name="csrf_token"`) {
+		t.Fatalf("invalid CSRF produced a retry form: status=%d body=%q", invalidCSRF.Code, invalidCSRF.Body.String())
+	}
+
+	unknown := httptest.NewRecorder()
+	unknownRequest := accountLoginPostUser(cookie, interaction, csrf, `nobody"<script>`, "wrong password")
+	unknownRequest.Header.Set("Accept", "text/html")
+	h.AccountLoginHandler(false).ServeHTTP(unknown, unknownRequest)
+	unknownBody := unknown.Body.String()
+	for _, want := range []string{`role="alert"`, "Check your username or password", `action="/prefix/account/login"`, `name="interaction" value="` + interaction + `"`, `name="csrf_token" value="` + csrf + `"`, `name="username" value="nobody&#34;&lt;script&gt;"`} {
+		if !strings.Contains(unknownBody, want) {
+			t.Fatalf("unknown-user page missing %q: %s", want, unknownBody)
+		}
+	}
+	if unknown.Code != wrong.Code || strings.Contains(unknownBody, `nobody"<script>`) || strings.Contains(unknownBody, "wrong password") {
+		t.Fatalf("known/unknown failure mismatch: known=%d unknown=%d body=%q", wrong.Code, unknown.Code, unknownBody)
 	}
 
 	correct := httptest.NewRecorder()

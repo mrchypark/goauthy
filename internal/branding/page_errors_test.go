@@ -124,7 +124,7 @@ func TestLoginErrorRuleWinsOverPanelParagraphStyle(t *testing.T) {
 	if !strings.Contains(css, `.auth-error { padding: 14px 16px; border: 1px solid hsl(var(--text) / .18); border-radius: var(--border-radius); color: hsl(var(--error)); font-size: 14px; }`) {
 		t.Fatal("nested auth errors must retain their shared styling and theme error color")
 	}
-	if !strings.Contains(css, `.auth-panel > p.auth-error { color: hsl(var(--error)); font-size: 14px; }`) {
-		t.Fatal("login error selector must override the panel paragraph style and use the theme error color")
+	if !strings.Contains(css, `body.auth-page .auth-panel > p.auth-error { color: hsl(var(--text-high)); font-size: 14px; }`) {
+		t.Fatal("login error selector must use high-contrast theme text without changing shared errors")
 	}
 }

@@ -456,7 +456,7 @@ pre {
 .auth-footer { display: flex; justify-content: space-between; gap: 20px; font-size: 11px; letter-spacing: .025em; color: hsl(var(--text)); }
 .auth-panel [role=status]:empty { display: none; }
 .auth-panel [role=status]:not(:empty), .auth-error { padding: 14px 16px; border: 1px solid hsl(var(--text) / .18); border-radius: var(--border-radius); color: hsl(var(--error)); font-size: 14px; }
-.auth-panel > p.auth-error { color: hsl(var(--error)); font-size: 14px; }
+body.auth-page .auth-panel > p.auth-error { color: hsl(var(--text-high)); font-size: 14px; }
 .auth-panel .otp-input { font-size: 26px; letter-spacing: .4em; font-variant-numeric: tabular-nums; }
 @media (hover: hover) { .auth-panel button:hover { background: color-mix(in srgb, hsl(var(--action)), black 12%); } .auth-panel button.secondary:hover, .auth-panel .provider-button:hover { background: hsl(var(--bg-high)); } }
 @media (max-width: 540px) { .auth-page { padding: 24px; } .auth-panel { margin: 32px 0; } .auth-footer { flex-wrap: wrap; } }
