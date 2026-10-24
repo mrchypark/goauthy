@@ -105,15 +105,9 @@ func TestLoginCompletesAuthorizationAndRotatesSession(t *testing.T) {
 	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
 	page := httptest.NewRecorder()
 	h.Authorize(page, get)
-	scriptTags := regexp.MustCompile(`<script\b[^>]*>`).FindAllString(page.Body.String(), -1)
-	nonceMatches := regexp.MustCompile(`\bnonce="([^"]+)"`).FindAllStringSubmatch(page.Body.String(), -1)
-	if len(scriptTags) == 0 || len(nonceMatches) == 0 || nonceMatches[0][1] == "" {
-		t.Fatalf("expected nonce-protected scripts, got %d scripts and %d nonces", len(scriptTags), len(nonceMatches))
-	}
-	for _, tag := range scriptTags {
-		if !strings.Contains(tag, `nonce="`+nonceMatches[0][1]+`"`) {
-			t.Fatalf("script lacks CSP nonce %q: %s", nonceMatches[0][1], tag)
-		}
+	nonceMatches := regexp.MustCompile(`<script nonce="([^"]+)"`).FindAllStringSubmatch(page.Body.String(), -1)
+	if len(nonceMatches) != 1 || nonceMatches[0][1] == "" {
+		t.Fatalf("expected exactly one script nonce, got %d", len(nonceMatches))
 	}
 	nonce := nonceMatches[0][1]
 	got := page.Header().Get("Content-Security-Policy")

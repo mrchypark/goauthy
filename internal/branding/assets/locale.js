@@ -41,12 +41,22 @@
     const loginForm = document.getElementById('login-form');
     if (loginForm) {
       const progress = document.querySelector('[data-login-progress]');
+      const submitButton = document.getElementById('login-submit');
+      let submitting = false;
       loginForm.addEventListener('submit', event => {
         if (event.defaultPrevented) return;
+        if (submitting) {
+          event.preventDefault();
+          return;
+        }
+        submitting = true;
+        if (submitButton) submitButton.disabled = true;
         if (progress) progress.hidden = false;
         loginForm.setAttribute('aria-busy', 'true');
       });
       window.addEventListener('pageshow', () => {
+        submitting = false;
+        if (submitButton) submitButton.disabled = false;
         if (progress) progress.hidden = true;
         loginForm.removeAttribute('aria-busy');
       });
