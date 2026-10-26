@@ -1871,7 +1871,7 @@ func (s *Store) GetClient(ctx context.Context, id string) (fosite.Client, error)
 			if custom.ClientID != id || custom.Revision < 0 {
 				return nil, errors.New("invalid bootstrap custom scopes")
 			}
-			return &bootstrapScopedClient{Client: s.client, scopes: append(append(fosite.Arguments(nil), s.client.GetScopes()...), custom.Allowed...)}, nil
+			return &bootstrapScopedClient{Client: s.client, scopes: append(append(fosite.Arguments(nil), s.client.GetScopes()...), custom.Allowed...), defaultScopes: append(fosite.Arguments(nil), custom.Default...)}, nil
 		}
 		return s.client, nil
 	}
@@ -1937,7 +1937,8 @@ func (s *Store) validateDynamicClientScopes(ctx context.Context, client fosite.C
 
 type bootstrapScopedClient struct {
 	fosite.Client
-	scopes fosite.Arguments
+	scopes        fosite.Arguments
+	defaultScopes fosite.Arguments
 }
 
 func (c *bootstrapScopedClient) GetScopes() fosite.Arguments {

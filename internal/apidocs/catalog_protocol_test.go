@@ -1,6 +1,7 @@
 package apidocs
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -26,6 +27,44 @@ func TestProtocolCatalogFeatureGatesAndSecurity(t *testing.T) {
 	}
 	if _, err := Document("https://id.example.test", Features{}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBootstrapClientConfigurationContract(t *testing.T) {
+	doc := &openapi3.T{OpenAPI: "3.0.3"}
+	if err := addProtocolOperations(doc, Features{}); err != nil {
+		t.Fatal(err)
+	}
+	op := doc.Paths.Value("/oidc/client-configuration").Get
+	if op == nil || op.Security == nil || len(*op.Security) != 1 || (*op.Security)[0]["clientBasic"] == nil {
+		t.Fatal("client configuration must require HTTP Basic without fallback security")
+	}
+	if op.RequestBody != nil || !strings.Contains(op.Description, "No API key or browser session") || !strings.Contains(op.Description, "exact raw JSON response body bytes") {
+		t.Fatalf("incomplete client configuration auth/cache contract: %#v", op)
+	}
+	success := op.Responses.Status(200).Value
+	if success.Content["application/json"] == nil || success.Headers["ETag"] == nil || success.Headers["Cache-Control"] == nil {
+		t.Fatal("client configuration response lacks JSON, ETag, or no-store documentation")
+	}
+	if !strings.Contains(success.Headers["ETag"].Value.Description, "SHA-256") || success.Headers["Cache-Control"].Value.Description != "no-store" {
+		t.Fatal("client configuration response headers lack raw-body ETag or no-store details")
+	}
+	schema := success.Content["application/json"].Schema.Value
+	if !reflect.DeepEqual(schema.Properties["version"].Value.Enum, []any{"goauthy.client-configuration.v1"}) {
+		t.Fatalf("unexpected version schema: %#v", schema.Properties["version"].Value.Enum)
+	}
+	for _, name := range []string{"version", "issuer", "client_id", "client_kind", "enabled", "confidential", "redirect_uris", "grant_types", "scopes", "default_scopes", "audience", "default_aud"} {
+		if schema.Properties[name] == nil {
+			t.Errorf("v1 response schema missing %q", name)
+		}
+	}
+	for _, name := range []string{"redirect_uris", "grant_types", "scopes", "default_scopes", "audience", "default_aud"} {
+		if !schema.Properties[name].Value.Type.Is("array") {
+			t.Errorf("%s must be an array", name)
+		}
+	}
+	if op.Responses.Status(400) == nil || op.Responses.Status(401) == nil {
+		t.Fatal("client configuration missing 400 or 401 response")
 	}
 }
 

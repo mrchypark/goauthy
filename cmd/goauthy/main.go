@@ -1199,6 +1199,7 @@ func run() (err error) {
 	handler.Handle("GET /oidc/jwks.json", oidc.JWKSHandler(db, keyring, issuer))
 	handler.Handle("POST /oidc/token", oauthServer.TokenHandler())
 	handler.Handle("POST /oidc/introspect", oauthServer.IntrospectionHandler())
+	handler.Handle("GET /oidc/client-configuration", oauthServer.ClientConfigurationHandler())
 	handler.Handle("POST /oidc/revoke", oauthServer.RevocationHandler())
 	handler.Handle("GET /oidc/userinfo", oauthServer.UserInfoHandler())
 	handler.Handle("POST /oidc/userinfo", oauthServer.UserInfoHandler())
