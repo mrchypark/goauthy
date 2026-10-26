@@ -76,6 +76,14 @@ func addProtocolOperations(doc *openapi3.T, features Features) error {
 	operation("POST", "/oidc/token", "token", "Exchange an authorization, refresh, client-credentials, device, or subject token", formBody(tokenForm, true), 200, 400, 401)
 	doc.Paths.Value("/oidc/token").Post.Responses.Set("200", &openapi3.ResponseRef{Value: openapi3.NewResponse().WithDescription("OK").WithJSONSchemaRef(token)})
 	operation("POST", "/oidc/introspect", "introspect", "Inspect a token", formBody(ref("IntrospectionRequest", form(map[string]*openapi3.Schema{"token": stringSchema, "token_type_hint": stringSchema}, "token")), true), 200, 400, 401)
+	clientConfiguration := form(map[string]*openapi3.Schema{
+		"version": openapi3.NewStringSchema().WithEnum("goauthy.client-configuration.v1"), "issuer": stringSchema, "client_id": stringSchema,
+		"client_kind": openapi3.NewStringSchema().WithEnum("bootstrap"), "enabled": openapi3.NewBoolSchema(), "confidential": openapi3.NewBoolSchema(),
+		"redirect_uris": openapi3.NewArraySchema().WithItems(stringSchema), "grant_types": openapi3.NewArraySchema().WithItems(stringSchema),
+		"scopes": openapi3.NewArraySchema().WithItems(stringSchema), "default_scopes": openapi3.NewArraySchema().WithItems(stringSchema),
+		"audience": openapi3.NewArraySchema().WithItems(stringSchema), "default_aud": openapi3.NewArraySchema().WithItems(stringSchema),
+	}, "version", "issuer", "client_id", "client_kind", "enabled", "confidential", "redirect_uris", "grant_types", "scopes", "default_scopes", "audience", "default_aud").WithoutAdditionalProperties()
+	operation("GET", "/oidc/client-configuration", "clientConfiguration", "Read the authenticated bootstrap client's effective OAuth configuration", nil, 200, 400, 401, 500)
 	operation("POST", "/oidc/revoke", "revoke", "Revoke a token", formBody(ref("RevocationRequest", form(map[string]*openapi3.Schema{"token": stringSchema, "token_type_hint": stringSchema}, "token")), true), 200, 400, 401)
 	operation("GET", "/oidc/userinfo", "userInfoGet", "Return claims for the bearer token", nil, 200, 401)
 	operation("POST", "/oidc/userinfo", "userInfoPost", "Return claims for the bearer token", nil, 200, 401)
@@ -109,6 +117,17 @@ func addProtocolOperations(doc *openapi3.T, features Features) error {
 	// OAuth client authentication is selected by the registered client. Form
 	// credentials/private_key_jwt are described in the body, not a fake HTTP scheme.
 	doc.Components.SecuritySchemes["clientBasic"] = &openapi3.SecuritySchemeRef{Value: &openapi3.SecurityScheme{Type: "http", Scheme: "basic", Description: "Registered OAuth client ID and secret."}}
+	clientConfigurationGet := doc.Paths.Value("/oidc/client-configuration").Get
+	clientConfigurationGet.Security = &openapi3.SecurityRequirements{{"clientBasic": {}}}
+	clientConfigurationGet.Description = "Requires HTTP Basic authentication with the configured bootstrap OAuth client's credentials. No API key or browser session is accepted. The response is Cache-Control: no-store; ETag is the quoted SHA-256 of the exact raw JSON response body bytes. Query parameters and request bodies are rejected."
+	clientConfigurationOK := clientConfigurationGet.Responses.Status(200).Value
+	clientConfigurationOK.WithDescription("Effective bootstrap client configuration v1.").WithJSONSchema(clientConfiguration)
+	clientConfigurationOK.Headers = openapi3.Headers{
+		"ETag":          {Value: &openapi3.Header{Schema: &openapi3.SchemaRef{Value: stringSchema}, Description: `Quoted SHA-256 of the exact raw JSON response body bytes, in the form "sha256:<hex>".`}},
+		"Cache-Control": {Value: &openapi3.Header{Schema: &openapi3.SchemaRef{Value: stringSchema}, Description: "no-store"}},
+	}
+	clientConfigurationGet.Responses.Status(400).Value.WithDescription("Malformed request, query parameter, or request body.")
+	clientConfigurationGet.Responses.Status(401).Value.WithDescription("Missing or invalid bootstrap client HTTP Basic credentials.")
 	doc.Components.SecuritySchemes["registrationBearer"] = &openapi3.SecuritySchemeRef{Value: &openapi3.SecurityScheme{Type: "http", Scheme: "bearer", Description: "Per-client registration access token, not an OAuth access token."}}
 	doc.Components.SecuritySchemes["registrationAdminBearer"] = &openapi3.SecuritySchemeRef{Value: &openapi3.SecurityScheme{Type: "http", Scheme: "bearer", Description: "Configured DCR registration token."}}
 	for _, name := range []string{"resource", "audience", "actor_token", "actor_token_type", "requested_token_type", "client_assertion", "client_assertion_type"} {
