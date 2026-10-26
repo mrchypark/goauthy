@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 
 	"github.com/ory/fosite"
 )
@@ -70,13 +71,17 @@ func (s *Server) ClientConfigurationHandler() http.Handler {
 			Version: "goauthy.client-configuration.v1", Issuer: s.oidc.Issuer,
 			ClientID: client.GetID(), ClientKind: "bootstrap", Enabled: true,
 			Confidential: !client.IsPublic(), RedirectURIs: client.GetRedirectURIs(),
-			GrantTypes: append([]string(nil), client.GetGrantTypes()...), Scopes: append([]string(nil), client.GetScopes()...),
+			GrantTypes: append([]string(nil), client.GetGrantTypes()...), Scopes: []string{},
 			DefaultScopes: append([]string{}, defaults...), Audience: append([]string{}, client.GetAudience()...),
 			DefaultAud: []string{},
 		}
 		cfg.RedirectURIs = append([]string{}, cfg.RedirectURIs...)
 		cfg.GrantTypes = append([]string{}, cfg.GrantTypes...)
-		cfg.Scopes = append([]string{}, cfg.Scopes...)
+		for _, scope := range client.GetScopes() {
+			if !slices.Contains(cfg.Scopes, scope) {
+				cfg.Scopes = append(cfg.Scopes, scope)
+			}
+		}
 		if audience := s.defaultAudiences[client.GetID()]; audience != "" {
 			cfg.DefaultAud = []string{audience}
 		}

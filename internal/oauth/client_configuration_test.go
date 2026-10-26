@@ -18,8 +18,8 @@ import (
 func TestClientConfigurationHandler(t *testing.T) {
 	t.Parallel()
 	db := oauthTestDB(t)
-	allowed := []string{"custom.read"}
-	defaults := []string{"goauthy.read"}
+	allowed := []string{"openid", "custom.read"}
+	defaults := []string{"openid"}
 	policyReads := 0
 	server, err := NewServerWithOIDC(t.Context(), db, randomSecret(t), testClientID, testClientSecret, testRedirectURI, []string{"https://resource.example.test"}, OIDCConfig{
 		Issuer: oidcTestIssuer, DefaultAudiences: map[string]string{testClientID: "https://resource.example.test"},
@@ -72,8 +72,19 @@ func TestClientConfigurationHandler(t *testing.T) {
 				t.Fatalf("%s must be an array: %#v", field, body[field])
 			}
 		}
-		if !reflect.DeepEqual(body["default_scopes"], []any{"goauthy.read"}) {
+		if !reflect.DeepEqual(body["default_scopes"], []any{"openid"}) {
 			t.Fatalf("effective default scopes missing: %#v", body["default_scopes"])
+		}
+		scopes := body["scopes"].([]any)
+		seen := make(map[any]bool)
+		for _, scope := range scopes {
+			if seen[scope] {
+				t.Fatalf("overlapping policy scope duplicated in metadata: %v", scope)
+			}
+			seen[scope] = true
+		}
+		if !seen["openid"] || !seen["custom.read"] {
+			t.Fatalf("effective scopes lost: %v", scopes)
 		}
 		if strings.Contains(got.Body.String(), testClientSecret) || strings.Contains(got.Body.String(), "secret_hash") || got.Header().Get("Cache-Control") != "no-store" {
 			t.Fatalf("unsafe response headers/body: headers=%v body=%s", got.Header(), got.Body.String())
