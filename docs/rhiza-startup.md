@@ -1,13 +1,12 @@
 # Rhiza startup close guard
 
-The current greenfield build pins Rhiza to
-`github.com/mrchypark/rhiza v0.19.1-0.20261008214459-3895b723e194` in `go.mod`,
-resolving to upstream commit [`3895b723e194`](https://github.com/mrchypark/rhiza/commit/3895b723e194).
-Earlier documentation cited the official Rhiza `v0.19.0` release (commit
+The current greenfield build pins official Rhiza `v0.21.0` in `go.mod`,
+resolving to upstream commit
+[`e4c6339f9ce2092ac329e9a24ccd583c6a219bc8`](https://github.com/mrchypark/rhiza/commit/e4c6339f9ce2092ac329e9a24ccd583c6a219bc8).
+Older documentation cited the official Rhiza `v0.19.0` release (commit
 [`abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8`](https://github.com/mrchypark/rhiza/commit/abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8),
-[release tag](https://github.com/mrchypark/rhiza/releases/tag/v0.19.0)). PR #146 inherits
-the same pseudo-version unchanged from its base and corrects this stale release citation;
-it does not change the Rhiza dependency.
+[release tag](https://github.com/mrchypark/rhiza/releases/tag/v0.19.0)); that citation
+and the related v0.19.1 pseudo-version describe an earlier build.
 This build uses `github.com/mrchypark/latticedb-go v0.11.3` with a fresh `DataDir`,
 unused cluster ID, and unused object-store namespace. Existing-data migration is
 out of scope and unsupported.
@@ -25,12 +24,12 @@ probe budgets and storage durability are unchanged.
 
 The startup defer intentionally does not call `DB.Close()` until all startup
 initialization has succeeded and the server lifecycle is about to begin. This
-is an application-side workaround for a confirmed Rhiza v0.10.0
-checkpoint-corruption hazard when a database is closed during startup, even if
-`DB.Ready()` became true transiently before a later migration, quorum, or
-configuration failure. Once startup is complete, the normal close path remains
-active for graceful shutdown, so this guard does not alter ordinary lifecycle
-cleanup.
+guard addresses a checkpoint-corruption hazard confirmed on Rhiza v0.10.0 when
+a database was closed during startup, even if `DB.Ready()` became true
+transiently before a later migration, quorum, or configuration failure. The
+hazard's status on Rhiza v0.21.0 has not been runtime-verified; retain the guard
+until the upgraded startup path is checked. After startup, graceful shutdown
+still closes the database.
 
 The GoAuthy startup-close regression test verifies this guard. One fresh local
 v0.18.0 diagnostic with three logical GoAuthy members on one Kind node and a Versity

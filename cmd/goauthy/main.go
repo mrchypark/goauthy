@@ -1461,7 +1461,7 @@ func run() (err error) {
 		identityStore.SetMetrics(registry)
 		appHandler = registry.Instrument(appHandler)
 
-		metricsMux := newMetricsMux(registry, metricsToken, db.Handler(), newArchiveStatsHandler(db))
+		metricsMux := newMetricsMux(registry, metricsToken, db.Handler(), newArchiveStatsHandler())
 		metricsServer = &http.Server{
 			Addr:              metricsAddr,
 			Handler:           metricsMux,
@@ -1507,14 +1507,16 @@ func newMetricsMux(registry *metrics.Registry, token string, objectStoreHandler,
 	return mux
 }
 
-func newArchiveStatsHandler(db *rhiza.DB) http.Handler {
+const unavailableArchiveStatsV1 = `{"schema_version":1,"stages":{"publication_admission":{"available":false,"count":null,"duration_ns_sum":null},"archive_load":{"available":false,"count":null,"duration_ns_sum":null},"extent_build_upload":{"available":false,"count":null,"duration_ns_sum":null},"head_publish":{"available":false,"count":null,"duration_ns_sum":null},"publication_release":{"available":false,"count":null,"duration_ns_sum":null}}}`
+
+func newArchiveStatsHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(db.ArchiveStats())
+		_, _ = w.Write([]byte(unavailableArchiveStatsV1 + "\n"))
 	})
 }
 

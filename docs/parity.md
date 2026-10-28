@@ -46,10 +46,10 @@ alternative source, raw database values are strict ASCII ISO alpha-2, and
 allow/deny/unknown decisions are fail-closed as configured. MaxMind success
 fixture coverage now includes standalone and exact-three HA runtime checks;
 no downloader or update scheduler exists.
-With the current Rhiza v0.12.3 integration, startup failure paths still
-intentionally skip `db.Close()` until all startup initialization succeeds; the
-startup-close workaround remains pending verification against the upgraded runtime;
-normal post-start shutdown still closes the database as usual.
+The startup path still skips `db.Close()` until initialization succeeds. This
+guard was added for a checkpoint-corruption hazard confirmed on Rhiza v0.10.0;
+its behavior on the current Rhiza v0.21.0 build remains unverified. Normal
+post-start shutdown closes the database as usual. See [the startup guard](rhiza-startup.md).
 
 Bootstrap authentication is password-only for the initial administrator by
 default; passkeys are optional. `GOAUTHY_BOOTSTRAP_FORCE_MFA=true` is an
