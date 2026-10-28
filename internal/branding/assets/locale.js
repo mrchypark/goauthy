@@ -21,6 +21,7 @@
     'Check your username or password': '사용자 이름 또는 비밀번호를 확인하세요.',
     'Too many attempts. Please wait before trying again.': '시도 횟수가 많습니다. 잠시 후 다시 시도하세요.',
     'Sign-in is temporarily unavailable. Please try again shortly.': '로그인 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.',
+    'Password change outcome is unknown. Check the current state before retrying.': '비밀번호 변경 결과를 확인할 수 없습니다. 현재 상태를 확인한 뒤 다시 시도하세요.',
     'Continue to': '계속할 서비스:', 'Sign in with a passkey': '패스키로 로그인',
     'YOUR SECURE CONNECTION': '나만의 안전한 연결',
     'Complete the security key verification to continue.': '계속하려면 등록된 보안 키로 본인을 확인하세요.',

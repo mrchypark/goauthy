@@ -58,6 +58,33 @@ it is delivery-only. `refreshing` means bounded observation without exchanging a
 guess versions, retry exchanges blindly, or substitute an owner cookie. Delivery
 never refreshes automatically and no scheduler exists.
 
+Refresh has a durable pre-send boundary. The local `refreshing` claim must return
+committed before the provider request starts. If claiming returns an error,
+including an unknown Rhiza commit outcome, this attempt sends no provider request;
+the claim may nevertheless have committed, so the caller must inspect status and
+follow interrupted-refresh recovery rather than retrying the same version. Once
+the provider HTTP request begins, any transport error, lost response, or local
+completion-write error is treated as uncertain: GoAuthy does not replay the
+refresh token. If the uncertainty marker itself cannot be confirmed, the durable
+row remains fail-closed as `refreshing`.
+
+For registered API-key invocation, current grant, caller authority, connection,
+credential and provider state are read before dispatch. The restricted transport
+also checks the provider's enabled flag and revision immediately before admitting
+the HTTP operation. A disable or revision change visible at that check prevents
+the request. The check and the subsequent network write cannot be one atomic
+operation: a change after the check may race with sending, and the service cannot
+promise that an admitted request has not reached the provider. Local provider
+updates retire old pooled connections for subsequent work; they do not recall an
+active request. Postflight checks stop returning a result when current authority,
+credential or provider state changed. Network failures and lost responses do not
+trigger automatic replay, because the provider may have processed the operation.
+Callers need a separate provider-level idempotency contract before retrying such
+an operation. `TestSaaSPoolMutationNeverReplays` and
+`TestSaaSPoolProviderReadErrorFailsClosed` cover transport retry and fail-closed
+provider-read behavior; `TestRefreshOAuth2InFlightFences` covers provider revision
+change during OAuth refresh.
+
 ### Interrupted refresh recovery
 
 Consumers should stop the current model/API operation while `refreshing`. For

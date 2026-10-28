@@ -161,9 +161,11 @@ func TestUnlinkExternalRelinkAndPendingCleanup(t *testing.T) {
 	if err := pending.CleanupExpiredOpenRegistrations(ctx, base.Add(time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, err := pending.FindExternalLink(ctx, pendingExternal); err != nil || found {
-		t.Fatalf("pending link found=%v err=%v", found, err)
+	if got, found, err := pending.FindExternalLink(ctx, pendingExternal); err != nil || !found || got != registered.Subject {
+		t.Fatalf("external-linked pending identity subject=%q found=%v err=%v", got, found, err)
 	}
+	assertCount(t, pending, `SELECT COUNT(*) FROM identity_users WHERE subject='`+registered.Subject+`' AND password_phc=''`, 1)
+	assertCount(t, pending, `SELECT COUNT(*) FROM identity_password_reset_tokens WHERE subject='`+registered.Subject+`' AND usage='password_new'`, 1)
 }
 
 func TestUnlinkExternalDoesNotDeleteDisabledSubjectLink(t *testing.T) {

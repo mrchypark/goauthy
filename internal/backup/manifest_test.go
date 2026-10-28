@@ -201,6 +201,9 @@ func TestManifestVersionFields(t *testing.T) {
 		"v1_zero_tip":       append(append([]byte(nil), v1[:len(v1)-1]...), []byte(`,"archive_tip":0}`)...),
 		"v2_missing_fields": v2,
 		"unknown_version":   bytes.Replace(v1, []byte(`"format_version":1`), []byte(`"format_version":3`), 1),
+		"unsupported_format_with_future_engine": bytes.Replace(
+			bytes.Replace(v1, []byte(`"rhiza_version":"v0.12.3"`), []byte(`"rhiza_version":"v99.0.0"`), 1),
+			[]byte(`"format_version":1`), []byte(`"format_version":3`), 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := decodeManifest(raw); err == nil {

@@ -479,15 +479,18 @@ func (s *Store) loadSessionAndTouch(ctx context.Context, token string, peerIP *s
 			return session, err
 		}
 	}
-	if now.Sub(lastSeen) < touchInterval {
+	touchEvery := s.sessionTouchInterval()
+	if now.Sub(lastSeen) < touchEvery {
 		return session, nil
 	}
+	idleCutoff := now.Add(-s.idleTimeout).UnixMilli()
+	touchCutoff := now.Add(-touchEvery).UnixMilli()
 	touchSQL := `UPDATE browser_sessions SET last_seen_at_unix_ms = ?
 		WHERE token_digest = ? AND revoked_at_unix_ms IS NULL AND expires_at_unix_ms > ?
 		AND last_seen_at_unix_ms > ? AND last_seen_at_unix_ms <= ? AND ` + activeSessionSubjectSQL + ` AND peer_ip=?`
 	// Guard against changes since the read. Use the stored value so this
 	// statement stays identical across callers and legacy peer addresses.
-	touchArgs := []any{now.UnixMilli(), digest, now.UnixMilli(), now.Add(-s.idleTimeout).UnixMilli(), now.Add(-touchInterval).UnixMilli(), now.UnixMilli(), session.PeerIP}
+	touchArgs := []any{now.UnixMilli(), digest, now.UnixMilli(), idleCutoff, touchCutoff, now.UnixMilli(), session.PeerIP}
 	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID: mutationID("session-touch-v2", digest, fmt.Sprint(now.UnixMilli())),
 		SQL:       touchSQL,
@@ -539,7 +542,7 @@ func (s *Store) RefreshSessionForPeerIfTouchDue(ctx context.Context, token, peer
 		return snapshot, err
 	}
 	now := s.timeNow()
-	if !snapshot.lastSeenAt.IsZero() && now.Sub(snapshot.lastSeenAt) < touchInterval {
+	if !snapshot.lastSeenAt.IsZero() && now.Sub(snapshot.lastSeenAt) < s.sessionTouchInterval() {
 		return snapshot, nil
 	}
 	return s.LoadSessionForPeer(ctx, token, peerIP)
@@ -876,7 +879,10 @@ func (s *Store) consumeAuthorizationInteractionGuarded(ctx context.Context, sess
 	if err != nil {
 		return AuthorizationInteraction{}, err
 	}
-	now := s.timeNow().UnixMilli()
+	nowTime := s.timeNow()
+	now := nowTime.UnixMilli()
+	idleCutoff := nowTime.Add(-s.idleTimeout).UnixMilli()
+	touchCutoff := nowTime.Add(-s.sessionTouchInterval()).UnixMilli()
 	sessionCondition := `(subject = '' AND auth_method = '') OR (subject <> '' AND auth_method IN ('pwd', 'webauthn', 'mfa', 'external'))`
 	if requireInitSession {
 		sessionCondition = `subject = '' AND auth_method = ''`
@@ -884,7 +890,7 @@ func (s *Store) consumeAuthorizationInteractionGuarded(ctx context.Context, sess
 	if parentGuard != "" {
 		parentGuard = " AND (" + parentGuard + ")"
 	}
-	consumeArgs := append([]any{attempt, now, digest, sessionDigest, now, sessionDigest, now, now - s.idleTimeout.Milliseconds(), now}, parentArgs...)
+	consumeArgs := append([]any{attempt, now, digest, sessionDigest, now, sessionDigest, now, idleCutoff, now}, parentArgs...)
 	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID: mutationID("authorization-consume", digest, attempt),
 		Statements: []rhiza.SQLStatement{{SQL: `UPDATE browser_authorization_interactions
@@ -898,7 +904,7 @@ func (s *Store) consumeAuthorizationInteractionGuarded(ctx context.Context, sess
 			AND last_seen_at_unix_ms > ? AND last_seen_at_unix_ms <= ?
 			AND (` + sessionCondition + `)
 			AND EXISTS (SELECT 1 FROM browser_authorization_interactions WHERE token_digest = ? AND session_digest = ? AND consumed_attempt = ?)`,
-				Args: []any{now, sessionDigest, now, now - s.idleTimeout.Milliseconds(), now - touchInterval.Milliseconds(), digest, sessionDigest, attempt}},
+				Args: []any{now, sessionDigest, now, idleCutoff, touchCutoff, digest, sessionDigest, attempt}},
 		},
 	})
 	if err != nil {
@@ -911,7 +917,7 @@ func (s *Store) consumeAuthorizationInteractionGuarded(ctx context.Context, sess
 			AND i.expires_at_unix_ms > ? AND s.revoked_at_unix_ms IS NULL AND s.expires_at_unix_ms > ? AND s.last_seen_at_unix_ms > ?
 			AND (` + strings.ReplaceAll(strings.ReplaceAll(sessionCondition, "subject", "s.subject"), "auth_method", "s.auth_method") + `)
 			AND ` + strings.ReplaceAll(activeSessionSubjectSQL, "browser_sessions.", "s."),
-		Args: []any{digest, sessionDigest, attempt, now, now, now - s.idleTimeout.Milliseconds(), now}, Consistency: rhiza.ConsistencyLinearizable,
+		Args: []any{digest, sessionDigest, attempt, now, now, idleCutoff, now}, Consistency: rhiza.ConsistencyLinearizable,
 	})
 	if err != nil {
 		return AuthorizationInteraction{}, err
@@ -1000,6 +1006,16 @@ func CheckPeerIP(session Session, currentPeerIP string) error {
 }
 
 func (s *Store) timeNow() time.Time { return s.now().UTC() }
+
+// sessionTouchInterval keeps the touch throttle strictly inside the idle
+// lifetime, so activity at the idle boundary can refresh the SQL row in time.
+func (s *Store) sessionTouchInterval() time.Duration {
+	interval := touchInterval
+	if shorter := s.idleTimeout / 2; shorter < interval {
+		interval = shorter
+	}
+	return interval
+}
 
 func validateInteraction(requestID string, payload []byte) error {
 	if strings.TrimSpace(requestID) == "" || len(requestID) > maxRequestIDLength {

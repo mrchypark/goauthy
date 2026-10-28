@@ -32,7 +32,7 @@ func (s *Store) NeedsProfileUpdate(ctx context.Context, policy UserValuesPolicy,
 	if err := policy.ValidateFields(claims.GivenName, claims.FamilyName, &values); err != nil {
 		return true, nil
 	}
-	if err := policy.PreferredUsername.ValidateRegistration(claims.PreferredUsername); err != nil {
+	if !(policy.PreferredUsername.Immutable() && claims.PreferredUsername != nil) && policy.PreferredUsername.ValidateRegistration(claims.PreferredUsername) != nil {
 		return true, nil
 	}
 	return false, nil

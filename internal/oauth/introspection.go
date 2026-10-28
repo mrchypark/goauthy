@@ -47,11 +47,27 @@ func (s *Server) introspectionHandler(reuseVerification bool) http.Handler {
 		}
 		response, err := s.provider.NewIntrospectionRequest(r.Context(), r, &fosite.DefaultSession{})
 		if err != nil {
+			if oauthBackendUnavailable(err) {
+				writeOAuthServiceUnavailable(w)
+				return
+			}
 			s.provider.WriteIntrospectionError(r.Context(), w, err)
 			return
 		}
-		if !s.refreshIntrospectionPrincipal(r.Context(), response) ||
-			(response.IsActive() && s.store.validateTokenAccounts(r.Context(), response.GetAccessRequester()) != nil) {
+		principalValid, err := s.refreshIntrospectionPrincipal(r.Context(), response)
+		if oauthBackendUnavailable(err) {
+			writeOAuthServiceUnavailable(w)
+			return
+		}
+		accountErr := error(nil)
+		if response.IsActive() && principalValid {
+			accountErr = s.store.validateTokenAccounts(r.Context(), response.GetAccessRequester())
+		}
+		if oauthBackendUnavailable(accountErr) {
+			writeOAuthServiceUnavailable(w)
+			return
+		}
+		if !principalValid || accountErr != nil {
 			// RFC 7662 requires a valid caller to receive an inactive response
 			// when the subject is no longer eligible. Do not expose persisted
 			// session Extra claims in that case.
@@ -86,41 +102,55 @@ func (s *Server) introspectionHandler(reuseVerification bool) http.Handler {
 // refreshIntrospectionPrincipal makes persisted OAuth claims non-authoritative
 // for end-user access tokens. Other grants deliberately retain their existing
 // introspection behavior and never receive these claims here.
-func (s *Server) refreshIntrospectionPrincipal(ctx context.Context, response fosite.IntrospectionResponder) bool {
+func (s *Server) refreshIntrospectionPrincipal(ctx context.Context, response fosite.IntrospectionResponder) (bool, error) {
 	if !response.IsActive() || s.oidc == nil {
-		return true
+		return true, nil
 	}
 	request := response.GetAccessRequester()
 	if request == nil {
-		return true
+		return true, nil
 	}
 	session, ok := request.GetSession().(*fosite.DefaultSession)
 	// Stored Fosite requests do not retain token-endpoint grant types. An
 	// authorization-code session does retain its authorization-code expiry;
 	// device, client-credentials, and token-exchange sessions do not.
 	if !ok {
-		return true
+		return true, nil
 	}
 	deviceOrigin, _ := session.Extra[deviceOIDCExtra].(bool)
 	_, passwordOrigin := session.Extra[passwordAuthTimeExtra]
 	if session.GetExpiresAt(fosite.AuthorizeCode).IsZero() && !deviceOrigin && !passwordOrigin {
-		return true
+		return true, nil
 	}
 	if session.Subject == "" {
-		return false
+		return false, nil
 	}
-	if s.oidc.ValidateSubject != nil && s.oidc.ValidateSubject(ctx, session.Subject) != nil {
-		return false
+	if s.oidc.ValidateSubject != nil {
+		if err := s.oidc.ValidateSubject(ctx, session.Subject); err != nil {
+			if oauthBackendUnavailable(err) {
+				return false, err
+			}
+			return false, nil
+		}
 	}
 	claims, err := s.currentPrincipal(ctx, session.Subject)
 	if err != nil {
-		return false
+		if oauthBackendUnavailable(err) {
+			return false, err
+		}
+		return false, nil
 	}
 	if !request.GetGrantedScopes().Has(groupsScope) {
 		claims.Groups = nil
 	}
 	custom, err := s.currentCustomClaims(ctx, session.Subject, request.GetGrantedScopes())
-	return err == nil && setPrincipalClaims(request, claims) == nil && setCustomAccessClaims(request, custom.access) == nil
+	if err != nil {
+		if oauthBackendUnavailable(err) {
+			return false, err
+		}
+		return false, nil
+	}
+	return setPrincipalClaims(request, claims) == nil && setCustomAccessClaims(request, custom.access) == nil, nil
 }
 
 // RevocationHandler serves RFC 7009 to authenticated registered clients.

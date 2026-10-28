@@ -37,7 +37,7 @@ const submit = () => get('client-form').onsubmit({preventDefault() {}});
 const fixture = confidential => ({id: 'c1', name: 'One', confidential, enabled: true, revision: 7,
   backchannel_logout_uri: 'https://app.example/logout', restrict_group_prefix: 'team/',
   redirect_uris: ['https://app.example/cb?a=one,two'], scopes: ['goauthy.read', 'offline_access'],
-  audience: ['https://resource.example/api/one,two'], default_scopes: ['goauthy.read'], enabled_flows: ['authorization_code', 'refresh_token', device]});
+  audience: ['https://resource.example/api/one,two'], default_scopes: ['goauthy.read'], enabled_flows: ['authorization_code', 'refresh_token', device, 'urn:ietf:params:oauth:grant-type:token-exchange']});
 function normalAPI(_url, opts) {
   if (!opts.method) return {...current};
   if (opts.method === 'PUT') { current = {...current, ...JSON.parse(opts.body), revision: 11}; return {...current}; }
@@ -47,10 +47,13 @@ function normalAPI(_url, opts) {
   current = fixture(false); handler = normalAPI;
   await ctx.clients('c1', 'edit');
   assert.equal(get('client-secret-hide'), null);
+  const originalFlows = [...current.enabled_flows];
+  get('client-name').value = 'Renamed without changing grants';
   await submit();
   const update = calls.find(c => c.opts.method === 'PUT');
   assert.equal(update.opts.headers['If-Match'], '"7"');
-  assert.deepEqual(JSON.parse(update.opts.body).enabled_flows, current.enabled_flows);
+  assert.equal(JSON.parse(update.opts.body).name, 'Renamed without changing grants');
+  assert.deepEqual(JSON.parse(update.opts.body).enabled_flows, originalFlows);
   assert.deepEqual(JSON.parse(update.opts.body).redirect_uris, ['https://app.example/cb?a=one,two']);
   assert.deepEqual(JSON.parse(update.opts.body).audience, ['https://resource.example/api/one,two']);
   assert.equal(JSON.parse(update.opts.body).backchannel_logout_uri, current.backchannel_logout_uri);

@@ -3,12 +3,12 @@ package oauth
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -36,16 +36,33 @@ func TestIntrospectionMakesRevokedPrincipalInactive(t *testing.T) {
 	})
 	token := issueRBACAccessToken(t, server, strings.Repeat("k", 43), "openid groups goauthy.read offline_access")
 
-	resolverErr = errors.New("revoked")
+	resolverErr = identity.ErrInactiveSubject
 	assertInactive(t, postOAuthForm(server.IntrospectionHandler(), url.Values{"token": {token}}, testClientID, testClientSecret))
 
 	resolverErr = nil
-	server.oidc.ValidateSubject = func(context.Context, string) error { return errors.New("disabled") }
+	server.oidc.ValidateSubject = func(context.Context, string) error { return identity.ErrInactiveSubject }
 	response := postOAuthForm(server.IntrospectionHandler(), url.Values{"token": {token}}, testClientID, testClientSecret)
 	if response.Code != http.StatusOK {
 		t.Fatalf("disabled principal status=%d body=%s", response.Code, response.Body.String())
 	}
 	assertInactive(t, response)
+}
+
+func TestIntrospectionBackendUnavailableReturnsServiceUnavailable(t *testing.T) {
+	t.Parallel()
+	var unavailable error
+	server := rbacClaimsServer(t, func(context.Context, string) (PrincipalClaims, error) {
+		if unavailable != nil {
+			return PrincipalClaims{}, unavailable
+		}
+		return PrincipalClaims{Roles: []string{"viewer"}, Revision: 1}, nil
+	})
+	token := issueRBACAccessToken(t, server, strings.Repeat("m", 43), "openid goauthy.read offline_access")
+	unavailable = rhiza.ErrQuorumUnavailable
+	response := postOAuthForm(server.IntrospectionHandler(), url.Values{"token": {token}}, testClientID, testClientSecret)
+	if response.Code != http.StatusServiceUnavailable || strings.Contains(response.Body.String(), "user-1") || strings.Contains(response.Body.String(), "\"active\":false") {
+		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+	}
 }
 
 func TestIntrospectionRefreshAccessUsesCurrentPrincipalClaims(t *testing.T) {

@@ -1,115 +1,45 @@
-# Goauthy 성능 최적화 가이드
+# Goauthy 성능 구현 현황과 측정 결과
 
-## 개요
+## 범위
 
-이 문서는 goauthy의 성능 최적화 아키텍처와 벤치마크 결과를 설명합니다.
+This document separates implemented runtime behavior from standalone
+experiments and reports measurements with their limits. It does not define
+capacity targets or a production SLO.
 
-## 최적화 아키텍처
+## 구현 상태
 
-### 1. 인메모리 캐시 (`internal/cache`)
+### Standalone in-memory cache package
 
-샤딩된 TTL/LRU 캐시로, 인증 서버의 핫 패스에서 linearizable 데이터베이스 읽기를 줄입니다.
+`internal/cache` contains a sharded TTL/LRU cache implementation, tests, and
+microbenchmarks. Production Go packages do not import it. It is not wired into
+authentication, browser sessions, identities, profiles, RBAC, or API-key
+lookups. No production hot path currently receives cache hits from this
+package.
 
-**특징:**
-- 파워-오브-2 샤딩으로 lock contention 최소화
-- TTL 기반 만료 + LRU 제거
-- 타입 안전 제네릭 구현
-- 원자적 메트릭 추적 (히트율, 미스, 제거)
+The TTL and capacity values previously listed for session, user, profile,
+principal, and API-key caches were not implemented and have been removed.
 
-**캐시 적용 대상:**
+### Argon2 admission policy
 
-| 캐시 | TTL | 최대 항목 | 대상 |
-|------|-----|-----------|------|
-| 세션 캐시 | 5초 | 8,192 | 브라우저 세션 |
-| 사용자 캐시 | 30초 | 4,096 | identity_users |
-| 프로필 캐시 | 30초 | 4,096 | identity_user_profiles |
-| Principal 캐시 | 30초 | 4,096 | RBAC 역할/그룹 |
-| API 키 캐시 | 30초 | 1,024 | API 키 인증 |
+The default maximum concurrency is 4. Admission can wait up to 250 ms for the
+combined slot and optional memory budget, and respects context cancellation.
+Requests that cannot acquire capacity return the work-limit error.
 
-### 2. 동시성 개선
+## 이전 마이크로벤치마크의 범위
 
-**Argon2 해셔 큐잉:**
-- 기본 동시성: 2 → 4 슬롯으로 증가
-- 대기 타임아웃: 250ms (즉시 거부 대신 짧은 대기)
-- 컨텍스트 취소 지원
+The former cache and Argon2 microbenchmark figures were not OAuth endpoint
+measurements and did not support estimated database timings, cache-hit latency
+reductions, or traffic thresholds. The runtime HTTP campaign below reports
+measured request distributions and failures for one local synthetic setup; it
+is not a capacity target or deployment SLO.
 
-### 3. 메트릭 확장
+## DB/cache metric instrumentation status
 
-**새로운 메트릭:**
-- `goauthy_db_query_duration_seconds` - 데이터베이스 쿼리 지연시간
-- `goauthy_cache_hits_total` - 캐시 히트 수
-- `goauthy_cache_misses_total` - 캐시 미스 수
-- `goauthy_cache_evictions_total` - 캐시 제거 수
-
-## 벤치마크 결과
-
-### 캐시 성능 (Apple M3)
-
-```
-BenchmarkCacheGetHit-8          11,392,129    124.9 ns/op    13 B/op    1 allocs/op
-BenchmarkCacheGetMiss-8         18,471,578     66.9 ns/op    24 B/op    2 allocs/op
-BenchmarkCacheSet-8              5,552,770    261.0 ns/op    59 B/op    3 allocs/op
-BenchmarkCacheSetParallel-8     10,594,075    143.5 ns/op    28 B/op    2 allocs/op
-BenchmarkCacheGetParallel-8      9,642,370    123.1 ns/op    15 B/op    1 allocs/op
-```
-
-### Argon2 해셔 성능
-
-```
-BenchmarkHash-8                        42    32,157,611 ns/op    19,927,112 B/op    35 allocs/op
-BenchmarkVerifyOrDummy-8               39    30,095,151 ns/op    19,925,474 B/op    32 allocs/op
-BenchmarkVerifyOrDummyMiss-8           45    24,453,332 ns/op    19,925,168 B/op    24 allocs/op
-BenchmarkTryAcquireContended-8  2,331,627           465.5 ns/op           142 B/op     2 allocs/op
-```
-
-## 성능 영향 분석
-
-### 캐시 적용 전후 비교
-
-**캐시 미적용 시 (모든 요청이 linearizable 읽기):**
-- 세션 로드: ~1ms (네트워크 + 합의)
-- 사용자 조회: ~1ms
-- Principal 조회: ~2ms (4-way JOIN)
-- API 키 인증: ~1ms
-
-**캐시 적용 후 (캐시 히트 시):**
-- 세션 로드: ~125ns (99.99% 감소)
-- 사용자 조회: ~125ns (99.99% 감소)
-- Principal 조회: ~125ns (99.99% 감소)
-- API 키 인증: ~125ns (99.99% 감소)
-
-### Argon2 동시성 개선
-
-**기존 (MaxConcurrency=2, 즉시 거부):**
-- 2개 요청 동시 처리 가능
-- 3번째 요청 즉시 실패
-
-**개선 후 (MaxConcurrency=4, 250ms 대기):**
-- 4개 요청 동시 처리 가능
-- admission 용량이 계속 부족하면 요청은 최대 250ms 기다린 뒤 work-limit 오류를 반환
-
-## 모니터링
-
-### Prometheus 메트릭
-
-```prometheus
-# 캐시 히트율 계산
-rate(goauthy_cache_hits_total[5m]) / (rate(goauthy_cache_hits_total[5m]) + rate(goauthy_cache_misses_total[5m]))
-
-# 데이터베이스 쿼리 지연시간 P99
-histogram_quantile(0.99, rate(goauthy_db_query_duration_seconds_bucket[5m]))
-
-# 캐시 제거율
-rate(goauthy_cache_evictions_total[5m])
-```
-
-### 권장 임계값
-
-| 메트릭 | 경고 | 위험 |
-|--------|------|------|
-| 캐시 히트율 | < 80% | < 50% |
-| DB 쿼리 P99 | > 100ms | > 500ms |
-| 캐시 제거율 | > 100/s | > 1000/s |
+The Prometheus registry declares DB-query duration and cache hit/miss/eviction
+collectors, and `internal/metrics` has methods to update them. Repository search
+found no production call sites for those methods. These series therefore do
+not provide live DB/cache measurements, and no PromQL dashboard or alert is
+listed here as operational guidance.
 
 ## 설정
 
@@ -128,31 +58,70 @@ there is no wait-time environment variable. Positive memory budgets must be at
 least 131072 KiB. This bounds nominal reservations, not process RSS. See the
 [measurement report](measurements/argon2-109-budget.md) before opting in.
 
-### 캐시 크기 조정
+## 실제 HTTP 런타임 측정
 
-캐시 크기는 워크로드에 따라 조정해야 합니다:
+`internal/oauth/review_http_measurement_test.go` is an opt-in, bounded
+measurement using a real loopback TCP `httptest.Server` and `http.Client` with
+the production token and UserInfo handlers. Each volume uses a private migrated
+database seeded with 0 or 1,000 unrelated synthetic users. It records 200
+samples per case at concurrency 1 and 8 for authorization-code token exchange,
+UserInfo validation, and rotating refresh grant. A separate direct Argon2 verify
+case reports KDF latency, throughput, and work-limit errors at each concurrency.
+It does not measure browser login/session-cookie validation, remote network
+latency, multi-node replication, expired-token cleanup backlog, or live-user data.
 
-- **낮은 트래픽** (< 100 RPS): 기본값 유지
-- **중간 트래픽** (100-1000 RPS): MaxEntries 2배 증가
-- **높은 트래픽** (> 1000 RPS): MaxEntries 4배 증가, ShardCount 32로 증가
+Authorization codes and synthetic fixtures are prepared outside each timed
+sample; authorization itself is not the measured HTTP stage. The resolver uses
+the current linearizable identity-profile query and production-equivalent OIDC
+field projection. Per-cell counters assert two profile resolver calls for each
+baseline authorization-code/refresh request and one for each fixed request;
+UserInfo asserts one. Invalid UserInfo and authorization-code controls are
+recorded outside latency samples. Non-200 responses remain in the sample count
+and are reported as errors. The 1,000-row volume is unrelated identity users
+only. These are local loopback measurements on the stated host. `GOMAXPROCS=2`
+configures Go scheduling, not a CPU quota; cores and memory are not isolated and
+the run has no OS resource limit. Other local activity can affect results.
 
-## 보안 고려사항
+Run the exact same harness source against the archived v0.3.8 tree and the fixed
+tree, as three serial baseline/fixed pairs with fresh output directories. The
+test emits nearest-rank P50/P95/P99, throughput, HTTP status/error counts, and request/authorization/
+response byte totals to `results.json`; `manifest.json` records runtime and
+fixture provenance. It also logs a `SNAPSHOT112 http_runtime` JSON line. Report
+median and minimum–maximum range across the three paired runs; with 200 samples per cell, tail percentiles
+are noisy and do not support significance claims. The 10-minute test context and
+11-minute Go timeout are harness bounds, not SLOs.
 
-1. **캐시 무효화**: 세션 해지, 사용자 비활성화 즉시 캐시 무효화
-2. **TTL 선택**: 짧은 TTL(5-30초)로 stale 데이터 윈도우 최소화
-3. **비밀번호 해시**: 캐시하지 않음 (보안 민감)
-4. **캐시 키**: 해시 다이제스트 포함으로 키 교체 시 자동 무효화
+```sh
+set -e
+WORKTREE=/Users/cypark/.codex/worktrees/login-browser-fixes/goauthy
+BASELINE=/Users/cypark/.codex/task-state/goauthy-v038-review-fixes-20261024/baseline-source
+RESULTS=/Users/cypark/.codex/task-state/goauthy-v038-review-fixes-20261024/http-runtime
+mkdir -p "$RESULTS"
+cp "$WORKTREE/internal/oauth/review_http_measurement_test.go" "$BASELINE/internal/oauth/"
+for REP in 1 2 3; do
+  (
+    cd "$BASELINE"
+    GOMAXPROCS=2 GOAUTHY_HTTP_MEASURE=1 GOAUTHY_HTTP_LABEL="baseline-$REP" \
+      GOAUTHY_HTTP_HARDWARE='Macmini9,1 M1 8CPU 16GiB' GOAUTHY_HTTP_OUTPUT="$RESULTS/baseline-$REP" \
+      go test -mod=readonly -tags=integration -count=1 -run '^TestReviewHTTPRuntimeMeasurement$' -timeout=11m -v ./internal/oauth
+  )
+  (
+    cd "$WORKTREE"
+    GOMAXPROCS=2 GOAUTHY_HTTP_MEASURE=1 GOAUTHY_HTTP_LABEL="fixed-$REP" \
+      GOAUTHY_HTTP_HARDWARE='Macmini9,1 M1 8CPU 16GiB' GOAUTHY_HTTP_OUTPUT="$RESULTS/fixed-$REP" \
+      go test -mod=readonly -tags=integration -count=1 -run '^TestReviewHTTPRuntimeMeasurement$' -timeout=11m -v ./internal/oauth
+  )
+done
+```
 
-## 향후 개선사항
-
-1. **분산 캐시**: Redis 기반 캐시로 멀티 노드 확장
-2. **예측적 로딩**: 자주 접근되는 데이터 사전 로딩
-3. **캐시 워밍**: 서버 시작 시 핫 데이터 미리 로딩
-4. **적응형 TTL**: 접근 빈도에 따른 동적 TTL 조정
+The comparison is only meaningful when both runs complete with matching sample
+counts, status/error profiles, Go version, architecture, GOMAXPROCS, matrix, and
+fixture source. Keep the raw JSON with any summary; do not turn a single-host
+result into a performance guarantee.
 
 ## Measured baselines (issue #65)
 
-Apple M3, 8 CPU, macOS, go1.27.0 darwin/arm64; representative run of
+Historical recorded run: 8 CPU, macOS, go1.27.0 darwin/arm64; representative run of
 `go test -bench . -benchtime 3x -run '^$' ./internal/ipblacklist/ ./internal/oauth/`.
 Measurements only; no behavior changed.
 
@@ -175,3 +144,9 @@ DELETEs batch with the token INSERT in one replicated Execute (the full fosite
 HTTP token-endpoint path is not driven). Cleanup runs on every issuance, and the
 orphan-row DELETE anti-joins `oauth_token_requests` against
 `oauth_access_tokens`, so its cost tracks the live token count.
+
+The completed v0.3.8 comparison, including sanitized raw results, host-load
+caveats, aggregation, and hashes, is recorded in
+[`docs/measurements/v038-review-http/`](measurements/v038-review-http/README.md).
+The load-average snapshot was taken immediately after the six-run campaign, not per run. Latency
+and throughput are descriptive only and cannot establish a causal change.

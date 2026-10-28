@@ -10,8 +10,10 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func TestMiddlewarePreservesResponseController(t *testing.T) {
@@ -132,5 +134,48 @@ func TestMiddlewareLabelsUnmatchedRequestsWithoutPath(t *testing.T) {
 	}
 	if strings.Contains(spans[0].Name(), "leaked-code") {
 		t.Fatalf("span name leaked the request path: %q", spans[0].Name())
+	}
+}
+
+func TestMiddlewareExtractsTraceparentAndMarksServerErrors(t *testing.T) {
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+	// Keep this regression deterministic when the process environment selects
+	// a low-ratio sampler; the request's remote parent is asserted separately.
+	t.Setenv("OTEL_TRACES_SAMPLER", "traceidratio")
+	t.Setenv("OTEL_TRACES_SAMPLER_ARG", "0.01")
+
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(
+		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithSpanProcessor(recorder),
+	)
+	previousProvider := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previousProvider)
+		_ = provider.Shutdown(context.Background())
+	})
+
+	handler := Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/health", nil)
+	request.Header.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("response status = %d, want %d", response.Code, http.StatusServiceUnavailable)
+	}
+
+	spans := recorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("recorded %d spans, want 1", len(spans))
+	}
+	wantTraceID, _ := trace.TraceIDFromHex("4bf92f3577b34da6a3ce929d0e0e4736")
+	if got := spans[0].Parent().TraceID(); got != wantTraceID {
+		t.Errorf("parent trace ID = %s, want extracted trace ID %s", got, wantTraceID)
+	}
+	if got := spans[0].Status().Code; got != codes.Error {
+		t.Errorf("span status = %v, want %v for HTTP 503", got, codes.Error)
 	}
 }

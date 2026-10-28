@@ -75,8 +75,8 @@ func run(args []string, out io.Writer, measure measureFunc) error {
 }
 
 func calibrate(memoryKiB uint32, parallelism uint8, samples int, target time.Duration, measure measureFunc) ([]recommendation, error) {
-	result := make([]recommendation, 0, 5)
-	for iterations := uint32(5); iterations >= 1; iterations-- {
+	result := make([]recommendation, 0, 4)
+	for iterations := uint32(5); iterations >= 2; iterations-- {
 		values := make([]time.Duration, samples)
 		for i := range values {
 			value, err := measure(iterations, memoryKiB, parallelism)
