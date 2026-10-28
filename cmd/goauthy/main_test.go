@@ -2348,7 +2348,7 @@ func TestMetricsMuxServesOnlyProtectedNativeObjectStoreCounters(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	const token = "metrics-test-token"
-	mux := newMetricsMux(metrics.NewRegistry(), token, db.Handler(), newArchiveStatsHandler(db))
+	mux := newMetricsMux(metrics.NewRegistry(), token, db.Handler(), newArchiveStatsHandler())
 	request := httptest.NewRequest(http.MethodGet, "/metrics/object-store", nil)
 	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
@@ -2374,13 +2374,7 @@ func TestMetricsMuxServesOnlyProtectedNativeObjectStoreCounters(t *testing.T) {
 	if response.Code != http.StatusOK || response.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("GET /metrics/archive/v1 with valid bearer returned status=%d content-type=%q", response.Code, response.Header().Get("Content-Type"))
 	}
-	var archiveStats rhiza.ArchiveStats
-	if err := json.Unmarshal(response.Body.Bytes(), &archiveStats); err != nil {
-		t.Fatalf("decode versioned archive stats: %v", err)
-	}
-	if archiveStats.SchemaVersion != rhiza.ArchiveStatsSchemaVersion || !archiveStats.Stages.PublicationAdmission.Available {
-		t.Fatalf("unexpected available archive stats: %+v", archiveStats)
-	}
+	assertArchiveStatsUnavailable(t, response.Body.Bytes())
 
 	for _, path := range []string{"/metrics/object-store", "/metrics/archive/v1"} {
 		for _, headers := range [][]string{
@@ -2432,7 +2426,7 @@ func TestMetricsMuxPreservesNativeObjectStoreDisabledNotFound(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/metrics/object-store", nil)
 	request.Header.Set("Authorization", "Bearer metrics-test-token")
 	response := httptest.NewRecorder()
-	newMetricsMux(metrics.NewRegistry(), "metrics-test-token", db.Handler(), newArchiveStatsHandler(db)).ServeHTTP(response, request)
+	newMetricsMux(metrics.NewRegistry(), "metrics-test-token", db.Handler(), newArchiveStatsHandler()).ServeHTTP(response, request)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("disabled native object-store route returned %d, want 404", response.Code)
 	}
@@ -2449,16 +2443,35 @@ func TestMetricsMuxPreservesNativeObjectStoreDisabledNotFound(t *testing.T) {
 	request = httptest.NewRequest(http.MethodGet, "/metrics/archive/v1", nil)
 	request.Header.Set("Authorization", "Bearer metrics-test-token")
 	response = httptest.NewRecorder()
-	newMetricsMux(metrics.NewRegistry(), "metrics-test-token", db.Handler(), newArchiveStatsHandler(db)).ServeHTTP(response, request)
+	newMetricsMux(metrics.NewRegistry(), "metrics-test-token", db.Handler(), newArchiveStatsHandler()).ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("archive stats route without archive returned %d, want 200 with unavailable stages", response.Code)
 	}
-	var archiveStats rhiza.ArchiveStats
-	if err := json.Unmarshal(response.Body.Bytes(), &archiveStats); err != nil {
-		t.Fatalf("decode unavailable archive stats: %v", err)
+	assertArchiveStatsUnavailable(t, response.Body.Bytes())
+}
+
+func assertArchiveStatsUnavailable(t *testing.T, body []byte) {
+	t.Helper()
+	var stats struct {
+		SchemaVersion uint64 `json:"schema_version"`
+		Stages        map[string]struct {
+			Available     bool    `json:"available"`
+			Count         *uint64 `json:"count"`
+			DurationNSSum *uint64 `json:"duration_ns_sum"`
+		} `json:"stages"`
 	}
-	if archiveStats.SchemaVersion != rhiza.ArchiveStatsSchemaVersion || archiveStats.Stages.PublicationAdmission.Available || archiveStats.Stages.PublicationAdmission.Count != nil || archiveStats.Stages.PublicationAdmission.DurationNSSum != nil {
-		t.Fatalf("archive stage without manager was not unavailable/null: %+v", archiveStats.Stages.PublicationAdmission)
+	if err := json.Unmarshal(body, &stats); err != nil {
+		t.Fatalf("decode versioned archive stats: %v", err)
+	}
+	wantStages := []string{"publication_admission", "archive_load", "extent_build_upload", "head_publish", "publication_release"}
+	if stats.SchemaVersion != 1 || len(stats.Stages) != len(wantStages) {
+		t.Fatalf("unexpected archive stats shape: %+v", stats)
+	}
+	for _, name := range wantStages {
+		stage, ok := stats.Stages[name]
+		if !ok || stage.Available || stage.Count != nil || stage.DurationNSSum != nil {
+			t.Fatalf("archive stage %q should be unavailable/null: %+v", name, stage)
+		}
 	}
 }
 

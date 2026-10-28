@@ -1,11 +1,24 @@
 # No-PVC and object-store DR contract
 
 The project default is no GoAuthy PVC. The greenfield candidate uses Rhiza
-v0.19.0 with a fresh local `DataDir` (`emptyDir` in Kubernetes), an unused
+`v0.21.0` with a fresh local `DataDir` (`emptyDir` in Kubernetes), an unused
 cluster ID, and an unused object-store namespace. Object-store durability stays
 fixed at `before-ack`, and periodic GC stays disabled. Master keys, issuer, and
 node/member identities must be configured consistently. A local-directory
 backup is not the default DR mechanism.
+
+The [v0.21.0 release](https://github.com/mrchypark/rhiza/releases/tag/v0.21.0)
+resolves to source `e4c6339f9ce2092ac329e9a24ccd583c6a219bc8` and requires Go
+1.27.3 or newer. Rhiza v0.21.0 changes the fixed Local archive format used with
+filesystem, S3, GCS, and Azure backends. GoAuthy's greenfield upgrade requires a
+new `DataDir` and a fresh archive/object-store namespace; existing data and
+archives have no supported automatic migration. Mixed-version peers and
+downgrade are unsupported. GoAuthy's production profiles use `Local: false`;
+`Local: true` is used only for SDK qualification. This profile scope does not
+restrict Rhiza Local mode's object-store support. Earlier acceptance results do
+not qualify the current candidate.
+
+## Historical Rhiza v0.19.0 candidate
 
 The [v0.19.0 release](https://github.com/mrchypark/rhiza/releases/tag/v0.19.0)
 resolves to source `abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8` and uses

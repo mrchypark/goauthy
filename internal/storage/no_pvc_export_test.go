@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -46,6 +47,11 @@ func TestNoPVCPublicRhizaSnapshotCapture(t *testing.T) {
 	root := t.TempDir()
 	sourceDir := filepath.Join(root, "source-objects")
 	config := noPVCExportConfig(t, root, filepath.Join(root, "writer"), sourceDir)
+	// Keep automatic checkpoints outside the entire archive-only phase deadline.
+	config.CheckpointInterval = time.Hour
+	if config.CheckpointInterval <= timeout {
+		t.Fatalf("archive-only checkpoint interval %s must exceed test deadline %s", config.CheckpointInterval, timeout)
+	}
 	keyDir := filepath.Join(root, "keys")
 	if err := os.MkdirAll(keyDir, 0700); err != nil {
 		t.Fatal(err)
@@ -95,13 +101,18 @@ func TestNoPVCPublicRhizaSnapshotCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	verifyNoPVCInitialArchiveCapture(t, ctx, db, config, keyring, root, issuer, key.PublicJWK.KeyID)
-	// Close publishes a certified checkpoint in this deterministic single-node fixture.
 	if err := db.Close(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("close archive-only writer: %v", err)
 	}
+	config.CheckpointInterval = 10 * time.Second
+	db, err = rhiza.Open(ctx, config)
+	if err != nil {
+		t.Fatalf("reopen writer for certified checkpoint: %v", err)
+	}
+	certifiedRoot := closeNoPVCWriterAfterCertifiedCheckpoint(t, ctx, db, config)
 
 	prefix := path.Join(config.ObjStorePrefix, config.ClusterID)
-	retiredRoot := noPVCExportOnlyCheckpointRoot(t, ctx, config, prefix)
+	retiredRoot := noPVCCheckpointRootKey(prefix, certifiedRoot)
 	live, err := rhiza.Open(ctx, config)
 	if err != nil {
 		t.Fatalf("reopen source writer: %v", err)
@@ -299,23 +310,96 @@ func noPVCExportBucket(t *testing.T, config rhiza.Config) objstore.Bucket {
 	return bucket
 }
 
-func noPVCExportOnlyCheckpointRoot(t *testing.T, ctx context.Context, config rhiza.Config, prefix string) string {
+func noPVCCheckpointRootKey(prefix string, root *checkpoint.Checkpoint) string {
+	return path.Join(prefix, "checkpoint/roots", fmt.Sprintf("%020d_%x.json", root.Index, root.RootHash))
+}
+
+// Wait through public object-store reads so the fixture never races Rhiza's
+// live publisher against the filesystem bucket's atomic PUBLISHER swap.
+func closeNoPVCWriterAfterCertifiedCheckpoint(t *testing.T, ctx context.Context, db *rhiza.DB, config rhiza.Config) *checkpoint.Checkpoint {
 	t.Helper()
-	bucket := noPVCExportBucket(t, config)
-	defer bucket.Close()
-	var roots []string
-	if err := bucket.Iter(ctx, prefix+"/checkpoint/roots", func(name string) error {
-		if strings.HasSuffix(name, ".json") {
-			roots = append(roots, name)
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			_ = db.Close()
 		}
-		return nil
-	}, objstore.WithRecursiveIter()); err != nil {
-		t.Fatal(err)
+	})
+	bucket := noPVCExportBucket(t, config)
+	defer func() {
+		if err := bucket.Close(); err != nil {
+			t.Errorf("close checkpoint admission bucket: %v", err)
+		}
+	}()
+	prefix := path.Join(config.ObjStorePrefix, config.ClusterID)
+	checkpoints := checkpoint.NewManager(bucket, prefix, t.TempDir(), 1)
+	archive := recovery.NewManager(bucket, prefix, 1)
+	defer archive.Close()
+	publisherKey := path.Join(prefix, "checkpoint/PUBLISHER")
+	for {
+		if err := checkpoints.Load(ctx); err != nil {
+			t.Fatalf("read certified checkpoint pointer: %v", err)
+		}
+		root := checkpoints.Latest()
+		if root != nil {
+			if err := archive.Load(ctx); err != nil {
+				t.Fatalf("read certified archive seal: %v", err)
+			}
+			seal, _, sealed := archive.RecoveryBase()
+			if sealed && uint64(seal.Index) == root.Index && seal.RootHash == root.RootHash && root.Hash == seal.StateHash {
+				released, err := noPVCPublisherReleased(ctx, bucket, publisherKey, root)
+				if err != nil {
+					t.Fatalf("read checkpoint publisher release: %v", err)
+				}
+				if released {
+					break
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("wait for certified checkpoint and publisher release: %v", ctx.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
-	if len(roots) != 1 {
-		t.Fatalf("initial source checkpoint roots=%d want 1", len(roots))
+	selected := checkpoints.Latest()
+	closeErr := db.Close()
+	closed = true
+	if closeErr != nil {
+		t.Fatalf("close writer after checkpoint publisher release: %v", closeErr)
 	}
-	return roots[0]
+	if err := checkpoints.Load(ctx); err != nil {
+		t.Fatalf("reload checkpoint after writer close: %v", err)
+	}
+	admitted, err := checkpoints.OpenRoot(ctx, selected.Index, selected.RootHash)
+	if err != nil {
+		t.Fatalf("admit exact certified checkpoint after writer close: %v", err)
+	}
+	if admitted.Index != selected.Index || admitted.RootHash != selected.RootHash || admitted.Hash != selected.Hash {
+		t.Fatalf("admitted checkpoint changed: got index=%d root=%x hash=%x; want index=%d root=%x hash=%x", admitted.Index, admitted.RootHash, admitted.Hash, selected.Index, selected.RootHash, selected.Hash)
+	}
+	return admitted
+}
+
+func noPVCPublisherReleased(ctx context.Context, bucket objstore.Bucket, key string, root *checkpoint.Checkpoint) (bool, error) {
+	reader, err := bucket.Get(ctx, key)
+	if err != nil {
+		if bucket.IsObjNotFoundErr(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	data, readErr := io.ReadAll(io.LimitReader(reader, 64<<10))
+	closeErr := reader.Close()
+	if err := errors.Join(readErr, closeErr); err != nil {
+		return false, err
+	}
+	var claim checkpoint.PublisherClaim
+	if err := json.Unmarshal(data, &claim); err != nil {
+		return false, fmt.Errorf("decode public publisher claim: %w", err)
+	}
+	releasedAt := time.UnixMilli(claim.LeaseUntilMS)
+	now := time.Now()
+	return claim.Purpose == "publisher" && claim.BoundIndex == root.Index && claim.RootHash == fmt.Sprintf("%x", root.RootHash) && !releasedAt.After(now) && now.Sub(releasedAt) <= 30*time.Second, nil
 }
 
 func noPVCExportWaitPinnedGC(t *testing.T, ctx context.Context, config rhiza.Config, prefix, retired string, selected *checkpoint.Checkpoint, renew func() error) {

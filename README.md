@@ -13,10 +13,13 @@ GoAuthy-specific external-connection and credential-delegation capabilities. Rau
 is a compatibility ledger rather than the sole product roadmap. Earlier documentation
 cited the official Rhiza `v0.19.0` release (commit
 [`abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8`](https://github.com/mrchypark/rhiza/commit/abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8)).
-The current Go build pins Rhiza `v0.19.1-0.20261008214459-3895b723e194` in `go.mod`,
-resolving to upstream commit [`3895b723e194`](https://github.com/mrchypark/rhiza/commit/3895b723e194).
-PR #146 inherits this pin unchanged from its base and corrects the stale release citation;
-it does not change the Rhiza dependency. Rhiza
+The current Go build pins official Rhiza `v0.21.0` in `go.mod`,
+resolving to upstream commit [`e4c6339f9ce2092ac329e9a24ccd583c6a219bc8`](https://github.com/mrchypark/rhiza/commit/e4c6339f9ce2092ac329e9a24ccd583c6a219bc8).
+This release requires Go 1.27.3; the root Docker build uses the same minimum.
+Rhiza v0.21 removes the archive-statistics API. GoAuthy's protected
+`/metrics/archive/v1` compatibility response keeps schema version 1 and its fixed
+stage names, with `available: false` and `null` count/duration values. Those nulls
+mean unavailable, not zero. Rhiza
 `v0.9.0` is retracted because its published proxy-cached commit was wrong.
 v0.10.0 remains the historical baseline for earlier recorded runs.
 Rhiza v0.10.0 introduced bounded graph reachability APIs; GoAuthy does not need or
@@ -203,12 +206,13 @@ issuer-path/browser parity remains pending.
 
 ## Rhiza production profiles
 
-GoAuthy has two explicit Rhiza `v0.12.3` runtime modes. `standalone` is the
+The current build uses Rhiza `v0.21.0` for both runtime modes. `standalone` is the
 production single-node topology: one embedded member and no peer inputs.
 The default Kubernetes profile uses `emptyDir`, an object-store bucket/prefix,
 fixed `before-ack` durability and `GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE=true`.
-Its local state is rebuildable. The runtime still permits explicitly configured
-local-only standalone fixtures; their cold-copy tests are not object-store DR. The legacy `dev` profile remains local-only. Both
+Its local state is rebuildable. The `Local` Rhiza mode is limited to local-only
+standalone fixtures; their cold-copy tests are not object-store DR. The legacy
+`dev` profile remains local-only. Both
 single-node profiles reject peer, voter-token and admin-token settings.
 The isolated [Ternal no-PVC profile](deploy/ternal-no-pvc/README.md) does not
 change existing deployments. `make e2e-standalone` passed runtime
@@ -232,10 +236,10 @@ also passes normal/cross-pod flows, pod replacement, quorum-loss readiness 503,
 quorum restoration and rolling restart; see [dated verification](docs/status.md).
 Standalone and exact-three HA have identical application semantics; HA pods
 must use matching SCIM provider configuration, including stable IDs and policies.
-With the current Rhiza v0.12.3 integration, startup failure paths still
-intentionally skip `db.Close()` until all startup initialization succeeds; the
-startup-close workaround remains pending verification against the upgraded runtime;
-normal post-start shutdown still closes the database as usual.
+The startup path still skips `db.Close()` until initialization succeeds. This
+guard was added for a checkpoint-corruption hazard confirmed on Rhiza v0.10.0;
+its behavior on v0.21.0 remains unverified. Normal post-start shutdown closes the
+database as usual.
 
 Bootstrap authentication is password-only for the initial administrator by
 default; passkeys are optional. `GOAUTHY_BOOTSTRAP_FORCE_MFA=true` is an
