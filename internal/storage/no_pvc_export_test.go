@@ -47,7 +47,11 @@ func TestNoPVCPublicRhizaSnapshotCapture(t *testing.T) {
 	root := t.TempDir()
 	sourceDir := filepath.Join(root, "source-objects")
 	config := noPVCExportConfig(t, root, filepath.Join(root, "writer"), sourceDir)
-	config.CheckpointInterval = 10 * time.Second
+	// Keep automatic checkpoints outside the entire archive-only phase deadline.
+	config.CheckpointInterval = time.Hour
+	if config.CheckpointInterval <= timeout {
+		t.Fatalf("archive-only checkpoint interval %s must exceed test deadline %s", config.CheckpointInterval, timeout)
+	}
 	keyDir := filepath.Join(root, "keys")
 	if err := os.MkdirAll(keyDir, 0700); err != nil {
 		t.Fatal(err)
@@ -97,6 +101,14 @@ func TestNoPVCPublicRhizaSnapshotCapture(t *testing.T) {
 		t.Fatal(err)
 	}
 	verifyNoPVCInitialArchiveCapture(t, ctx, db, config, keyring, root, issuer, key.PublicJWK.KeyID)
+	if err := db.Close(); err != nil {
+		t.Fatalf("close archive-only writer: %v", err)
+	}
+	config.CheckpointInterval = 10 * time.Second
+	db, err = rhiza.Open(ctx, config)
+	if err != nil {
+		t.Fatalf("reopen writer for certified checkpoint: %v", err)
+	}
 	certifiedRoot := closeNoPVCWriterAfterCertifiedCheckpoint(t, ctx, db, config)
 
 	prefix := path.Join(config.ObjStorePrefix, config.ClusterID)
