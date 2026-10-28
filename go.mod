@@ -12,7 +12,7 @@ require (
 	github.com/chromedp/chromedp v0.16.0
 	github.com/fxamacker/cbor/v2 v2.9.3
 	github.com/getkin/kin-openapi v0.149.0
-	github.com/go-jose/go-jose/v4 v4.1.4
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68
 	github.com/go-kit/log v0.2.1
 	github.com/go-webauthn/webauthn v0.18.0
