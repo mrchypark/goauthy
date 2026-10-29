@@ -1,7 +1,10 @@
 # Rhiza startup close guard
 
-The current greenfield build pins official Rhiza `v0.21.0` in `go.mod`,
+The current greenfield build pins official Rhiza `v0.21.1` in `go.mod`,
 resolving to upstream commit
+[`66e2416b52e3d64aa86134b7b0c8b70c5ace88be`](https://github.com/mrchypark/rhiza/commit/66e2416b52e3d64aa86134b7b0c8b70c5ace88be).
+This documentation-only release leaves the Go runtime and archive format
+unchanged from v0.21.0 at upstream commit
 [`e4c6339f9ce2092ac329e9a24ccd583c6a219bc8`](https://github.com/mrchypark/rhiza/commit/e4c6339f9ce2092ac329e9a24ccd583c6a219bc8).
 Older documentation cited the official Rhiza `v0.19.0` release (commit
 [`abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8`](https://github.com/mrchypark/rhiza/commit/abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8),
@@ -27,9 +30,9 @@ initialization has succeeded and the server lifecycle is about to begin. This
 guard addresses a checkpoint-corruption hazard confirmed on Rhiza v0.10.0 when
 a database was closed during startup, even if `DB.Ready()` became true
 transiently before a later migration, quorum, or configuration failure. The
-hazard's status on Rhiza v0.21.0 has not been runtime-verified; retain the guard
-until the upgraded startup path is checked. After startup, graceful shutdown
-still closes the database.
+hazard's status on Rhiza v0.21.1 has not been runtime-verified; its Go runtime
+is unchanged from v0.21.0. Retain the guard until the upgraded startup path is
+checked. After startup, graceful shutdown still closes the database.
 
 The GoAuthy startup-close regression test verifies this guard. One fresh local
 v0.18.0 diagnostic with three logical GoAuthy members on one Kind node and a Versity

@@ -70,6 +70,9 @@ jobs:
       - name: deploy/standalone
         run: ./deploy/standalone/test.sh
 
+      - name: deploy/standalone-local
+        run: sh ./deploy/standalone-local/test.sh
+
       - name: deploy/ied-qualification
         run: ./deploy/ied-qualification/test.sh
 

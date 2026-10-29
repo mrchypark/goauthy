@@ -10,6 +10,7 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy ./cmd/goauthy
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy-rhiza-init ./cmd/goauthy-rhiza-init
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy-bootstrap-secrets ./cmd/goauthy-bootstrap-secrets
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy-backup ./cmd/goauthy-backup
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy-backchannel-sink ./cmd/goauthy-backchannel-sink
@@ -93,6 +94,7 @@ ENTRYPOINT ["/bin/sh", "/e2e-journal-entrypoint.sh"]
 FROM scratch
 
 COPY --from=build /goauthy /goauthy
+COPY --from=build /goauthy-rhiza-init /goauthy-rhiza-init
 COPY --from=build /goauthy-backup /goauthy-backup
 COPY --from=build /goauthy-bootstrap-secrets /goauthy-bootstrap-secrets
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt

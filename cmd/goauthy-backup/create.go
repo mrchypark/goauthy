@@ -46,6 +46,9 @@ func runCreate(ctx context.Context, args []string, getenv func(string) string, o
 	if err != nil {
 		return err
 	}
+	if sourceConfig.Local {
+		return errors.New("signed backup creation does not support the Local archive format")
+	}
 	destinationConfig, separateDestination, err := backupDestinationConfig(getenv, sourceConfig)
 	if err != nil {
 		return err

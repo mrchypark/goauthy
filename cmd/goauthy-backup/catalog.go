@@ -57,6 +57,9 @@ func runCatalog(ctx context.Context, args []string, getenv func(string) string, 
 	if err != nil {
 		return err
 	}
+	if config.Local {
+		return errors.New("signed backup catalog commands do not support the Local archive profile")
+	}
 	ctx, cancel := context.WithTimeout(ctx, *timeout)
 	defer cancel()
 	bucket, err := storage.OpenObjectStore(ctx, config)
