@@ -18,7 +18,7 @@ require (
 	github.com/go-webauthn/webauthn v0.18.0
 	github.com/minio/minio-go/v7 v7.0.95
 	github.com/mrchypark/ely-htmx v0.1.0
-	github.com/mrchypark/rhiza v0.21.1
+	github.com/mrchypark/rhiza v0.21.2
 	github.com/ory/fosite v0.49.0
 	github.com/oschwald/maxminddb-golang v1.13.1
 	github.com/pb33f/jsonpath v0.8.2

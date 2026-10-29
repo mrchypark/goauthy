@@ -10,12 +10,15 @@ automatic migration path. In Kubernetes, each uses a disposable `DataDir`
 are separate recovery inputs. A local-directory copy is not the default DR
 mechanism.
 
-GoAuthy pins Rhiza v0.21.1 at source
-`66e2416b52e3d64aa86134b7b0c8b70c5ace88be`; this documentation-only release
-requires Go 1.27.3 or newer and leaves the Go runtime and archive format
-unchanged from v0.21.0 source
-`e4c6339f9ce2092ac329e9a24ccd583c6a219bc8`. Its new [Local init-container guide](https://github.com/mrchypark/rhiza/blob/66e2416b52e3d64aa86134b7b0c8b70c5ace88be/docs/local-init-container-recovery.md)
-describes that unchanged public Go API. The v0.21.0 archive compatibility
+GoAuthy's current integration candidate is Rhiza v0.21.2 at source
+[`8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd`](https://github.com/mrchypark/rhiza/commit/8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd),
+requiring Go 1.27.3 or newer. Its Local maintenance-release fix reconciles an
+upload error only when stable remote readback proves the exact expected free
+control at a changed object version. Work errors, cancellation, held controls,
+and uncertainty remain errors; the fix does not clear an orphaned held token
+or change identity. There is no public API, archive-format, or receipt change.
+The [application-owned init guide](https://github.com/mrchypark/rhiza/blob/8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd/docs/local-init-container-recovery.md)
+is unchanged. The v0.21.0 archive compatibility
 limits still apply: Local archives are not automatically migrated, and
 mixed-version peers and downgrade are unsupported. GoAuthy's greenfield Local
 profile requires a fresh `DataDir` and dedicated archive namespace. The
@@ -83,7 +86,39 @@ retained snapshots. Existing `Local: false` profiles keep periodic GC disabled.
 The v0.21.0 Local archive format has no automatic migration from older formats
 and does not convert a three-voter HA installation into Local mode.
 
-The v0.21.1 [release notes](https://github.com/mrchypark/rhiza/releases/tag/v0.21.1)
+## Current v0.21.2 qualification and release gates
+
+The published Go SDK resolves to source `8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd`;
+its verified module checksum is
+`h1:q1bAEo2pHpm7dBpSEGWZ4VjbQk++dtB62sB8BKu7dn0=`.
+Upstream [exact-source CI 40840202108](https://github.com/mrchypark/rhiza/actions/runs/40840202108)
+completed successfully with 12 successful jobs and one explicit skip.
+The candidate cited by the [v0.21.2 release](https://github.com/mrchypark/rhiza/releases/tag/v0.21.2)
+and tagged merge have the same tree. The release reports each pinned provider
+adapter had 19 passes and two explicit skips; this is not live-cloud qualification.
+
+Fresh focused GoAuthy v0.21.2 filesystem loss/recovery and binding checks passed
+normally and with the race detector on 2026-10-29: storage 4.655s/29.716s and
+init 5.163s/35.597s (normal/race, author receipts). Module verification and tidy
+also passed. The new SDK provider matrix and new image remain pending; live
+Kubernetes and production-cloud behavior remain unqualified. Earlier v0.21.1
+GoAuthy CI does not qualify the new source. GoAuthy consumes the embedded Go SDK
+and builds its own app/init image; neither Rhiza Operator images nor native
+C/Rust FFI archives are required. The same-image, same-DataDir Open/Close init
+contract above remains in force.
+
+The separate high-severity [go-jose advisory GHSA-mgcc-cww5-fp2q](https://github.com/go-jose/go-jose/security/advisories/GHSA-mgcc-cww5-fp2q)
+still blocks PR merge, tagging, and release: direct v4 is pinned to fixed
+v4.1.6, but source-reachable v3.0.5 remains through Fosite v0.49.0 with no
+published fixed v3 version. Rhiza v0.21.2 and its CI do not close this block.
+
+## Historical v0.21.1 qualification and image review
+
+The v0.21.1 documentation-only release at source
+`66e2416b52e3d64aa86134b7b0c8b70c5ace88be` left the Go runtime and archive
+format unchanged from v0.21.0 source
+`e4c6339f9ce2092ac329e9a24ccd583c6a219bc8`.
+Its [release notes](https://github.com/mrchypark/rhiza/releases/tag/v0.21.1)
 record an unresolved S3 qualification failure:
 `TestEmbeddedObjectStorageCheckpointAndTailTotalLoss` reported
 `Local maintenance control changed during read` in
@@ -92,9 +127,9 @@ Do not treat the docs-only release as all-green CI or new cloud qualification.
 Its upstream [application-image workflow](https://github.com/mrchypark/rhiza/blob/66e2416b52e3d64aa86134b7b0c8b70c5ace88be/.github/workflows/application-image.yml)
 is manually dispatched, publishes only immutable `sha-<commit>` tags, and
 builds `linux/amd64`; the upstream Dockerfile still starts `rhiza` as a server.
-At this review, anonymous lookups for `v0.21.1` and
+At the v0.21.1 review, anonymous lookups for `v0.21.1` and
 `sha-66e2416b52e3d64aa86134b7b0c8b70c5ace88be` returned HTTP 404, so no public
-v0.21.1 image digest is available to pin. Use GoAuthy's own image for the
+v0.21.1 image digest was established by that review. Use GoAuthy's own image for the
 application-owned init helper, not an assumed Rhiza init image.
 
 ## Historical Rhiza v0.19.0 candidate

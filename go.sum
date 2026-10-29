@@ -395,8 +395,8 @@ github.com/mrchypark/ely-htmx v0.1.0 h1:HI5uuCvLcbiHdiEi3GSKz1fPMNc+bLFGQhrSj6o/
 github.com/mrchypark/ely-htmx v0.1.0/go.mod h1:df8hZdxaPs+K67jE5bkpNq9uSwoe3fFBhZLKYeCLs1s=
 github.com/mrchypark/latticedb-go v0.11.3 h1:Jtn+3dZduZKjxHkjRHUTHD2leRWrzS6TV8eqmoEAgKg=
 github.com/mrchypark/latticedb-go v0.11.3/go.mod h1:0lE7Ig+DYuVRHocNZLNlvAmIEq3xvyJQXIfh83CbHkM=
-github.com/mrchypark/rhiza v0.21.1 h1:yEKg/YEFGklTVW6aC7RZSSI0evEZH9686fGIhTX1Aeg=
-github.com/mrchypark/rhiza v0.21.1/go.mod h1:Cmof+NGVUgCu4+HTenSu2h5SKW88w5KxBV1S9eJNevM=
+github.com/mrchypark/rhiza v0.21.2 h1:q1bAEo2pHpm7dBpSEGWZ4VjbQk++dtB62sB8BKu7dn0=
+github.com/mrchypark/rhiza v0.21.2/go.mod h1:Cmof+NGVUgCu4+HTenSu2h5SKW88w5KxBV1S9eJNevM=
 github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f h1:KUppIJq7/+SVif2QVs3tOP0zanoHgBEVAwHxUSIzRqU=
 github.com/mwitkow/go-conntrack v0.0.0-20190716064945-2f068394615f/go.mod h1:qRWi+5nqEBWmkhHvq77mSJWrCKwh8bxhgT7d/eI7P4U=
 github.com/ncruces/go-sqlite3 v0.35.3 h1:Ei07Zv1qfV/vyXzelhFsyS5Oh9TArBZHsmFk14Xv3GY=
