@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: goauthy
+  namespace: goauthy
+spec:
+  replicas: 1
+  template:
+    spec:
+      initContainers:
+        - $patch: replace
+        - name: restore-local-archive
+          image: goauthy:e2e
+          imagePullPolicy: Never
+          command: ["/goauthy-rhiza-init"]
+          env:
+            - name: SQLITE_TMPDIR
+              value: /tmp
+            - name: GOAUTHY_RHIZA_PROFILE
+              value: standalone-local
+            - name: GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE
+              value: "true"
+            - name: GOAUTHY_CLUSTER_ID
+              value: goauthy-e2e
+            - name: GOAUTHY_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: GOAUTHY_DATA_DIR
+              value: /var/lib/goauthy
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER
+              value: s3
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_ENDPOINT
+              value: versity.goauthy.svc.cluster.local:9000
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_INSECURE
+              value: "true"
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_BUCKET
+              value: rhiza
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_PREFIX
+              value: goauthy-local
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_REGION
+              value: us-east-1
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: goauthy-secrets
+                  key: versity-root-user
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: goauthy-secrets
+                  key: versity-root-password
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/goauthy
+            - name: sqlite-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      containers:
+        - name: goauthy
+          env:
+            - name: GOAUTHY_RHIZA_PROFILE
+              value: standalone-local
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER
+              value: s3
+            - name: GOAUTHY_RHIZA_OBJECT_STORE_PREFIX
+              value: goauthy-local

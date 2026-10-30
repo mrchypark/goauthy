@@ -100,6 +100,9 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if err != nil {
 		return err
 	}
+	if config.Local {
+		return errors.New("backup export/restore does not support the Local archive format")
+	}
 	ctx, cancel := context.WithTimeout(ctx, *timeout)
 	defer cancel()
 	bucket, err := storage.OpenObjectStore(ctx, config)

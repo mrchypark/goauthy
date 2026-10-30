@@ -13,8 +13,18 @@ GoAuthy-specific external-connection and credential-delegation capabilities. Rau
 is a compatibility ledger rather than the sole product roadmap. Earlier documentation
 cited the official Rhiza `v0.19.0` release (commit
 [`abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8`](https://github.com/mrchypark/rhiza/commit/abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8)).
-The current Go build pins official Rhiza `v0.21.0` in `go.mod`,
-resolving to upstream commit [`e4c6339f9ce2092ac329e9a24ccd583c6a219bc8`](https://github.com/mrchypark/rhiza/commit/e4c6339f9ce2092ac329e9a24ccd583c6a219bc8).
+The current Rhiza integration candidate is official `v0.21.2`,
+resolving to upstream commit [`8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd`](https://github.com/mrchypark/rhiza/commit/8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd).
+It reconciles a lost Local maintenance-release acknowledgement only when stable
+remote readback proves the exact expected free control at a changed object version.
+It does not clear orphaned held tokens or change the public API or archive format.
+Fresh focused GoAuthy filesystem loss/recovery and binding checks passed normally
+and with the race detector. The archive-adoption/ACK-tail recovery SDK contract
+also passed on pinned S3, GCS, and Azure emulators with no skips. This does not
+qualify the init/main application journey on each provider. The new image, live
+Kubernetes, and production-cloud behavior remain unqualified. The separate
+[go-jose/v3 security block](docs/no-pvc-dr.md#current-v0212-qualification-and-release-gates)
+still prevents PR merge and release.
 This release requires Go 1.27.3; the root Docker build uses the same minimum.
 Rhiza v0.21 removes the archive-statistics API. GoAuthy's protected
 `/metrics/archive/v1` compatibility response keeps schema version 1 and its fixed
@@ -206,14 +216,19 @@ issuer-path/browser parity remains pending.
 
 ## Rhiza production profiles
 
-The current build uses Rhiza `v0.21.0` for both runtime modes. `standalone` is the
+The current integration candidate uses Rhiza `v0.21.2` for both runtime modes.
+`standalone` is the
 production single-node topology: one embedded member and no peer inputs.
 The default Kubernetes profile uses `emptyDir`, an object-store bucket/prefix,
 fixed `before-ack` durability and `GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE=true`.
-Its local state is rebuildable. The `Local` Rhiza mode is limited to local-only
-standalone fixtures; their cold-copy tests are not object-store DR. The legacy
-`dev` profile remains local-only. Both
-single-node profiles reject peer, voter-token and admin-token settings.
+Its local state is rebuildable. The existing `standalone` and default
+Kubernetes profiles use Rhiza `Local: false`; the standalone cold-copy tests
+cover only that profile's local-directory copy behavior and do not qualify
+object-store DR. The opt-in `standalone-local` profile uses Rhiza `Local: true`
+with required S3 or GCS object storage; see the
+[standalone-local recovery contract](docs/no-pvc-dr.md#opt-in-standalone-local-profile).
+The legacy `dev` profile remains local-only. Both single-node profiles reject
+peer, voter-token and admin-token settings.
 The isolated [Ternal no-PVC profile](deploy/ternal-no-pvc/README.md) does not
 change existing deployments. `make e2e-standalone` passed runtime
 smoke plus restart verification, including persistence of the JWKS key ID, and
@@ -238,8 +253,8 @@ Standalone and exact-three HA have identical application semantics; HA pods
 must use matching SCIM provider configuration, including stable IDs and policies.
 The startup path still skips `db.Close()` until initialization succeeds. This
 guard was added for a checkpoint-corruption hazard confirmed on Rhiza v0.10.0;
-its behavior on v0.21.0 remains unverified. Normal post-start shutdown closes the
-database as usual.
+its behavior on v0.21.2 remains unverified. The maintenance-release fix does not
+qualify this startup guard. Normal post-start shutdown closes the database as usual.
 
 Bootstrap authentication is password-only for the initial administrator by
 default; passkeys are optional. `GOAUTHY_BOOTSTRAP_FORCE_MFA=true` is an

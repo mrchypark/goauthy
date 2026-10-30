@@ -16,6 +16,8 @@ import (
 const (
 	// RhizaProfileStandalone is the production single-node profile.
 	RhizaProfileStandalone = "standalone"
+	// RhizaProfileStandaloneLocal opts into Rhiza's Local archive protocol.
+	RhizaProfileStandaloneLocal = "standalone-local"
 	// RhizaProfileDev is one local embedded node. It never accepts cluster
 	// peers or object-store credentials.
 	RhizaProfileDev = "dev"
@@ -113,8 +115,8 @@ func RhizaConfigFromEnv(getenv func(string) string) (rhiza.Config, error) {
 	clusterID := getenv("GOAUTHY_CLUSTER_ID")
 	nodeID := getenv("GOAUTHY_NODE_ID")
 	dataDir := getenv("GOAUTHY_DATA_DIR")
-	if profile != RhizaProfileDev && profile != RhizaProfileStandalone && profile != RhizaProfileCluster {
-		return rhiza.Config{}, fmt.Errorf("GOAUTHY_RHIZA_PROFILE must be %q, %q, or %q", RhizaProfileStandalone, RhizaProfileDev, RhizaProfileCluster)
+	if profile != RhizaProfileDev && profile != RhizaProfileStandalone && profile != RhizaProfileCluster && profile != RhizaProfileStandaloneLocal {
+		return rhiza.Config{}, fmt.Errorf("GOAUTHY_RHIZA_PROFILE must be %q, %q, %q, or %q", RhizaProfileStandalone, RhizaProfileDev, RhizaProfileCluster, RhizaProfileStandaloneLocal)
 	}
 	if clusterID == "" || nodeID == "" || dataDir == "" {
 		return rhiza.Config{}, fmt.Errorf("GOAUTHY_CLUSTER_ID, GOAUTHY_NODE_ID, and GOAUTHY_DATA_DIR are required")
@@ -130,6 +132,22 @@ func RhizaConfigFromEnv(getenv func(string) string) (rhiza.Config, error) {
 	}
 	if requireObjectStore && profile == RhizaProfileDev {
 		return rhiza.Config{}, fmt.Errorf("dev Rhiza profile does not support required object storage")
+	}
+	if profile == RhizaProfileStandaloneLocal {
+		if getenv(rhizaCheckpointIntervalEnv) != "" {
+			return rhiza.Config{}, fmt.Errorf("%s does not accept %s; Local checkpoint cadence uses the native 15-minute default", profile, rhizaCheckpointIntervalEnv)
+		}
+		for _, name := range rhizaClusterEnv {
+			if getenv(name) != "" && !strings.HasPrefix(name, "GOAUTHY_RHIZA_OBJECT_STORE_") {
+				return rhiza.Config{}, fmt.Errorf("%s does not accept %s", profile, name)
+			}
+		}
+		config.Local = true
+		// Zero enables these same Local defaults in Rhiza; it does not disable GC.
+		config.ObjStoreGCInterval = time.Hour
+		config.ObjStoreGCGracePeriod = 24 * time.Hour
+		config.CheckpointRetainCount = 3
+		return withObjectStore(config, getenv)
 	}
 	if profile == RhizaProfileDev || profile == RhizaProfileStandalone {
 		objectStore := requireObjectStore
