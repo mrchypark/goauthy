@@ -19,8 +19,10 @@ It reconciles a lost Local maintenance-release acknowledgement only when stable
 remote readback proves the exact expected free control at a changed object version.
 It does not clear orphaned held tokens or change the public API or archive format.
 Fresh focused GoAuthy filesystem loss/recovery and binding checks passed normally
-and with the race detector. The new SDK provider matrix and new image remain
-pending; live Kubernetes and cloud behavior remain unqualified. The separate
+and with the race detector. The archive-adoption/ACK-tail recovery SDK contract
+also passed on pinned S3, GCS, and Azure emulators with no skips. This does not
+qualify the init/main application journey on each provider. The new image, live
+Kubernetes, and production-cloud behavior remain unqualified. The separate
 [go-jose/v3 security block](docs/no-pvc-dr.md#current-v0212-qualification-and-release-gates)
 still prevents PR merge and release.
 This release requires Go 1.27.3; the root Docker build uses the same minimum.

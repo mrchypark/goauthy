@@ -100,9 +100,14 @@ adapter had 19 passes and two explicit skips; this is not live-cloud qualificati
 Fresh focused GoAuthy v0.21.2 filesystem loss/recovery and binding checks passed
 normally and with the race detector on 2026-10-29: storage 4.655s/29.716s and
 init 5.163s/35.597s (normal/race, author receipts). Module verification and tidy
-also passed. The new SDK provider matrix and new image remain pending; live
-Kubernetes and production-cloud behavior remain unqualified. Earlier v0.21.1
-GoAuthy CI does not qualify the new source. GoAuthy consumes the embedded Go SDK
+also passed. On 2026-10-30, the archive-adoption/ACK-tail recovery SDK contract
+passed on pinned Floci S3, GCS, and Azure emulators, all exit 0 with no skips.
+This does not qualify the init/main application journey on each provider.
+Owned containers and temporary binaries were removed and absence verified.
+[GoAuthy CI 40844609485](https://github.com/mrchypark/goauthy/actions/runs/40844609485)
+passed all five jobs for runtime commit `6453996`. The new image, live Kubernetes,
+and production-cloud behavior remain unqualified. Earlier v0.21.1 GoAuthy CI is
+not credited to v0.21.2. GoAuthy consumes the embedded Go SDK
 and builds its own app/init image; neither Rhiza Operator images nor native
 C/Rust FFI archives are required. The same-image, same-DataDir Open/Close init
 contract above remains in force.
