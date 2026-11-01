@@ -4,6 +4,12 @@
 
 Existing Fosite v0.49.0 supplies client authentication and the resource-owner grant protocol. `internal/oauth/password_grant.go` adapts it to pinned Rauthy default scopes, password-origin ID tokens, conditional refresh, recovery errors and guarded persistence; `internal/identity` owns credential verification, generation snapshots, login timestamps and schema86 failure counters. Managed/DCR registration remains in `internal/clients` and `internal/dcr`; signing uses existing `internal/oidc` and go-jose. No new dependency was added.
 
+## Fosite JOSE v4 maintenance fork (2026-11-01)
+
+GoAuthy keeps the canonical `github.com/ory/fosite` import path and replaces the upstream v0.49.0 module with the versioned [GoAuthy fork release](https://github.com/mrchypark/fosite/releases/tag/v0.49.0-goauthy.1). The fork is pinned to tag `v0.49.0-goauthy.1` at commit `06741a29e6f11260e9d6fe45222eedc00cb38959`, based on upstream Ory Fosite v0.49.0 commit `653c812`. It migrates the source from go-jose v3 to v4.1.6, updates JWT serialization and parse algorithm allowlists, handles JOSE v4 key types, and adds JOSE security regressions. This is a GoAuthy fork release, not an official Ory release.
+
+Return to upstream Ory Fosite when it publishes a maintained release with equivalent JOSE v4 support and security behavior, then verify GoAuthy's focused normal and race tests against that release. Until that condition is met, retain the exact versioned replacement and its checksums; do not restore a repository-local source copy.
+
 `internal/recovery` reuses its reset issuance, cookie/CSRF consumption and go-mail SMTP sender. `TestExpiredPasswordGrantDeliversResetSMTP` now joins the OAuth HTTP endpoint, real recovery service, loopback SMTP, delivered link consumption and signed ID-token checks. This is a local integration qualification, not production email or distributed DR. Fosite wraps non-NotFound credential errors; the scoped handler preserves the explicitly signaled reset-required denial without changing unrelated credential checks.
 
 Remaining application work includes unconditional sessionless login state, managed per-client logout metadata and endpoint isolation, location notifications, and full pinned failure/error parity. Existing logout tables and consumers must be integrated rather than treating a configured global callback URI as a substitute for a client's own endpoint. Runtime and DR evidence remains in `status.md` and `no-pvc-dr.md`.

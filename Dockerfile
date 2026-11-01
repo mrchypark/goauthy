@@ -6,6 +6,7 @@ ENV GOOS=$TARGETOS GOARCH=$TARGETARCH
 
 WORKDIR /src
 COPY go.mod go.sum ./
+RUN apk add --no-cache git
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
@@ -70,6 +71,7 @@ ARG TARGETARCH
 ENV GOOS=$TARGETOS GOARCH=$TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
+RUN apk add --no-cache git
 RUN go mod download
 COPY internal ./internal
 RUN CGO_ENABLED=0 go test -c -o /storage.test ./internal/storage
