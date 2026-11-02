@@ -21,7 +21,23 @@
   const request = (url, options = {}) => {
     globalThis.GoAuthyI18n?.setBusy?.(true);
     return fetch(endpoint(url), Object.assign({ credentials: 'same-origin' }, options)).then(async (response) => {
-      if (!response.ok) { const error = new Error(response.status === 401 || response.status === 403 ? t('Your session has expired. Sign in again.') : t('Request failed ({status}).', { status: response.status })); error.status = response.status; throw error; }
+      if (!response.ok) {
+        let body = null;
+        try { body = await response.json?.(); } catch (_) { /* retain the generic status message */ }
+        const wrongCurrentPassword = response.status === 401 && body?.error_code === 'invalid_current_password';
+        const unknownMutationOutcome = response.status === 503 && body?.error_code === 'mutation_outcome_unknown';
+        const message = wrongCurrentPassword
+          ? t('The current password is incorrect. Check it and try again.')
+          : unknownMutationOutcome
+            ? t('Password change outcome is unknown. Check the current state before retrying.')
+            : response.status === 401 || response.status === 403
+              ? t('Your session has expired. Sign in again.')
+              : t('Request failed ({status}).', { status: response.status });
+        const error = new Error(message);
+        error.status = response.status;
+        if (body?.error_code) error.code = body.error_code;
+        throw error;
+      }
       return response;
     }).finally(() => globalThis.GoAuthyI18n?.setBusy?.(false));
   };
@@ -49,7 +65,10 @@
     $('#password-section').hidden = Boolean(account.features && account.features.password === false);
     const conversion = $('#passwordless-section'); conversion.hidden = !(account.features && account.features.password && account.features.passkeys && state.passkeys.length); updateConversionControl();
     $('#passwordless-hint').textContent = account.features && account.features.passkey_conversion ? t('This requires an enrolled passkey and will remove password sign-in.') : t('Use a registered passkey to sign in again before converting.');
-    $('#password-restore-section').hidden = !(account.features && account.features.password === false);
+    const hasLocalPassword = account.features?.password !== false;
+    const hasRegisteredPasskey = state.passkeys.length > 0;
+    $('#passkey-form').hidden = !hasLocalPassword && !hasRegisteredPasskey;
+    $('#password-restore-section').hidden = hasLocalPassword || !hasRegisteredPasskey;
   }
 
   async function convertPasswordless() { if (state.actionBusy || state.passkeyBusy || !state.passkeysLoaded || !state.account || !state.account.features.passkey_conversion) return; if (!globalThis.confirm || !globalThis.confirm(t('Turn off password sign-in for this account?'))) return; state.actionBusy = true; $('#passwordless-convert').disabled = true; try { await request(`${subjectPath()}/self/convert_passkey`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf } }); await refreshAccount(); status('passwordless-status', t('Password sign-in disabled.')); } catch (error) { status('passwordless-status', error.message, true); $('#passwordless-convert').disabled = false; } finally { state.actionBusy = false; displayProfile(state.account); setPasskeyBusy(false); } }

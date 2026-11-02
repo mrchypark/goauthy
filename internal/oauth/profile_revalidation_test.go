@@ -176,7 +176,7 @@ func TestProfileRevalidationInvalidPreferredUsernameDeniesIssuance(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy.PreferredUsername = puPolicy
+	policy.PreferredUsername = puPolicy.WithImmutable(false)
 
 	if err := server.SetUserValuesPolicy(policy, identityStore.NeedsProfileUpdate); err != nil {
 		t.Fatal(err)
@@ -194,6 +194,34 @@ func TestProfileRevalidationInvalidPreferredUsernameDeniesIssuance(t *testing.T)
 		t.Fatalf("expected interaction_required, got %q", location.Query().Get("error"))
 	}
 	assertNoAuthorizationState(t, db)
+}
+
+func TestProfileRevalidationGrandfathersImmutableBlacklistedPreferredUsername(t *testing.T) {
+	t.Parallel()
+	db := oauthTestDB(t)
+	server := oauthTestServer(t, db, randomSecret(t))
+	identityStore := profileRevalidationIdentityStore(t, db)
+	seedOAuthUser(t, db, "user-1")
+	seedUserProfile(t, db, "user-1", "user-1@example.test", "Admin", "Given", "Family", `{}`)
+
+	policy := identity.UserValuesPolicy{RevalidateDuringLogin: true, GivenName: "required"}
+	puPolicy, err := identity.NewPreferredUsernamePolicy("required", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy.PreferredUsername = puPolicy
+	if err := server.SetUserValuesPolicy(policy, identityStore.NeedsProfileUpdate); err != nil {
+		t.Fatal(err)
+	}
+
+	response := profileAuthorize(t, server)
+	location, err := url.Parse(response.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if location.Query().Get("code") == "" {
+		t.Fatalf("unchanged immutable preferred_username must be grandfathered, got error=%q", location.Query().Get("error"))
+	}
 }
 
 func TestProfileRevalidationMissingNestedBirthdateDeniesIssuance(t *testing.T) {

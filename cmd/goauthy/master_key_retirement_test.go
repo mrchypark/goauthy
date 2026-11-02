@@ -125,7 +125,7 @@ func TestMasterKeyRetirementWorkerSkipsUnsafeAndAttestsWithMonotonicSequence(t *
 	t.Parallel()
 	db := retirementCmdDB(t, false)
 	keyring := retirementCmdKeyring(t, "key-b")
-	barrier := storage.MasterKeyRetirement{Epoch: 7, OldKeyID: "key-a", ReplacementKeyID: "key-b", State: storage.MasterKeyRetirementFenced}
+	barrier := storage.MasterKeyRetirement{Epoch: 7, OldKeyID: "key-a", ReplacementKeyID: "key-b", State: storage.MasterKeyRetirementFenced, FencedAt: time.UnixMilli(1_800_000_000_010).Add(-90*24*time.Hour - time.Second)}
 	unsafe := storage.MasterKeyRetirementStatus{OldReferences: 1, PasskeyEnabled: false}
 	var inspections int
 	var requests []storage.MasterKeyRetirementAttestationRequest
@@ -210,7 +210,7 @@ func TestMasterKeyRetirementRejectsRetainedPasskeyRowsWhenDisabled(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker.now = func() time.Time { return now.Add(2 * time.Second) }
+	worker.now = func() time.Time { return now.Add(90*24*time.Hour + 2*time.Second) }
 	if err := worker.Step(ctx); err == nil {
 		t.Fatal("worker attested while uninspected passkey rows were retained")
 	}
@@ -319,6 +319,69 @@ func TestMasterKeyRetirementWorkerRunUsesInjectedTriggerAndCancellation(t *testi
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("worker run=%v", err)
+	}
+}
+
+func TestMasterKeyRetirementWaitsForPasswordlessCookieLifetime(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		ttl           time.Duration
+		wait          time.Duration
+		passkeyActive bool
+	}{
+		{name: "application-default", wait: 90 * 24 * time.Hour, passkeyActive: true},
+		{name: "configured-lifetime", ttl: 120 * 24 * time.Hour, wait: 120 * 24 * time.Hour, passkeyActive: true},
+		{name: "existing-overlap-without-passkeys", wait: 90 * 24 * time.Hour},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := retirementCmdDB(t, false)
+			newKeyring := retirementCmdKeyring(t, "key-b")
+			var service *passkey.Service
+			if test.passkeyActive {
+				config := passkey.Config{
+					RPID: "example.test", RPDisplayName: "Example", Origins: []string{"https://example.test"},
+					CookieKey: []byte(strings.Repeat("k", 32)), RenewTTL: test.ttl, Keyring: newKeyring,
+				}
+				var err error
+				service, err = passkey.New(db, config)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			preparedAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+			fencedAt := preparedAt.Add(180 * 24 * time.Hour)
+			currentTime := fencedAt
+			barrier := storage.MasterKeyRetirement{Epoch: 1, OldKeyID: "key-a", ReplacementKeyID: "key-b", State: storage.MasterKeyRetirementFenced, PreparedAt: preparedAt, FencedAt: fencedAt}
+			attested := 0
+			worker := &masterKeyRetirementWorker{
+				db: db, keyring: newKeyring, passkey: service, nodeID: "node-0", bootID: "boot-0",
+				now:  func() time.Time { return currentTime },
+				load: func(context.Context, *rhiza.DB) (storage.MasterKeyRetirement, error) { return barrier, nil },
+				inspect: func(context.Context, *rhiza.DB, *oidc.Keyring, string, *passkey.Service, string, time.Time) (storage.MasterKeyRetirementStatus, error) {
+					return storage.MasterKeyRetirementStatus{}, nil
+				},
+				attest: func(_ context.Context, _ *rhiza.DB, request storage.MasterKeyRetirementAttestationRequest) (storage.MasterKeyRetirement, error) {
+					attested++
+					return barrier, nil
+				},
+			}
+
+			currentTime = fencedAt.Add(test.wait - time.Second)
+			if err := worker.Step(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if attested != 0 {
+				t.Fatalf("worker attested %d seconds before passwordless cookie expiry", attested)
+			}
+
+			currentTime = fencedAt.Add(test.wait)
+			if err := worker.Step(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if attested != 1 {
+				t.Fatalf("worker attested %d times at passwordless cookie expiry, want 1", attested)
+			}
+		})
 	}
 }
 

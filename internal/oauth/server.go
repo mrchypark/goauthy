@@ -124,6 +124,13 @@ type ClientGroupPolicy struct {
 }
 
 type principalSnapshotContextKey struct{}
+type idTokenProfileContextKey struct{}
+
+type idTokenProfileSnapshot struct {
+	subject string
+	needed  bool
+	profile oidc.ProfileClaims
+}
 
 type principalSnapshot struct {
 	signature      string
@@ -520,6 +527,47 @@ func (s *Server) writeTokenError(ctx context.Context, w http.ResponseWriter, req
 	s.provider.WriteAccessError(ctx, w, request, publicError)
 }
 
+func oauthBackendUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var backendFailure *oauthBackendFailure
+	if errors.As(err, &backendFailure) {
+		return true
+	}
+	return !oauthKnownInvalid(err)
+}
+
+func oauthKnownInvalid(err error) bool {
+	if err == nil {
+		return false
+	}
+	var nonceErr *dpopNonceError
+	return errors.Is(err, identity.ErrInactiveSubject) || errors.Is(err, fosite.ErrInvalidRequest) ||
+		errors.Is(err, fosite.ErrRequestUnauthorized) || errors.Is(err, fosite.ErrInvalidClient) ||
+		errors.Is(err, fosite.ErrNotFound) || errors.Is(err, fosite.ErrInactiveToken) ||
+		errors.Is(err, fosite.ErrInvalidGrant) || errors.Is(err, errInvalidDPoPProof) ||
+		errors.As(err, &nonceErr)
+}
+
+type oauthBackendFailure struct{ err error }
+
+func (e *oauthBackendFailure) Error() string { return e.err.Error() }
+func (e *oauthBackendFailure) Unwrap() error { return e.err }
+
+func wrapOAuthBackendFailure(err error) error {
+	if err == nil || oauthKnownInvalid(err) {
+		return err
+	}
+	return &oauthBackendFailure{err: err}
+}
+
+func writeOAuthServiceUnavailable(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	w.WriteHeader(http.StatusServiceUnavailable)
+}
+
 func (s *Server) TokenHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx, span := tracing.NewTracer("goauthy/oauth").Start(r.Context(), "token")
@@ -761,6 +809,13 @@ func (s *Server) TokenHandler() http.Handler {
 				s.writeTokenError(r.Context(), sw, request, fosite.ErrServerError)
 				return
 			}
+			profile, err := s.preflightIDTokenProfile(r.Context(), request)
+			if err != nil {
+				slog.Error("OIDC profile preflight failed", "error", err)
+				s.writeTokenError(r.Context(), sw, request, fosite.ErrServerError)
+				return
+			}
+			r = r.WithContext(context.WithValue(r.Context(), idTokenProfileContextKey{}, profile))
 			if _, err := s.signIDToken(r.Context(), request, signingKey, "preflight", principal, custom.id); err != nil {
 				slog.Error("OIDC ID token preflight failed", "error", err)
 				s.writeTokenError(r.Context(), sw, request, fosite.ErrServerError)
@@ -1433,7 +1488,10 @@ func (s *Server) currentPrincipal(ctx context.Context, subject string) (Principa
 			// Attribute changes share the principal revision even when role/group
 			// resolution is disabled. Capture it before resolving custom values.
 			rows, err := s.store.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COALESCE((SELECT revision FROM rbac_principal_versions WHERE subject=?),1) FROM identity_users WHERE subject=? AND disabled=0`, Args: []any{subject, subject}, Consistency: rhiza.ConsistencyLinearizable})
-			if err != nil || len(rows.Rows) != 1 || len(rows.Rows[0]) != 1 {
+			if err != nil {
+				return PrincipalClaims{}, fmt.Errorf("resolve custom principal revision: %w", err)
+			}
+			if len(rows.Rows) != 1 || len(rows.Rows[0]) != 1 {
 				return PrincipalClaims{}, errors.New("resolve custom principal revision")
 			}
 			var ok bool
@@ -1459,7 +1517,10 @@ func (s *Server) currentCustomClaims(ctx context.Context, subject string, grante
 		return customClaimsSnapshot{}, nil
 	}
 	resolved, err := s.oidc.ResolveCustomClaims(ctx, subject, append([]string(nil), granted...))
-	if err != nil || resolved.CatalogRevision < 0 {
+	if err != nil {
+		return customClaimsSnapshot{}, fmt.Errorf("resolve custom claims: %w", err)
+	}
+	if resolved.CatalogRevision < 0 {
 		return customClaimsSnapshot{}, errors.New("resolve custom claims")
 	}
 	id, err := oidc.NormalizeCustomClaims(oidc.CustomClaims{Nested: resolved.ID, Root: resolved.IDRoot})
@@ -1769,8 +1830,15 @@ func (s *Server) signIDToken(ctx context.Context, request fosite.AccessRequester
 	if limit := accountDeadline(ctx); !limit.IsZero() && limit.Before(expires) {
 		expires = limit
 	}
+	profileSnapshot, hasSnapshot := ctx.Value(idTokenProfileContextKey{}).(idTokenProfileSnapshot)
 	profile := oidc.ProfileClaims{}
-	if s.oidc.ResolveProfile != nil && request.GetGrantedScopes().HasOneOf("profile", "email", "address", "phone") {
+	profileNeeded := request.GetGrantedScopes().HasOneOf("profile", "email", "address", "phone")
+	if hasSnapshot {
+		if profileSnapshot.subject != session.Subject || (profileNeeded && !profileSnapshot.needed) {
+			return "", errors.New("OIDC profile preflight does not match token request")
+		}
+		profile = profileSnapshot.profile
+	} else if s.oidc.ResolveProfile != nil && profileNeeded {
 		profile, err = s.oidc.ResolveProfile(ctx, session.Subject)
 		if err != nil {
 			return "", fmt.Errorf("resolve OIDC profile: %w", err)
@@ -1785,6 +1853,22 @@ func (s *Server) signIDToken(ctx context.Context, request fosite.AccessRequester
 		Roles: principal.Roles, Groups: principal.Groups,
 		CustomClaims: custom, Profile: profile,
 	})
+}
+
+func (s *Server) preflightIDTokenProfile(ctx context.Context, request fosite.AccessRequester) (idTokenProfileSnapshot, error) {
+	session, ok := request.GetSession().(*fosite.DefaultSession)
+	if !ok || session.Subject == "" {
+		return idTokenProfileSnapshot{}, errors.New("OIDC session is missing")
+	}
+	snapshot := idTokenProfileSnapshot{subject: session.Subject, needed: request.GetGrantedScopes().HasOneOf("profile", "email", "address", "phone")}
+	if s.oidc.ResolveProfile != nil && snapshot.needed {
+		profile, err := s.oidc.ResolveProfile(ctx, session.Subject)
+		if err != nil {
+			return idTokenProfileSnapshot{}, fmt.Errorf("resolve OIDC profile: %w", err)
+		}
+		snapshot.profile = profile
+	}
+	return snapshot, nil
 }
 
 func scopedProfile(profile oidc.ProfileClaims, scopes fosite.Arguments) oidc.ProfileClaims {
@@ -1866,7 +1950,7 @@ func (s *Store) GetClient(ctx context.Context, id string) (fosite.Client, error)
 		if s.bootstrapClientScopes != nil {
 			custom, err := s.bootstrapClientScopes(ctx, id)
 			if err != nil {
-				return nil, err
+				return nil, wrapOAuthBackendFailure(err)
 			}
 			if custom.ClientID != id || custom.Revision < 0 {
 				return nil, errors.New("invalid bootstrap custom scopes")
@@ -1878,12 +1962,12 @@ func (s *Store) GetClient(ctx context.Context, id string) (fosite.Client, error)
 	if s.managedClients != nil {
 		owned, err := s.managedClients.Owns(ctx, id)
 		if err != nil {
-			return nil, err
+			return nil, wrapOAuthBackendFailure(err)
 		}
 		if owned {
 			client, err := s.managedClients.GetClient(ctx, id)
 			if err != nil {
-				return nil, err
+				return nil, wrapOAuthBackendFailure(err)
 			}
 			for _, grant := range client.GetGrantTypes() {
 				if grant != "password" && grant != "authorization_code" && grant != "refresh_token" && grant != "client_credentials" && grant != DeviceGrantType && grant != TokenExchangeGrantType {
@@ -1899,12 +1983,12 @@ func (s *Store) GetClient(ctx context.Context, id string) (fosite.Client, error)
 	client, err := s.dynamicClients.GetClient(ctx, id)
 	if err == nil {
 		if err := s.validateDynamicClientScopes(ctx, client); err != nil {
-			return nil, err
+			return nil, wrapOAuthBackendFailure(err)
 		}
 		return client, nil
 	}
 	if !errors.Is(err, fosite.ErrNotFound) {
-		return nil, err
+		return nil, wrapOAuthBackendFailure(err)
 	}
 	if s.cimd == nil || !cimdClientIDCandidate(id) {
 		return nil, fosite.ErrNotFound
@@ -1914,9 +1998,13 @@ func (s *Store) GetClient(ctx context.Context, id string) (fosite.Client, error)
 		if errors.Is(err, cimd.ErrNotFound) {
 			return nil, fosite.ErrNotFound
 		}
-		return nil, err
+		return nil, wrapOAuthBackendFailure(err)
 	}
-	return newEphemeralClient(metadata)
+	client, err = newEphemeralClient(metadata)
+	if err != nil {
+		return nil, wrapOAuthBackendFailure(err)
+	}
+	return client, nil
 }
 
 func (s *Store) validateDynamicClientScopes(ctx context.Context, client fosite.Client) error {

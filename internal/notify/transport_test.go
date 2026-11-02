@@ -1,13 +1,16 @@
 package notify
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -137,5 +140,164 @@ func TestNotificationEmail(t *testing.T) {
 	}
 	if !strings.Contains(got.String(), "Subject: Goauthy event: Test") || !strings.Contains(got.String(), `"typ":"Test"`) || !strings.Contains(got.String(), "from@example.test") || !strings.Contains(got.String(), "to@example.test") {
 		t.Fatalf("mime=%s", got.String())
+	}
+}
+
+func TestNotificationEmailClosesStalledGreeting(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		timeout time.Duration
+		cancel  bool
+	}{
+		{name: "cancel", timeout: 3 * time.Second, cancel: true},
+		{name: "deadline", timeout: 150 * time.Millisecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			accepted := make(chan net.Conn, 1)
+			closed := make(chan struct{})
+			go func() {
+				conn, err := listener.Accept()
+				if err != nil {
+					close(closed)
+					return
+				}
+				accepted <- conn
+				_, _ = io.Copy(io.Discard, conn)
+				_ = conn.Close()
+				close(closed)
+			}()
+
+			address := listener.Addr().String()
+			host, rawPort, err := net.SplitHostPort(address)
+			if err != nil {
+				t.Fatal(err)
+			}
+			port, err := strconv.Atoi(rawPort)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sender, err := NewEmailSender(EmailConfig{Host: host, Port: port, From: "from@example.test", To: "to@example.test", Timeout: test.timeout, AllowInsecure: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() { done <- sender.Send(ctx, eventlog.TestEvent("smtp", "", time.Now())) }()
+			var conn net.Conn
+			select {
+			case conn = <-accepted:
+			case <-time.After(time.Second):
+				cancel()
+				t.Fatal("SMTP connection was not accepted")
+			}
+			if test.cancel {
+				cancel()
+			}
+			select {
+			case <-closed:
+			case <-time.After(400 * time.Millisecond):
+				_ = conn.Close()
+				cancel()
+				<-done
+				t.Fatal("SMTP connection stayed open after cancellation or deadline")
+			}
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("SMTP send did not return after the connection closed")
+			}
+		})
+	}
+}
+
+func TestNotificationEmailCompletesLocalSMTPDelivery(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	received := make(chan struct{})
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		reader := bufio.NewReader(conn)
+		writer := bufio.NewWriter(conn)
+		write := func(response string) bool {
+			_, err := writer.WriteString(response)
+			return err == nil && writer.Flush() == nil
+		}
+		if !write("220 fixture ESMTP\r\n") {
+			return
+		}
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			switch {
+			case strings.HasPrefix(line, "EHLO "):
+				if !write("250-fixture\r\n250-8BITMIME\r\n250 SIZE 100000\r\n") {
+					return
+				}
+			case strings.HasPrefix(line, "HELO "), strings.HasPrefix(line, "MAIL FROM:"), strings.HasPrefix(line, "RCPT TO:"), line == "NOOP\r\n", line == "RSET\r\n":
+				if !write("250 fixture\r\n") {
+					return
+				}
+			case line == "DATA\r\n":
+				if !write("354 continue\r\n") {
+					return
+				}
+				for {
+					line, err = reader.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if line == ".\r\n" {
+						break
+					}
+				}
+				close(received)
+				if !write("250 queued\r\n") {
+					return
+				}
+			case line == "QUIT\r\n":
+				_ = write("221 bye\r\n")
+				return
+			default:
+				if !write("500 unexpected command\r\n") {
+					return
+				}
+			}
+		}
+	}()
+
+	host, rawPort, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(rawPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender, err := NewEmailSender(EmailConfig{Host: host, Port: port, From: "from@example.test", To: "to@example.test", Timeout: time.Second, AllowInsecure: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Send(context.Background(), eventlog.TestEvent("smtp", "", time.Now())); err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	select {
+	case <-received:
+	case <-time.After(time.Second):
+		t.Fatal("SMTP fixture did not receive DATA")
 	}
 }

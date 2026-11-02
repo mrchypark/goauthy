@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/device"
 	"github.com/mrchypark/goauthy/internal/oidc"
 )
 
@@ -88,4 +89,74 @@ func TestProfileClaimsCodeRefreshUserInfoAndScopeIsolation(t *testing.T) {
 		t.Fatal("machine grant resolved user profile")
 	}
 	assertUserInfoUnauthorized(t, server, userInfoRequest(http.MethodGet, machine.AccessToken, nil))
+}
+
+func TestProfileResolverRunsOncePerFositeIDTokenGrant(t *testing.T) {
+	t.Parallel()
+	newServer := func(t *testing.T) (*Server, func() int, func()) {
+		t.Helper()
+		db := oauthTestDB(t)
+		key := oidcTestKey(t)
+		server := userInfoTestServer(t, db, nil)
+		server.oidc.LoadSigningKey = func(context.Context) (oidc.SigningKey, error) { return key, nil }
+		calls := 0
+		server.oidc.ResolveProfile = func(context.Context, string) (oidc.ProfileClaims, error) {
+			calls++
+			return oidc.ProfileClaims{}, nil
+		}
+		return server, func() int { return calls }, func() { calls = 0 }
+	}
+	issue := func(t *testing.T, server *Server) oidcTokenResponse {
+		t.Helper()
+		verifier := strings.Repeat("r", 43)
+		code := issueProfileSnapshotCode(t, server, verifier)
+		return decodeOIDCToken(t, postToken(server, url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {testRedirectURI}, "code_verifier": {verifier}}))
+	}
+	t.Run("authorization_code", func(t *testing.T) {
+		server, calls, _ := newServer(t)
+		issue(t, server)
+		if calls() != 1 {
+			t.Fatalf("authorization-code profile resolutions=%d, want 1", calls())
+		}
+	})
+	t.Run("refresh_token", func(t *testing.T) {
+		server, calls, resetCalls := newServer(t)
+		issued := issue(t, server)
+		resetCalls()
+		decodeOIDCToken(t, postToken(server, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {issued.RefreshToken}}))
+		if calls() != 1 {
+			t.Fatalf("refresh profile resolutions=%d, want 1", calls())
+		}
+	})
+	t.Run("device_code", func(t *testing.T) {
+		server, calls, _ := newServer(t)
+		db := server.store.db
+		seedDeviceUser(t, db, "device-profile-user", nil)
+		grant, err := device.NewStore(db).Create(t.Context(), testClientID, []string{openidScope, "profile", "offline_access"}, time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := device.NewStore(db).Approve(t.Context(), grant.UserCode, "device-profile-user", time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+		decodeOIDCToken(t, postToken(server, url.Values{"grant_type": {DeviceGrantType}, "device_code": {grant.DeviceCode}}))
+		if calls() != 1 {
+			t.Fatalf("device profile resolutions=%d, want 1", calls())
+		}
+	})
+}
+
+func issueProfileSnapshotCode(t *testing.T, server *Server, verifier string) string {
+	t.Helper()
+	sessionID := oidcTestSessionID(0)
+	ensureOIDCTestBrowserSession(t, server, sessionID)
+	values := oidcAuthorizationValues(verifier, "profile-snapshot")
+	values.Set("scope", "openid profile offline_access")
+	response := httptest.NewRecorder()
+	server.CompleteAuthorizationWithSession(response, httptest.NewRequest(http.MethodGet, "/oidc/authorize?"+values.Encode(), nil), "user-1", []string{"openid", "profile", "offline_access"}, oidcTestAuthTime, sessionID, oidcAuthMethodPwd)
+	location, err := url.Parse(response.Header().Get("Location"))
+	if err != nil || location.Query().Get("code") == "" {
+		t.Fatalf("authorization failed: status=%d location=%q err=%v", response.Code, response.Header().Get("Location"), err)
+	}
+	return location.Query().Get("code")
 }

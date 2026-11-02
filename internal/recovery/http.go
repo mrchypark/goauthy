@@ -155,7 +155,7 @@ func (s *Service) PutReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload, err := decodeJSON[putReset](w, r, requestLimit)
-	if err != nil || !bounded(payload.Password) {
+	if err != nil || !bounded(payload.Password, s.rules.LengthMax) {
 		badRequest(w)
 		return
 	}
@@ -299,7 +299,7 @@ func (s *Service) RegisterOpen(w http.ResponseWriter, r *http.Request) {
 		unavailable(w)
 		return
 	}
-	if result.Created {
+	if result.Created || result.ReissuedPasswordNew {
 		message := Message{To: request.Email, Language: lang, ResetURL: s.resetURL(result.Subject, result.Token), ExpiresAt: result.ExpiresAt}
 		if err := s.sender.SendPasswordNew(r.Context(), message); err != nil && s.OnError != nil {
 			s.OnError(err)
@@ -368,8 +368,11 @@ func decodeJSON[T any](w http.ResponseWriter, r *http.Request, limit int64) (T, 
 	return value, nil
 }
 
-func bounded(value string) bool {
-	return len(value) > 0 && len(value) <= passwordLimit && utf8.ValidString(value) && utf8.RuneCountInString(value) <= passwordLimit
+func bounded(value string, maxRunes int) bool {
+	if maxRunes <= 0 || maxRunes > passwordLimit {
+		return false
+	}
+	return len(value) > 0 && len(value) <= maxRunes*utf8.UTFMax && utf8.ValidString(value) && utf8.RuneCountInString(value) <= maxRunes
 }
 func crossSite(r *http.Request) bool {
 	return strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site")

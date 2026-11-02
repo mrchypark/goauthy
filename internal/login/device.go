@@ -167,7 +167,7 @@ func parseDeviceLoginForm(w http.ResponseWriter, r *http.Request) (deviceLoginFo
 	}
 	return deviceLoginForm{Interaction: i, CSRFToken: c, Username: u, Password: p}, nil
 }
-func utf8Valid(v string) bool { return len(v) <= 256 && utf8.ValidString(v) }
+func utf8Valid(v string) bool { return utf8.ValidString(v) && utf8.RuneCountInString(v) <= 256 }
 func randomDeviceLoginID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {

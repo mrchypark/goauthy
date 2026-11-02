@@ -1,6 +1,7 @@
 FROM golang:1.27-alpine AS fixture-build
 WORKDIR /src
 COPY go.mod go.sum ./
+RUN apk add --no-cache git
 COPY cmd/e2e-saas-isolation-fixture ./cmd/e2e-saas-isolation-fixture
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /fixture ./cmd/e2e-saas-isolation-fixture
 
@@ -13,6 +14,7 @@ ENTRYPOINT ["/fixture"]
 FROM golang:1.27-alpine AS driver-build
 WORKDIR /src
 COPY go.mod go.sum ./
+RUN apk add --no-cache git
 RUN go mod download
 COPY . .
 RUN go test -c -trimpath -o /browser-e2e ./test/e2e/browser

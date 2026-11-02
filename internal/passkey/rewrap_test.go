@@ -104,6 +104,29 @@ func TestDurablePasskeyWritesRespectMasterKeyFence(t *testing.T) {
 	}
 }
 
+func TestPasswordlessCookieCannotReuseCachedTTLRegistrationAfterKeyFence(t *testing.T) {
+	t.Parallel()
+	ctx, db, old, _ := newRewrapServices(t)
+	first, err := old.PasswordlessCookie(ctx, "subject")
+	if err != nil || first == "" {
+		t.Fatalf("pre-fence cookie=%q err=%v", first, err)
+	}
+	now := old.now()
+	if _, err := storage.PrepareMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementPrepareRequest{
+		Epoch: 1, OldKeyID: "master-a", ReplacementKeyID: "master-b",
+		MemberIDs: []string{"node-0", "node-1", "node-2"}, PreparedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.FenceMasterKeyRetirement(ctx, db, 1, now.Add(time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	second, err := old.PasswordlessCookie(ctx, "subject")
+	if err == nil || second != "" {
+		t.Fatalf("cached TTL registration bypassed the master-key fence: cookie=%q err=%v", second, err)
+	}
+}
+
 func TestPasskeyEnvelopeWriteUsesAuthenticatedSealedKeyAsWriter(t *testing.T) {
 	t.Parallel()
 	ctx, db, _, replacement := newRewrapServices(t)

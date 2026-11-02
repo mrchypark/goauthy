@@ -265,5 +265,39 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
   assert.equal(profileStatus.attributes.role, 'alert');
   assert.equal(profileStatus.children[1].textContent, 'Your account could not be loaded.');
   assert.equal(profileStatus.children[2].textContent, 'Request failed (503).');
+
+  context.accountDashboard.state.account = { subject: 'federated-user', features: { password: false, passkeys: true, passkey_conversion: false } };
+  context.accountDashboard.state.passkeysLoaded = true;
+  element('connections-section').hidden = false;
+  context.accountDashboard.renderPasskeys([]);
+  assert.equal(element('password-restore-section').hidden, true, 'federated accounts without a passkey cannot restore a password');
+  assert.equal(element('passkey-form').hidden, true, 'federated accounts without a passkey cannot add their first passkey');
+  assert.equal(element('connections-section').hidden, false, 'other account actions remain available');
+  context.accountDashboard.renderPasskeys([{ name: 'existing' }]);
+  assert.equal(element('password-restore-section').hidden, false, 'registered passkeys keep password restoration available');
+  assert.equal(element('passkey-form').hidden, false, 'registered passkey users can manage passkeys');
+  context.accountDashboard.state.account.features.password = true;
+  context.accountDashboard.renderPasskeys([]);
+  assert.equal(element('password-restore-section').hidden, true, 'password users do not see password restoration');
+  assert.equal(element('password-section').hidden, false, 'password users retain password actions');
+  assert.equal(element('passkey-form').hidden, false, 'password users can still enroll their first passkey');
+
+  element('password-current').value = 'WrongPassword1';
+  element('password-new').value = 'NewPassword2';
+  element('password-confirm').value = 'NewPassword2';
+  context.fetch = async () => ({ ok: false, status: 401, json: async () => ({ error_code: 'invalid_current_password' }) });
+  await context.accountDashboard.submitPassword({ preventDefault() {}, target: form('password-form') });
+  assert.equal(element('password-status').children[2].textContent, 'The current password is incorrect. Check it and try again.');
+  context.fetch = async () => ({ ok: false, status: 503, json: async () => ({ error_code: 'mutation_outcome_unknown' }) });
+  await context.accountDashboard.submitPassword({ preventDefault() {}, target: form('password-form') });
+  assert.equal(element('password-status').children[2].textContent, 'Password change outcome is unknown. Check the current state before retrying.');
+  for (const [status, errorCode, message] of [
+    [401, 'unexpected', 'Your session has expired. Sign in again.'],
+    [403, 'invalid_current_password', 'Your session has expired. Sign in again.'],
+    [503, 'unexpected', 'Request failed (503).'],
+  ]) {
+    context.fetch = async () => ({ ok: false, status, json: async () => ({ error_code: errorCode }) });
+    await assert.rejects(context.accountDashboard.connectionDeps.request('/account/test'), (error) => error.status === status && error.message === message);
+  }
   console.log('dashboard UI checks passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

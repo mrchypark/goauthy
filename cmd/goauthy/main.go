@@ -497,14 +497,14 @@ func run() (err error) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			runNotifications(workerCtx, notifications, time.Now, func(error) { slog.Error("event notification worker step failed") })
+			runNotifications(workerCtx, notifications, time.Now, func(err error) { logWorkerFailure("notifications", "step", err) })
 		}()
 	}
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
-		if err := runEventCleanup(workerCtx, eventStore, eventCleanupInterval, eventRetention, time.Now, func(error) {
-			slog.Error("lifecycle event cleanup failed")
+		if err := runEventCleanup(workerCtx, eventStore, eventCleanupInterval, eventRetention, time.Now, func(err error) {
+			logWorkerFailure("event_cleanup", "cleanup", err)
 		}); err != nil {
 			slog.Error("lifecycle event cleanup stopped")
 		}
@@ -512,8 +512,8 @@ func run() (err error) {
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
-		if err := runUserExpiry(workerCtx, identityStore, userExpiryConfig, time.Now, func(error) {
-			slog.Error("account expiry cleanup failed")
+		if err := runUserExpiry(workerCtx, identityStore, userExpiryConfig, time.Now, func(err error) {
+			logWorkerFailure("account_expiry", "expiry", err)
 		}); err != nil {
 			slog.Error("account expiry worker stopped")
 		}
@@ -529,8 +529,8 @@ func run() (err error) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			if err := scimRuntime.Run(workerCtx, scimWorkerInterval, time.Now, func(error) {
-				slog.Error("SCIM synchronization failed")
+			if err := scimRuntime.Run(workerCtx, scimWorkerInterval, time.Now, func(err error) {
+				logWorkerFailure("scim", "synchronization", err)
 			}); err != nil {
 				slog.Error("SCIM worker stopped")
 			}
@@ -558,7 +558,7 @@ func run() (err error) {
 			}
 		}()
 	}
-	housekeepingJobs := buildHousekeepingJobs(db, recoveryService, loginPolicyStore, keyring, emailOutbox)
+	housekeepingJobs := buildHousekeepingJobs(db, recoveryService, loginPolicyStore, keyring, emailOutbox, passkeyConfig)
 	if scheduler := housekeeping.New(housekeepingJobs, housekeepingErrorHandler); len(housekeepingJobs) > 0 {
 		workers.Add(1)
 		go func() {
@@ -1155,7 +1155,30 @@ func run() (err error) {
 	if err := accountHandler.ConfigureDynamicExternalLinks(dynamicDispatcher.linkStartHandler(), dynamicDispatcher.exists); err != nil {
 		return fmt.Errorf("configure dynamic upstream account links: %w", err)
 	}
-	logoutHandler, err := logout.NewHandler(issuer, db, browserStore, oauthServer, []logout.Client{{ID: clientID, PostLogoutRedirectURIs: postLogoutRedirectURIs}})
+	resolveLogoutClient := func(ctx context.Context, id string) (logout.Client, bool, error) {
+		if id == clientID {
+			return logout.Client{}, false, nil
+		}
+		registered, resolveErr := managedClients.GetClient(ctx, id)
+		if resolveErr == nil {
+			return logout.Client{ID: registered.GetID()}, true, nil
+		}
+		if !errors.Is(resolveErr, fosite.ErrNotFound) {
+			return logout.Client{}, false, resolveErr
+		}
+		if dynamicClientStore == nil {
+			return logout.Client{}, false, nil
+		}
+		registered, resolveErr = dynamicClientStore.GetClient(ctx, id)
+		if errors.Is(resolveErr, fosite.ErrNotFound) {
+			return logout.Client{}, false, nil
+		}
+		if resolveErr != nil {
+			return logout.Client{}, false, resolveErr
+		}
+		return logout.Client{ID: registered.GetID()}, true, nil
+	}
+	logoutHandler, err := logout.NewHandler(issuer, db, browserStore, oauthServer, []logout.Client{{ID: clientID, PostLogoutRedirectURIs: postLogoutRedirectURIs}}, resolveLogoutClient)
 	if err != nil {
 		return err
 	}

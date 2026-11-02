@@ -17,7 +17,9 @@ jobs:
   browser-login-journey:
     name: Browser login journey
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Three serial fixtures: login tests cap at 4m, registration at seven 3m
+    # Go-test invocations, with 10m reserved for builds, startup, and cleanup.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         name: Checkout
@@ -37,10 +39,13 @@ jobs:
       - name: Check login journey preflight guards
         run: sh scripts/test-e2e-login-journey-standalone.sh
 
-      - name: Run isolated login journey
+      - name: Check isolated project journey guards
+        run: sh scripts/test-verify-isolated.sh
+
+      - name: Run isolated project journeys
         env:
-          GOAUTHY_LOGIN_JOURNEY_SLOT: granted
-        run: sh scripts/e2e-login-journey-standalone.sh --run
+          GOAUTHY_ISOLATED_E2E_SLOT: granted
+        run: sh scripts/verify-isolated.sh --run
 
       - name: Upload sanitized browser failure artifact
         if: failure()
@@ -69,6 +74,9 @@ jobs:
       # label silently changes the deployed resources.
       - name: deploy/standalone
         run: ./deploy/standalone/test.sh
+
+      - name: deploy/standalone-local
+        run: sh ./deploy/standalone-local/test.sh
 
       - name: deploy/ied-qualification
         run: ./deploy/ied-qualification/test.sh
@@ -116,14 +124,15 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Admin JavaScript tests
+      - name: Internal JavaScript tests
         run: |
-          command -v node >/dev/null 2>&1 || { echo "node is required for admin JavaScript tests" >&2; exit 1; }
-          node internal/admin/bundle_ui_test.js
-          node internal/admin/themes_ui_test.js
-          node internal/admin/ui_regression_test.js
-          node internal/admin/locale_ui_test.js
-          node internal/admin/module_locale_ui_test.js
+          command -v node >/dev/null 2>&1 || { echo "node is required for internal JavaScript tests" >&2; exit 1; }
+          find internal -type d -name vendor -prune -o -type f \( -name '*_test.js' -o -name '*_test.cjs' -o -name '*.test.js' -o -name '*.test.cjs' \) -print \
+            | LC_ALL=C sort \
+            | while IFS= read -r test_file; do
+                echo "Running $test_file"
+                node "$test_file" || exit 1
+              done
 
       - name: test
         run: go test -timeout=60m -p 3 ./...

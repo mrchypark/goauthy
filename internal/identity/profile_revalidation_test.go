@@ -126,7 +126,8 @@ func TestNeedsProfileUpdateInvalidPreferredUsername(t *testing.T) {
 	seedProfile(t, s, "pu-sub", "pu@example.test", "Admin", "Given", "Family", `{}`)
 	policy := UserValuesPolicy{GivenName: "required", RevalidateDuringLogin: true}
 	if policy.PreferredUsername == nil {
-		policy.PreferredUsername, _ = NewPreferredUsernamePolicy("required", "", nil)
+		policy.PreferredUsername, _ = NewPreferredUsernamePolicy("required", "", []string{"admin"})
+		policy.PreferredUsername = policy.PreferredUsername.WithImmutable(false)
 	}
 	needs, err := s.NeedsProfileUpdate(ctx, policy, "pu-sub", "other-client")
 	if err != nil {
