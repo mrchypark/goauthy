@@ -200,6 +200,15 @@ diagnostic_http_probe() {
 	printf 'diagnostic stage=%s http=%s curl_exit=%s category=%s\n' "$diagnostic_stage" "$diagnostic_http" "$diagnostic_rc" "$diagnostic_category" >&2
 }
 
+verify_gcs_digest() {
+	if gcs_repo_digests=$(dkr image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$gcs_image") &&
+		printf '%s\n' "$gcs_repo_digests" |
+		awk -v full="$gcs_image" -v canonical="${gcs_image#docker.io/}" \
+			'$0 == full || $0 == canonical { found=1 } END { exit !found }'; then return 0; fi
+	echo 'GCS emulator immutable repository/digest mismatch' >&2
+	return 1
+}
+
 owned_container_ip() {
 	requested_id=$1
 	diagnostic_identity=$(container_identity "$requested_id") || return 1
@@ -276,7 +285,7 @@ if [ "$gcs_start_verified" != true ] || [ -z "$gcs_image" ] || [ -z "$gcs_port" 
 fi
 timeout 120 docker pull "$gcs_image" >"$logs/gcs-pull.log" 2>&1
 [ "$(dkr image inspect --format '{{.Os}}/{{.Architecture}} {{index .Config.Labels "org.opencontainers.image.revision"}}' "$gcs_image")" = "linux/amd64 $gcs_revision" ] || { echo 'GCS emulator identity mismatch' >&2; exit 1; }
-dkr image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$gcs_image" | grep -Fx "$gcs_image" >/dev/null || exit 1
+verify_gcs_digest
 : >"$run_dir/$gcs_name.created"
 gcs_id=$(dkr create --name "$gcs_name" --label "$owner_label=$nonce" --network "$network_id" --network-alias gcs \
 	"$gcs_image")

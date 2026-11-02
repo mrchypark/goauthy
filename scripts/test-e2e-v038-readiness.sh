@@ -60,11 +60,35 @@ if grep -E '(^|[[:space:]])nc([[:space:]]|$)' "$script"; then exit 1; fi
 
 # Exercise the real cleanup functions with an owned-ID fake, a foreign label,
 # and an unavailable daemon. Only the verified owned ID may be stopped/removed.
-for function in build_redaction_patterns sanitize_logs owned_id container_identity verified_identity verify_absent remove_container fingerprint_jwks diagnostic_http_probe owned_container_ip diagnose_fs_timeout observe cleanup; do
+for function in build_redaction_patterns sanitize_logs owned_id container_identity verified_identity verify_absent remove_container fingerprint_jwks diagnostic_http_probe verify_gcs_digest owned_container_ip diagnose_fs_timeout observe cleanup; do
 	awk -v name="$function" '$0 == name "() {" {copy=1} copy {print} copy && /^}/ {exit}' "$script" >>"$scratch/functions.sh"
 done
 # shellcheck source=/dev/null
 . "$scratch/functions.sh"
+# Docker Hub may omit docker.io/ in RepoDigests. The old exact predicate fails
+# for that spelling; only the same repository and immutable digest may pass.
+gcs_image=docker.io/floci/floci-gcp@sha256:042c0c6d29b992691ea640bfce91554329d29004cfe4b68aa2093da23e06784f
+canonical_gcs=${gcs_image#docker.io/}
+if printf '%s\n' "$canonical_gcs" | grep -Fx "$gcs_image" >/dev/null; then exit 1; fi
+for digest_case in full canonical wrong_repo wrong_digest; do
+	# shellcheck disable=SC2329 # verify_gcs_digest calls the fake inspect.
+	(
+		dkr() {
+			[ "$1/$2" = image/inspect ] && [ "$5" = "$gcs_image" ]
+			case "$digest_case" in
+				full) printf '%s\n' "$gcs_image";;
+				canonical) printf '%s\n' "$canonical_gcs";;
+				wrong_repo) printf '%s\n' "other/floci-gcp@${gcs_image#*@}";;
+				wrong_digest) printf '%s\n' 'floci/floci-gcp@sha256:0000000000000000000000000000000000000000000000000000000000000000';;
+			esac
+		}
+		verify_gcs_digest
+	) >"$scratch/digest-$digest_case" 2>&1 && digest_rc=0 || digest_rc=$?
+	case "$digest_case" in
+		full|canonical) [ "$digest_rc" -eq 0 ];;
+		*) [ "$digest_rc" -eq 1 ]; grep -Fx 'GCS emulator immutable repository/digest mismatch' "$scratch/digest-$digest_case" >/dev/null;;
+	esac
+done
 nonce=owned-run
 # shellcheck disable=SC2034 # The extracted production functions use logs.
 logs=$scratch/logs
