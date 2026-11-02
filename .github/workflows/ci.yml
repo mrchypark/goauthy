@@ -17,7 +17,9 @@ jobs:
   browser-login-journey:
     name: Browser login journey
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Three serial fixtures: login tests cap at 4m, registration at seven 3m
+    # Go-test invocations, with 10m reserved for builds, startup, and cleanup.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         name: Checkout
@@ -37,10 +39,13 @@ jobs:
       - name: Check login journey preflight guards
         run: sh scripts/test-e2e-login-journey-standalone.sh
 
-      - name: Run isolated login journey
+      - name: Check isolated project journey guards
+        run: sh scripts/test-verify-isolated.sh
+
+      - name: Run isolated project journeys
         env:
-          GOAUTHY_LOGIN_JOURNEY_SLOT: granted
-        run: sh scripts/e2e-login-journey-standalone.sh --run
+          GOAUTHY_ISOLATED_E2E_SLOT: granted
+        run: sh scripts/verify-isolated.sh --run
 
       - name: Upload sanitized browser failure artifact
         if: failure()

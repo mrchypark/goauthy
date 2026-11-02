@@ -8,6 +8,8 @@ remains in [docs/status.md](docs/status.md), while Rauthy parity is tracked sepa
 
 [프로젝트 목표·진행 현황·남은 작업](docs/status.md)
 
+[Independent verification runbook](docs/independent-verification.md)
+
 GoAuthy uses Rauthy `v0.36.2` as a fixed behavior baseline while also providing
 GoAuthy-specific external-connection and credential-delegation capabilities. Rauthy parity
 is a compatibility ledger rather than the sole product roadmap. Earlier documentation

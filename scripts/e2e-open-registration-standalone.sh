@@ -85,7 +85,7 @@ if [ -n "$policy_mode" ]; then
 	done
 fi
 
-for command in curl go nc seq sleep dirname tail sed; do command -v "$command" >/dev/null 2>&1 || { echo "missing required tool: $command" >&2; exit 1; }; done
+for command in curl go nc seq sleep dirname sed ps mktemp rm mkdir cp chmod; do command -v "$command" >/dev/null 2>&1 || { echo "missing required tool: $command" >&2; exit 1; }; done
 tls_mode=${GOAUTHY_E2E_TLS:-0}
 case "$tls_mode" in
 	0|1) ;;
@@ -106,11 +106,60 @@ if [ "${GOAUTHY_E2E_FORCE_LOGOUT_BACKCHANNEL:-0}" = 1 ] || [ "${GOAUTHY_E2E_USER
 fi
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
-. "$root/scripts/e2e-port-lock.sh"; e2e_port_lock_acquire
-for candidate in "$port" "$smtp_port" "$smtp_http_port" $backchannel_port; do nc -z 127.0.0.1 "$candidate" >/dev/null 2>&1 && { echo "port $candidate is already in use" >&2; e2e_port_lock_release; exit 1; }; done
-umask 077; temp_dir=$(mktemp -d); pid=; smtp_pid=; backchannel_pid=; oauth_fixture_pid=; oauth_test_pid=
-cleanup() { status=$?; trap - 0 1 2 15; for p in "$pid" "$smtp_pid" "$backchannel_pid" "$oauth_fixture_pid" "$oauth_test_pid"; do [ -z "$p" ] || { kill "$p" >/dev/null 2>&1 || true; wait "$p" 2>/dev/null || true; }; done; [ "$status" -eq 0 ] || tail -n 80 "$temp_dir"/*.log >&2 || true; rm -rf "$temp_dir"; e2e_port_lock_release; exit "$status"; }
+. "$root/scripts/e2e-port-lock.sh"
+umask 077; temp_dir=; pid=; smtp_pid=; backchannel_pid=; oauth_fixture_pid=; oauth_test_pid=
+owned_child_active() {
+	state=$(ps -o stat= -p "$1" 2>/dev/null || true)
+	case "$state" in ''|Z*) return 1;; *) return 0;; esac
+}
+stop_owned_child() {
+	child=$1
+	[ -n "$child" ] || return 0
+	if owned_child_active "$child"; then
+		kill -TERM "$child" 2>/dev/null || true
+		attempt=0
+		while [ "$attempt" -lt 5 ] && owned_child_active "$child"; do sleep 1; attempt=$((attempt + 1)); done
+		if owned_child_active "$child"; then
+			kill -KILL "$child" 2>/dev/null || true
+			attempt=0
+			while [ "$attempt" -lt 5 ] && owned_child_active "$child"; do sleep 1; attempt=$((attempt + 1)); done
+		fi
+	fi
+	owned_child_active "$child" && return 1
+	wait "$child" 2>/dev/null || true
+	return 0
+}
+cleanup() {
+	status=$?
+	trap - 0 1 2 15
+	cleanup_failed=0
+	for child in "$pid" "$smtp_pid" "$backchannel_pid" "$oauth_fixture_pid" "$oauth_test_pid"; do
+		stop_owned_child "$child" || cleanup_failed=1
+	done
+	if [ "$cleanup_failed" -eq 0 ] && [ -n "$temp_dir" ] && [ -d "$temp_dir" ]; then
+		rm -rf "$temp_dir" || cleanup_failed=1
+		[ ! -e "$temp_dir" ] || cleanup_failed=1
+	fi
+	if [ "$cleanup_failed" -ne 0 ]; then
+		if [ -n "$temp_dir" ] && [ -d "$temp_dir" ]; then
+			echo "fixture cleanup incomplete; temporary directory retained: $temp_dir" >&2
+		else
+			echo 'fixture cleanup incomplete; owned process or temporary files remain' >&2
+		fi
+	fi
+	e2e_port_lock_release
+	[ "$status" -ne 0 ] || [ "$cleanup_failed" -eq 0 ] || status=1
+	exit "$status"
+}
 trap cleanup 0 1 2 15
+e2e_port_lock_acquire
+for candidate in "$port" "$smtp_port" "$smtp_http_port" $backchannel_port; do
+	if nc -z 127.0.0.1 "$candidate" >/dev/null 2>&1; then
+		echo "port $candidate is already in use" >&2
+		exit 1
+	fi
+done
+temp_dir=$(mktemp -d)
 mkdir -p "$temp_dir/data" "$temp_dir/master-keys"
 tls_cert_file=; tls_key_file=
 if [ "$tls_mode" = 1 ]; then
@@ -492,20 +541,20 @@ if [ -n "$backchannel_port" ]; then
 	echo 'standalone subject-only per-user backchannel logout after restart passed'
 	exit 0
 fi
-GOAUTHY_E2E_ADMIN_USER_CREATE=1 GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD=correct-horse-browser-staple GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple GOAUTHY_E2E_SMTP_SINK_URL="http://localhost:$smtp_http_port" GOAUTHY_E2E_URL="$base_url" GOAUTHY_E2E_SECONDARY_URL="$base_url" GOAUTHY_E2E_TERTIARY_URL="$base_url" go test -count=1 -v "$root/test/e2e/browser" -run '^Test(OpenRegistrationAcrossPods|AdminUserCreateLifecycle|AdminUserUpdateAcrossPods)$'
-GOAUTHY_E2E_EVENTS_STREAM=1 GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD=correct-horse-browser-staple GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple GOAUTHY_E2E_URL="$base_url" GOAUTHY_E2E_SECONDARY_URL="$base_url" GOAUTHY_E2E_TERTIARY_URL="$base_url" go test -count=1 -v "$root/test/e2e/browser" -run '^TestCreationEventsStream$'
-GOAUTHY_E2E_EVENT_TEST=1 GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD=correct-horse-browser-staple GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple GOAUTHY_E2E_URL="$base_url" GOAUTHY_E2E_SECONDARY_URL="$base_url" GOAUTHY_E2E_TERTIARY_URL="$base_url" go test -count=1 -v "$root/test/e2e/browser" -run '^TestEventTestEndpoint$'
+GOAUTHY_E2E_ADMIN_USER_CREATE=1 GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD=correct-horse-browser-staple GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple GOAUTHY_E2E_SMTP_SINK_URL="http://localhost:$smtp_http_port" GOAUTHY_E2E_URL="$base_url" GOAUTHY_E2E_SECONDARY_URL="$base_url" GOAUTHY_E2E_TERTIARY_URL="$base_url" go test -count=1 -timeout=3m -v "$root/test/e2e/browser" -run '^Test(OpenRegistrationAcrossPods|AdminUserCreateLifecycle|AdminUserUpdateAcrossPods)$'
+GOAUTHY_E2E_EVENTS_STREAM=1 GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD=correct-horse-browser-staple GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple GOAUTHY_E2E_URL="$base_url" GOAUTHY_E2E_SECONDARY_URL="$base_url" GOAUTHY_E2E_TERTIARY_URL="$base_url" go test -count=1 -timeout=3m -v "$root/test/e2e/browser" -run '^TestCreationEventsStream$'
+GOAUTHY_E2E_EVENT_TEST=1 GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD=correct-horse-browser-staple GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple GOAUTHY_E2E_URL="$base_url" GOAUTHY_E2E_SECONDARY_URL="$base_url" GOAUTHY_E2E_TERTIARY_URL="$base_url" go test -count=1 -timeout=3m -v "$root/test/e2e/browser" -run '^TestEventTestEndpoint$'
 stop_goauthy
 start_goauthy
-GOAUTHY_E2E_EVENT_TEST_PERSISTENCE=1 GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD=correct-horse-browser-staple GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple GOAUTHY_E2E_URL="$base_url" GOAUTHY_E2E_SECONDARY_URL="$base_url" GOAUTHY_E2E_TERTIARY_URL="$base_url" go test -count=1 -v "$root/test/e2e/browser" -run '^TestEventTestPersisted$'
-GOAUTHY_E2E_EVENTS_PERSISTENCE=1 GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD=correct-horse-browser-staple GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple GOAUTHY_E2E_URL="$base_url" GOAUTHY_E2E_SECONDARY_URL="$base_url" GOAUTHY_E2E_TERTIARY_URL="$base_url" go test -count=1 -v "$root/test/e2e/browser" -run '^Test(CreationEventsPersisted|AdminUserUpdatePersisted)$'
+GOAUTHY_E2E_EVENT_TEST_PERSISTENCE=1 GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD=correct-horse-browser-staple GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple GOAUTHY_E2E_URL="$base_url" GOAUTHY_E2E_SECONDARY_URL="$base_url" GOAUTHY_E2E_TERTIARY_URL="$base_url" go test -count=1 -timeout=3m -v "$root/test/e2e/browser" -run '^TestEventTestPersisted$'
+GOAUTHY_E2E_EVENTS_PERSISTENCE=1 GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD=correct-horse-browser-staple GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple GOAUTHY_E2E_URL="$base_url" GOAUTHY_E2E_SECONDARY_URL="$base_url" GOAUTHY_E2E_TERTIARY_URL="$base_url" go test -count=1 -timeout=3m -v "$root/test/e2e/browser" -run '^Test(CreationEventsPersisted|AdminUserUpdatePersisted)$'
 # Registration above proves per-user ko overrides an en fallback. The legacy
 # bootstrap reset fixture has no language and explicitly expects the ko template.
 stop_goauthy
 template_lang=ko
 start_goauthy
-GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD=correct-horse-browser-staple GOAUTHY_E2E_BROWSER_SUBJECT=bootstrap-admin GOAUTHY_E2E_BROWSER_EMAIL=admin@goauthy.e2e GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple GOAUTHY_E2E_SMTP_SINK_URL="http://localhost:$smtp_http_port" GOAUTHY_E2E_URL="$base_url" GOAUTHY_E2E_SECONDARY_URL="$base_url" GOAUTHY_E2E_TERTIARY_URL="$base_url" go test -count=1 -v "$root/test/e2e/browser" -run '^TestPasswordResetAcrossPods$'
+GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD=correct-horse-browser-staple GOAUTHY_E2E_BROWSER_SUBJECT=bootstrap-admin GOAUTHY_E2E_BROWSER_EMAIL=admin@goauthy.e2e GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple GOAUTHY_E2E_SMTP_SINK_URL="http://localhost:$smtp_http_port" GOAUTHY_E2E_URL="$base_url" GOAUTHY_E2E_SECONDARY_URL="$base_url" GOAUTHY_E2E_TERTIARY_URL="$base_url" go test -count=1 -timeout=3m -v "$root/test/e2e/browser" -run '^TestPasswordResetAcrossPods$'
 stop_goauthy
 start_goauthy
-GOAUTHY_E2E_RESET_EVENT_PERSISTENCE=1 GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD=Reset-Password-1A GOAUTHY_E2E_BROWSER_EMAIL=admin@goauthy.e2e GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple GOAUTHY_E2E_URL="$base_url" GOAUTHY_E2E_SECONDARY_URL="$base_url" GOAUTHY_E2E_TERTIARY_URL="$base_url" go test -count=1 -v "$root/test/e2e/browser" -run '^TestPasswordResetEventPersisted$'
+GOAUTHY_E2E_RESET_EVENT_PERSISTENCE=1 GOAUTHY_E2E_BROWSER_USERNAME=admin GOAUTHY_E2E_BROWSER_PASSWORD=Reset-Password-1A GOAUTHY_E2E_BROWSER_EMAIL=admin@goauthy.e2e GOAUTHY_E2E_CLIENT_SECRET=correct-horse-battery-staple GOAUTHY_E2E_URL="$base_url" GOAUTHY_E2E_SECONDARY_URL="$base_url" GOAUTHY_E2E_TERTIARY_URL="$base_url" go test -count=1 -timeout=3m -v "$root/test/e2e/browser" -run '^TestPasswordResetEventPersisted$'
 echo 'standalone open-registration and password-reset E2E passed'

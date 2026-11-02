@@ -7,7 +7,7 @@ if [ "${1:-}" != --isolated ]; then
 		GOAUTHY_LOGIN_JOURNEY_PORT="${GOAUTHY_LOGIN_JOURNEY_PORT:-19380}" \
 		GOAUTHY_E2E_CHROME_BIN="${GOAUTHY_E2E_CHROME_BIN:-}" \
 		GITHUB_RUN_ID="${GITHUB_RUN_ID:-}" GITHUB_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT:-}" \
-		RUNNER_TEMP="${RUNNER_TEMP:-}" GOMAXPROCS=2 GOWORK=off /bin/sh "$0" --isolated "$@"
+		RUNNER_TEMP="${RUNNER_TEMP:-}" GOMAXPROCS=2 GOENV=off GOWORK=off /bin/sh "$0" --isolated "$@"
 fi
 shift
 mode=${1:---check}
@@ -18,7 +18,7 @@ port=$GOAUTHY_LOGIN_JOURNEY_PORT
 case "$port" in ''|*[!0-9]*|0*) echo 'fixture port must be a decimal integer without leading zeros' >&2; exit 2;; esac
 [ "$port" -ge 1024 ] && [ "$port" -le 65533 ] || { echo 'fixture port must be 1024..65533' >&2; exit 2; }
 app_port=$((port + 1))
-for tool in go curl nc mktemp ps sed grep sh; do
+for tool in go curl nc mktemp ps sed grep sh sleep cp chmod mkdir rm; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "missing tool: $tool" >&2; exit 1; }
 done
 
@@ -46,25 +46,32 @@ fi
 
 umask 077
 . "$script_dir/e2e-port-lock.sh"
-temp_dir=$(mktemp -d "${TMPDIR%/}/goauthy-login-journey.XXXXXX")
 if [ -n "${GITHUB_RUN_ID:-}" ]; then run_suffix=$GITHUB_RUN_ID-${GITHUB_RUN_ATTEMPT:-0}; else run_suffix=local-$$; fi
 artifact_dir=${RUNNER_TEMP:-${TMPDIR:-/tmp}}/goauthy-login-journey-artifacts-$run_suffix
-private_dir=${RUNNER_TEMP:-${TMPDIR:-/tmp}}/goauthy-login-journey-private-$run_suffix
-[ ! -e "$artifact_dir" ] && [ ! -e "$private_dir" ] || { echo 'a previous login journey artifact directory already exists; refusing to overwrite it' >&2; exit 1; }
+[ ! -e "$artifact_dir" ] || { echo 'a previous login journey artifact directory already exists; refusing to overwrite it' >&2; exit 1; }
+temp_dir=
 server_pid=
 demo_pid=
 fixture_stage=fixture-preflight
+owned_child_active() {
+	state=$(ps -o stat= -p "$1" 2>/dev/null || true)
+	case "$state" in ''|Z*) return 1;; *) return 0;; esac
+}
 stop_owned_child() {
 	child=$1
 	[ -n "$child" ] || return 0
-	if kill -0 "$child" 2>/dev/null; then
+	if owned_child_active "$child"; then
 		kill -TERM "$child" 2>/dev/null || true
 		attempt=0
-		while [ "$attempt" -lt 5 ] && kill -0 "$child" 2>/dev/null; do sleep 1; attempt=$((attempt + 1)); done
-		if kill -0 "$child" 2>/dev/null; then kill -KILL "$child" 2>/dev/null || true; fi
+		while [ "$attempt" -lt 5 ] && owned_child_active "$child"; do sleep 1; attempt=$((attempt + 1)); done
+		if owned_child_active "$child"; then
+			kill -KILL "$child" 2>/dev/null || true
+			attempt=0
+			while [ "$attempt" -lt 5 ] && owned_child_active "$child"; do sleep 1; attempt=$((attempt + 1)); done
+		fi
 	fi
+	owned_child_active "$child" && return 1
 	wait "$child" 2>/dev/null || true
-	kill -0 "$child" 2>/dev/null && return 1
 	return 0
 }
 cleanup() {
@@ -75,25 +82,32 @@ cleanup() {
 		stop_owned_child "$child" || cleanup_failed=1
 	done
 	e2e_port_lock_release
-	if { [ "$status" -ne 0 ] || [ "$cleanup_failed" -ne 0 ]; } && [ -d "$temp_dir/artifacts" ] && [ ! -f "$temp_dir/artifacts/stage.txt" ]; then
+	if [ -n "$temp_dir" ] && { [ "$status" -ne 0 ] || [ "$cleanup_failed" -ne 0 ]; } && [ -d "$temp_dir/artifacts" ] && [ ! -f "$temp_dir/artifacts/stage.txt" ]; then
 		printf '%s\n' "$fixture_stage" >"$temp_dir/artifacts/stage.txt"
 		chmod 600 "$temp_dir/artifacts/stage.txt"
 	fi
-	if [ "$status" -ne 0 ] || [ "$cleanup_failed" -ne 0 ]; then
+	if [ -n "$temp_dir" ] && { [ "$status" -ne 0 ] || [ "$cleanup_failed" -ne 0 ]; }; then
 		if [ -d "$temp_dir/artifacts" ] && mkdir -m 700 "$artifact_dir" 2>/dev/null; then
 			for artifact in stage.txt failure.png; do
 				if [ -f "$temp_dir/artifacts/$artifact" ]; then cp "$temp_dir/artifacts/$artifact" "$artifact_dir/$artifact"; chmod 600 "$artifact_dir/$artifact"; fi
 			done
 		fi
-		if [ ! -e "$private_dir" ]; then mv "$temp_dir" "$private_dir"; else cleanup_failed=1; rm -rf "$temp_dir"; fi
-		if [ -d "$private_dir" ]; then echo "private fixture diagnostics retained for investigation: $private_dir" >&2; fi
-	else
-		rm -rf "$temp_dir"
+	fi
+	if [ -n "$temp_dir" ] && [ -d "$temp_dir" ] && [ "$cleanup_failed" -eq 0 ]; then
+		rm -rf "$temp_dir" || cleanup_failed=1
+		[ ! -e "$temp_dir" ] || cleanup_failed=1
 	fi
 	if [ "$status" -eq 0 ] && [ "$cleanup_failed" -eq 0 ]; then
 		exit 0
 	fi
-	if [ "$cleanup_failed" -ne 0 ]; then echo 'fixture cleanup could not verify all owned child processes exited' >&2; status=1; fi
+	if [ "$cleanup_failed" -ne 0 ]; then
+		if [ -n "$temp_dir" ] && [ -d "$temp_dir" ]; then
+			echo "fixture cleanup incomplete; temporary directory retained: $temp_dir" >&2
+		else
+			echo 'fixture cleanup incomplete; owned process or temporary files remain' >&2
+		fi
+		status=1
+	fi
 	if [ -d "$artifact_dir" ]; then echo "sanitized failure artifacts: $artifact_dir" >&2; fi
 	[ "$status" -ne 0 ] || status=1
 	exit "$status"
@@ -103,6 +117,7 @@ trap 'if [ "$mode" = --manual ]; then exit 0; else exit 130; fi' 2
 trap 'exit 143' 1 15
 
 e2e_port_lock_acquire
+temp_dir=$(mktemp -d "${TMPDIR%/}/goauthy-login-journey.XXXXXX")
 for reserved in "$port" "$app_port"; do
 	if nc -z 127.0.0.1 "$reserved" >/dev/null 2>&1 || nc -z localhost "$reserved" >/dev/null 2>&1; then echo "fixture port $reserved is occupied" >&2; exit 1; fi
 done
