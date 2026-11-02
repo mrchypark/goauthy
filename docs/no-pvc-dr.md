@@ -112,10 +112,17 @@ and builds its own app/init image; neither Rhiza Operator images nor native
 C/Rust FFI archives are required. The same-image, same-DataDir Open/Close init
 contract above remains in force.
 
-The separate high-severity [go-jose advisory GHSA-mgcc-cww5-fp2q](https://github.com/go-jose/go-jose/security/advisories/GHSA-mgcc-cww5-fp2q)
-still blocks PR merge, tagging, and release: direct v4 is pinned to fixed
-v4.1.6, but source-reachable v3.0.5 remains through Fosite v0.49.0 with no
-published fixed v3 version. Rhiza v0.21.2 and its CI do not close this block.
+The earlier high-severity [go-jose advisory GHSA-mgcc-cww5-fp2q](https://github.com/go-jose/go-jose/security/advisories/GHSA-mgcc-cww5-fp2q)
+blocked qualification of the pre-fork dependency graph using upstream Fosite
+v0.49.0 and source-reachable go-jose/v3 v3.0.5. The published GoAuthy v0.3.8
+dependency set is historical and is not changed by the current source pin.
+Current `go.mod` pins direct go-jose/v4 to v4.1.6 and replaces Fosite with
+`github.com/mrchypark/fosite v0.49.0-goauthy.1`. The fork policy permits only
+the security correction and minimum compatibility changes, with no feature
+fork. Return to upstream requires the fix to be published upstream and
+qualified for GoAuthy. Neither this pin nor Rhiza v0.21.2's CI establishes a
+passing latest security scan or closes the image, application-recovery,
+Kubernetes, and production-cloud qualification limits above.
 
 ## Historical v0.21.1 qualification and image review
 

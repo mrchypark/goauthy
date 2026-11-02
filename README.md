@@ -26,9 +26,12 @@ Fresh focused GoAuthy filesystem loss/recovery and binding checks passed normall
 and with the race detector. The archive-adoption/ACK-tail recovery SDK contract
 also passed on pinned S3, GCS, and Azure emulators with no skips. This does not
 qualify the init/main application journey on each provider. The new image, live
-Kubernetes, and production-cloud behavior remain unqualified. The separate
-[go-jose/v3 security block](docs/no-pvc-dr.md#current-v0212-qualification-and-release-gates)
-still prevents PR merge and release.
+Kubernetes, and production-cloud behavior remain unqualified. GoAuthy pins its
+Fosite fork at `github.com/mrchypark/fosite v0.49.0-goauthy.1` for the security
+correction and minimum compatibility changes only; it is not a feature fork.
+The policy is to return to upstream only after the fix is published upstream
+and qualified for GoAuthy. This pin does not establish a passing latest security
+scan; see the [dependency and release qualification limits](docs/no-pvc-dr.md#current-v0212-qualification-and-release-gates).
 This release requires Go 1.27.3; the root Docker build uses the same minimum.
 Rhiza v0.21 removes the archive-statistics API. GoAuthy's protected
 `/metrics/archive/v1` compatibility response keeps schema version 1 and its fixed
