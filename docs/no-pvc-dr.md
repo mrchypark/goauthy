@@ -1,22 +1,141 @@
 # No-PVC and object-store DR contract
 
-The project default is no GoAuthy PVC. The greenfield candidate uses Rhiza
-`v0.21.0` with a fresh local `DataDir` (`emptyDir` in Kubernetes), an unused
-cluster ID, and an unused object-store namespace. Object-store durability stays
-fixed at `before-ack`, and periodic GC stays disabled. Master keys, issuer, and
-node/member identities must be configured consistently. A local-directory
-backup is not the default DR mechanism.
+The project default is no GoAuthy PVC. For durable single-node operation,
+GoAuthy has two distinct profiles: the existing `standalone` profile remains
+Rhiza `Local: false`; the opt-in `standalone-local` profile uses Rhiza
+`Local: true` and its separate
+`local/v1` archive format. The profiles do not share an archive namespace or
+automatic migration path. In Kubernetes, each uses a disposable `DataDir`
+(`emptyDir`); the object store, master keys, issuer, and identity configuration
+are separate recovery inputs. A local-directory copy is not the default DR
+mechanism.
 
-The [v0.21.0 release](https://github.com/mrchypark/rhiza/releases/tag/v0.21.0)
-resolves to source `e4c6339f9ce2092ac329e9a24ccd583c6a219bc8` and requires Go
-1.27.3 or newer. Rhiza v0.21.0 changes the fixed Local archive format used with
-filesystem, S3, GCS, and Azure backends. GoAuthy's greenfield upgrade requires a
-new `DataDir` and a fresh archive/object-store namespace; existing data and
-archives have no supported automatic migration. Mixed-version peers and
-downgrade are unsupported. GoAuthy's production profiles use `Local: false`;
-`Local: true` is used only for SDK qualification. This profile scope does not
-restrict Rhiza Local mode's object-store support. Earlier acceptance results do
-not qualify the current candidate.
+GoAuthy's current integration candidate is Rhiza v0.21.2 at source
+[`8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd`](https://github.com/mrchypark/rhiza/commit/8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd),
+requiring Go 1.27.3 or newer. Its Local maintenance-release fix reconciles an
+upload error only when stable remote readback proves the exact expected free
+control at a changed object version. Work errors, cancellation, held controls,
+and uncertainty remain errors; the fix does not clear an orphaned held token
+or change identity. There is no public API, archive-format, or receipt change.
+The [application-owned init guide](https://github.com/mrchypark/rhiza/blob/8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd/docs/local-init-container-recovery.md)
+is unchanged. The v0.21.0 archive compatibility
+limits still apply: Local archives are not automatically migrated, and
+mixed-version peers and downgrade are unsupported. GoAuthy's greenfield Local
+profile requires a fresh `DataDir` and dedicated archive namespace. The
+`standalone-local` opt-in does not change existing profile defaults.
+
+## Opt-in `standalone-local` profile
+
+This is a single GoAuthy process using Rhiza `Local: true` with required S3 or
+GCS object storage and `before-ack` durability. It is not a Rhiza operator or a
+multi-voter topology. The existing [`standalone`](../deploy/standalone/README.md)
+profile remains `Local: false`; select
+`GOAUTHY_RHIZA_PROFILE=standalone-local` explicitly for this Local archive
+contract. The profile rejects `GOAUTHY_RHIZA_CHECKPOINT_INTERVAL` overrides and
+uses Rhiza's 15-minute default. A one-second override caused `node is not ready`
+during schema migration in the GoAuthy startup probe. It also rejects
+`GOAUTHY_BACKUP_ENABLED=true` and all `goauthy-backup` export, restore, create,
+catalog publish/list/fetch, and prune commands before object access; GoAuthy's
+signed backup format is not the Rhiza Local archive format.
+
+### Init and main process
+
+Rhiza v0.21.1 documents an application-owned `Open`/`Close` init flow; it does
+not add a Rhiza init command or dedicated init image. GoAuthy's
+`/goauthy-rhiza-init` helper is built into the GoAuthy image, and the init and
+main containers use the same promoted image reference. The init process opens
+the Local database with the same configuration as main, waits for `Open` to
+complete, and closes the DB successfully. It must not run application SQL,
+migrations, or services. A nonzero open or close error prevents the main
+container from starting.
+
+Both containers mount the same `DataDir` read/write and use the same
+`ClusterID`, `NodeID`, object-store bucket, prefix, and credentials. Both need
+object-store access. There is no separate staging volume, evidence file, or
+verify/bootstrap mode. Main opens the same `DataDir` and config again; Rhiza
+validates the archive binding and reconciles history, avoiding a blind
+checkpoint redownload when histories already match. Main readiness still
+depends on its own open and service initialization, not merely on init success.
+
+Render the opt-in Kubernetes profile with
+`kustomize build deploy/standalone-local`. The profile selection and its
+dedicated object-store namespace are explicit greenfield decisions; do not
+reuse an old or uncertain namespace to bypass a recovery error. If the Local
+archive and local binding are both absent, the process cannot infer whether
+this is a first install or total loss of previous history. Use external
+inventory to authorize greenfield initialization. When a local binding exists,
+missing, corrupt, partial, inaccessible, or maintenance-held remote history
+must fail closed; preserve it and investigate instead of clearing objects.
+
+The Local profile is an embedded GoAuthy mode, not a Kubernetes-only feature.
+Outside Kubernetes, run the same GoAuthy init helper and main process
+sequentially with the same shared `DataDir` and object-store configuration.
+The supervisor must prevent overlap and establish that the previous writer is
+stopped and has no outstanding storage work. One replica or a `Recreate`
+rollout is not fencing. Kubernetes `emptyDir` survives container restarts in
+the same Pod but is lost when the Pod is removed; the external object store is
+the independent recovery copy. A PVC can retain `DataDir`, subject to its own
+failure-domain guarantees. If the local data and a filesystem archive are on
+the failed host or disk, they are not independent backups.
+
+Preserve the complete Local archive, namespace, cluster identity, issuer,
+master keys, and other application secrets. Keep the object store configured
+in main and retain `before-ack`; `Async` has a loss window. Rhiza Local mode's
+documented defaults are GC every hour, a 24-hour grace period, and three
+retained snapshots. Existing `Local: false` profiles keep periodic GC disabled.
+The v0.21.0 Local archive format has no automatic migration from older formats
+and does not convert a three-voter HA installation into Local mode.
+
+## Current v0.21.2 qualification and release gates
+
+The published Go SDK resolves to source `8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd`;
+its verified module checksum is
+`h1:q1bAEo2pHpm7dBpSEGWZ4VjbQk++dtB62sB8BKu7dn0=`.
+Upstream [exact-source CI 40840202108](https://github.com/mrchypark/rhiza/actions/runs/40840202108)
+completed successfully with 12 successful jobs and one explicit skip.
+The candidate cited by the [v0.21.2 release](https://github.com/mrchypark/rhiza/releases/tag/v0.21.2)
+and tagged merge have the same tree. The release reports each pinned provider
+adapter had 19 passes and two explicit skips; this is not live-cloud qualification.
+
+Fresh focused GoAuthy v0.21.2 filesystem loss/recovery and binding checks passed
+normally and with the race detector on 2026-10-29: storage 4.655s/29.716s and
+init 5.163s/35.597s (normal/race, author receipts). Module verification and tidy
+also passed. On 2026-10-30, the archive-adoption/ACK-tail recovery SDK contract
+passed on pinned Floci S3, GCS, and Azure emulators, all exit 0 with no skips.
+This does not qualify the init/main application journey on each provider.
+Owned containers and temporary binaries were removed and absence verified.
+[GoAuthy CI 40844609485](https://github.com/mrchypark/goauthy/actions/runs/40844609485)
+passed all five jobs for runtime commit `6453996`. The new image, live Kubernetes,
+and production-cloud behavior remain unqualified. Earlier v0.21.1 GoAuthy CI is
+not credited to v0.21.2. GoAuthy consumes the embedded Go SDK
+and builds its own app/init image; neither Rhiza Operator images nor native
+C/Rust FFI archives are required. The same-image, same-DataDir Open/Close init
+contract above remains in force.
+
+The separate high-severity [go-jose advisory GHSA-mgcc-cww5-fp2q](https://github.com/go-jose/go-jose/security/advisories/GHSA-mgcc-cww5-fp2q)
+still blocks PR merge, tagging, and release: direct v4 is pinned to fixed
+v4.1.6, but source-reachable v3.0.5 remains through Fosite v0.49.0 with no
+published fixed v3 version. Rhiza v0.21.2 and its CI do not close this block.
+
+## Historical v0.21.1 qualification and image review
+
+The v0.21.1 documentation-only release at source
+`66e2416b52e3d64aa86134b7b0c8b70c5ace88be` left the Go runtime and archive
+format unchanged from v0.21.0 source
+`e4c6339f9ce2092ac329e9a24ccd583c6a219bc8`.
+Its [release notes](https://github.com/mrchypark/rhiza/releases/tag/v0.21.1)
+record an unresolved S3 qualification failure:
+`TestEmbeddedObjectStorageCheckpointAndTailTotalLoss` reported
+`Local maintenance control changed during read` in
+[run 40697711614, job 122848820051](https://github.com/mrchypark/rhiza/actions/runs/40697711614/job/122848820051).
+Do not treat the docs-only release as all-green CI or new cloud qualification.
+Its upstream [application-image workflow](https://github.com/mrchypark/rhiza/blob/66e2416b52e3d64aa86134b7b0c8b70c5ace88be/.github/workflows/application-image.yml)
+is manually dispatched, publishes only immutable `sha-<commit>` tags, and
+builds `linux/amd64`; the upstream Dockerfile still starts `rhiza` as a server.
+At the v0.21.1 review, anonymous lookups for `v0.21.1` and
+`sha-66e2416b52e3d64aa86134b7b0c8b70c5ace88be` returned HTTP 404, so no public
+v0.21.1 image digest was established by that review. Use GoAuthy's own image for the
+application-owned init helper, not an assumed Rhiza init image.
 
 ## Historical Rhiza v0.19.0 candidate
 
@@ -52,15 +171,20 @@ missing configuration cannot silently select standalone local-only persistence.
 Existing-data migration is out of scope and unsupported; this greenfield
 candidate is not production-qualified.
 
-## Periodic object-store GC readiness (blocked)
+## Periodic object-store GC readiness (profile-specific)
 
-GoAuthy keeps Rhiza's periodic object-store GC disabled: the config adapter
-rejects GC interval and grace-period environment variables, and supported
-profiles leave both fields zero. Existing export/restore GC checks exercise
-paired recovery pins; they do not qualify the node's periodic GC loop.
+The existing `Local: false` profiles keep Rhiza's periodic object-store GC
+disabled: their config adapter rejects GC interval and grace-period overrides,
+and leaves both fields zero. The opt-in `standalone-local` profile is separate;
+it explicitly uses Rhiza Local defaults of a one-hour interval, 24-hour grace
+period, and three retained snapshots. Existing export/restore GC checks
+exercise paired recovery pins; they do not qualify the Local-mode periodic GC
+loop. Keep GC and other writers quiesced during init verification, and do not
+treat the existing disabled-GC evidence as qualification of `standalone-local`.
 
 Issue [#105](https://github.com/mrchypark/goauthy/issues/105) remains open:
-the greenfield candidate and this source review do not qualify periodic GC.
+the greenfield candidate and this source review do not qualify periodic GC for
+the existing `Local: false` profiles or the Local-mode collector.
 The 2026-10-02 review below concerns the v0.12.3 deployment and remains
 historical. The following startup assessment concerns
 [Rhiza v0.18.0](https://github.com/mrchypark/rhiza/releases/tag/v0.18.0)

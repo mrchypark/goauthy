@@ -49,6 +49,9 @@ func scheduledBackupFromEnv(getenv func(string) string, source rhiza.Config) (*s
 	if !enabled {
 		return nil, nil
 	}
+	if source.Local {
+		return nil, errors.New("scheduled signed backups do not support the Local archive format")
+	}
 	c := &scheduledBackupConfig{source: source, catalog: getenv("GOAUTHY_BACKUP_CATALOG_PREFIX"), work: getenv("GOAUTHY_BACKUP_WORK_DIR"), lease: time.Minute, timeout: 15 * time.Minute, keepDays: 30, maxEntries: 4096, retentionPolicy: backup.RetainLatest}
 	if source.ObjStoreBucket == "" || c.catalog == "" || c.work == "" {
 		return nil, errors.New("scheduled backup requires source object storage, catalog prefix and private work directory")
