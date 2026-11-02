@@ -54,7 +54,7 @@ expect_failure 'loopback port 19580 is occupied'
 
 # Exercise the real cleanup functions with an owned-ID fake, a foreign label,
 # and an unavailable daemon. Only the verified owned ID may be stopped/removed.
-for function in build_redaction_patterns sanitize_logs owned_id container_identity verified_identity verify_absent remove_container fingerprint_jwks observe cleanup; do
+for function in build_redaction_patterns sanitize_logs owned_id container_identity verified_identity verify_absent remove_container fingerprint_jwks diagnostic_http_probe diagnose_fs_timeout observe cleanup; do
 	awk -v name="$function" '$0 == name "() {" {copy=1} copy {print} copy && /^}/ {exit}' "$script" >>"$scratch/functions.sh"
 done
 # shellcheck source=/dev/null
@@ -157,10 +157,99 @@ if grep -F 'FAIL ' "$scratch/observation-true"; then exit 1; fi
 grep -F 'FAIL stage=capped ' "$scratch/observation-false" >/dev/null
 if grep -F 'INCOMPLETE ' "$scratch/observation-false"; then exit 1; fi
 
+# Only an FS observation cap invokes the diagnostic; the capped non-FS cases
+# above run with the real diagnostic function and must not make network probes.
+# shellcheck disable=SC2034,SC2329 # The extracted observe uses these fakes.
+if (
+	http_probe() { : >"$2"; printf 000; }
+	dkr() { printf true; }
+	diagnose_fs_timeout() { echo timeout_diagnostic_called; }
+	stage_started=$(date +%s)
+	sut_id=$owned_test_id
+	observe fs 0
+) >"$scratch/fs-timeout" 2>&1; then exit 1; else [ "$?" -eq 75 ]; fi
+[ "$(grep -c '^timeout_diagnostic_called$' "$scratch/fs-timeout")" -eq 1 ]
+
+# Timeout diagnostics compare the published path with only the exact owned
+# container's attachment. Foreign labels/IDs must prevent IP inspection.
+for diagnostic_case in owned foreign_container foreign_network wrong_container wrong_network wrong_attachment invalid_ip; do
+	# shellcheck disable=SC2034,SC2329 # Extracted diagnostic functions use these fakes and variables.
+	(
+		sut_id=$owned_test_id
+		network_id=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+		network_name=owned-network
+		issuer=http://127.0.0.1:19580
+		dkr() {
+			case "$1/$2/$4" in
+				container/inspect/*NetworkSettings*)
+					[ "$5" = "$sut_id" ]
+					echo attachment >>"$scratch/probe-$diagnostic_case.calls"
+					case "$diagnostic_case" in
+						wrong_attachment) printf '%s 172.30.0.2\n' "$sut_id";;
+						invalid_ip) printf '%s forbidden.example\n' "$network_id";;
+						*) printf '%s 172.30.0.2\n' "$network_id";;
+					esac;;
+				container/inspect/*)
+					[ "$5" = "$sut_id" ]
+					echo container_identity >>"$scratch/probe-$diagnostic_case.calls"
+					case "$diagnostic_case" in
+						foreign_container) printf '%s foreign\n' "$sut_id";;
+						wrong_container) printf '%s %s\n' "$network_id" "$nonce";;
+						*) printf '%s %s\n' "$sut_id" "$nonce";;
+					esac;;
+				network/inspect/*)
+					[ "$5" = "$network_id" ]
+					echo network_identity >>"$scratch/probe-$diagnostic_case.calls"
+					case "$diagnostic_case" in
+						foreign_network) printf '%s foreign\n' "$network_id";;
+						wrong_network) printf '%s %s\n' "$sut_id" "$nonce";;
+						*) printf '%s %s\n' "$network_id" "$nonce";;
+					esac;;
+				*) return 99;;
+			esac
+		}
+		curl() {
+			printf '%s\n' "$*" >>"$scratch/probe-$diagnostic_case.curl"
+			echo 'sensitive raw curl error' >&2
+			case "$*" in
+				*http://127.0.0.1:19580/livez) printf 000; return 7;;
+				*http://172.30.0.2:8080/livez) printf 204;;
+				*) return 99;;
+			esac
+		}
+		diagnose_fs_timeout
+	) >"$scratch/probe-$diagnostic_case.output" 2>&1
+	grep -Fx 'diagnostic stage=fs_published http=000 curl_exit=7 category=connect_failed' "$scratch/probe-$diagnostic_case.output" >/dev/null
+	if grep -E '172\.30|127\.0|sensitive raw|forbidden' "$scratch/probe-$diagnostic_case.output"; then exit 1; fi
+	if grep -v -e '--connect-timeout 1 --max-time 2 --output /dev/null' "$scratch/probe-$diagnostic_case.curl"; then exit 1; fi
+	if [ "$diagnostic_case" = owned ]; then
+		grep -Fx 'diagnostic stage=fs_direct http=204 curl_exit=0 category=other' "$scratch/probe-$diagnostic_case.output" >/dev/null
+		printf 'container_identity\nnetwork_identity\nattachment\n' >"$scratch/expected-probe-order"
+		cmp "$scratch/expected-probe-order" "$scratch/probe-$diagnostic_case.calls"
+		[ "$(wc -l <"$scratch/probe-$diagnostic_case.curl" | tr -d ' ')" -eq 2 ]
+	else
+		grep -Fx 'diagnostic stage=fs_direct_unverified http=000 curl_exit=not_run category=other' "$scratch/probe-$diagnostic_case.output" >/dev/null
+		[ "$(wc -l <"$scratch/probe-$diagnostic_case.curl" | tr -d ' ')" -eq 1 ]
+		case "$diagnostic_case" in foreign_*|wrong_container|wrong_network) if grep -Fx attachment "$scratch/probe-$diagnostic_case.calls"; then exit 1; fi;; esac
+	fi
+done
+
+# Fixed curl categories must not expose stderr even for unexpected failures.
+for probe_rc in 7 28 52 56 99; do
+	# shellcheck disable=SC2329 # diagnostic_http_probe calls this fake.
+	(
+		curl() { echo 'sensitive raw curl error' >&2; printf 000; return "$probe_rc"; }
+		diagnostic_http_probe fs_published http://127.0.0.1:19580/livez
+	) >"$scratch/category-$probe_rc" 2>&1
+	case "$probe_rc" in 7) category=connect_failed;; 28) category=timeout;; 52) category=empty_reply;; 56) category=receive_failed;; *) category=other;; esac
+	grep -Fx "diagnostic stage=fs_published http=000 curl_exit=$probe_rc category=$category" "$scratch/category-$probe_rc" >/dev/null
+	[ "$(wc -l <"$scratch/category-$probe_rc" | tr -d ' ')" -eq 1 ]
+done
+
 grep -F 'pull_request:' "$workflow" >/dev/null
 grep -F 'paths:' "$workflow" >/dev/null
 grep -F 'runs-on: ubuntu-latest' "$workflow" >/dev/null
 grep -F 'timeout-minutes: 25' "$workflow" >/dev/null
 if grep -E 'workflow_dispatch:|branches:|pull_request_target:|ci.yml|docker (push|build)' "$workflow"; then exit 1; fi
 for path in scripts/e2e-v038-readiness.sh scripts/test-e2e-v038-readiness.sh .github/workflows/v038-readiness.yml; do grep -F -e "- '$path'" "$workflow" >/dev/null; done
-echo 'PASS v0.3.8 shell guards: offline check, native host/server, port collision, owned cleanup/status, newline redaction, JWKS, workflow scope.'
+echo 'PASS v0.3.8 shell guards: offline check, native host/server, port collision, owned cleanup/status, newline redaction, JWKS, timeout network diagnostics, workflow scope.'

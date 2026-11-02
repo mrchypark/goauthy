@@ -185,6 +185,45 @@ http_probe() {
 		--output "$output" --write-out '%{http_code}' "$issuer$path" 2>"$output.err" || true
 }
 
+diagnostic_http_probe() {
+	diagnostic_stage=$1
+	diagnostic_rc=0
+	diagnostic_http=$(curl --noproxy '*' --silent --connect-timeout 1 --max-time 2 \
+		--output /dev/null --write-out '%{http_code}' "$2" 2>/dev/null) || diagnostic_rc=$?
+	case "$diagnostic_http" in [0-9][0-9][0-9]) ;; *) diagnostic_http=000;; esac
+	case "$diagnostic_rc" in
+		7) diagnostic_category=connect_failed;;
+		28) diagnostic_category=timeout;;
+		52) diagnostic_category=empty_reply;;
+		56) diagnostic_category=receive_failed;;
+		*) diagnostic_category=other;;
+	esac
+	printf 'diagnostic stage=%s http=%s curl_exit=%s category=%s\n' "$diagnostic_stage" "$diagnostic_http" "$diagnostic_rc" "$diagnostic_category" >&2
+}
+
+diagnose_fs_timeout() {
+	diagnostic_http_probe fs_published "$issuer/livez"
+	diagnostic_identity=$(container_identity "$sut_id") || diagnostic_identity=
+	diagnostic_owned_id=$(verified_identity "$diagnostic_identity") || diagnostic_owned_id=
+	if [ "$diagnostic_owned_id" != "$sut_id" ] || [ -z "$sut_id" ]; then
+		echo 'diagnostic stage=fs_direct_unverified http=000 curl_exit=not_run category=other' >&2
+		return 0
+	fi
+	diagnostic_identity=$(owned_id network "$network_id") || diagnostic_identity=
+	diagnostic_owned_id=$(verified_identity "$diagnostic_identity") || diagnostic_owned_id=
+	if [ "$diagnostic_owned_id" != "$network_id" ] || [ -z "$network_id" ]; then
+		echo 'diagnostic stage=fs_direct_unverified http=000 curl_exit=not_run category=other' >&2
+		return 0
+	fi
+	diagnostic_endpoint=$(dkr container inspect --format "{{with index .NetworkSettings.Networks \"$network_name\"}}{{.NetworkID}} {{.IPAddress}}{{end}}" "$sut_id" 2>/dev/null) || diagnostic_endpoint=
+	diagnostic_ip=${diagnostic_endpoint#* }
+	if [ "${diagnostic_endpoint%% *}" != "$network_id" ] || ! printf '%s\n' "$diagnostic_ip" | awk -F . 'NF != 4 { exit 1 } { for (i=1; i<=4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1 }'; then
+		echo 'diagnostic stage=fs_direct_unverified http=000 curl_exit=not_run category=other' >&2
+		return 0
+	fi
+	diagnostic_http_probe fs_direct "http://$diagnostic_ip:8080/livez"
+}
+
 observe() {
 	stage=$1; cap=$2
 	started=$stage_started; checkpoint=false; first_live=false; first_ready=false
@@ -211,6 +250,7 @@ observe() {
 			else
 				echo "INCOMPLETE observation_window_exceeded stage=$stage livez=$live readyz=$ready discovery=$discovery observed=${elapsed}s cap=${cap}s running=$running" >&2
 				observation_exit=75
+				if [ "$stage" = fs ]; then diagnose_fs_timeout; fi
 			fi
 			for endpoint in livez readyz discovery; do printf '%s body: ' "$endpoint" >&2; head -c 512 "$logs/$stage-$endpoint.body" | LC_ALL=C tr -cd '\11\12\15\40-\176' >&2; printf '\n' >&2; done
 			return "$observation_exit"
