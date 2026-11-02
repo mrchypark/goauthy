@@ -33,7 +33,7 @@ script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 cd "$root"
 
-for tool in env go curl nc mktemp grep rm; do
+for tool in env go curl nc mktemp grep rm ps sleep; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "missing required tool: $tool" >&2; exit 1; }
 done
 for source in \
@@ -42,6 +42,9 @@ for source in \
 	scripts/e2e-open-registration-standalone.sh \
 	scripts/e2e-admin-standalone.sh \
 	scripts/e2e-port-lock.sh \
+	scripts/e2e-stage-supervisor.sh \
+	scripts/e2e-stage-supervisor-src/go.mod \
+	scripts/e2e-stage-supervisor-src/main.go \
 	test/e2e/browser/login_journey_test.go \
 	test/e2e/browser/open_registration_test.go \
 	test/e2e/browser/password_reset_test.go \
@@ -51,7 +54,7 @@ for source in \
 	test/e2e/browser/password_reset_event_persistence_test.go; do
 	[ -f "$source" ] || { echo "missing isolated E2E source: $source" >&2; exit 1; }
 done
-for shell_script in scripts/verify-isolated.sh scripts/e2e-login-journey-standalone.sh scripts/e2e-open-registration-standalone.sh scripts/e2e-admin-standalone.sh; do
+for shell_script in scripts/verify-isolated.sh scripts/e2e-stage-supervisor.sh scripts/e2e-login-journey-standalone.sh scripts/e2e-open-registration-standalone.sh scripts/e2e-admin-standalone.sh; do
 	sh -n "$shell_script"
 done
 go version >/dev/null
@@ -75,6 +78,40 @@ fi
 
 umask 077
 run_dir=$(mktemp -d "${TMPDIR%/}/goauthy-isolated-e2e.XXXXXX")
+stage_pid=
+stage_active() {
+	state=$(ps -o stat= -p "$1" 2>/dev/null || true)
+	case "$state" in ''|Z*) return 1;; *) return 0;; esac
+}
+stop_owned_stage() {
+	child=$1
+	[ -n "$child" ] || return 0
+	if stage_active "$child"; then
+		kill -TERM "$child" 2>/dev/null || true
+		attempt=0
+		# The controller owns escalation; allow its 75s grace and 5s check.
+		while [ "$attempt" -lt 900 ] && stage_active "$child"; do
+			sleep 0.1
+			attempt=$((attempt + 1))
+		done
+	fi
+	stage_active "$child" && return 1
+	wait "$child" 2>/dev/null || true
+	return 0
+}
+handle_signal() {
+	signal_status=$1
+	signal_name=$2
+	trap - 1 2 15
+	if [ -n "$stage_pid" ]; then
+		if stop_owned_stage "$stage_pid"; then
+			stage_pid=
+		else
+			echo "could not verify owned stage exit after $signal_name; PID retained: $stage_pid" >&2
+		fi
+	fi
+	exit "$signal_status"
+}
 cleanup() {
 	status=$?
 	trap - 0 1 2 15
@@ -102,14 +139,27 @@ cleanup() {
 	exit "$status"
 }
 trap cleanup 0
-trap 'exit 130' 2
-trap 'exit 143' 1 15
+trap 'handle_signal 129 HUP' 1
+trap 'handle_signal 130 INT' 2
+trap 'handle_signal 143 TERM' 15
 
 run_stage() {
 	label=$1
 	shift
 	log=$run_dir/$label.log
-	if "$@" >"$log" 2>&1; then
+	if [ "$label" = supervisor-build ]; then
+		"$@" >"$log" 2>&1 &
+	else
+		/bin/sh "$script_dir/e2e-stage-supervisor.sh" "$@" >"$log" 2>&1 &
+	fi
+	stage_pid=$!
+	if wait "$stage_pid"; then
+		stage_status=0
+	else
+		stage_status=$?
+	fi
+	stage_pid=
+	if [ "$stage_status" -eq 0 ]; then
 		return 0
 	fi
 	echo "isolated E2E stage failed: $label (raw fixture logs suppressed)" >&2
@@ -125,6 +175,8 @@ run_stage() {
 	fi
 	return 1
 }
+
+run_stage supervisor-build /bin/sh "$script_dir/e2e-stage-supervisor.sh" --prepare
 
 run_stage login \
 	env -i PATH="$PATH" HOME="$HOME" TMPDIR="$TMPDIR" GOENV=off GOWORK=off GOMAXPROCS=2 \
