@@ -1,0 +1,31 @@
+name: Published v0.3.8 readiness observation
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/e2e-v038-readiness.sh'
+      - 'scripts/test-e2e-v038-readiness.sh'
+      - '.github/workflows/v038-readiness.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v038-readiness-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Check readiness harness guards
+        run: sh scripts/test-e2e-v038-readiness.sh
+      - name: Offline setup check
+        run: sh scripts/e2e-v038-readiness.sh --check
+      - name: Observe FS 2m, GCS cold 15m and warm 2m
+        # A missing verified GCS emulator pin exits 78 after the FS control.
+        run: sh scripts/e2e-v038-readiness.sh --run
