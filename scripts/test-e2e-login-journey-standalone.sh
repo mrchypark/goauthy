@@ -7,7 +7,16 @@ sh -n "$runner"
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/login-journey-guard.XXXXXX")
 trap 'rm -rf "$tmp"' 0 1 2 15
-mkdir "$tmp/bin"
+mkdir "$tmp/bin" "$tmp/runner-temp" "$tmp/caller-runner-temp"
+caller_run_id=ci-call-$$
+caller_run_attempt=8
+caller_artifact="$tmp/caller-runner-temp/goauthy-login-journey-artifacts-$caller_run_id-$caller_run_attempt"
+mkdir "$caller_artifact"
+printf '%s\n' preserve >"$caller_artifact/marker"
+RUNNER_TEMP="$tmp/caller-runner-temp"
+GITHUB_RUN_ID=$caller_run_id
+GITHUB_RUN_ATTEMPT=$caller_run_attempt
+export RUNNER_TEMP GITHUB_RUN_ID GITHUB_RUN_ATTEMPT
 for tool in go nc; do
 	cat >"$tmp/bin/$tool" <<'EOF'
 #!/bin/sh
@@ -58,7 +67,11 @@ assert_not_started
 # Force the real login harness through its nested env-i boundary, then stop at
 # its first Go command with the fake executable. This proves the Go child sees
 # GOENV=off even when the caller supplies a hostile Go environment setting.
+# Use a private CI-style run namespace so its expected failure artifact cannot
+# collide with this workflow's RUNNER_TEMP/GITHUB_RUN_ID artifact path.
+guard_run_id=login-guard-$$
 if PATH=$guard_path TMPDIR="$tmp" GOENV="$tmp/hostile-goenv" \
+	RUNNER_TEMP="$tmp/runner-temp" GITHUB_RUN_ID="$guard_run_id" GITHUB_RUN_ATTEMPT=1 \
 	GOAUTHY_E2E_CHROME_BIN=/usr/bin/true GOAUTHY_LOGIN_JOURNEY_SLOT=granted \
 	sh "$runner" --run >"$tmp/nested-run.log" 2>&1; then
 	echo 'nested Go capture unexpectedly completed the full login journey' >&2
@@ -69,8 +82,15 @@ fi
 	exit 1
 }
 grep -q '^run -mod=readonly -p=1 ./cmd/goauthy-password$' "$tmp/nested-go-args"
+[ -f "$tmp/runner-temp/goauthy-login-journey-artifacts-$guard_run_id-1/stage.txt" ] || {
+	echo 'nested login guard did not use its isolated CI artifact namespace' >&2
+	exit 1
+}
 [ ! -d "$tmp/goauthy-e2e-port.lock" ] || { echo 'login preflight left its port lock behind' >&2; exit 1; }
 set -- "$tmp"/goauthy-login-journey.??????
 [ ! -e "$1" ] || { echo 'login preflight left its credential directory behind' >&2; exit 1; }
+[ "$(cat "$caller_artifact/marker")" = preserve ] || { echo 'nested fake-Go failure modified the caller CI artifact' >&2; exit 1; }
+set -- "$tmp/caller-runner-temp"/*
+[ "$#" -eq 1 ] && [ "$1" = "$caller_artifact" ] || { echo 'login guard leaked an artifact into caller RUNNER_TEMP' >&2; exit 1; }
 
 echo 'Login journey syntax and offline preflight guards passed; no build, listener, or browser started.'
