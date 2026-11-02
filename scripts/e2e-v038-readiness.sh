@@ -33,7 +33,7 @@ if [ "$mode" = --check ]; then
 	exit 0
 fi
 
-for tool in docker curl jq nc openssl timeout sha256sum sudo chown uname date mktemp chmod rm sed tail head tr grep cat cut tee mkdir sleep; do
+for tool in docker curl jq nc openssl timeout sha256sum sudo chown uname date mktemp chmod rm sed tail head tr grep cat cut tee mkdir sleep awk; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "missing tool: $tool" >&2; exit 1; }
 done
 [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ] || { echo 'native Linux/amd64 host required; cross-architecture/FEX execution is unsupported' >&2; exit 1; }
@@ -54,6 +54,11 @@ sut_name=$network_name-sut
 gcs_name=$network_name-gcs
 network_id=; sut_id=; gcs_id=
 printf 'run=%s\nimage=%s\nrevision=%s\nplatform=%s\n' "$nonce" "$sut_image" "$sut_revision" "$platform" >"$logs/summary.txt"
+
+build_redaction_patterns() {
+	awk 'length($0) > 0 { print }' "$@" >"$inputs/patterns"
+	[ -s "$inputs/patterns" ]
+}
 
 sanitize_logs() {
 	for file in "$logs"/*; do
@@ -119,13 +124,14 @@ cleanup() {
 	sanitize_logs
 	rm -rf "$inputs"
 	[ ! -e "$inputs" ] || cleanup_failed=1
-	printf 'cleanup_verified=%s\nexit=%s\n' "$((1 - cleanup_failed))" "$status" >>"$logs/summary.txt"
+	cleanup_verified=false
+	if [ "$cleanup_failed" -eq 0 ]; then cleanup_verified=true; else status=1; fi
+	printf 'cleanup_verified=%s\nexit=%s\n' "$cleanup_verified" "$status" | tee -a "$logs/summary.txt"
 	if [ "$status" -ne 0 ]; then
 		# Logs are bounded and scanned for the fresh synthetic input values.
 		for file in "$logs"/*.log; do [ ! -f "$file" ] || tail -n 8 "$file" >&2; done
 	fi
-	echo "Protected synthetic diagnostics (inputs removed): $logs"
-	[ "$cleanup_failed" -eq 0 ] || status=1
+	echo "Protected synthetic diagnostics: $logs"
 	exit "$status"
 }
 trap cleanup 0
@@ -141,7 +147,7 @@ printf '%s\n' "$identity" >>"$logs/summary.txt"
 openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n' >"$inputs/keys/readiness-1"
 openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n' >"$inputs/oauth-hmac"
 openssl rand -hex 32 >"$inputs/bootstrap-client"
-for file in "$inputs/keys/readiness-1" "$inputs/oauth-hmac" "$inputs/bootstrap-client"; do cat "$file" >>"$inputs/patterns"; printf '\n' >>"$inputs/patterns"; done
+build_redaction_patterns "$inputs/keys/readiness-1" "$inputs/oauth-hmac" "$inputs/bootstrap-client"
 chmod 755 "$inputs" "$inputs/keys"
 chmod 600 "$inputs/keys/readiness-1" "$inputs/oauth-hmac" "$inputs/bootstrap-client"
 sudo -n chown 65532:65532 "$inputs/keys/readiness-1" "$inputs/oauth-hmac" "$inputs/bootstrap-client"

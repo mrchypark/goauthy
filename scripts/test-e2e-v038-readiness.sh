@@ -54,7 +54,7 @@ expect_failure 'loopback port 19580 is occupied'
 
 # Exercise the real cleanup functions with an owned-ID fake, a foreign label,
 # and an unavailable daemon. Only the verified owned ID may be stopped/removed.
-for function in container_identity verified_identity verify_absent remove_container fingerprint_jwks observe; do
+for function in build_redaction_patterns sanitize_logs owned_id container_identity verified_identity verify_absent remove_container fingerprint_jwks observe cleanup; do
 	awk -v name="$function" '$0 == name "() {" {copy=1} copy {print} copy && /^}/ {exit}' "$script" >>"$scratch/functions.sh"
 done
 # shellcheck source=/dev/null
@@ -62,16 +62,28 @@ done
 nonce=owned-run
 # shellcheck disable=SC2034 # The extracted production functions use logs.
 logs=$scratch/logs
+# shellcheck disable=SC2034 # The extracted production functions use inputs.
+inputs=$scratch/inputs
+printf 'synthetic-first\n' >"$inputs/trailing-newline"
+printf 'synthetic-second\n\n\n' >"$inputs/extra-newlines"
+build_redaction_patterns "$inputs/trailing-newline" "$inputs/extra-newlines"
+if grep '^$' "$inputs/patterns" >/dev/null; then echo 'redaction regression: empty pattern would withhold every log' >&2; exit 1; fi
+[ "$(wc -l <"$inputs/patterns" | tr -d ' ')" -eq 2 ]
+printf 'public startup diagnostic\n' >"$logs/benign.log"
+printf 'synthetic-first\n' >"$logs/sensitive.log"
+sanitize_logs
+grep -Fx 'public startup diagnostic' "$logs/benign.log" >/dev/null
+grep -Fx 'Log withheld: synthetic key material detected.' "$logs/sensitive.log" >/dev/null
 owned_test_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 test_label=$nonce
 test_daemon=up
 dkr() {
 	case "$1/$2" in
-		container/inspect)
+		container/inspect|network/inspect)
 			[ "$test_daemon" = up ] || return 125
 			if [ "$3" = --format ]; then printf '%s %s\n' "$owned_test_id" "$test_label"; else echo "Error: No such container: $owned_test_id" >&2; return 1; fi;;
 		logs/*) echo 'bounded synthetic log';;
-		stop/*|rm/*) printf '%s\n' "$*" >>"$scratch/actions";;
+		stop/*|rm/*|network/rm) printf '%s\n' "$*" >>"$scratch/actions";;
 		*) return 99;;
 	esac
 }
@@ -86,12 +98,39 @@ test_daemon=down
 if remove_container owned-name 2>"$scratch/rejected"; then echo 'daemon failure treated as verified absence' >&2; exit 1; fi
 cmp "$scratch/actions" "$scratch/before"
 
+# Run the actual EXIT cleanup in a subshell. Only verified resource absence
+# may print true; an unavailable daemon must print false and fail cleanup.
+for cleanup_case in up down; do
+	# shellcheck disable=SC2034 # The extracted cleanup uses these variables.
+	if (
+		test_daemon=$cleanup_case; test_label=$nonce
+		run_dir=$scratch/cleanup-$cleanup_case
+		inputs=$run_dir/inputs
+		# shellcheck disable=SC2030 # Each cleanup case deliberately isolates paths.
+		logs=$run_dir/logs
+		sut_name=owned-name; gcs_name=not-started; network_name=owned-network
+		mkdir -p "$inputs" "$logs"
+		: >"$run_dir/$sut_name.created"; : >"$run_dir/network.created"
+		cleanup
+	) >"$scratch/cleanup-$cleanup_case.output" 2>&1; then cleanup_rc=0; else cleanup_rc=$?; fi
+	if [ "$cleanup_case" = up ]; then
+		[ "$cleanup_rc" -eq 0 ]
+		grep -Fx 'cleanup_verified=true' "$scratch/cleanup-$cleanup_case.output" >/dev/null
+	else
+		[ "$cleanup_rc" -eq 1 ]
+		grep -Fx 'cleanup_verified=false' "$scratch/cleanup-$cleanup_case.output" >/dev/null
+		if grep -Fx 'cleanup_verified=true' "$scratch/cleanup-$cleanup_case.output"; then exit 1; fi
+	fi
+	[ ! -e "$scratch/cleanup-$cleanup_case/inputs" ]
+done
+
 http_probe() { cp "$scratch/jwks" "$2"; printf 200; }
 printf '%s\n' '{"keys":[{"kty":"OKP","kid":"fixture","crv":"Ed25519","x":"public"}]}' >"$scratch/jwks"
 fingerprint_jwks valid >"$scratch/fingerprint"
 [ "$(wc -c <"$scratch/fingerprint" | tr -d ' ')" -eq 65 ]
 printf '%s\n' '{"keys":[{"kty":"OKP","kid":"fixture","x":"public","d":"private"}]}' >"$scratch/jwks"
 if fingerprint_jwks private >"$scratch/private-fingerprint" 2>&1; then echo 'private JWKS accepted' >&2; exit 1; fi
+# shellcheck disable=SC2031 # This is the outer fixture's log path.
 [ ! -e "$logs/private-jwks.body" ] || { echo 'private JWKS response retained' >&2; exit 1; }
 
 # A running service exceeding the observation cap is incomplete, not a product
@@ -124,4 +163,4 @@ grep -F 'runs-on: ubuntu-latest' "$workflow" >/dev/null
 grep -F 'timeout-minutes: 25' "$workflow" >/dev/null
 if grep -E 'workflow_dispatch:|branches:|pull_request_target:|ci.yml|docker (push|build)' "$workflow"; then exit 1; fi
 for path in scripts/e2e-v038-readiness.sh scripts/test-e2e-v038-readiness.sh .github/workflows/v038-readiness.yml; do grep -F -e "- '$path'" "$workflow" >/dev/null; done
-echo 'PASS v0.3.8 shell guards: offline check, native host/server, port collision, owned cleanup, JWKS, workflow scope.'
+echo 'PASS v0.3.8 shell guards: offline check, native host/server, port collision, owned cleanup/status, newline redaction, JWKS, workflow scope.'
