@@ -62,11 +62,17 @@ build_redaction_patterns() {
 sanitize_logs() {
 	for file in "$logs"/*; do
 		[ -f "$file" ] || continue
-		if [ -f "$inputs/patterns" ] && grep -F -f "$inputs/patterns" "$file" >/dev/null 2>&1; then
-			printf '%s\n' 'Log withheld: synthetic key material detected.' >"$file"
+		if [ -f "$inputs/patterns" ]; then
+			if grep -F -f "$inputs/patterns" "$file" >/dev/null 2>&1; then
+				printf '%s\n' 'Log withheld: synthetic key material detected.' >"$file" || return 1
+			else
+				match_status=$?
+				[ "$match_status" -eq 1 ] || return 1
+			fi
 		fi
-		chmod 600 "$file"
+		chmod 600 "$file" || return 1
 	done
+	return 0
 }
 
 owned_id() {

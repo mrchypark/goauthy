@@ -187,24 +187,34 @@ grep -Fx 'STORAGE_EMULATOR_HOST=http://172.30.0.3:4588' "$scratch/args-gcs" >/de
 
 # Run the actual EXIT cleanup in a subshell. Only verified resource absence
 # may print true; an unavailable daemon must print false and fail cleanup.
-for cleanup_case in up down retained_inputs; do
+for cleanup_case in up down retained_inputs grep_failure placeholder_failure chmod_failure; do
 	# shellcheck disable=SC2034 # The extracted cleanup uses these variables.
 	if (
 		test_daemon=$cleanup_case; test_label=$nonce
-		[ "$cleanup_case" != retained_inputs ] || test_daemon=up
+		case "$cleanup_case" in down) ;; *) test_daemon=up;; esac
 		run_dir=$scratch/cleanup-$cleanup_case
 		inputs=$run_dir/inputs
 		# shellcheck disable=SC2030 # Each cleanup case deliberately isolates paths.
 		logs=$run_dir/logs
 		sut_name=owned-name; gcs_name=not-started; network_name=owned-network
 		mkdir -p "$inputs" "$logs"
+		# shellcheck disable=SC2329 # sanitize_logs calls this failure injection.
+		printf() { if [ "$cleanup_case" = placeholder_failure ] && [ "${2:-}" = 'Log withheld: synthetic key material detected.' ]; then return 1; fi; command printf "$@"; }
 		printf 'synthetic-private-fixture\n' >"$inputs/gcs-private.pem"
 		printf '{"private_key":"synthetic-private-fixture"}\n' >"$inputs/gcs-adc.json"
 		printf 'synthetic-private-fixture\n' >"$inputs/patterns"
 		printf 'synthetic-private-fixture\n' >"$logs/secret.log"
+		printf 'log-output-must-be-blocked\n' >"$logs/aaa-benign.log"
+		# shellcheck disable=SC2329 # sanitize_logs calls these failure injections.
+		grep() { if [ "$cleanup_case" = grep_failure ]; then case "$*" in */secret.log) return 2;; esac; fi; command grep "$@"; }
+		# shellcheck disable=SC2329
+		chmod() { if [ "$cleanup_case" = chmod_failure ] && [ "$*" = "600 $logs/aaa-benign.log" ]; then return 1; fi; command chmod "$@"; }
 		# shellcheck disable=SC2329 # cleanup calls this failure injection.
 		rm() { if [ "$cleanup_case" = retained_inputs ] && [ "$*" = "-rf $inputs" ]; then return 1; fi; command rm "$@"; }
 		: >"$run_dir/$sut_name.created"; : >"$run_dir/network.created"
+		# Give cleanup an existing failure so a masked sanitizer error would
+		# print the raw logs, reproducing the original confidentiality bug.
+		case "$cleanup_case" in *_failure) false;; esac
 		cleanup
 	) >"$scratch/cleanup-$cleanup_case.output" 2>&1; then cleanup_rc=0; else cleanup_rc=$?; fi
 	if [ "$cleanup_case" = up ]; then
@@ -218,7 +228,8 @@ for cleanup_case in up down retained_inputs; do
 	if [ "$cleanup_case" = retained_inputs ]; then
 		[ -f "$scratch/cleanup-$cleanup_case/inputs/gcs-private.pem" ]
 	else [ ! -e "$scratch/cleanup-$cleanup_case/inputs" ]; fi
-	if grep -F synthetic-private-fixture "$scratch/cleanup-$cleanup_case.output"; then exit 1; fi
+	if grep -F synthetic-private-fixture "$scratch/cleanup-$cleanup_case.output" >/dev/null; then echo 'cleanup exposed synthetic secret' >&2; exit 1; fi
+	case "$cleanup_case" in *_failure) if grep -E 'log-output-must-be-blocked|Log withheld:' "$scratch/cleanup-$cleanup_case.output" >/dev/null; then echo 'sanitization failure allowed log output' >&2; exit 1; fi;; esac
 done
 
 http_probe() { cp "$scratch/jwks" "$2"; printf 200; }
