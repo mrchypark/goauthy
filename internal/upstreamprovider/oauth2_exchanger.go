@@ -9,12 +9,26 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
 )
 
 const upstreamTokenExchangeTimeout = 10 * time.Second
+
+var defaultTokenExchangeClient = sync.OnceValue(func() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DisableCompression = true
+	if transport.TLSClientConfig == nil {
+		transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	} else {
+		transport.TLSClientConfig = transport.TLSClientConfig.Clone()
+		transport.TLSClientConfig.MinVersion = tls.VersionTLS12
+	}
+	return &http.Client{Transport: transport, Timeout: upstreamTokenExchangeTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+})
 
 var errTokenExchange = errors.New("upstream provider: token exchange failed")
 
@@ -68,16 +82,7 @@ func NewOAuth2TokenExchanger(configs map[string]Config, secrets map[string]strin
 		}
 	}
 	if client == nil {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.Proxy = nil
-		transport.DisableCompression = true
-		if transport.TLSClientConfig == nil {
-			transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-		} else {
-			transport.TLSClientConfig = transport.TLSClientConfig.Clone()
-			transport.TLSClientConfig.MinVersion = tls.VersionTLS12
-		}
-		client = &http.Client{Transport: transport, Timeout: upstreamTokenExchangeTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		client = defaultTokenExchangeClient()
 	} else {
 		cloned := *client
 		if cloned.Timeout == 0 || cloned.Timeout > upstreamTokenExchangeTimeout {

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/loginpolicy"
+	"github.com/mrchypark/goauthy/internal/passkey"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -17,7 +19,7 @@ import (
 func TestHousekeepingLeavesDedicatedTasksToTheirOwners(t *testing.T) {
 	t.Parallel()
 	db := retirementCmdDB(t, true)
-	jobs := buildHousekeepingJobs(db, nil, loginpolicy.NewStore(db), retirementCmdKeyring(t, "key-c"), nil)
+	jobs := buildHousekeepingJobs(db, nil, loginpolicy.NewStore(db), retirementCmdKeyring(t, "key-c"), nil, nil)
 	owners := map[string]int{}
 	for _, job := range jobs {
 		owners[job.Name]++
@@ -77,13 +79,13 @@ func TestHousekeepingKeyRemovalRetainsObligationsAcrossEpochs(t *testing.T) {
 	if _, err := storage.PrepareMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementPrepareRequest{Epoch: 2, OldKeyID: "key-b", ReplacementKeyID: "key-c", MemberIDs: []string{"node-0"}, PreparedAt: base.Add(4 * time.Second)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := removeRetiredMasterKey(ctx, db, first, func() time.Time { return firstReady.Add(time.Hour) }, ack); err != nil {
+	if err := removeRetiredMasterKey(ctx, db, first, 0, func() time.Time { return firstReady.Add(time.Hour) }, ack); err != nil {
 		t.Fatal(err)
 	}
 	if len(acknowledged) != 0 || !first.HasKey("key-a") {
 		t.Fatalf("overlap period ignored across epochs: acknowledged=%v", acknowledged)
 	}
-	if err := removeRetiredMasterKey(ctx, db, first, func() time.Time { return firstReady.Add(25 * time.Hour) }, ack); err != nil {
+	if err := removeRetiredMasterKey(ctx, db, first, 0, func() time.Time { return firstReady.Add(25 * time.Hour) }, ack); err != nil {
 		t.Fatal(err)
 	}
 	if len(acknowledged) != 1 || acknowledged[0] != 1 || first.HasKey("key-a") || !first.HasKey("key-b") {
@@ -92,7 +94,7 @@ func TestHousekeepingKeyRemovalRetainsObligationsAcrossEpochs(t *testing.T) {
 
 	// A member that missed the first cleanup still sees the obligation even
 	// though another node already recorded the removal.
-	if err := removeRetiredMasterKey(ctx, db, second, func() time.Time { return firstReady.Add(26 * time.Hour) }, ack); err != nil {
+	if err := removeRetiredMasterKey(ctx, db, second, 0, func() time.Time { return firstReady.Add(26 * time.Hour) }, ack); err != nil {
 		t.Fatal(err)
 	}
 	if len(acknowledged) != 2 || acknowledged[1] != 1 || second.HasKey("key-a") {
@@ -101,13 +103,13 @@ func TestHousekeepingKeyRemovalRetainsObligationsAcrossEpochs(t *testing.T) {
 
 	// B keeps its own independent overlap window.
 	secondReady := complete(2, "key-b", "key-c", base.Add(5*time.Second))
-	if err := removeRetiredMasterKey(ctx, db, first, func() time.Time { return secondReady.Add(time.Hour) }, ack); err != nil {
+	if err := removeRetiredMasterKey(ctx, db, first, 0, func() time.Time { return secondReady.Add(time.Hour) }, ack); err != nil {
 		t.Fatal(err)
 	}
 	if len(acknowledged) != 2 || !first.HasKey("key-b") {
 		t.Fatalf("second generation overlap ignored: epochs=%v retained-b=%v", acknowledged, first.HasKey("key-b"))
 	}
-	if err := removeRetiredMasterKey(ctx, db, first, func() time.Time { return secondReady.Add(25 * time.Hour) }, ack); err != nil {
+	if err := removeRetiredMasterKey(ctx, db, first, 0, func() time.Time { return secondReady.Add(25 * time.Hour) }, ack); err != nil {
 		t.Fatal(err)
 	}
 	if len(acknowledged) != 3 || acknowledged[2] != 2 || first.HasKey("key-b") {
@@ -150,19 +152,19 @@ func TestKeyRemovalRequiresAcknowledgedArchivalAndOverlap(t *testing.T) {
 		return nil
 	}
 	unavailable := errors.New("object-store durability unavailable")
-	if err := removeRetiredMasterKey(ctx, db, keyring, func() time.Time { return ready.Add(25 * time.Hour) }, func(context.Context, *rhiza.DB, int64) error { return unavailable }); !errors.Is(err, unavailable) {
+	if err := removeRetiredMasterKey(ctx, db, keyring, 0, func() time.Time { return ready.Add(25 * time.Hour) }, func(context.Context, *rhiza.DB, int64) error { return unavailable }); !errors.Is(err, unavailable) {
 		t.Fatalf("removal without acknowledged archival err=%v", err)
 	}
 	if !keyring.HasKey("key-a") {
 		t.Fatal("old key deleted from visible but unacknowledged readiness")
 	}
-	if err := removeRetiredMasterKey(ctx, db, keyring, func() time.Time { return ready.Add(time.Hour) }, ack); err != nil {
+	if err := removeRetiredMasterKey(ctx, db, keyring, 0, func() time.Time { return ready.Add(time.Hour) }, ack); err != nil {
 		t.Fatal(err)
 	}
 	if len(acknowledged) != 0 || !keyring.HasKey("key-a") {
 		t.Fatalf("overlap period ignored: acknowledged=%v", acknowledged)
 	}
-	if err := removeRetiredMasterKey(ctx, db, keyring, func() time.Time { return ready.Add(25 * time.Hour) }, ack); err != nil {
+	if err := removeRetiredMasterKey(ctx, db, keyring, 0, func() time.Time { return ready.Add(25 * time.Hour) }, ack); err != nil {
 		t.Fatal(err)
 	}
 	if len(acknowledged) != 1 || acknowledged[0] != 1 || keyring.HasKey("key-a") {
@@ -173,5 +175,216 @@ func TestKeyRemovalRequiresAcknowledgedArchivalAndOverlap(t *testing.T) {
 	}
 	if err := storage.AcknowledgeMasterKeyRetirementArchival(ctx, db, 2); !errors.Is(err, storage.ErrMasterKeyRetirementConflict) {
 		t.Fatalf("archival acknowledgment accepted a foreign epoch: %v", err)
+	}
+}
+
+func TestKeyRemovalWaitsForPasswordlessCookieRetentionAfterPreexistingReady(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		config *passkey.Config
+	}{
+		{name: "default", config: &passkey.Config{}},
+		{name: "shorter configured ttl", config: &passkey.Config{RenewTTL: 30 * 24 * time.Hour}},
+		{name: "configured", config: &passkey.Config{RenewTTL: 120 * 24 * time.Hour}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			db := retirementCmdDB(t, true)
+			keyring := retirementCmdKeyring(t, "key-b")
+			fencedAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+			if _, err := storage.PrepareMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementPrepareRequest{Epoch: 1, OldKeyID: "key-a", ReplacementKeyID: "key-b", MemberIDs: []string{"node-0"}, PreparedAt: fencedAt.Add(-time.Hour)}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := storage.FenceMasterKeyRetirement(ctx, db, 1, fencedAt); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := storage.AttestMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementAttestationRequest{Epoch: 1, NodeID: "node-0", BootID: "boot-0", ActiveKeyID: "key-b", AttestationSequence: 1, AttestedAt: fencedAt.Add(time.Second), Status: storage.MasterKeyRetirementStatus{}}); err != nil {
+				t.Fatal(err)
+			}
+			readyAt := fencedAt.Add(2 * time.Second)
+			if _, err := storage.ReadyMasterKeyRetirement(ctx, db, 1, readyAt); err != nil {
+				t.Fatal(err)
+			}
+			var acknowledged []int64
+			ack := func(_ context.Context, _ *rhiza.DB, epoch int64) error {
+				acknowledged = append(acknowledged, epoch)
+				return nil
+			}
+			cookieTTL := passkey.PasswordlessCookieTTLForConfig(test.config)
+			beforeCookieExpiry := func() time.Time { return fencedAt.Add(cookieTTL - time.Second) }
+			if err := removeRetiredMasterKey(ctx, db, keyring, cookieTTL, beforeCookieExpiry, ack); err != nil {
+				t.Fatal(err)
+			}
+			if len(acknowledged) != 0 || !keyring.HasKey("key-a") {
+				t.Fatalf("preexisting ready barrier removed a key before passwordless-cookie expiry: acknowledged=%v retained=%v", acknowledged, keyring.HasKey("key-a"))
+			}
+			if err := removeRetiredMasterKey(ctx, db, keyring, cookieTTL, func() time.Time { return fencedAt.Add(cookieTTL) }, ack); err != nil {
+				t.Fatal(err)
+			}
+			if len(acknowledged) != 1 || acknowledged[0] != 1 || keyring.HasKey("key-a") {
+				t.Fatalf("key removal at passwordless-cookie expiry acknowledgments=%v retained=%v", acknowledged, keyring.HasKey("key-a"))
+			}
+		})
+	}
+}
+
+func TestKeyRemovalRetainsDefaultCookieGraceWhenPasskeysAreDisabled(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := retirementCmdDB(t, true)
+	keyring := retirementCmdKeyring(t, "key-b")
+	fencedAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := storage.PrepareMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementPrepareRequest{Epoch: 1, OldKeyID: "key-a", ReplacementKeyID: "key-b", MemberIDs: []string{"node-0"}, PreparedAt: fencedAt.Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.FenceMasterKeyRetirement(ctx, db, 1, fencedAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.AttestMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementAttestationRequest{Epoch: 1, NodeID: "node-0", BootID: "boot-0", ActiveKeyID: "key-b", AttestationSequence: 1, AttestedAt: fencedAt.Add(time.Second), Status: storage.MasterKeyRetirementStatus{}}); err != nil {
+		t.Fatal(err)
+	}
+	readyAt := fencedAt.Add(2 * time.Second)
+	if _, err := storage.ReadyMasterKeyRetirement(ctx, db, 1, readyAt); err != nil {
+		t.Fatal(err)
+	}
+	var acknowledged []int64
+	ack := func(_ context.Context, _ *rhiza.DB, epoch int64) error {
+		acknowledged = append(acknowledged, epoch)
+		return nil
+	}
+	// Passkeys may be disabled now, but an older default-TTL cookie can still
+	// have been issued using this generation's fenced master key.
+	if err := removeRetiredMasterKey(ctx, db, keyring, passkey.PasswordlessCookieTTLForConfig(nil), func() time.Time {
+		return readyAt.Add(25 * time.Hour)
+	}, ack); err != nil {
+		t.Fatal(err)
+	}
+	if len(acknowledged) != 0 || !keyring.HasKey("key-a") {
+		t.Fatalf("disabling passkeys shortened default cookie retention: acknowledged=%v retained=%v", acknowledged, keyring.HasKey("key-a"))
+	}
+	if err := removeRetiredMasterKey(ctx, db, keyring, passkey.PasswordlessCookieTTLForConfig(nil), func() time.Time {
+		return fencedAt.Add(90 * 24 * time.Hour)
+	}, ack); err != nil {
+		t.Fatal(err)
+	}
+	if len(acknowledged) != 1 || acknowledged[0] != 1 || keyring.HasKey("key-a") {
+		t.Fatalf("key removal at default cookie expiry acknowledgments=%v retained=%v", acknowledged, keyring.HasKey("key-a"))
+	}
+}
+
+func TestKeyRemovalRetainsHistoricalPasswordlessCookieTTLAfterReduction(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := retirementCmdDB(t, true)
+	oldKeyring := retirementCmdKeyring(t, "key-a")
+	oldConfig := passkey.Config{
+		RPID: "example.com", RPDisplayName: "GoAuthy", Origins: []string{"https://example.com"},
+		CookieKey: bytes.Repeat([]byte{0x42}, 32), RenewTTL: 120 * 24 * time.Hour, Keyring: oldKeyring,
+	}
+	oldService, err := passkey.New(db, oldConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldCookie, err := oldService.PasswordlessCookie(ctx, "subject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The service has since been reconfigured with a shorter lifetime and a
+	// replacement active key, but the cookie above can still live for 120 days.
+	currentKeyring := retirementCmdKeyring(t, "key-b")
+	currentConfig := oldConfig
+	currentConfig.Keyring = currentKeyring
+	currentConfig.RenewTTL = 30 * 24 * time.Hour
+	currentService, err := passkey.New(db, currentConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subject, err := currentService.SubjectFromCookie(oldCookie); err != nil || subject != "subject" {
+		t.Fatalf("old cookie stopped decrypting after TTL reduction: subject=%q err=%v", subject, err)
+	}
+
+	issuedAt := time.Now().UTC()
+	fencedAt := issuedAt.Add(time.Second)
+	if _, err := storage.PrepareMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementPrepareRequest{Epoch: 1, OldKeyID: "key-a", ReplacementKeyID: "key-b", MemberIDs: []string{"node-0"}, PreparedAt: fencedAt.Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.FenceMasterKeyRetirement(ctx, db, 1, fencedAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.AttestMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementAttestationRequest{Epoch: 1, NodeID: "node-0", BootID: "boot-0", ActiveKeyID: "key-b", AttestationSequence: 1, AttestedAt: fencedAt.Add(time.Second), Status: storage.MasterKeyRetirementStatus{}}); err != nil {
+		t.Fatal(err)
+	}
+	readyAt := fencedAt.Add(2 * time.Second)
+	if _, err := storage.ReadyMasterKeyRetirement(ctx, db, 1, readyAt); err != nil {
+		t.Fatal(err)
+	}
+	var acknowledged []int64
+	ack := func(_ context.Context, _ *rhiza.DB, epoch int64) error {
+		acknowledged = append(acknowledged, epoch)
+		return nil
+	}
+	currentTTL := passkey.PasswordlessCookieTTLForConfig(&currentConfig)
+	if err := removeRetiredMasterKey(ctx, db, currentKeyring, currentTTL, func() time.Time {
+		return fencedAt.Add(90*24*time.Hour + time.Second)
+	}, ack); err != nil {
+		t.Fatal(err)
+	}
+	if len(acknowledged) != 0 || !currentKeyring.HasKey("key-a") {
+		t.Fatalf("TTL reduction pruned a key while its historical cookie remained valid: acknowledged=%v retained=%v", acknowledged, currentKeyring.HasKey("key-a"))
+	}
+	// Disabling passkeys after the reduction must still consult the persisted
+	// high-water mark, even though there is no current service configuration.
+	disabledTTL := passkey.PasswordlessCookieTTLForConfig(nil)
+	if err := removeRetiredMasterKey(ctx, db, currentKeyring, disabledTTL, func() time.Time {
+		return fencedAt.Add(100*24*time.Hour + time.Second)
+	}, ack); err != nil {
+		t.Fatal(err)
+	}
+	if len(acknowledged) != 0 || !currentKeyring.HasKey("key-a") {
+		t.Fatalf("disabling passkeys discarded historical cookie retention: acknowledged=%v retained=%v", acknowledged, currentKeyring.HasKey("key-a"))
+	}
+	if err := removeRetiredMasterKey(ctx, db, currentKeyring, disabledTTL, func() time.Time {
+		return fencedAt.Add(120*24*time.Hour + time.Second)
+	}, ack); err != nil {
+		t.Fatal(err)
+	}
+	if len(acknowledged) != 1 || acknowledged[0] != 1 || currentKeyring.HasKey("key-a") {
+		t.Fatalf("key removal after historical cookie expiry acknowledgments=%v retained=%v", acknowledged, currentKeyring.HasKey("key-a"))
+	}
+}
+
+func TestKeyRemovalFailsClosedWhenCookieRetentionCannotBeRead(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := retirementCmdDB(t, true)
+	keyring := retirementCmdKeyring(t, "key-b")
+	fencedAt := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := storage.PrepareMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementPrepareRequest{Epoch: 1, OldKeyID: "key-a", ReplacementKeyID: "key-b", MemberIDs: []string{"node-0"}, PreparedAt: fencedAt.Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.FenceMasterKeyRetirement(ctx, db, 1, fencedAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.AttestMasterKeyRetirement(ctx, db, storage.MasterKeyRetirementAttestationRequest{Epoch: 1, NodeID: "node-0", BootID: "boot-0", ActiveKeyID: "key-b", AttestationSequence: 1, AttestedAt: fencedAt.Add(time.Second), Status: storage.MasterKeyRetirementStatus{}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.ReadyMasterKeyRetirement(ctx, db, 1, fencedAt.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "retirement-drop-cookie-retention-for-test", SQL: `DROP TABLE passkey_cookie_key_retention`}); err != nil {
+		t.Fatal(err)
+	}
+	var acknowledged []int64
+	err := removeRetiredMasterKey(ctx, db, keyring, 90*24*time.Hour, func() time.Time {
+		return fencedAt.Add(120 * 24 * time.Hour)
+	}, func(_ context.Context, _ *rhiza.DB, epoch int64) error {
+		acknowledged = append(acknowledged, epoch)
+		return nil
+	})
+	if err == nil || len(acknowledged) != 0 || !keyring.HasKey("key-a") {
+		t.Fatalf("pruning without readable retention err=%v acknowledgments=%v retained=%v", err, acknowledged, keyring.HasKey("key-a"))
 	}
 }

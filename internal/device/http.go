@@ -456,7 +456,7 @@ func parseScopes(value string) ([]string, bool) {
 }
 
 func validClientID(value string) bool {
-	return utf8.ValidString(value) && value == strings.TrimSpace(value) && len(value) <= 128 && value != ""
+	return utf8.ValidString(value) && value == strings.TrimSpace(value) && len(value) <= 256 && value != ""
 }
 
 func validUserCode(value string) bool {

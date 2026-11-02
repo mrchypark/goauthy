@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/i18n"
+	"github.com/mrchypark/goauthy/internal/smtptransport"
 	mail "github.com/wneessen/go-mail"
 )
 
@@ -93,8 +94,8 @@ type SMTPConfig struct {
 
 // SMTPSender delivers password-reset messages through SMTP.
 type SMTPSender struct {
-	config           SMTPConfig
-	send             func(context.Context, *mail.Msg) error
+	config            SMTPConfig
+	send              func(context.Context, *mail.Msg) error
 	OnDeliveryFailure func(recipient, mailType, subject, textBody, htmlBody string, err error)
 }
 
@@ -372,14 +373,14 @@ func renderOTPHTML(data otpData) (string, error) {
 }
 
 var otpTemplates = map[string]EmailTemplate{
-	"en": {Subject: "Your One-Time Password", Header: "One-Time Password", Text: "Use the following code to complete your login:", Validity: "This code expires in:", Expires: "Expires at:", Footer: "If you did not request this code, you can safely ignore this email."},
-	"de": {Subject: "Ihr Einmalpasswort", Header: "Einmalpasswort", Text: "Verwenden Sie den folgenden Code, um Ihren Login abzuschließen:", Validity: "Dieser Code läuft ab in:", Expires: "Gültig bis:", Footer: "Wenn Sie diesen Code nicht angefordert haben, können Sie diese E-Mail sicher ignorieren."},
-	"fr": {Subject: "Votre mot de passe à usage unique", Header: "Mot de passe à usage unique", Text: "Utilisez le code suivant pour terminer votre connexion:", Validity: "Ce code expire dans:", Expires: "Expire le:", Footer: "Si vous n'avez pas demandé ce code, vous pouvez ignorer cet e-mail."},
-	"ko": {Subject: "일회용 비밀번호", Header: "일회용 비밀번호", Text: "로그인을 완료하려면 다음 코드를 사용하세요:", Validity: "이 코드는 다음 시간 후 만료됩니다:", Expires: "만료일:", Footer: "이 코드를 요청하지 않았다면 이 이메일을 무시해도 됩니다."},
-	"nb": {Subject: "Engangspassord", Header: "Engangspassord", Text: "Bruk følgende kode for å fullføre påloggingen:", Validity: "Denne koden utløper om:", Expires: "Utløper:", Footer: "Hvis du ikke ba om denne koden, kan du trygt ignorere denne e-posten."},
-	"nl": {Subject: "Uw eenmalig wachtwoord", Header: "Eenmalig wachtwoord", Text: "Gebruik de volgende code om uw aanmelding te voltooien:", Validity: "Deze code verloopt over:", Expires: "Verloopt:", Footer: "Als u deze code niet heeft aangevraagd, kunt u deze e-mail veilig negeren."},
-	"ru": {Subject: "Ваш одноразовый пароль", Header: "Одноразовый пароль", Text: "Используйте следующий код для завершения входа:", Validity: "Срок действия этого кода:", Expires: "Истекает:", Footer: "Если вы не запрашивали этот код, можете безопасно игнорировать это письмо."},
-	"uk": {Subject: "Ваш одноразовий пароль", Header: "Одноразовий пароль", Text: "Використайте наступний код для завершення входу:", Validity: "Термін дії цього коду:", Expires: "Закінчується:", Footer: "Якщо ви не запитували цей код, можете безпечно ігнорувати цей лист."},
+	"en":      {Subject: "Your One-Time Password", Header: "One-Time Password", Text: "Use the following code to complete your login:", Validity: "This code expires in:", Expires: "Expires at:", Footer: "If you did not request this code, you can safely ignore this email."},
+	"de":      {Subject: "Ihr Einmalpasswort", Header: "Einmalpasswort", Text: "Verwenden Sie den folgenden Code, um Ihren Login abzuschließen:", Validity: "Dieser Code läuft ab in:", Expires: "Gültig bis:", Footer: "Wenn Sie diesen Code nicht angefordert haben, können Sie diese E-Mail sicher ignorieren."},
+	"fr":      {Subject: "Votre mot de passe à usage unique", Header: "Mot de passe à usage unique", Text: "Utilisez le code suivant pour terminer votre connexion:", Validity: "Ce code expire dans:", Expires: "Expire le:", Footer: "Si vous n'avez pas demandé ce code, vous pouvez ignorer cet e-mail."},
+	"ko":      {Subject: "일회용 비밀번호", Header: "일회용 비밀번호", Text: "로그인을 완료하려면 다음 코드를 사용하세요:", Validity: "이 코드는 다음 시간 후 만료됩니다:", Expires: "만료일:", Footer: "이 코드를 요청하지 않았다면 이 이메일을 무시해도 됩니다."},
+	"nb":      {Subject: "Engangspassord", Header: "Engangspassord", Text: "Bruk følgende kode for å fullføre påloggingen:", Validity: "Denne koden utløper om:", Expires: "Utløper:", Footer: "Hvis du ikke ba om denne koden, kan du trygt ignorere denne e-posten."},
+	"nl":      {Subject: "Uw eenmalig wachtwoord", Header: "Eenmalig wachtwoord", Text: "Gebruik de volgende code om uw aanmelding te voltooien:", Validity: "Deze code verloopt over:", Expires: "Verloopt:", Footer: "Als u deze code niet heeft aangevraagd, kunt u deze e-mail veilig negeren."},
+	"ru":      {Subject: "Ваш одноразовый пароль", Header: "Одноразовый пароль", Text: "Используйте следующий код для завершения входа:", Validity: "Срок действия этого кода:", Expires: "Истекает:", Footer: "Если вы не запрашивали этот код, можете безопасно игнорировать это письмо."},
+	"uk":      {Subject: "Ваш одноразовий пароль", Header: "Одноразовий пароль", Text: "Використайте наступний код для завершення входу:", Validity: "Термін дії цього коду:", Expires: "Закінчується:", Footer: "Якщо ви не запитували цей код, можете безпечно ігнорувати цей лист."},
 	"zh_hans": {Subject: "您的动态验证码", Header: "动态验证码", Text: "请使用以下代码完成登录:", Validity: "此代码将在以下时间后过期:", Expires: "过期时间:", Footer: "如果您没有请求此代码，可以安全地忽略此邮件。"},
 }
 
@@ -418,10 +419,13 @@ func (s *SMTPSender) validPasswordURL(value, event string) error {
 }
 
 func (s *SMTPSender) deliver(ctx context.Context, msg *mail.Msg) error {
+	tlsConfig := &tls.Config{ServerName: s.config.Host, MinVersion: tls.VersionTLS12}
+	dial, implicitTLSAuth := smtptransport.Dialer(ctx, s.config.ImplicitTLS, tlsConfig)
 	opts := []mail.Option{
 		mail.WithPort(s.config.Port),
 		mail.WithTimeout(s.config.Timeout),
-		mail.WithTLSConfig(&tls.Config{ServerName: s.config.Host, MinVersion: tls.VersionTLS12}),
+		mail.WithTLSConfig(tlsConfig),
+		mail.WithDialContextFunc(dial),
 	}
 	if s.config.ImplicitTLS {
 		opts = append(opts, mail.WithSSL())
@@ -431,7 +435,11 @@ func (s *SMTPSender) deliver(ctx context.Context, msg *mail.Msg) error {
 		opts = append(opts, mail.WithTLSPolicy(mail.TLSMandatory))
 	}
 	if s.config.Username != "" || s.config.Password != "" {
-		opts = append(opts, mail.WithSMTPAuth(mail.SMTPAuthAutoDiscover), mail.WithUsername(s.config.Username), mail.WithPassword(s.config.Password))
+		auth := mail.WithSMTPAuth(mail.SMTPAuthAutoDiscover)
+		if s.config.ImplicitTLS {
+			auth = implicitTLSAuth(s.config.Username, s.config.Password)
+		}
+		opts = append(opts, auth, mail.WithUsername(s.config.Username), mail.WithPassword(s.config.Password))
 	}
 	client, err := mail.NewClient(s.config.Host, opts...)
 	if err != nil {

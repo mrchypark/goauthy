@@ -1326,11 +1326,15 @@ func (s *Store) GetAccessTokenSession(ctx context.Context, signature string, ses
 		SQL: `SELECT request_json FROM oauth_token_requests WHERE signature = ?`, Args: []any{signature}, Consistency: rhiza.ConsistencyLinearizable,
 	})
 	if err != nil {
-		return nil, err
+		return nil, wrapOAuthBackendFailure(err)
 	}
 	if len(result.Rows) == 1 && len(result.Rows[0]) == 1 {
 		if encoded, ok := result.Rows[0][0].(string); ok {
-			return s.decodeRequest(ctx, encoded, session)
+			request, err := s.decodeRequest(ctx, encoded, session)
+			if err != nil {
+				return nil, wrapOAuthBackendFailure(err)
+			}
+			return request, nil
 		}
 	}
 	return nil, fosite.ErrNotFound

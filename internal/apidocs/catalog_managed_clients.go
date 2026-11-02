@@ -30,7 +30,7 @@ func addManagedClientOperations(doc *openapi3.T) {
 	fields := func() map[string]*openapi3.Schema {
 		return map[string]*openapi3.Schema{
 			"backchannel_logout_uri": backchannel, "restrict_group_prefix": prefix, "client_uri": clientURI, "name": openapi3.NewStringSchema().WithNullable(), "confidential": openapi3.NewBoolSchema(),
-			"redirect_uris": list, "enabled": openapi3.NewBoolSchema(), "scopes": list,
+			"redirect_uris": list, "enabled": openapi3.NewBoolSchema(), "force_mfa": openapi3.NewBoolSchema(), "scopes": list,
 			"default_scopes": list, "enabled_flows": list, "audience": openapi3.NewArraySchema().WithItems(str), "default_aud": openapi3.NewArraySchema().WithItems(str),
 		}
 	}
@@ -40,8 +40,8 @@ func addManagedClientOperations(doc *openapi3.T) {
 	responseFields := fields()
 	responseFields["client_uri"] = responseClientURI
 	responseFields["id"], responseFields["revision"] = str, openapi3.NewInt64Schema().WithMin(1)
-	client := object(responseFields, "id", "revision", "name", "confidential", "redirect_uris", "enabled", "scopes", "default_scopes", "enabled_flows", "audience", "default_aud")
-	create := object(map[string]*openapi3.Schema{"id": str, "backchannel_logout_uri": backchannel, "restrict_group_prefix": prefix, "client_uri": clientURI, "name": openapi3.NewStringSchema().WithNullable(), "confidential": openapi3.NewBoolSchema(), "redirect_uris": list, "audience": openapi3.NewArraySchema().WithItems(str), "default_aud": openapi3.NewArraySchema().WithItems(str)}, "id", "confidential", "redirect_uris")
+	client := object(responseFields, "id", "revision", "name", "confidential", "redirect_uris", "enabled", "force_mfa", "scopes", "default_scopes", "enabled_flows", "audience", "default_aud")
+	create := object(map[string]*openapi3.Schema{"id": str, "backchannel_logout_uri": backchannel, "restrict_group_prefix": prefix, "client_uri": clientURI, "name": openapi3.NewStringSchema().WithNullable(), "confidential": openapi3.NewBoolSchema(), "redirect_uris": list, "force_mfa": openapi3.NewBoolSchema(), "audience": openapi3.NewArraySchema().WithItems(str), "default_aud": openapi3.NewArraySchema().WithItems(str)}, "id", "confidential", "redirect_uris")
 	create.WithProperty("scopes", list).WithProperty("default_scopes", list).WithProperty("enabled_flows", list)
 	create.Description = "default_aud configures independent default access-token audiences across grants, included alongside any explicitly granted resource. Defaults do not expand the resource request allow-list. Token exchange is admitted only for confidential clients with the explicit token-exchange enabled_flow. Optional initial scopes, default_scopes, enabled_flows and audience configure the client atomically. Omitted or empty audience allows no explicitly requested resource audience. Entries must be unique absolute HTTPS URLs without userinfo, query or fragment, at most 32 entries of 2048 bytes each. Token requests also require the resource in the server allow-list. Empty redirect_uris are valid only when authorization_code is not enabled. Device-only public clients require no client secret or synthetic callback URL."
 	update.Description = "Omit audience or default_aud to preserve that policy; send [] to clear it. Omit client_uri to preserve it; send null to clear it. A changed audience policy invalidates the previous client generation and its tokens."

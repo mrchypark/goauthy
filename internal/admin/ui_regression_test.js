@@ -175,10 +175,17 @@ const ready = vm.runInNewContext(source, ctx);
     '요청 결과를 확인할 수 없습니다. 다시 시도하기 전에 현재 상태를 확인하세요.');
   assert.equal(unreadableSubmitter.disabled, false);
 
-  const existing = {language: 'fr', user_expires: 2000000000, roles: [], groups: [],
+  const existing = {language: 'fr', user_expires: 2000000000, roles: ['role,admin'], groups: ['group,ops'],
     user_values: {preferred_username: 'retained', birthdate: '2000-01-02', phone: '+33123456789',
       street: 'Main', zip: '12345', city: 'Paris', country: 'FR', tz: 'Europe/Paris'}};
+  const setUserNameArrays = (roles = [], groups = []) => {
+    document.getElementById('roles').value = JSON.stringify(roles);
+    document.getElementById('groups').value = JSON.stringify(groups);
+  };
   ctx.userForm('member/one', existing);
+  assert.match(document.getElementById('app').innerHTML, /<textarea id="roles">\[&quot;role,admin&quot;\]<\/textarea>/);
+  assert.match(document.getElementById('app').innerHTML, /<textarea id="groups">\[&quot;group,ops&quot;\]<\/textarea>/);
+  setUserNameArrays(existing.roles, existing.groups);
   assert.equal(document.getElementById('language').value, 'fr');
   document.getElementById('email').value = 'member@example.test';
   document.getElementById('given').value = 'Given';
@@ -191,13 +198,28 @@ const ready = vm.runInNewContext(source, ctx);
   assert.equal(calls.at(-1).url, '/auth/v1/users/member%2Fone');
   assert.equal(payload.user_expires, existing.user_expires);
   assert.equal(payload.language, 'fr');
-  assert.deepEqual(payload.roles, []);
+  assert.deepEqual(payload.roles, ['role,admin']);
+  assert.deepEqual(payload.groups, ['group,ops']);
   const {preferred_username, ...accepted} = existing.user_values;
   assert.deepEqual(payload.user_values, accepted);
   assert.equal(existing.user_values.preferred_username, 'retained');
 
-  const callsBeforeInvalidExpiry = calls.length;
+  const callsBeforeInvalidNames = calls.length;
   ctx.userForm('member/one', existing);
+  setUserNameArrays(existing.roles, existing.groups);
+  document.getElementById('roles').value = '{invalid';
+  await document.getElementById('user').onsubmit({preventDefault() {}});
+  assert.equal(calls.length, callsBeforeInvalidNames);
+  assert.match(document.getElementById('result').textContent, /JSON/);
+
+  // This fake DOM does not rebuild input values when innerHTML changes. Restore
+  // valid values explicitly so the following expiry case reaches its guard.
+  setUserNameArrays(existing.roles, existing.groups);
+  const callsBeforeInvalidExpiry = calls.length;
+  assert.equal(document.getElementById('roles').value, JSON.stringify(existing.roles),
+    'the fake DOM must restore valid role JSON after the invalid-JSON case');
+  assert.equal(document.getElementById('groups').value, JSON.stringify(existing.groups),
+    'the fake DOM must restore valid group JSON after the invalid-JSON case');
   document.getElementById('expiry').value = '-1';
   await document.getElementById('user').onsubmit({preventDefault() {}});
   assert.equal(calls.length, callsBeforeInvalidExpiry);
@@ -207,6 +229,7 @@ const ready = vm.runInNewContext(source, ctx);
   assert.equal(calls.length, callsBeforeInvalidExpiry);
 
   ctx.userForm();
+  setUserNameArrays();
   document.getElementById('language').value = 'en';
   document.getElementById('expiry').value = '2000000000';
   document.getElementById('preferred').value = 'new-member';
@@ -224,6 +247,7 @@ const ready = vm.runInNewContext(source, ctx);
   document.getElementById('expiry').value = '';
   document.getElementById('preferred').value = '';
   document.getElementById('timezone').value = '';
+  setUserNameArrays();
   await document.getElementById('user').onsubmit({preventDefault() {}});
   payload = JSON.parse(calls.at(-1).opts.body);
   assert.equal(payload.user_expires, null);

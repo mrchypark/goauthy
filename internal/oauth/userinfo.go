@@ -33,6 +33,10 @@ func (s *Server) UserInfoHandler() http.Handler {
 		signature := s.accessTokens.AccessTokenSignature(r.Context(), token)
 		request, err := s.store.GetAccessTokenSession(r.Context(), signature, &fosite.DefaultSession{})
 		if err != nil {
+			if oauthBackendUnavailable(err) {
+				writeOAuthServiceUnavailable(w)
+				return
+			}
 			writeUserInfoUnauthorized(w)
 			return
 		}
@@ -45,6 +49,10 @@ func (s *Server) UserInfoHandler() http.Handler {
 			return
 		}
 		if err := s.verifyDPoPResourceRequest(r.Context(), r, request, token); err != nil {
+			if oauthBackendUnavailable(err) {
+				writeOAuthServiceUnavailable(w)
+				return
+			}
 			var nonceErr *dpopNonceError
 			if errors.As(err, &nonceErr) {
 				w.Header().Set("DPoP-Nonce", nonceErr.nonce)
@@ -60,18 +68,37 @@ func (s *Server) UserInfoHandler() http.Handler {
 			return
 		}
 		subject := request.GetSession().GetSubject()
-		if _, err := s.store.GetClient(r.Context(), request.GetClient().GetID()); err != nil || s.oidc.ValidateSubject(r.Context(), subject) != nil {
+		if _, err := s.store.GetClient(r.Context(), request.GetClient().GetID()); err != nil {
+			if oauthBackendUnavailable(err) {
+				writeOAuthServiceUnavailable(w)
+				return
+			}
+			writeUserInfoUnauthorized(w)
+			return
+		}
+		if err := s.oidc.ValidateSubject(r.Context(), subject); err != nil {
+			if oauthBackendUnavailable(err) {
+				writeOAuthServiceUnavailable(w)
+				return
+			}
 			writeUserInfoUnauthorized(w)
 			return
 		}
 		claims, err := s.currentPrincipal(r.Context(), subject)
 		if err != nil {
+			if oauthBackendUnavailable(err) {
+				writeOAuthServiceUnavailable(w)
+				return
+			}
 			writeUserInfoUnauthorized(w)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
 		custom, err := s.currentCustomClaims(r.Context(), subject, request.GetGrantedScopes())
 		if err != nil {
+			if oauthBackendUnavailable(err) {
+				writeOAuthServiceUnavailable(w)
+				return
+			}
 			writeUserInfoUnauthorized(w)
 			return
 		}
@@ -82,6 +109,10 @@ func (s *Server) UserInfoHandler() http.Handler {
 		if s.oidc.ResolveProfile != nil && request.GetGrantedScopes().HasOneOf("profile", "email", "address", "phone") {
 			profile, profileErr := s.oidc.ResolveProfile(r.Context(), subject)
 			if profileErr != nil {
+				if oauthBackendUnavailable(profileErr) {
+					writeOAuthServiceUnavailable(w)
+					return
+				}
 				writeUserInfoUnauthorized(w)
 				return
 			}
@@ -92,10 +123,15 @@ func (s *Server) UserInfoHandler() http.Handler {
 			writeUserInfoUnauthorized(w)
 			return
 		}
-		if s.store.validateTokenAccounts(r.Context(), request) != nil {
+		if err := s.store.validateTokenAccounts(r.Context(), request); err != nil {
+			if oauthBackendUnavailable(err) {
+				writeOAuthServiceUnavailable(w)
+				return
+			}
 			writeUserInfoUnauthorized(w)
 			return
 		}
+		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(response)
 	})
 }

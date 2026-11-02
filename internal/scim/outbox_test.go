@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -957,5 +958,25 @@ func TestOutboxBoundsConfigAndRetryDelay(t *testing.T) {
 	o.MaxAttempts = 1000
 	if got := o.retryDelay(Job{ID: "job"}, 1000); got > time.Hour {
 		t.Fatalf("retry delay=%s exceeds one hour", got)
+	}
+}
+
+func TestOutboxRetryJitterSurvivesMillisecondPersistence(t *testing.T) {
+	o := newOutboxTest(t, func(context.Context, string) (Reconciler, error) {
+		return fakeReconciler(nil), nil
+	}, OutboxConfig{RetryBase: 100 * time.Millisecond})
+	now := time.UnixMilli(1_700_000_000_000).UTC()
+	seen := make(map[int64]struct{})
+	for i := 0; i < 128; i++ {
+		job := Job{ID: "millisecond-jitter-" + strconv.Itoa(i)}
+		delay := o.retryDelay(job, 1)
+		storedDelay := now.Add(delay).UnixMilli() - now.UnixMilli()
+		if storedDelay < 100 || storedDelay > 200 {
+			t.Fatalf("stored retry delay for job %q = %dms, want [100,200]ms", job.ID, storedDelay)
+		}
+		seen[storedDelay] = struct{}{}
+	}
+	if len(seen) < 8 {
+		t.Fatalf("stored retry jitter has %d millisecond buckets, want at least 8", len(seen))
 	}
 }

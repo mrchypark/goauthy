@@ -28,6 +28,7 @@ func Export(ctx context.Context, bucket objstore.Bucket, prefix, clusterID strin
 	if _, err := limits.streamLimit(); err != nil {
 		return SnapshotManifest{}, err
 	}
+	producerVersion := rhizaVersion()
 	stage, err := os.MkdirTemp(workParent, ".goauthy-export-")
 	if err != nil {
 		return SnapshotManifest{}, err
@@ -59,7 +60,7 @@ func Export(ctx context.Context, bucket objstore.Bucket, prefix, clusterID strin
 		if err := validateInitialArchive(ctx, archive, uint64(archive.Tip())); err != nil {
 			return SnapshotManifest{}, err
 		}
-		manifest := SnapshotManifest{FormatVersion: 2, RhizaVersion: "v0.12.3", SourcePrefix: prefix, ClusterID: clusterID, ConfigID: 1, RecoveryMode: "archive-only", ArchiveTip: uint64(archive.Tip())}
+		manifest := SnapshotManifest{FormatVersion: 2, RhizaVersion: producerVersion, SourcePrefix: prefix, ClusterID: clusterID, ConfigID: 1, RecoveryMode: "archive-only", ArchiveTip: uint64(archive.Tip())}
 		return writeCaptured(ctx, capture, manifest, dst, recipients, limits)
 	}
 	owner := "goauthy-export-" + rand.Text()
@@ -153,7 +154,7 @@ func Export(ctx context.Context, bucket objstore.Bucket, prefix, clusterID strin
 			return SnapshotManifest{}, err
 		}
 	}
-	manifest := SnapshotManifest{FormatVersion: 1, RhizaVersion: "v0.12.3", SourcePrefix: prefix, ClusterID: clusterID, ConfigID: 1, CheckpointIndex: root.Index, CheckpointRootHash: fmt.Sprintf("%x", root.RootHash), CheckpointStateHash: fmt.Sprintf("%x", root.Hash)}
+	manifest := SnapshotManifest{FormatVersion: 1, RhizaVersion: producerVersion, SourcePrefix: prefix, ClusterID: clusterID, ConfigID: 1, CheckpointIndex: root.Index, CheckpointRootHash: fmt.Sprintf("%x", root.RootHash), CheckpointStateHash: fmt.Sprintf("%x", root.Hash)}
 	manifest, err = writeCaptured(ctx, capture, manifest, dst, recipients, limits)
 	if err != nil {
 		return SnapshotManifest{}, err

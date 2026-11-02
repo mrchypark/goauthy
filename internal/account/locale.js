@@ -39,4 +39,8 @@
     'I reviewed this provider and its allowed operations. Store my key with these settings. This does not authorize a consumer service to use it.': '이 제공자와 허용된 작업을 검토했습니다. 이 설정으로 키를 저장합니다. 소비자 서비스의 사용을 허용하는 것은 아닙니다.',
     'Unable to load provider settings. Close and reopen to review them before saving. An existing key can still be revoked.': '제공자 설정을 불러올 수 없습니다. 저장하기 전에 닫았다가 다시 열어 설정을 검토하세요. 기존 키는 계속 취소할 수 있습니다.'
   });
+  Object.assign(i18n.messages, {
+    'The current password is incorrect. Check it and try again.': '현재 비밀번호가 올바르지 않습니다. 확인한 뒤 다시 시도하세요.',
+    'Password change outcome is unknown. Check the current state before retrying.': '비밀번호 변경 결과를 확인할 수 없습니다. 현재 상태를 확인한 뒤 다시 시도하세요.'
+  });
 })();

@@ -88,7 +88,7 @@ func TestWebAuthnStartPasskeyOnlyTamperedCookieDenies(t *testing.T) {
 	init := page.Result().Cookies()[0]
 	interaction := interactionToken(t, page.Body.String())
 
-	valid, err := h.passkeys.PasswordlessCookie("user-1")
+	valid, err := h.passkeys.PasswordlessCookie(t.Context(), "user-1")
 	if err != nil {
 		t.Fatal(err)
 	}

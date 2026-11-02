@@ -1,0 +1,107 @@
+{
+  "campaign": "goauthy-v0.3.8 review HTTP runtime comparison",
+  "baseline": {
+    "version": "v0.3.8",
+    "revision": "908cc698b1f238fb12ce83a47e2656d8333e2523",
+    "source": "archived source tree"
+  },
+  "fixed": {
+    "branch": "feature/review-v038-correctness",
+    "source": "uncommitted review worktree on feature/review-v038-correctness; full-tree revision/diff hash was not captured at measurement time"
+  },
+  "harness": {
+    "path": "internal/oauth/review_http_measurement_test.go",
+    "sha256": "f6c4f6574cd901a596844f0cebf99b6358f1eb20f4b6f5c12c51396f4da6cabe",
+    "build_tag": "integration",
+    "test": "TestReviewHTTPRuntimeMeasurement"
+  },
+  "runtime": {
+    "go": "go1.27.2",
+    "os": "darwin",
+    "architecture": "arm64",
+    "host": "Macmini9,1 M1, 8 CPU, 16 GiB",
+    "GOMAXPROCS": 2,
+    "transport": "loopback TCP via httptest.Server and http.Client"
+  },
+  "matrix": {
+    "http_stages": [
+      "authorization_code_token",
+      "userinfo",
+      "refresh_grant"
+    ],
+    "synthetic_unrelated_identity_rows": [
+      0,
+      1000
+    ],
+    "concurrency": [
+      1,
+      8
+    ],
+    "samples_per_cell_per_run": 200,
+    "repetitions_per_tree": 3,
+    "direct_kdf_stage": "argon2_verify",
+    "kdf_concurrency": [
+      1,
+      8
+    ]
+  },
+  "totals": {
+    "cells": 84,
+    "samples": 16800,
+    "http_samples": 14400,
+    "direct_kdf_samples": 2400,
+    "http_errors": 0,
+    "kdf_work_limit_errors": {
+      "baseline": 18,
+      "fixed": 61
+    }
+  },
+  "profile_resolver_calls_per_request": {
+    "authorization_code_token": {
+      "baseline": 2,
+      "fixed": 1
+    },
+    "refresh_grant": {
+      "baseline": 2,
+      "fixed": 1
+    },
+    "userinfo": {
+      "baseline": 1,
+      "fixed": 1
+    }
+  },
+  "host_load_note": "Immediately after the six-run campaign, the shared 8-CPU host reported load averages 18.09, 19.88, and 20.61. Background load was not controlled or recorded per run. Other workload identities and process details are intentionally omitted. Latency and throughput are descriptive observations under this uncontrolled host condition, not causal performance estimates.",
+  "scope": "Synthetic local fixtures only. No private captures or live data. The 1000-row case adds unrelated identity rows; it does not model expired-token backlog. Invalid token controls are outside timed samples. KDF errors are retained, not discarded.",
+  "run_files": [
+    {
+      "run": "baseline-1",
+      "file": "raw/baseline-1.json",
+      "elapsed_seconds": 66.351346084
+    },
+    {
+      "run": "baseline-2",
+      "file": "raw/baseline-2.json",
+      "elapsed_seconds": 76.204819292
+    },
+    {
+      "run": "baseline-3",
+      "file": "raw/baseline-3.json",
+      "elapsed_seconds": 65.2895025
+    },
+    {
+      "run": "fixed-1",
+      "file": "raw/fixed-1.json",
+      "elapsed_seconds": 48.128784333
+    },
+    {
+      "run": "fixed-2",
+      "file": "raw/fixed-2.json",
+      "elapsed_seconds": 71.848334583
+    },
+    {
+      "run": "fixed-3",
+      "file": "raw/fixed-3.json",
+      "elapsed_seconds": 63.1142405
+    }
+  ]
+}

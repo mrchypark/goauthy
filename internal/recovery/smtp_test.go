@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
 	"net"
+	"net/http/httptest"
 	stdmail "net/mail"
 	"strings"
 	"testing"
@@ -250,6 +252,106 @@ func TestSMTPSenderSendsToLocalInsecureFixture(t *testing.T) {
 	plain, html := multipartBodies(t, message)
 	if !strings.Contains(plain, "http://auth.example.test/reset") || !strings.Contains(plain, expires.Format(time.RFC3339)) || !strings.Contains(html, `href="http://auth.example.test/reset"`) {
 		t.Fatalf("fixture bodies plain=%q html=%q", plain, html)
+	}
+}
+
+func TestSMTPSenderClosesStalledGreeting(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		timeout time.Duration
+		cancel  bool
+	}{
+		{name: "cancel", timeout: 3 * time.Second, cancel: true},
+		{name: "deadline", timeout: 150 * time.Millisecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			accepted := make(chan net.Conn, 1)
+			closed := make(chan struct{})
+			go func() {
+				conn, err := listener.Accept()
+				if err != nil {
+					close(closed)
+					return
+				}
+				accepted <- conn
+				_, _ = io.Copy(io.Discard, conn)
+				_ = conn.Close()
+				close(closed)
+			}()
+
+			host, port := splitSMTPAddress(t, listener.Addr().String())
+			sender, err := NewSMTPSender(SMTPConfig{Host: host, Port: port, From: "support@example.test", Timeout: test.timeout, AllowInsecure: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() { done <- sender.SendAlreadyRegistered(ctx, Message{To: "user@example.test"}) }()
+			var conn net.Conn
+			select {
+			case conn = <-accepted:
+			case <-time.After(time.Second):
+				cancel()
+				t.Fatal("SMTP connection was not accepted")
+			}
+			if test.cancel {
+				cancel()
+			}
+			select {
+			case <-closed:
+			case <-time.After(400 * time.Millisecond):
+				_ = conn.Close()
+				cancel()
+				<-done
+				t.Fatal("SMTP connection stayed open after cancellation or deadline")
+			}
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("SMTP send did not return after the connection closed")
+			}
+		})
+	}
+}
+
+func TestSMTPSenderVerifiesImplicitTLSCertificate(t *testing.T) {
+	certServer := httptest.NewTLSServer(nil)
+	defer certServer.Close()
+	rawListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener := tls.NewListener(rawListener, &tls.Config{Certificates: certServer.TLS.Certificates})
+	defer listener.Close()
+	handshake := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			handshake <- err
+			return
+		}
+		defer conn.Close()
+		handshake <- conn.(*tls.Conn).Handshake()
+	}()
+
+	_, port := splitSMTPAddress(t, listener.Addr().String())
+	sender, err := NewSMTPSender(SMTPConfig{Host: "localhost", Port: port, From: "support@example.test", Timeout: time.Second, ImplicitTLS: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.SendAlreadyRegistered(context.Background(), Message{To: "user@example.test"}); err == nil {
+		t.Fatal("implicit TLS accepted an untrusted certificate")
+	}
+	select {
+	case <-handshake:
+	case <-time.After(time.Second):
+		t.Fatal("TLS fixture did not observe a handshake")
 	}
 }
 

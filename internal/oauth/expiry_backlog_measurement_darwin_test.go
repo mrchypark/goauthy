@@ -272,7 +272,7 @@ func newExpiry65Fixture(t *testing.T, root string) *expiry65Fixture {
 			return PrincipalClaims{}, err
 		}
 		if len(r.Rows) != 1 {
-			return PrincipalClaims{}, errors.New("inactive measurement principal")
+			return PrincipalClaims{}, identity.ErrInactiveSubject
 		}
 		return PrincipalClaims{Revision: r.Rows[0][0].(int64)}, nil
 	}})

@@ -21,9 +21,10 @@ import (
 )
 
 const (
-	jwksCacheTTL = 5 * time.Minute
-	jwksTimeout  = 10 * time.Second
-	maxJWKSBytes = 64 << 10
+	jwksCacheTTL          = 5 * time.Minute
+	jwksTimeout           = 10 * time.Second
+	maxJWKSBytes          = 64 << 10
+	jwksMissRetryInterval = time.Second
 )
 
 // ErrIDTokenVerification intentionally gives callers no token, key, or
@@ -36,9 +37,10 @@ var allowedIDTokenAlgorithms = []jose.SignatureAlgorithm{
 }
 
 type jwksCacheEntry struct {
-	keys        jose.JSONWebKeySet
-	expires     time.Time
-	missRefresh bool
+	keys             jose.JSONWebKeySet
+	expires          time.Time
+	missRefreshUntil time.Time
+	retryAfter       time.Time
 }
 
 type jwksFetch struct {
@@ -178,13 +180,11 @@ func verificationError(ctx context.Context, err error) error {
 func (v *JWKSVerifier) keys(ctx context.Context, issuer, uri string, force bool) (jose.JSONWebKeySet, error) {
 	now := v.now()
 	v.mu.Lock()
-	if entry, ok := v.entries[issuer]; ok && now.Before(entry.expires) {
-		if !force || entry.missRefresh {
-			v.mu.Unlock()
-			return entry.keys, nil
-		}
-		entry.missRefresh = true
-		v.entries[issuer] = entry
+	entry, cached := v.entries[issuer]
+	cached = cached && now.Before(entry.expires)
+	if cached && !force {
+		v.mu.Unlock()
+		return entry.keys, nil
 	}
 	if active := v.fetching[issuer]; active != nil {
 		v.mu.Unlock()
@@ -193,6 +193,12 @@ func (v *JWKSVerifier) keys(ctx context.Context, issuer, uri string, force bool)
 			return active.keys, active.err
 		case <-ctx.Done():
 			return jose.JSONWebKeySet{}, ctx.Err()
+		}
+	}
+	if cached && force {
+		if now.Before(entry.missRefreshUntil) || now.Before(entry.retryAfter) {
+			v.mu.Unlock()
+			return entry.keys, nil
 		}
 	}
 	active := &jwksFetch{done: make(chan struct{})}
@@ -205,7 +211,18 @@ func (v *JWKSVerifier) keys(ctx context.Context, issuer, uri string, force bool)
 		cancel()
 		v.mu.Lock()
 		if err == nil {
-			v.entries[issuer] = jwksCacheEntry{keys: keys, expires: v.now().Add(jwksCacheTTL), missRefresh: force}
+			fetchedAt := v.now()
+			entry := jwksCacheEntry{keys: keys, expires: fetchedAt.Add(jwksCacheTTL)}
+			if force {
+				entry.missRefreshUntil = entry.expires
+			}
+			v.entries[issuer] = entry
+		} else if force {
+			fetchedAt := v.now()
+			if entry, ok := v.entries[issuer]; ok && fetchedAt.Before(entry.expires) {
+				entry.retryAfter = fetchedAt.Add(jwksMissRetryInterval)
+				v.entries[issuer] = entry
+			}
 		}
 		active.keys, active.err = keys, err
 		delete(v.fetching, issuer)

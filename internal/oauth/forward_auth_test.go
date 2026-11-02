@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -98,11 +99,22 @@ func TestForwardAuthRejectsDPoPBoundAndInvalidSubject(t *testing.T) {
 	bindForwardAuthTokenDPoP(t, db, server, bound)
 	assertForwardAuthUnauthorized(t, server, forwardAuthRequest(http.MethodGet, bound, nil))
 
-	server = userInfoTestServer(t, db, assertError("disabled"))
+	server = userInfoTestServer(t, db, identity.ErrInactiveSubject)
 	assertForwardAuthUnauthorized(t, server, forwardAuthRequest(http.MethodGet, issueUserInfoToken(t, server), nil))
 	response := forwardAuthResponse(server, forwardAuthRequest(http.MethodPost, issueUserInfoToken(t, server), nil))
 	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != http.MethodGet {
 		t.Fatalf("method status=%d headers=%v", response.Code, response.Header())
+	}
+}
+
+func TestForwardAuthBackendUnavailableReturnsServiceUnavailable(t *testing.T) {
+	t.Parallel()
+	server := userInfoTestServer(t, oauthTestDB(t), nil)
+	token := issueUserInfoToken(t, server)
+	server.oidc.ValidateSubject = func(context.Context, string) error { return rhiza.ErrQuorumUnavailable }
+	response := forwardAuthResponse(server, forwardAuthRequest(http.MethodGet, token, nil))
+	if response.Code != http.StatusServiceUnavailable || response.Header().Get("Cache-Control") != "no-store" || response.Header().Get(ForwardAuthUserHeader) != "" || strings.Contains(response.Body.String(), "user-1") {
+		t.Fatalf("status=%d headers=%v body=%q", response.Code, response.Header(), response.Body.String())
 	}
 }
 
@@ -151,7 +163,3 @@ func bindForwardAuthTokenDPoP(t *testing.T, db *rhiza.DB, server *Server, token 
 		t.Fatal(err)
 	}
 }
-
-type assertError string
-
-func (e assertError) Error() string { return string(e) }

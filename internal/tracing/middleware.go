@@ -6,6 +6,8 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -31,7 +33,10 @@ func (h *tracingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Use the installed provider instead of the request context: an ordinary
 	// request carries no span, so the context lookup silently supplied the
 	// no-op tracer and produced no request spans.
-	spanCtx, span := otel.Tracer("goauthy/http").Start(r.Context(), r.Method+" "+unmatchedRoute,
+	// Accept only W3C trace context from HTTP headers; caller-controlled baggage
+	// can carry unrelated or sensitive values into downstream spans.
+	ctx := (propagation.TraceContext{}).Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+	spanCtx, span := otel.Tracer("goauthy/http").Start(ctx, r.Method+" "+unmatchedRoute,
 		trace.WithSpanKind(trace.SpanKindServer),
 		trace.WithAttributes(
 			attribute.String("http.method", r.Method),
@@ -60,6 +65,7 @@ func (h *tracingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 	if sw.status >= 500 {
 		span.SetAttributes(attribute.Bool("error", true))
+		span.SetStatus(codes.Error, http.StatusText(sw.status))
 	}
 }
 

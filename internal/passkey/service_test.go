@@ -358,7 +358,7 @@ func TestLoginFinishCredentialInterpositionLeavesCeremonyUnconsumed(t *testing.T
 
 func TestPasswordlessCookieAndModificationTokenAreBoundAndOneUse(t *testing.T) {
 	s, _, now := newTestService(t)
-	cookie, err := s.PasswordlessCookie("subject")
+	cookie, err := s.PasswordlessCookie(t.Context(), "subject")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,6 +399,88 @@ func TestPasswordlessCookieAndModificationTokenAreBoundAndOneUse(t *testing.T) {
 	}
 }
 
+func TestPasswordlessCookieRetentionRegistersExactKeyAndCachesSuccess(t *testing.T) {
+	s, db, _ := newTestService(t)
+	first, err := s.PasswordlessCookie(t.Context(), "subject")
+	if err != nil || first == "" {
+		t.Fatalf("first cookie=%q err=%v", first, err)
+	}
+	row, err := db.Query(t.Context(), rhiza.QueryRequest{
+		SQL:         `SELECT max_ttl_ns FROM passkey_cookie_key_retention WHERE master_key_id='master-a'`,
+		Consistency: rhiza.ConsistencyLinearizable,
+	})
+	if err != nil || len(row.Rows) != 1 || row.Rows[0][0] != int64(s.renewTTL) {
+		t.Fatalf("master-a retention row=%v err=%v", row.Rows, err)
+	}
+
+	// A replacement service issuing under a new active key must establish a
+	// separate watermark for the key embedded in its own envelope.
+	rotated, err := New(db, Config{
+		RPID: "example.test", RPDisplayName: "Example", Origins: []string{"https://example.test"},
+		CookieKey: []byte(strings.Repeat("k", 32)), Keyring: testPasskeyKeyringOnly(t, "master-b"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotatedCookie, err := rotated.PasswordlessCookie(t.Context(), "rotated-subject")
+	if err != nil || rotatedCookie == "" {
+		t.Fatalf("rotated cookie=%q err=%v", rotatedCookie, err)
+	}
+	for _, keyID := range []string{"master-a", "master-b"} {
+		row, err := db.Query(t.Context(), rhiza.QueryRequest{
+			SQL:  `SELECT max_ttl_ns FROM passkey_cookie_key_retention WHERE master_key_id=?`,
+			Args: []any{keyID}, Consistency: rhiza.ConsistencyLinearizable,
+		})
+		if err != nil || len(row.Rows) != 1 {
+			t.Fatalf("%s retention row=%v err=%v", keyID, row.Rows, err)
+		}
+	}
+
+	// Successful registrations are cached per service/key pair. Removing the
+	// table makes any accidental per-cookie SQL visible as an issuance error.
+	if _, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{RequestID: "passkey-cookie-retention-drop-for-test", SQL: `DROP TABLE passkey_cookie_key_retention`}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.PasswordlessCookie(t.Context(), "subject-2")
+	if err != nil || second == "" {
+		t.Fatalf("cached cookie=%q err=%v", second, err)
+	}
+	secondRotated, err := rotated.PasswordlessCookie(t.Context(), "rotated-subject-2")
+	if err != nil || secondRotated == "" {
+		t.Fatalf("cached rotated cookie=%q err=%v", secondRotated, err)
+	}
+}
+
+func TestPasswordlessCookieFailsClosedWhenRetentionWriteFails(t *testing.T) {
+	s, db, _ := newTestService(t)
+	if _, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{RequestID: "passkey-cookie-retention-drop-write-failure", SQL: `DROP TABLE passkey_cookie_key_retention`}); err != nil {
+		t.Fatal(err)
+	}
+	cookie, err := s.PasswordlessCookie(t.Context(), "subject")
+	if err == nil || cookie != "" {
+		t.Fatalf("cookie escaped without a durable retention record: cookie=%q err=%v", cookie, err)
+	}
+}
+
+func TestPasswordlessCookieRetentionWatermarkIsMonotonic(t *testing.T) {
+	_, db, _ := newTestService(t)
+	ctx := t.Context()
+	if err := storage.RegisterPasswordlessCookieKeyTTL(ctx, db, "watermark-key", 120*24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.RegisterPasswordlessCookieKeyTTL(ctx, db, "watermark-key", 30*24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	ttl, err := storage.PasswordlessCookieKeyTTL(ctx, db, "watermark-key")
+	if err != nil || ttl != 120*24*time.Hour {
+		t.Fatalf("historical TTL=%v err=%v, want 120 days", ttl, err)
+	}
+	missing, err := storage.PasswordlessCookieKeyTTL(ctx, db, "legacy-key-without-row")
+	if err != nil || missing != 0 {
+		t.Fatalf("legacy missing watermark=%v err=%v, want zero without synthesizing a row", missing, err)
+	}
+}
+
 func TestPasswordlessCookieLegacyDualReadAndGAOPFailClosed(t *testing.T) {
 	s, _, now := newTestService(t)
 	exp := now.UTC().Add(s.renewTTL).Unix()
@@ -413,7 +495,7 @@ func TestPasswordlessCookieLegacyDualReadAndGAOPFailClosed(t *testing.T) {
 	}
 
 	// A valid GAOP cookie must not fall back to CookieKey after tampering.
-	gaop, err := s.PasswordlessCookie("gaop-subject")
+	gaop, err := s.PasswordlessCookie(t.Context(), "gaop-subject")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +510,7 @@ func TestPasswordlessCookieLegacyDualReadAndGAOPFailClosed(t *testing.T) {
 
 	// Removing the old key makes an A-issued GAOP cookie unknown, and it still
 	// must not be interpreted as a legacy CookieKey ciphertext.
-	aCookie, err := s.PasswordlessCookie("old-key-subject")
+	aCookie, err := s.PasswordlessCookie(t.Context(), "old-key-subject")
 	if err != nil {
 		t.Fatal(err)
 	}
