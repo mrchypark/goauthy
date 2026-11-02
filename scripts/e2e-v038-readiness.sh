@@ -33,7 +33,7 @@ if [ "$mode" = --check ]; then
 	exit 0
 fi
 
-for tool in docker curl jq nc openssl timeout sha256sum sudo chown uname date mktemp chmod rm sed tail head tr grep cat cut tee mkdir sleep awk; do
+for tool in docker curl jq openssl timeout sha256sum sudo chown uname date mktemp chmod rm sed tail head tr grep cat cut tee mkdir sleep awk; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "missing tool: $tool" >&2; exit 1; }
 done
 [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ] || { echo 'native Linux/amd64 host required; cross-architecture/FEX execution is unsupported' >&2; exit 1; }
@@ -41,7 +41,6 @@ export DOCKER_HOST=unix:///var/run/docker.sock
 dkr() { timeout 30 docker "$@"; }
 platform=$(dkr info --format '{{.OSType}}/{{.Architecture}}')
 case "$platform" in linux/amd64|linux/x86_64) ;; *) echo "native Docker Linux/amd64 server required; got $platform" >&2; exit 1;; esac
-nc -z 127.0.0.1 19580 >/dev/null 2>&1 && { echo 'loopback port 19580 is occupied; refusing to start' >&2; exit 1; }
 
 umask 077
 run_dir=$(mktemp -d "${TMPDIR%/}/goauthy-v038-readiness.XXXXXX")
@@ -159,13 +158,12 @@ printf 'network %s %s\n' "$network_id" "$network_name" >>"$logs/resources.txt"
 create_sut() {
 	context=$1
 	shift
-	nc -z 127.0.0.1 19580 >/dev/null 2>&1 && { echo 'loopback port 19580 became occupied' >&2; return 1; }
 	: >"$run_dir/$sut_name.created"
 	sut_id=$(dkr create --name "$sut_name" --label "$owner_label=$nonce" --network "$network_id" \
 		--user 65532:65532 --read-only --cap-drop ALL --security-opt no-new-privileges \
 		--tmpfs /data:rw,noexec,nosuid,uid=65532,gid=65532,mode=0700 \
 		--tmpfs /tmp:rw,noexec,nosuid,uid=65532,gid=65532,mode=0700 \
-		--mount "type=bind,src=$inputs,dst=/inputs,readonly" --publish 127.0.0.1:19580:8080 \
+		--mount "type=bind,src=$inputs,dst=/inputs,readonly" \
 		--env GOAUTHY_LISTEN_ADDR=:8080 --env "GOAUTHY_ISSUER=$issuer" \
 		--env GOAUTHY_RHIZA_PROFILE=standalone --env "GOAUTHY_CLUSTER_ID=v038-$nonce-$context" \
 		--env GOAUTHY_NODE_ID=readiness-0 --env GOAUTHY_DATA_DIR=/data/rhiza \
@@ -177,12 +175,13 @@ create_sut() {
 	stage_started=$(date +%s)
 	printf 'context=%s start_epoch=%s\n' "$context" "$stage_started" >>"$logs/summary.txt"
 	dkr start "$sut_id" >/dev/null
+	probe_base=http://$(owned_container_ip "$sut_id"):8080
 }
 
 http_probe() {
 	path=$1; output=$2
 	curl --noproxy '*' --silent --show-error --connect-timeout 1 --max-time 2 --max-filesize 16384 \
-		--output "$output" --write-out '%{http_code}' "$issuer$path" 2>"$output.err" || true
+		--output "$output" --write-out '%{http_code}' "$probe_base$path" 2>"$output.err" || true
 }
 
 diagnostic_http_probe() {
@@ -201,27 +200,24 @@ diagnostic_http_probe() {
 	printf 'diagnostic stage=%s http=%s curl_exit=%s category=%s\n' "$diagnostic_stage" "$diagnostic_http" "$diagnostic_rc" "$diagnostic_category" >&2
 }
 
-diagnose_fs_timeout() {
-	diagnostic_http_probe fs_published "$issuer/livez"
-	diagnostic_identity=$(container_identity "$sut_id") || diagnostic_identity=
+owned_container_ip() {
+	requested_id=$1
+	diagnostic_identity=$(container_identity "$requested_id") || return 1
 	diagnostic_owned_id=$(verified_identity "$diagnostic_identity") || diagnostic_owned_id=
-	if [ "$diagnostic_owned_id" != "$sut_id" ] || [ -z "$sut_id" ]; then
-		echo 'diagnostic stage=fs_direct_unverified http=000 curl_exit=not_run category=other' >&2
-		return 0
-	fi
+	[ -n "$requested_id" ] && [ "$diagnostic_owned_id" = "$requested_id" ] || return 1
 	diagnostic_identity=$(owned_id network "$network_id") || diagnostic_identity=
 	diagnostic_owned_id=$(verified_identity "$diagnostic_identity") || diagnostic_owned_id=
-	if [ "$diagnostic_owned_id" != "$network_id" ] || [ -z "$network_id" ]; then
-		echo 'diagnostic stage=fs_direct_unverified http=000 curl_exit=not_run category=other' >&2
-		return 0
-	fi
-	diagnostic_endpoint=$(dkr container inspect --format "{{with index .NetworkSettings.Networks \"$network_name\"}}{{.NetworkID}} {{.IPAddress}}{{end}}" "$sut_id" 2>/dev/null) || diagnostic_endpoint=
+	[ -n "$network_id" ] && [ "$diagnostic_owned_id" = "$network_id" ] || return 1
+	diagnostic_endpoint=$(dkr container inspect --format "{{with index .NetworkSettings.Networks \"$network_name\"}}{{.NetworkID}} {{.IPAddress}}{{end}}" "$requested_id" 2>/dev/null) || return 1
 	diagnostic_ip=${diagnostic_endpoint#* }
 	if [ "${diagnostic_endpoint%% *}" != "$network_id" ] || ! printf '%s\n' "$diagnostic_ip" | awk -F . 'NF != 4 { exit 1 } { for (i=1; i<=4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1 }'; then
-		echo 'diagnostic stage=fs_direct_unverified http=000 curl_exit=not_run category=other' >&2
-		return 0
+		return 1
 	fi
-	diagnostic_http_probe fs_direct "http://$diagnostic_ip:8080/livez"
+	printf '%s\n' "$diagnostic_ip"
+}
+
+diagnose_fs_timeout() {
+	diagnostic_http_probe fs_direct "$probe_base/livez"
 }
 
 observe() {
@@ -283,23 +279,22 @@ timeout 120 docker pull "$gcs_image" >"$logs/gcs-pull.log" 2>&1
 dkr image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$gcs_image" | grep -Fx "$gcs_image" >/dev/null || exit 1
 : >"$run_dir/$gcs_name.created"
 gcs_id=$(dkr create --name "$gcs_name" --label "$owner_label=$nonce" --network "$network_id" --network-alias gcs \
-	--publish "127.0.0.1::$gcs_port" "$gcs_image")
+	"$gcs_image")
 printf 'container %s %s\n' "$gcs_id" "$gcs_name" >>"$logs/resources.txt"
 dkr start "$gcs_id" >/dev/null
-gcs_host_port=$(dkr container inspect --format "{{(index (index .NetworkSettings.Ports \"$gcs_port/tcp\") 0).HostPort}}" "$gcs_id")
-case "$gcs_host_port" in ''|*[!0-9]*) echo 'invalid emulator loopback port' >&2; exit 1;; esac
+gcs_probe_base=http://$(owned_container_ip "$gcs_id"):$gcs_port
 bucket=readiness-$nonce
 attempt=0
 until curl --noproxy '*' --silent --fail --max-time 2 -H 'Content-Type: application/json' \
-	--data "{\"name\":\"$bucket\"}" "http://127.0.0.1:$gcs_host_port/storage/v1/b?project=readiness-fixture" >"$logs/bucket.json"; do
+	--data "{\"name\":\"$bucket\"}" "$gcs_probe_base/storage/v1/b?project=readiness-fixture" >"$logs/bucket.json"; do
 	attempt=$((attempt + 1)); [ "$attempt" -lt 30 ] || exit 1; sleep 1
 done
 jq -e --arg bucket "$bucket" '.name == $bucket' "$logs/bucket.json" >/dev/null
-curl --noproxy '*' --silent --fail --max-time 5 "http://127.0.0.1:$gcs_host_port/storage/v1/b/$bucket/o" >"$logs/initial-objects.json"
+curl --noproxy '*' --silent --fail --max-time 5 "$gcs_probe_base/storage/v1/b/$bucket/o" >"$logs/initial-objects.json"
 jq -e '(.items // []) | length == 0' "$logs/initial-objects.json" >/dev/null
 create_sut gcs --env GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE=true --env GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER=gcs \
 	--env "GOAUTHY_RHIZA_OBJECT_STORE_BUCKET=$bucket" --env "GOAUTHY_RHIZA_OBJECT_STORE_PREFIX=cold-$nonce" \
-	--env "STORAGE_EMULATOR_HOST=http://gcs:$gcs_port" --env GCE_METADATA_DISABLED=true
+	--env "STORAGE_EMULATOR_HOST=$gcs_probe_base" --env GCE_METADATA_DISABLED=true
 observe gcs-cold 900
 cold_fingerprint=$(fingerprint_jwks cold)
 # Stop/start preserves the emulator/bucket/keys; Docker recreates /data tmpfs.
@@ -307,6 +302,7 @@ dkr stop --time 15 "$sut_id" >/dev/null
 [ "$(dkr container inspect --format '{{.State.Running}} {{.State.ExitCode}} {{.State.OOMKilled}}' "$sut_id")" = 'false 0 false' ] || { echo 'cold SUT did not stop gracefully' >&2; exit 1; }
 stage_started=$(date +%s)
 dkr start "$sut_id" >/dev/null
+probe_base=http://$(owned_container_ip "$sut_id"):8080
 observe gcs-warm 120
 warm_fingerprint=$(fingerprint_jwks warm)
 [ "$cold_fingerprint" = "$warm_fingerprint" ] || { echo 'public JWKS material changed across GCS restart' >&2; exit 1; }

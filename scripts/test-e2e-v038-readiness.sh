@@ -15,6 +15,7 @@ cat >"$scratch/bin/docker" <<EOF
 printf '%s\n' "\$*" >>'$scratch/docker.calls'
 case "\$*" in
   'info --format '*) cat '$scratch/platform';;
+  'pull '*) echo 'preflight completed: synthetic pull stop' >&2; exit 99;;
   *) echo 'unexpected Docker call in preflight guard' >&2; exit 99;;
 esac
 EOF
@@ -24,7 +25,8 @@ case "\$1" in -s) cat '$scratch/os';; -m) cat '$scratch/arch';; esac
 EOF
 cat >"$scratch/bin/nc" <<EOF
 #!/bin/sh
-[ -f '$scratch/occupied' ]
+echo 'synthetic issuer-port listener queried' >>'$scratch/nc.calls'
+exit 0
 EOF
 chmod +x "$scratch/bin/"*
 guard_path=$scratch/bin:$PATH
@@ -48,13 +50,17 @@ expect_failure 'native Linux/amd64 host required'
 printf 'Linux\n' >"$scratch/os"; printf 'x86_64\n' >"$scratch/arch"
 printf 'linux/aarch64\n' >"$scratch/platform"
 expect_failure 'native Docker Linux/amd64 server required'
-printf 'linux/amd64\n' >"$scratch/platform"; : >"$scratch/occupied"
-expect_failure 'loopback port 19580 is occupied'
-[ "$(wc -l <"$scratch/docker.calls" | tr -d ' ')" -eq 2 ]
+# nc would report an unrelated listener on the issuer port. With no published
+# port, preflight must ignore it and reach the deliberate fake pull failure.
+printf 'linux/amd64\n' >"$scratch/platform"
+expect_failure 'preflight completed: synthetic pull stop'
+[ ! -e "$scratch/nc.calls" ]
+[ "$(wc -l <"$scratch/docker.calls" | tr -d ' ')" -eq 3 ]
+if grep -E '(^|[[:space:]])nc([[:space:]]|$)' "$script"; then exit 1; fi
 
 # Exercise the real cleanup functions with an owned-ID fake, a foreign label,
 # and an unavailable daemon. Only the verified owned ID may be stopped/removed.
-for function in build_redaction_patterns sanitize_logs owned_id container_identity verified_identity verify_absent remove_container fingerprint_jwks diagnostic_http_probe diagnose_fs_timeout observe cleanup; do
+for function in build_redaction_patterns sanitize_logs owned_id container_identity verified_identity verify_absent remove_container fingerprint_jwks diagnostic_http_probe owned_container_ip diagnose_fs_timeout observe cleanup; do
 	awk -v name="$function" '$0 == name "() {" {copy=1} copy {print} copy && /^}/ {exit}' "$script" >>"$scratch/functions.sh"
 done
 # shellcheck source=/dev/null
@@ -170,15 +176,14 @@ if (
 ) >"$scratch/fs-timeout" 2>&1; then exit 1; else [ "$?" -eq 75 ]; fi
 [ "$(grep -c '^timeout_diagnostic_called$' "$scratch/fs-timeout")" -eq 1 ]
 
-# Timeout diagnostics compare the published path with only the exact owned
-# container's attachment. Foreign labels/IDs must prevent IP inspection.
+# All direct routes require the exact owned container attachment. Foreign
+# labels/IDs must prevent IP inspection and every HTTP request.
 for diagnostic_case in owned foreign_container foreign_network wrong_container wrong_network wrong_attachment invalid_ip; do
 	# shellcheck disable=SC2034,SC2329 # Extracted diagnostic functions use these fakes and variables.
 	(
 		sut_id=$owned_test_id
 		network_id=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 		network_name=owned-network
-		issuer=http://127.0.0.1:19580
 		dkr() {
 			case "$1/$2/$4" in
 				container/inspect/*NetworkSettings*)
@@ -212,27 +217,52 @@ for diagnostic_case in owned foreign_container foreign_network wrong_container w
 			printf '%s\n' "$*" >>"$scratch/probe-$diagnostic_case.curl"
 			echo 'sensitive raw curl error' >&2
 			case "$*" in
-				*http://127.0.0.1:19580/livez) printf 000; return 7;;
-				*http://172.30.0.2:8080/livez) printf 204;;
+				*http://172.30.0.2:8080/*) printf 204;;
 				*) return 99;;
 			esac
 		}
-		diagnose_fs_timeout
+		if direct_ip=$(owned_container_ip "$sut_id"); then
+			[ "$diagnostic_case" = owned ]
+			probe_base=http://$direct_ip:8080
+			diagnose_fs_timeout
+			# Exercise the real production probe for every SUT endpoint.
+			awk '$0 == "http_probe() {" {copy=1} copy {print} copy && /^}/ {exit}' "$script" >"$scratch/http-probe.sh"
+			# shellcheck source=/dev/null
+			. "$scratch/http-probe.sh"
+			for probe_path in /livez /readyz /.well-known/openid-configuration /oidc/jwks.json; do
+				[ "$(http_probe "$probe_path" "$scratch/probe.body")" = 204 ]
+			done
+		else
+			[ "$diagnostic_case" != owned ]
+		fi
 	) >"$scratch/probe-$diagnostic_case.output" 2>&1
-	grep -Fx 'diagnostic stage=fs_published http=000 curl_exit=7 category=connect_failed' "$scratch/probe-$diagnostic_case.output" >/dev/null
 	if grep -E '172\.30|127\.0|sensitive raw|forbidden' "$scratch/probe-$diagnostic_case.output"; then exit 1; fi
-	if grep -v -e '--connect-timeout 1 --max-time 2 --output /dev/null' "$scratch/probe-$diagnostic_case.curl"; then exit 1; fi
 	if [ "$diagnostic_case" = owned ]; then
+		if grep -v -e '--connect-timeout 1 --max-time 2' "$scratch/probe-$diagnostic_case.curl"; then exit 1; fi
 		grep -Fx 'diagnostic stage=fs_direct http=204 curl_exit=0 category=other' "$scratch/probe-$diagnostic_case.output" >/dev/null
 		printf 'container_identity\nnetwork_identity\nattachment\n' >"$scratch/expected-probe-order"
 		cmp "$scratch/expected-probe-order" "$scratch/probe-$diagnostic_case.calls"
-		[ "$(wc -l <"$scratch/probe-$diagnostic_case.curl" | tr -d ' ')" -eq 2 ]
+		[ "$(wc -l <"$scratch/probe-$diagnostic_case.curl" | tr -d ' ')" -eq 5 ]
 	else
-		grep -Fx 'diagnostic stage=fs_direct_unverified http=000 curl_exit=not_run category=other' "$scratch/probe-$diagnostic_case.output" >/dev/null
-		[ "$(wc -l <"$scratch/probe-$diagnostic_case.curl" | tr -d ' ')" -eq 1 ]
+		[ ! -e "$scratch/probe-$diagnostic_case.curl" ]
 		case "$diagnostic_case" in foreign_*|wrong_container|wrong_network) if grep -Fx attachment "$scratch/probe-$diagnostic_case.calls"; then exit 1; fi;; esac
 	fi
 done
+
+# Transport addresses are independent of the configured public issuer. Both
+# SUT start paths and emulator initialization use the verified attachment.
+# shellcheck disable=SC2016 # These assertions match literal source expressions.
+{
+grep -Fx 'issuer=http://127.0.0.1:19580' "$script" >/dev/null
+grep -F -- '--env "GOAUTHY_ISSUER=$issuer"' "$script" >/dev/null
+grep -F -- '"$probe_base$path"' "$script" >/dev/null
+[ "$(grep -Fc 'probe_base=http://$(owned_container_ip "$sut_id"):8080' "$script")" -eq 2 ]
+grep -Fx 'gcs_probe_base=http://$(owned_container_ip "$gcs_id"):$gcs_port' "$script" >/dev/null
+grep -F '"$gcs_probe_base/storage/v1/b?project=readiness-fixture"' "$script" >/dev/null
+grep -F '"$gcs_probe_base/storage/v1/b/$bucket/o"' "$script" >/dev/null
+grep -F -- '--env "STORAGE_EMULATOR_HOST=$gcs_probe_base"' "$script" >/dev/null
+if grep -E -- '--publish|gcs_host_port|\$issuer\$path|STORAGE_EMULATOR_HOST=http://gcs:' "$script"; then exit 1; fi
+}
 
 # Fixed curl categories must not expose stderr even for unexpected failures.
 for probe_rc in 7 28 52 56 99; do
@@ -252,4 +282,4 @@ grep -F 'runs-on: ubuntu-latest' "$workflow" >/dev/null
 grep -F 'timeout-minutes: 25' "$workflow" >/dev/null
 if grep -E 'workflow_dispatch:|branches:|pull_request_target:|ci.yml|docker (push|build)' "$workflow"; then exit 1; fi
 for path in scripts/e2e-v038-readiness.sh scripts/test-e2e-v038-readiness.sh .github/workflows/v038-readiness.yml; do grep -F -e "- '$path'" "$workflow" >/dev/null; done
-echo 'PASS v0.3.8 shell guards: offline check, native host/server, port collision, owned cleanup/status, newline redaction, JWKS, timeout network diagnostics, workflow scope.'
+echo 'PASS v0.3.8 shell guards: offline check, native host/server, unrelated issuer-port listener, owned cleanup/status, newline redaction, JWKS, timeout network diagnostics, workflow scope.'
