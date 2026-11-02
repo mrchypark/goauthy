@@ -13,6 +13,7 @@ chmod 700 "$scratch"
 cat >"$scratch/bin/docker" <<EOF
 #!/bin/sh
 printf '%s\n' "\$*" >>'$scratch/docker.calls'
+[ -z "\${GOOGLE_APPLICATION_CREDENTIALS:-}" ] || { echo 'inherited ADC leaked into clean fixture' >&2; exit 98; }
 case "\$*" in
   'info --format '*) cat '$scratch/platform';;
   'pull '*) echo 'preflight completed: synthetic pull stop' >&2; exit 99;;
@@ -32,7 +33,7 @@ chmod +x "$scratch/bin/"*
 guard_path=$scratch/bin:$PATH
 run_script() { PATH="$guard_path" TMPDIR="$scratch" /bin/sh "$script" "$@"; }
 expect_failure() {
-	if run_script --run >"$scratch/result" 2>&1; then echo 'unsafe preflight unexpectedly succeeded' >&2; exit 1; fi
+	if GOOGLE_APPLICATION_CREDENTIALS=/forbidden/real-adc.json run_script --run >"$scratch/result" 2>&1; then echo 'unsafe preflight unexpectedly succeeded' >&2; exit 1; fi
 	grep -F "$1" "$scratch/result" >/dev/null
 }
 
@@ -60,7 +61,7 @@ if grep -E '(^|[[:space:]])nc([[:space:]]|$)' "$script"; then exit 1; fi
 
 # Exercise the real cleanup functions with an owned-ID fake, a foreign label,
 # and an unavailable daemon. Only the verified owned ID may be stopped/removed.
-for function in build_redaction_patterns sanitize_logs owned_id container_identity verified_identity verify_absent remove_container fingerprint_jwks diagnostic_http_probe verify_gcs_digest owned_container_ip diagnose_fs_timeout observe cleanup; do
+for function in build_redaction_patterns sanitize_logs owned_id container_identity verified_identity verify_absent remove_container fingerprint_jwks diagnostic_http_probe verify_gcs_digest owned_container_ip create_gcs_adc create_sut diagnose_fs_timeout observe cleanup; do
 	awk -v name="$function" '$0 == name "() {" {copy=1} copy {print} copy && /^}/ {exit}' "$script" >>"$scratch/functions.sh"
 done
 # shellcheck source=/dev/null
@@ -128,18 +129,81 @@ test_daemon=down
 if remove_container owned-name 2>"$scratch/rejected"; then echo 'daemon failure treated as verified absence' >&2; exit 1; fi
 cmp "$scratch/actions" "$scratch/before"
 
+# Generate real synthetic RSA/JSON while mocking only root ownership changes.
+# The production function must reject external or unverified ADC endpoints
+# before generating files, and fail closed on ownership/mode mismatch.
+for adc_case in valid external wrong_internal unverified wrong_owner; do
+	# shellcheck disable=SC2034,SC2329 # Extracted ADC functions use these fixtures.
+	if (
+		inputs=$scratch/adc-$adc_case/inputs; logs=$scratch/adc-$adc_case/logs
+		mkdir -p "$inputs" "$logs"
+		gcs_id=$owned_test_id; gcs_port=4588
+		gcs_probe_base=http://172.30.0.3:4588
+		case "$adc_case" in external) gcs_probe_base=https://oauth2.googleapis.com;; wrong_internal) gcs_probe_base=http://172.30.0.4:4588;; esac
+		owned_container_ip() { [ "$1" = "$gcs_id" ] && [ "$adc_case" != unverified ] && printf 172.30.0.3; }
+		sudo() { [ "$*" = "-n chown 65532:65532 $inputs/gcs-private.pem $inputs/gcs-adc.json" ]; }
+		stat() { if [ "$adc_case" = wrong_owner ]; then printf '0:0:644\n'; else printf '65532:65532:600\n'; fi; }
+		create_gcs_adc || exit 1
+		jq -e '.type == "service_account" and .project_id == "readiness-fixture" and .token_uri == "http://172.30.0.3:4588/token" and (.private_key | startswith("-----BEGIN PRIVATE KEY-----"))' "$inputs/gcs-adc.json" >/dev/null || exit 1
+		openssl pkey -in "$inputs/gcs-private.pem" -check -noout >/dev/null 2>&1 || exit 1
+		# shellcheck disable=SC2012 # This fixed fixture filename has no whitespace.
+		[ "$(LC_ALL=C ls -l "$inputs/gcs-adc.json" | cut -c 1-10)" = -rw------- ] || exit 1
+		# The former redaction patterns did not include ADC key material.
+		cp "$inputs/gcs-private.pem" "$logs/raw.log"
+		cp "$inputs/gcs-adc.json" "$logs/json.log"
+		printf 'ordinary synthetic diagnostic\n' >"$logs/benign.log"
+		sanitize_logs || exit 1
+		grep -Fx 'Log withheld: synthetic key material detected.' "$logs/raw.log" >/dev/null || exit 1
+		grep -Fx 'Log withheld: synthetic key material detected.' "$logs/json.log" >/dev/null || exit 1
+		grep -Fx 'ordinary synthetic diagnostic' "$logs/benign.log" >/dev/null
+	) >"$scratch/adc-$adc_case.output" 2>&1; then adc_rc=0; else adc_rc=$?; fi
+	if [ "$adc_case" = valid ]; then [ "$adc_rc" -eq 0 ]; [ ! -s "$scratch/adc-$adc_case.output" ]; else [ "$adc_rc" -eq 1 ]; fi
+	if grep -E 'BEGIN PRIVATE|private_key|readiness-owned-run' "$scratch/adc-$adc_case.output" >/dev/null; then exit 1; fi
+	case "$adc_case" in external|wrong_internal|unverified) [ ! -e "$scratch/adc-$adc_case/inputs/gcs-private.pem" ];; esac
+done
+
+# Exercise the real container argument builder and the actual GCS invocation.
+# Only GCS receives the synthetic ADC path; the existing inputs bind is readonly.
+# shellcheck disable=SC2034,SC2329,SC2154 # Extracted create_sut sets context and uses these fakes/variables.
+(
+	run_dir=$scratch; inputs=$scratch/inputs; logs=$scratch/logs
+	sut_name=adc-args-sut; sut_image=synthetic-image; network_id=owned-network
+	owner_label=io.goauthy.v038-readiness
+	issuer=http://127.0.0.1:19580; bucket=synthetic
+	gcs_probe_base=http://172.30.0.3:4588
+	dkr() {
+		case "$1" in create) printf '%s\n' "$@" >"$scratch/args-$context"; printf '%s\n' "$owned_test_id";; start) :;; *) return 99;; esac
+	}
+	owned_container_ip() { [ "$1" = "$owned_test_id" ] && printf 172.30.0.2; }
+	create_sut fs
+	awk '/^create_sut gcs / {copy=1} copy {print} copy && !/\\$/ {exit}' "$script" >"$scratch/gcs-invocation.sh"
+	# shellcheck source=/dev/null
+	. "$scratch/gcs-invocation.sh"
+)
+if grep -F GOOGLE_APPLICATION_CREDENTIALS "$scratch/args-fs"; then exit 1; fi
+grep -Fx 'GOOGLE_APPLICATION_CREDENTIALS=/inputs/gcs-adc.json' "$scratch/args-gcs" >/dev/null
+grep -Fx "type=bind,src=$scratch/inputs,dst=/inputs,readonly" "$scratch/args-gcs" >/dev/null
+grep -Fx 'STORAGE_EMULATOR_HOST=http://172.30.0.3:4588' "$scratch/args-gcs" >/dev/null
+
 # Run the actual EXIT cleanup in a subshell. Only verified resource absence
 # may print true; an unavailable daemon must print false and fail cleanup.
-for cleanup_case in up down; do
+for cleanup_case in up down retained_inputs; do
 	# shellcheck disable=SC2034 # The extracted cleanup uses these variables.
 	if (
 		test_daemon=$cleanup_case; test_label=$nonce
+		[ "$cleanup_case" != retained_inputs ] || test_daemon=up
 		run_dir=$scratch/cleanup-$cleanup_case
 		inputs=$run_dir/inputs
 		# shellcheck disable=SC2030 # Each cleanup case deliberately isolates paths.
 		logs=$run_dir/logs
 		sut_name=owned-name; gcs_name=not-started; network_name=owned-network
 		mkdir -p "$inputs" "$logs"
+		printf 'synthetic-private-fixture\n' >"$inputs/gcs-private.pem"
+		printf '{"private_key":"synthetic-private-fixture"}\n' >"$inputs/gcs-adc.json"
+		printf 'synthetic-private-fixture\n' >"$inputs/patterns"
+		printf 'synthetic-private-fixture\n' >"$logs/secret.log"
+		# shellcheck disable=SC2329 # cleanup calls this failure injection.
+		rm() { if [ "$cleanup_case" = retained_inputs ] && [ "$*" = "-rf $inputs" ]; then return 1; fi; command rm "$@"; }
 		: >"$run_dir/$sut_name.created"; : >"$run_dir/network.created"
 		cleanup
 	) >"$scratch/cleanup-$cleanup_case.output" 2>&1; then cleanup_rc=0; else cleanup_rc=$?; fi
@@ -151,7 +215,10 @@ for cleanup_case in up down; do
 		grep -Fx 'cleanup_verified=false' "$scratch/cleanup-$cleanup_case.output" >/dev/null
 		if grep -Fx 'cleanup_verified=true' "$scratch/cleanup-$cleanup_case.output"; then exit 1; fi
 	fi
-	[ ! -e "$scratch/cleanup-$cleanup_case/inputs" ]
+	if [ "$cleanup_case" = retained_inputs ]; then
+		[ -f "$scratch/cleanup-$cleanup_case/inputs/gcs-private.pem" ]
+	else [ ! -e "$scratch/cleanup-$cleanup_case/inputs" ]; fi
+	if grep -F synthetic-private-fixture "$scratch/cleanup-$cleanup_case.output"; then exit 1; fi
 done
 
 http_probe() { cp "$scratch/jwks" "$2"; printf 200; }

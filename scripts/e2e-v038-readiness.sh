@@ -1,5 +1,5 @@
 #!/bin/sh
-# Published v0.3.8 cold-start observations; no account or token operations.
+# Published v0.3.8 cold-start observations with synthetic emulator credentials.
 set -eu
 
 mode=${1:---check}
@@ -33,7 +33,7 @@ if [ "$mode" = --check ]; then
 	exit 0
 fi
 
-for tool in docker curl jq openssl timeout sha256sum sudo chown uname date mktemp chmod rm sed tail head tr grep cat cut tee mkdir sleep awk; do
+for tool in docker curl jq openssl timeout sha256sum sudo chown stat uname date mktemp chmod rm sed tail head tr grep cat cut tee mkdir sleep awk; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "missing tool: $tool" >&2; exit 1; }
 done
 [ "$(uname -s)/$(uname -m)" = Linux/x86_64 ] || { echo 'native Linux/amd64 host required; cross-architecture/FEX execution is unsupported' >&2; exit 1; }
@@ -120,13 +120,14 @@ cleanup() {
 			if ! verify_absent network "$network_name"; then echo "network cleanup ownership/absence unverified: $network_name" >&2; cleanup_failed=1; fi
 		fi
 	fi
-	sanitize_logs
-	rm -rf "$inputs"
+	logs_sanitized=true
+	sanitize_logs || { logs_sanitized=false; cleanup_failed=1; }
+	rm -rf "$inputs" || cleanup_failed=1
 	[ ! -e "$inputs" ] || cleanup_failed=1
 	cleanup_verified=false
 	if [ "$cleanup_failed" -eq 0 ]; then cleanup_verified=true; else status=1; fi
 	printf 'cleanup_verified=%s\nexit=%s\n' "$cleanup_verified" "$status" | tee -a "$logs/summary.txt"
-	if [ "$status" -ne 0 ]; then
+	if [ "$status" -ne 0 ] && [ "$logs_sanitized" = true ]; then
 		# Logs are bounded and scanned for the fresh synthetic input values.
 		for file in "$logs"/*.log; do [ ! -f "$file" ] || tail -n 8 "$file" >&2; done
 	fi
@@ -225,6 +226,26 @@ owned_container_ip() {
 	printf '%s\n' "$diagnostic_ip"
 }
 
+create_gcs_adc() {
+	adc_ip=$(owned_container_ip "$gcs_id") || return 1
+	adc_base=http://$adc_ip:$gcs_port
+	[ "$gcs_probe_base" = "$adc_base" ] || { echo 'GCS ADC endpoint is not the verified owned emulator' >&2; return 1; }
+	(umask 077; openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$inputs/gcs-private.pem" 2>/dev/null) || return 1
+	(umask 077; jq -n --rawfile private_key "$inputs/gcs-private.pem" --arg nonce "$nonce" --arg token_uri "$adc_base/token" \
+		'{type:"service_account", project_id:"readiness-fixture", private_key_id:("readiness-key-" + $nonce), private_key:$private_key,
+		client_email:("readiness-" + $nonce + "@readiness-fixture.iam.gserviceaccount.com"), client_id:("readiness-" + $nonce), token_uri:$token_uri}' \
+		>"$inputs/gcs-adc.json") || return 1
+	# Install raw PEM lines and JSON-escaped key material before the SUT can
+	# read credentials or any container logs can be displayed.
+	adc_patterns=$(jq -r '.private_key, (.private_key | @json), .private_key_id, .client_email, .client_id' "$inputs/gcs-adc.json") || return 1
+	printf '%s\n' "$adc_patterns" | awk 'length($0) > 0 { print }' >>"$inputs/patterns" || return 1
+	unset adc_patterns
+	chmod 600 "$inputs/gcs-private.pem" "$inputs/gcs-adc.json" || return 1
+	sudo -n chown 65532:65532 "$inputs/gcs-private.pem" "$inputs/gcs-adc.json" || return 1
+	[ "$(stat -c '%u:%g:%a' "$inputs/gcs-private.pem")" = 65532:65532:600 ] &&
+		[ "$(stat -c '%u:%g:%a' "$inputs/gcs-adc.json")" = 65532:65532:600 ] || { echo 'GCS ADC input ownership/mode verification failed' >&2; return 1; }
+}
+
 diagnose_fs_timeout() {
 	diagnostic_http_probe fs_direct "$probe_base/livez"
 }
@@ -301,9 +322,11 @@ done
 jq -e --arg bucket "$bucket" '.name == $bucket' "$logs/bucket.json" >/dev/null
 curl --noproxy '*' --silent --fail --max-time 5 "$gcs_probe_base/storage/v1/b/$bucket/o" >"$logs/initial-objects.json"
 jq -e '(.items // []) | length == 0' "$logs/initial-objects.json" >/dev/null
+create_gcs_adc
 create_sut gcs --env GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE=true --env GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER=gcs \
 	--env "GOAUTHY_RHIZA_OBJECT_STORE_BUCKET=$bucket" --env "GOAUTHY_RHIZA_OBJECT_STORE_PREFIX=cold-$nonce" \
-	--env "STORAGE_EMULATOR_HOST=$gcs_probe_base" --env GCE_METADATA_DISABLED=true
+	--env "STORAGE_EMULATOR_HOST=$gcs_probe_base" --env GCE_METADATA_DISABLED=true \
+	--env GOOGLE_APPLICATION_CREDENTIALS=/inputs/gcs-adc.json
 observe gcs-cold 900
 cold_fingerprint=$(fingerprint_jwks cold)
 # Stop/start preserves the emulator/bucket/keys; Docker recreates /data tmpfs.
