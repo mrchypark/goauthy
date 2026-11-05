@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -18,7 +19,8 @@ import (
 // This is an isolated process/filesystem-object-store crash test. It does not
 // qualify HA replication, S3 semantics, or a power-loss filesystem guarantee.
 func TestSharedGeneratedBootstrapRecoversAfterSIGKILL(t *testing.T) {
-	t.Parallel()
+	// Keep this subprocess/migration fixture outside this package's parallel
+	// workload. This does not isolate it from other packages or qualify latency.
 	root := os.Getenv("GOAUTHY_SHARED_BOOTSTRAP_CRASH_ROOT")
 	if root != "" {
 		runSharedGeneratedBootstrapCrashChild(t, root)
@@ -29,24 +31,64 @@ func TestSharedGeneratedBootstrapRecoversAfterSIGKILL(t *testing.T) {
 	if err := setupSharedGeneratedBootstrapCrashFiles(root); err != nil {
 		t.Fatal(err)
 	}
-	childCtx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	nowStartup := time.Now()
+	var testDeadline time.Time
+	if deadline, ok := t.Deadline(); ok {
+		testDeadline = deadline
+	}
+	startupDeadline := sharedBootstrapCrashStartupDeadline(nowStartup, testDeadline)
+	if !startupDeadline.After(nowStartup) {
+		t.Fatal("insufficient test deadline for startup plus independent 45-second recovery")
+	}
+	childCtx, cancel := context.WithDeadline(t.Context(), startupDeadline)
 	defer cancel()
 	cmd := exec.CommandContext(childCtx, os.Args[0], "-test.run=^TestSharedGeneratedBootstrapRecoversAfterSIGKILL$")
 	cmd.Env = append(os.Environ(), "GOAUTHY_SHARED_BOOTSTRAP_CRASH_ROOT="+root)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if err := waitForSharedBootstrapCrashMarker(childCtx, filepath.Join(root, "ready")); err != nil {
+	childExited := make(chan struct{})
+	var childErr error
+	go func() {
+		childErr = cmd.Wait()
+		close(childExited)
+	}()
+	reapChild := func() bool {
+		select {
+		case <-childExited:
+			return true
+		default:
+		}
 		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-		t.Fatal(err)
+		select {
+		case <-childExited:
+			return true
+		case <-time.After(5 * time.Second):
+			t.Errorf("shared bootstrap child %d did not exit after SIGKILL", cmd.Process.Pid)
+			return false
+		}
+	}
+	t.Cleanup(func() { reapChild() })
+	if err := waitForSharedBootstrapCrashMarker(childCtx, filepath.Join(root, "ready"), childExited); err != nil {
+		if !reapChild() {
+			t.Fatal("shared bootstrap child cleanup incomplete")
+		}
+		t.Fatalf("shared bootstrap startup: phase=%s elapsed=%s wait=%v child=%v", sharedBootstrapCrashPhase(root), time.Since(nowStartup), err, childErr)
 	}
 	if err := cmd.Process.Kill(); err != nil {
-		_ = cmd.Wait()
-		t.Fatal(err)
+		reapChild()
+		t.Fatalf("SIGKILL after bootstrap ready: phase=%s err=%v", sharedBootstrapCrashPhase(root), err)
 	}
-	if err := cmd.Wait(); err == nil {
-		t.Fatal("shared bootstrap child exited without SIGKILL")
+	if !reapChild() {
+		t.Fatal("shared bootstrap child cleanup incomplete")
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(childErr, &exitErr) {
+		t.Fatal("shared bootstrap child did not exit from SIGKILL")
+	}
+	status, ok := exitErr.ProcessState.Sys().(syscall.WaitStatus)
+	if !ok || !status.Signaled() || status.Signal() != syscall.SIGKILL {
+		t.Fatalf("shared bootstrap child exited without SIGKILL: %v", childErr)
 	}
 	if err := childCtx.Err(); err != nil {
 		t.Fatal(err)
@@ -72,7 +114,7 @@ func TestSharedGeneratedBootstrapRecoversAfterSIGKILL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	db := openSharedGeneratedBootstrapCrashDB(t, root, "recover")
+	db := openSharedGeneratedBootstrapCrashDB(t, ctx, root, "recover")
 	defer db.Close()
 	store, err := NewStore(db)
 	if err != nil {
@@ -96,31 +138,38 @@ func TestSharedGeneratedBootstrapRecoversAfterSIGKILL(t *testing.T) {
 }
 
 func runSharedGeneratedBootstrapCrashChild(t *testing.T, root string) {
-	ctx := context.Background()
-	db := openSharedGeneratedBootstrapCrashDB(t, root, "writer")
+	ctx := t.Context()
+	db := openSharedGeneratedBootstrapCrashDB(t, ctx, root, "writer")
+	writeSharedBootstrapCrashPhase(t, root, "keyring")
 	keyDir := filepath.Join(root, "keys")
 	keyring, err := oidc.LoadKeyring(keyDir, "crash-key")
 	if err != nil {
 		t.Fatal(err)
 	}
+	writeSharedBootstrapCrashPhase(t, root, "store")
 	store, err := NewStore(db)
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := sharedGeneratedBootstrapCrashNow()
 	store.now = func() time.Time { return now }
+	writeSharedBootstrapCrashPhase(t, root, "bootstrap")
 	if err := store.BootstrapWithSharedGeneratedSecrets(ctx, filepath.Join(root, "bootstrap.json"), keyDir, filepath.Join(root, "artifact"), keyring, now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
+	writeSharedBootstrapCrashPhase(t, root, "bootstrap-complete")
 	if err := os.WriteFile(filepath.Join(root, "ready"), []byte("ready"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	select {}
 }
 
-func openSharedGeneratedBootstrapCrashDB(t *testing.T, root, dataName string) *rhiza.DB {
+func openSharedGeneratedBootstrapCrashDB(t *testing.T, ctx context.Context, root, dataName string) *rhiza.DB {
 	t.Helper()
-	db, err := rhiza.Open(context.Background(), rhiza.Config{
+	if dataName == "writer" {
+		writeSharedBootstrapCrashPhase(t, root, "open")
+	}
+	db, err := rhiza.Open(ctx, rhiza.Config{
 		NodeID: "shared-generated-crash", DataDir: filepath.Join(root, dataName),
 		ObjStoreProvider: rhiza.ObjectStoreProviderFilesystem, ObjStoreDir: filepath.Join(root, "objects"),
 		ObjStoreDurability: rhiza.ObjectStoreDurabilityBeforeAck, CheckpointInterval: time.Hour,
@@ -128,7 +177,10 @@ func openSharedGeneratedBootstrapCrashDB(t *testing.T, root, dataName string) *r
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := storage.Migrate(context.Background(), db); err != nil {
+	if dataName == "writer" {
+		writeSharedBootstrapCrashPhase(t, root, "migrate")
+	}
+	if err := storage.Migrate(ctx, db); err != nil {
 		_ = db.Close()
 		t.Fatal(err)
 	}
@@ -154,19 +206,60 @@ func sharedGeneratedBootstrapCrashNow() time.Time {
 	return time.Unix(2_100_000_000, 0).UTC()
 }
 
-func waitForSharedBootstrapCrashMarker(ctx context.Context, path string) error {
+var errSharedBootstrapCrashChildExited = errors.New("shared bootstrap child exited before ready")
+
+func waitForSharedBootstrapCrashMarker(ctx context.Context, path string, childExited <-chan struct{}) error {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 	for {
+		select {
+		case <-childExited:
+			return errSharedBootstrapCrashChildExited
+		default:
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if _, err := os.Stat(path); err == nil {
 			return nil
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		select {
+		case <-childExited:
+			return errSharedBootstrapCrashChildExited
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
 		}
 	}
+}
+
+// Startup includes Open, full migrations and bootstrap. Reserve recovery's
+// unchanged 45 seconds and five seconds for cleanup inside the enclosing test.
+func sharedBootstrapCrashStartupDeadline(now, testDeadline time.Time) time.Time {
+	deadline := now.Add(2 * time.Minute)
+	if !testDeadline.IsZero() && testDeadline.Add(-50*time.Second).Before(deadline) {
+		deadline = testDeadline.Add(-50 * time.Second)
+	}
+	return deadline
+}
+
+func writeSharedBootstrapCrashPhase(t *testing.T, root, phase string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "phase"), []byte(phase), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Only fixed phase names are reported, never arbitrary child logs or file data.
+func sharedBootstrapCrashPhase(root string) string {
+	phase, err := os.ReadFile(filepath.Join(root, "phase"))
+	if err == nil {
+		switch string(phase) {
+		case "open", "migrate", "keyring", "store", "bootstrap", "bootstrap-complete":
+			return string(phase)
+		}
+	}
+	return "unavailable"
 }

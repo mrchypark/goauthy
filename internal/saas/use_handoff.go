@@ -81,7 +81,7 @@ func validHandoffState(state string) bool {
 }
 
 func (s *CredentialStore) handoffRequester(h useHandoff) (string, []any) {
-	return `EXISTS(SELECT 1 FROM managed_oauth_clients m WHERE m.id=? AND m.generation=? AND m.enabled=1 AND m.deleted=0
+	return `EXISTS(SELECT 1 FROM connection_client_policies m WHERE m.id=? AND m.generation=? AND m.enabled=1 AND m.deleted=0
 		AND EXISTS(SELECT 1 FROM json_each(m.metadata_json,'$.redirect_uris') WHERE type='text' AND value=?)
 		AND EXISTS(SELECT 1 FROM json_each(m.metadata_json,'$.scopes') WHERE type='text' AND value='goauthy.connections.write')
 		AND EXISTS(SELECT 1 FROM json_each(m.metadata_json,'$.audience') WHERE type='text' AND value=?))`, []any{h.RequestClient, h.RequestGeneration, h.ReturnURI, h.Grant.Resource}
@@ -98,7 +98,7 @@ func (s *CredentialStore) CreateUseHandoff(ctx context.Context, owner, requester
 		return "", UseHandoffReview{}, ErrUseGrantInvalid
 	}
 	clientStore := clients.NewStore(s.db, s.keys)
-	app, err := clientStore.GetWithGuard(ctx, requester, authority)
+	app, err := clientStore.GetConnectionPolicyWithGuard(ctx, requester, authority)
 	if err != nil {
 		return "", UseHandoffReview{}, err
 	}

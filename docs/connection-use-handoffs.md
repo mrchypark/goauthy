@@ -1,5 +1,57 @@
 # Connection use handoff
 
+## Bootstrap client policy
+
+The configured bootstrap OAuth client can be a handoff requester or execution
+consumer without a managed-client row. It uses the same scope, resource, owner,
+expiry, provider, credential and transactional generation checks as managed clients.
+Public clients may request proxy access; credential delivery still requires a
+confidential execution consumer. Provider/key storage and explicit owner approval
+remain separate from the consumer's OAuth authentication.
+
+The bootstrap client's built-in scopes do not include connection scopes. An
+authorized administrator must first create the needed `goauthy.connections.read`,
+`goauthy.connections.write` and `goauthy.connections.use` entries in the existing
+scope catalog (`POST /auth/v1/scopes`, `scope` field), then update the bootstrap
+client policy through `GET`/`PUT /auth/v1/clients/{id}/scopes` with `allowed_scopes`
+and `default_scopes`. Preserve existing custom entries when replacing these lists;
+defaults are an explicit operator choice, not automatically expanded. The existing
+admin UI or scoped `Scopes:create` and `Clients:read/update` API-key permissions
+apply. This patch adds no bootstrap-scopes environment variable or automatic grants.
+The consumer must request its needed scopes and the exact connections `resource`
+at authorization; a default audience for another API does not substitute for it.
+Handoff proposals need `write`, credential retrieval needs `use`, and connection
+metadata queries need `read`. These remain distinct permissions.
+
+Schema 113 adds an immutable public bootstrap connections-policy pin and a shared
+client-policy view. It does not rewrite accounts, credentials, keys, existing grants
+or managed clients. The first startup with `GOAUTHY_CONNECTIONS_RESOURCE` configured
+pins the issuer, bootstrap ID, authentication methods/confidential status, redirects,
+base scopes, flows, resource audiences/defaults, MFA flag and connections resource.
+All nodes must use matching public settings. A competing configuration fails startup;
+the first successful pin is authoritative, not proof of the operator's intended
+configuration. There is no automatic overwrite or public policy-reset API.
+
+An installation that has never pinned connections can leave the resource unset.
+After pinning, removing that resource also fails startup. Changing pinned settings
+requires a separately designed, coordinated migration; restarting with new settings
+does not replace the pin. Do not delete the pin as a configuration-change procedure.
+Existing bootstrap scope-management updates remain supported: each persisted scope
+revision changes the consent generation. Removal and re-addition do not restore old
+grants or pending handoffs; the owner must approve fresh consent.
+
+The fingerprint covers public authorization policy only. It stores neither a
+secret nor a secret verifier and does not check that nodes share an authentication
+secret. Existing bootstrap shared-secret provisioning requirements still apply;
+secret rotation alone does not change the public consent policy. Upgrade every
+serving node before relying on the cluster-wide pin: older binaries do not enforce
+it. A node already running with the feature unset also does not discover a later
+first pin through a background check. Drain and restart every serving node with
+the patched binary and matching configuration before relying on cluster policy
+consistency. Mixed old/new or unset/configured rolling operation is not qualified;
+the pin does not provide a new runtime or distributed fence. This is a source/storage
+contract, not HA or deployment qualification.
+
 Schema 81. Supports registered API-key `proxy` and `credential_delivery` consent,
 and OAuth2 `credential_delivery` for confidential consumers.
 Delivery requires a confidential execution consumer; a proxy ticket never becomes
