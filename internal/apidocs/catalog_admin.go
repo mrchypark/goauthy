@@ -329,6 +329,8 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 	}
 	globalCSS := add("GET", "/auth/v1/theme/global.css", "Read shared theme styles", nil, nil, nil)
 	globalCSS.Responses.Status(200).Value.Content = openapi3.Content{"text/css": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}}
+	elysCSS := add("GET", "/auth/v1/elysdui.css", "Read shared elysdui styles", nil, nil, nil)
+	elysCSS.Responses.Status(200).Value.Content = openapi3.Content{"text/css": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}}
 	themePublic := add("GET", "/auth/v1/theme/{client_id}/{timestamp}", "Read public theme CSS", nil, nil, nil)
 	themePublic.Description = "Returns the requested client theme, then the stored global rauthy theme, then built-in defaults. Timestamp is a signed 64-bit cache-busting value."
 	themePublic.Responses.Status(200).Value.Content = openapi3.Content{"text/css": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}}

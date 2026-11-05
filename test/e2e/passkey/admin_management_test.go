@@ -187,7 +187,7 @@ func assertUserDetail(t *testing.T, session *http.Client, secret string, bases [
 			if r.StatusCode != http.StatusOK {
 				t.Fatalf("user detail status=%d", r.StatusCode)
 			}
-			if err := validateUserDetail(b, subject); err != nil {
+			if err := validateUserDetail(b, subject, os.Getenv("GOAUTHY_E2E_BROWSER_EMAIL")); err != nil {
 				t.Fatalf("user detail node=%s: %v", base, err)
 			}
 			if reference == nil {
@@ -211,7 +211,7 @@ func assertUserDetail(t *testing.T, session *http.Client, secret string, bases [
 	}
 }
 
-func validateUserDetail(body []byte, subject string) error {
+func validateUserDetail(body []byte, subject, expectedEmail string) error {
 	var row map[string]json.RawMessage
 	if json.Unmarshal(body, &row) != nil || row["id"] == nil {
 		return fmt.Errorf("invalid detail")
@@ -245,7 +245,7 @@ func validateUserDetail(body []byte, subject string) error {
 	var id, email, language, account string
 	var enabled bool
 	var created, login int64
-	if json.Unmarshal(row["id"], &id) != nil || id != subject || json.Unmarshal(row["email"], &email) != nil || email != "" || json.Unmarshal(row["language"], &language) != nil || language != "en" || json.Unmarshal(row["enabled"], &enabled) != nil || !enabled || json.Unmarshal(row["account_type"], &account) != nil || account != "password" || json.Unmarshal(row["created_at"], &created) != nil || created <= 0 || json.Unmarshal(row["last_login"], &login) != nil || login <= 0 {
+	if json.Unmarshal(row["id"], &id) != nil || id != subject || json.Unmarshal(row["email"], &email) != nil || email != expectedEmail || json.Unmarshal(row["language"], &language) != nil || language != "en" || json.Unmarshal(row["enabled"], &enabled) != nil || !enabled || json.Unmarshal(row["account_type"], &account) != nil || account != "password" || json.Unmarshal(row["created_at"], &created) != nil || created <= 0 || json.Unmarshal(row["last_login"], &login) != nil || login <= 0 {
 		return fmt.Errorf("invalid detail fields")
 	}
 	var roles []string
@@ -260,11 +260,11 @@ func validateUserDetail(body []byte, subject string) error {
 
 func TestUserDetailWireRejectsMalformed(t *testing.T) {
 	valid := `{"id":"subject","email":"","email_verified":false,"language":"en","enabled":true,"account_type":"password","created_at":1,"last_login":1,"roles":["rauthy_admin"],"user_values":{}}`
-	if validateUserDetail([]byte(valid), "subject") != nil {
+	if validateUserDetail([]byte(valid), "subject", "") != nil {
 		t.Fatal("valid detail rejected")
 	}
 	for _, body := range []string{`null`, `{"id":"subject"}`, strings.Replace(valid, `"email":""`, `"email":null`, 1), strings.Replace(valid, `"created_at":1`, `"created_at":"1"`, 1), strings.Replace(valid, `"email_verified":false,`, "", 1), strings.Replace(valid, `"user_values":{}`, `"user_values":{},"password_phc":"private"`, 1), strings.Replace(valid, `"user_values":{}`, `"user_values":{},"webauthn_user_id":null`, 1)} {
-		if validateUserDetail([]byte(body), "subject") == nil {
+		if validateUserDetail([]byte(body), "subject", "") == nil {
 			t.Errorf("accepted malformed detail %s", body)
 		}
 	}
@@ -300,7 +300,7 @@ func assertUserList(t *testing.T, session *http.Client, secret string, bases []s
 			if r.StatusCode != wantStatus || err != nil || r.Header.Get("X-User-Count") != "1" {
 				t.Fatalf("users %s status=%d", tc.name, r.StatusCode)
 			}
-			if err := validateUserList(body, subject, 1); err != nil {
+			if err := validateUserList(body, subject, os.Getenv("GOAUTHY_E2E_BROWSER_EMAIL"), 1); err != nil {
 				t.Fatalf("users %s node=%s: %v", tc.name, base, err)
 			}
 			if reference == nil {
@@ -328,31 +328,68 @@ func assertUserList(t *testing.T, session *http.Client, secret string, bases []s
 		if r.StatusCode != wantStatus || r.Header.Get("X-User-Count") != "1" {
 			t.Fatalf("users threshold status=%d node=%s", r.StatusCode, base)
 		}
-		if threshold == 1 && (r.Header.Get("X-Page-Size") != "1" || r.Header.Get("X-Page-Count") != "1") {
+		if threshold == 1 && (r.Header.Get("X-Page-Size") != "1" || r.Header.Get("X-Page-Count") != "1" || r.Header.Get("X-Continuation-Token") != "") {
 			t.Fatalf("missing pagination headers node=%s", base)
 		}
 	}
 	if threshold == 1 {
-		r := do(t, browserClient(t), http.MethodGet, bases[0]+"/auth/v1/users?page_size=1", nil, map[string]string{"Authorization": "API-Key " + secret})
+		assertUserListAcrossNodes(t, session, secret, bases, subject)
+	}
+}
+
+func assertUserListAcrossNodes(t *testing.T, session *http.Client, secret string, bases []string, subject string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"email": fmt.Sprintf("pagination-%d@example.test", time.Now().UnixNano()), "language": "en", "given_name": "Pagination", "roles": []string{}})
+	created := do(t, session, http.MethodPost, bases[0]+"/auth/v1/users", bytes.NewReader(body), map[string]string{"Content-Type": "application/json", "Sec-Fetch-Site": "same-origin", "X-CSRF-Token": accountCSRF(t, session, bases[0])})
+	var fixture struct {
+		Subject string `json:"id"`
+	}
+	err := json.NewDecoder(created.Body).Decode(&fixture)
+	created.Body.Close()
+	if created.StatusCode != http.StatusOK || err != nil || fixture.Subject == "" {
+		t.Fatalf("create pagination fixture status=%d decode=%v (password recovery must be enabled)", created.StatusCode, err)
+	}
+	t.Cleanup(func() {
+		r := do(t, session, http.MethodDelete, bases[0]+"/auth/v1/users/"+url.PathEscape(fixture.Subject), nil, map[string]string{"Sec-Fetch-Site": "same-origin", "X-CSRF-Token": accountCSRF(t, session, bases[0])})
 		r.Body.Close()
-		cursor := r.Header.Get("X-Continuation-Token")
-		if cursor == "" || r.Header.Get("X-User-Count") != "1" || r.Header.Get("X-Page-Count") != "1" {
-			t.Fatal("missing user pagination headers")
+		if r.StatusCode != http.StatusNoContent {
+			t.Errorf("delete pagination fixture status=%d", r.StatusCode)
 		}
-		for _, query := range []string{"continuation_token=" + url.QueryEscape(cursor), "backwards=true&continuation_token=" + url.QueryEscape(cursor)} {
-			for _, base := range bases {
-				next := do(t, browserClient(t), http.MethodGet, base+"/auth/v1/users?page_size=1&"+query, nil, map[string]string{"Authorization": "API-Key " + secret})
-				b, _ := io.ReadAll(next.Body)
-				next.Body.Close()
-				if next.StatusCode != http.StatusPartialContent || next.Header.Get("X-User-Count") != "1" || next.Header.Get("X-Page-Size") != "1" || next.Header.Get("X-Page-Count") != "1" || next.Header.Get("X-Continuation-Token") != "" || !bytes.Equal(bytes.TrimSpace(b), []byte("[]")) {
-					t.Fatalf("user cursor status=%d node=%s body=%s", next.StatusCode, base, b)
-				}
+	})
+	for _, direction := range []string{"", "&backwards=true"} {
+		request := func(base, cursor string) (string, string) {
+			query := "?page_size=1" + direction
+			if cursor != "" {
+				query += "&continuation_token=" + url.QueryEscape(cursor)
+			}
+			r := do(t, browserClient(t), http.MethodGet, base+"/auth/v1/users"+query, nil, map[string]string{"Authorization": "API-Key " + secret})
+			var rows []struct {
+				ID string `json:"id"`
+			}
+			err := json.NewDecoder(r.Body).Decode(&rows)
+			r.Body.Close()
+			if r.StatusCode != http.StatusPartialContent || err != nil || len(rows) != 1 || r.Header.Get("X-User-Count") != "2" || r.Header.Get("X-Page-Size") != "1" || r.Header.Get("X-Page-Count") != "2" {
+				t.Fatalf("pagination node=%s direction=%s status=%d rows=%v decode=%v", base, direction, r.StatusCode, rows, err)
+			}
+			return rows[0].ID, r.Header.Get("X-Continuation-Token")
+		}
+		first, cursor := request(bases[0], "")
+		if cursor == "" {
+			t.Fatal("first page has no continuation token")
+		}
+		if (direction == "" && first != subject) || (direction != "" && first != fixture.Subject) {
+			t.Fatalf("unexpected first user %q for direction %q", first, direction)
+		}
+		for _, base := range bases {
+			last, next := request(base, cursor)
+			if next != "" || first == last || !((first == subject && last == fixture.Subject) || (first == fixture.Subject && last == subject)) {
+				t.Fatalf("pagination node=%s direction=%s first=%q last=%q next=%q", base, direction, first, last, next)
 			}
 		}
 	}
 }
 
-func validateUserList(body []byte, subject string, count int) error {
+func validateUserList(body []byte, subject, email string, count int) error {
 	var rows []map[string]json.RawMessage
 	if bytes.Equal(bytes.TrimSpace(body), []byte("null")) || json.Unmarshal(body, &rows) != nil || len(rows) != count {
 		return fmt.Errorf("invalid user list")
@@ -369,7 +406,7 @@ func validateUserList(body []byte, subject string, count int) error {
 			}
 		}
 		var id, got string
-		if json.Unmarshal(row["id"], &id) != nil || id != subject || bytes.Equal(bytes.TrimSpace(row["email"]), []byte("null")) || json.Unmarshal(row["email"], &got) != nil || got != "" {
+		if json.Unmarshal(row["id"], &id) != nil || id != subject || bytes.Equal(bytes.TrimSpace(row["email"]), []byte("null")) || json.Unmarshal(row["email"], &got) != nil || got != email {
 			return fmt.Errorf("id/email")
 		}
 		for _, key := range []string{"given_name", "family_name"} {
@@ -393,11 +430,11 @@ func validateUserList(body []byte, subject string, count int) error {
 }
 
 func TestUserListWireRejectsMalformed(t *testing.T) {
-	if err := validateUserList([]byte(`[{"id":"subject","email":"","given_name":null,"family_name":"","created_at":1,"last_login":1,"picture_id":null}]`), "subject", 1); err != nil {
+	if err := validateUserList([]byte(`[{"id":"subject","email":"","given_name":null,"family_name":"","created_at":1,"last_login":1,"picture_id":null}]`), "subject", "", 1); err != nil {
 		t.Fatal(err)
 	}
 	for _, body := range []string{`null`, `[{"email":"x"}]`, `[{"Email":"x","id":"i","given_name":"","family_name":"","created_at":1,"last_login":1,"picture_id":null}]`, `[{"id":"i","email":"x","given_name":"","family_name":"","created_at":"1","last_login":1,"picture_id":null}]`, `[{"id":"i","email":"x","given_name":"","family_name":"","created_at":1,"last_login":1,"picture_id":null,"extra":1}]`} {
-		if validateUserList([]byte(body), "x", 1) == nil {
+		if validateUserList([]byte(body), "x", "", 1) == nil {
 			t.Errorf("accepted malformed %s", body)
 		}
 	}

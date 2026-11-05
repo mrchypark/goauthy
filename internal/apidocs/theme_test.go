@@ -43,3 +43,25 @@ func TestThemeContractAcceptsPinnedActionAndRejectsMissingTuple(t *testing.T) {
 		t.Fatal("missing CSS content type")
 	}
 }
+
+func TestElysduiStylesheetIsPublicCSS(t *testing.T) {
+	data, err := Document("https://id.example.test", Features{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := openapi3.NewLoader().LoadFromData(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := doc.Paths.Value("/auth/v1/elysdui.css")
+	if path == nil || path.Get == nil {
+		t.Fatal("missing elysdui stylesheet operation")
+	}
+	op := path.Get
+	if (op.Security != nil && len(*op.Security) != 0) || (op.Security == nil && len(doc.Security) != 0) {
+		t.Fatal("elysdui stylesheet unexpectedly requires authentication")
+	}
+	if response := op.Responses.Status(200); response == nil || response.Value.Content.Get("text/css") == nil {
+		t.Fatal("missing CSS response")
+	}
+}

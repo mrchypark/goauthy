@@ -30,7 +30,7 @@
 
   function displayProfile(account) {
     const profile = $('#profile'); profile.textContent = '';
-    const heading = document.createElement('h2'); heading.id = 'profile-heading'; heading.textContent = [account.given_name, account.family_name].filter(Boolean).join(' ') || account.email || t('Your profile'); profile.append(heading);
+    const heading = document.createElement('h2'); heading.id = 'profile-heading'; heading.textContent = [account.given_name, account.family_name].filter(Boolean).join(' ') || t('Your profile'); profile.append(heading);
     const email = document.createElement('p'); email.textContent = account.email || ''; profile.append(email);
     if (account.email_verified === false) { const note = document.createElement('p'); note.className = 'hint'; note.textContent = t('Email address is not verified.'); profile.append(note); }
     $('#preferred-username').value = account.preferred_username || '';

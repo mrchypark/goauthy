@@ -15,7 +15,7 @@ const localizedKeys = [
   '{count} users', 'Metadata must be valid JSON', 'Request outcome is unknown. Check the current state before retrying.', 'Saving…', 'Creating…',
   'Deleting…', 'Rotating…', 'Expiry must be a safe integer of at least 1719784800',
   'Create a named authorization entity.', 'Update {name} and preserve its immutable ID.',
-  'Create user', 'Edit user', 'Send an activation email to a new user.', 'Email', 'Given name',
+  'Create user', 'Edit user', 'Email', 'Given name',
   'Family name', 'Language', 'Roles', 'Groups', 'roles', 'groups', 'Comma-separated names', 'Preferred username',
   'Time zone', 'Optional IANA name, for example Asia/Seoul', 'Account expiry',
   'Unix seconds; blank means no expiry', 'Unix seconds; blank clears', 'New password',
@@ -63,9 +63,9 @@ assert.equal(context.GoAuthyI18n.t('Manage access rights and expiry. Plaintext s
 const html = fs.readFileSync(__dirname + '/admin.html', 'utf8');
 assert.match(html, /src="\/auth\/v1\/branding\/locale\.js" defer/);
 assert.match(html, /data-language-select/);
-assert.match(html, /id="admin-menu-toggle"[^>]*aria-controls="admin-navigation"[^>]*aria-expanded="false"[^>]*data-i18n="Menu"/);
+assert.match(html, /{{template "button".*"admin-menu-toggle".*"admin-navigation".*"aria-expanded" "false".*"data-i18n" "Menu"/);
 assert.match(html, /<nav id="admin-navigation"/);
-assert.match(html, /<body data-locale-mode="reload">/);
+assert.match(html, /<body\b[^>]* data-locale-mode="reload"/);
 assert.match(html, /href="\/oidc\/logout"/);
 assert.match(adminJS, /document\.documentElement\?\.dataset\?\.basePath/);
 assert.match(adminJS, /GoAuthyI18n\?\.setBusy\?\.\(true\)/);

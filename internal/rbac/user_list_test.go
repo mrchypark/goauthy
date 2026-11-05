@@ -74,15 +74,15 @@ func TestListUsersTiesForwardBackwardAndCursor(t *testing.T) {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
 	second, err := s.listUsers(ctx, "1=1", nil, UserListOptions{PageSize: 1, Cursor: first.ContinuationToken}, 2)
-	if err != nil || len(second.Users) != 1 || second.Users[0].ID != "c" {
+	if err != nil || len(second.Users) != 1 || second.Users[0].ID != "c" || second.ContinuationToken != "" {
 		t.Fatalf("second=%+v err=%v", second, err)
 	}
 	back, err := s.listUsers(ctx, "1=1", nil, UserListOptions{PageSize: 1, Backwards: true}, 2)
-	if err != nil || len(back.Users) != 2 || back.Users[0].ID != "b" || back.Users[1].ID != "c" {
+	if err != nil || len(back.Users) != 2 || back.Users[0].ID != "b" || back.Users[1].ID != "c" || back.ContinuationToken == "" {
 		t.Fatalf("back=%+v err=%v", back, err)
 	}
 	back2, err := s.listUsers(ctx, "1=1", nil, UserListOptions{PageSize: 1, Backwards: true, Cursor: back.ContinuationToken}, 2)
-	if err != nil || len(back2.Users) != 1 || back2.Users[0].ID != "a" {
+	if err != nil || len(back2.Users) != 1 || back2.Users[0].ID != "a" || back2.ContinuationToken != "" {
 		t.Fatalf("back2=%+v err=%v", back2, err)
 	}
 	if _, err := s.listUsers(ctx, "1=1", nil, UserListOptions{Cursor: "u1.bad"}, 2); !errors.Is(err, ErrInvalid) {
@@ -102,6 +102,35 @@ func TestListUsersNullableAndOffset(t *testing.T) {
 	}
 }
 
+func TestListUsersExactPagesAndOffset(t *testing.T) {
+	t.Parallel()
+	s := userListStore(t)
+	ctx := context.Background()
+	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "user-list-fourth", SQL: `INSERT INTO identity_users(subject,username,password_phc,created_at_unix_ms) VALUES ('d','d','phc',1000)`}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		backwards   bool
+		first, last string
+	}{{false, "ab", "cd"}, {true, "cd", "ab"}} {
+		options := UserListOptions{PageSize: 2, Backwards: tc.backwards}
+		first, err := s.listUsers(ctx, "1=1", nil, options, 2)
+		if err != nil || len(first.Users) != 2 || first.Users[0].ID+first.Users[1].ID != tc.first || first.ContinuationToken == "" {
+			t.Fatalf("first backwards=%v: %+v err=%v", tc.backwards, first, err)
+		}
+		options.Cursor = first.ContinuationToken
+		last, err := s.listUsers(ctx, "1=1", nil, options, 2)
+		if err != nil || len(last.Users) != 2 || last.Users[0].ID+last.Users[1].ID != tc.last || last.ContinuationToken != "" {
+			t.Fatalf("last backwards=%v: %+v err=%v", tc.backwards, last, err)
+		}
+		options.Cursor, options.Offset = "", 2
+		offset, err := s.listUsers(ctx, "1=1", nil, options, 2)
+		if err != nil || len(offset.Users) != 2 || offset.Users[0].ID+offset.Users[1].ID != tc.last || offset.ContinuationToken != "" {
+			t.Fatalf("offset backwards=%v: %+v err=%v", tc.backwards, offset, err)
+		}
+	}
+}
+
 func TestListUsersEmptyPagesKeepAuthorizedCount(t *testing.T) {
 	t.Parallel()
 	s := userListStore(t)
@@ -117,7 +146,7 @@ func TestListUsersEmptyPagesKeepAuthorizedCount(t *testing.T) {
 	for _, backwards := range []bool{false, true} {
 		cursor := ""
 		ids := []string{}
-		for range 4 {
+		for i := range 3 {
 			part, err := s.listUsers(ctx, "1=1", nil, UserListOptions{PageSize: 1, Backwards: backwards, Cursor: cursor}, 1)
 			if err != nil || part.Count != 3 || !part.Paginated {
 				t.Fatalf("part=%+v err=%v", part, err)
@@ -126,6 +155,9 @@ func TestListUsersEmptyPagesKeepAuthorizedCount(t *testing.T) {
 				ids = append(ids, u.ID)
 			}
 			cursor = part.ContinuationToken
+			if (cursor == "") != (i == 2) {
+				t.Fatalf("page %d: unexpected continuation token %q", i, cursor)
+			}
 		}
 		want := "abc"
 		if backwards {

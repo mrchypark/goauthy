@@ -225,10 +225,13 @@ func TestApprovalEntryOffersSharedPasskeyAndUpstreamMethods(t *testing.T) {
 		page := httptest.NewRecorder()
 		tc.handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, tc.entry, nil))
 		body := page.Body.String()
-		for _, want := range []string{`id="passkey-btn"`, `document.getElementById('login-form')`, `/auth/v1/users/webauthn_start`, `/auth/v1/users/webauthn_finish`, `/upstream/upstream/start?`} {
+		for _, want := range []string{`id="passkey-btn"`, `id="login-form" method="post"`, `name="csrf_token"`, `/auth/v1/users/webauthn_start`, `/auth/v1/users/webauthn_finish`, `/upstream/upstream/start?`} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("%s missing %s", tc.entry, want)
 			}
+		}
+		if strings.Contains(body, "loginForm.addEventListener('submit'") {
+			t.Fatalf("%s intercepted native password form", tc.entry)
 		}
 		r := httptest.NewRequest(http.MethodGet, "/upstream/upstream/start", nil)
 		r.AddCookie(page.Result().Cookies()[0])

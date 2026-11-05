@@ -1,10 +1,14 @@
 package admin
 
 import (
+	"bytes"
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	ui "github.com/mrchypark/elysdui/ui/gohtmx"
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"html/template"
 	"net/http"
@@ -12,8 +16,24 @@ import (
 	"strings"
 )
 
-//go:embed admin.html admin.css locale.js module_locale.js admin.js dashboard.js catalog.js sessions.js collections.js clients.js themes.js providers.js blacklist.js events.js templates.js
+//go:embed admin.html admin.css locale.js module_locale.js elysdui.js admin.js dashboard.js catalog.js sessions.js collections.js clients.js themes.js providers.js blacklist.js events.js templates.js
 var uiFS embed.FS
+
+var adminTemplate = func() *template.Template {
+	t, err := ui.NewTemplates()
+	if err != nil {
+		panic(err)
+	}
+	return template.Must(t.ParseFS(uiFS, "admin.html"))
+}()
+
+var elysAssets = func() *http.ServeMux {
+	mux := http.NewServeMux()
+	if err := ui.BindAssets(mux); err != nil {
+		panic(err)
+	}
+	return mux
+}()
 
 type CSRFTokenProvider func(http.ResponseWriter, *http.Request) bool
 
@@ -39,6 +59,7 @@ type UI struct {
 	basePath     string
 	csrf         CSRFTokenProvider
 	templates    EmailTemplateProvider
+	brand        func(context.Context) (branding.Brand, error)
 }
 
 func NewUI(browserAdmin BrowserAdministrator) (*UI, error) {
@@ -72,6 +93,9 @@ func (u *UI) localPaths(data []byte) []byte {
 
 func (u *UI) SetCSRFTokenProvider(provider CSRFTokenProvider) { u.csrf = provider }
 func (u *UI) SetTemplateProvider(p EmailTemplateProvider)     { u.templates = p }
+func (u *UI) SetBrandResolver(resolve func(context.Context) (branding.Brand, error)) {
+	u.brand = resolve
+}
 
 func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -119,7 +143,7 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/auth/v1/admin/app.js" {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		for _, name := range []string{"locale.js", "module_locale.js", "dashboard.js", "catalog.js", "sessions.js", "collections.js", "clients.js", "themes.js", "providers.js", "blacklist.js", "events.js", "templates.js", "admin.js"} {
+		for _, name := range []string{"locale.js", "module_locale.js", "elysdui.js", "dashboard.js", "catalog.js", "sessions.js", "collections.js", "clients.js", "themes.js", "providers.js", "blacklist.js", "events.js", "templates.js", "admin.js"} {
 			data, _ := uiFS.ReadFile(name)
 			_, _ = w.Write(u.localPaths(data))
 			_, _ = w.Write([]byte("\n;\n"))
@@ -132,13 +156,38 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(data)
 		return
 	}
+	if r.URL.Path == "/auth/v1/admin/elysdui.css" || r.URL.Path == "/auth/v1/admin/elysdui-patterns.css" {
+		assetRequest := r.Clone(r.Context())
+		assetRequest.URL.Path = "/assets/app.css"
+		if strings.HasSuffix(r.URL.Path, "elysdui-patterns.css") {
+			assetRequest.URL.Path = "/assets/ely-patterns.css"
+		}
+		elysAssets.ServeHTTP(w, assetRequest)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	data, _ := uiFS.ReadFile("admin.html")
+	brand := branding.Brand{Name: "GoAuthy"}
+	if u.brand != nil {
+		var err error
+		brand, err = u.brand(r.Context())
+		if err != nil {
+			http.Error(w, "Brand unavailable", http.StatusServiceUnavailable)
+			return
+		}
+	}
 	language := i18n.UILanguageFromRequest(r)
 	w.Header().Set("Content-Language", language)
 	w.Header().Add("Vary", "Accept-Language")
 	w.Header().Add("Vary", "Cookie")
-	_, _ = w.Write(u.localPaths([]byte(strings.Replace(string(data), `<html lang="en">`, `<html lang="`+language+`" data-base-path="`+template.HTMLEscapeString(u.basePath)+`">`, 1))))
+	var data bytes.Buffer
+	if err := adminTemplate.ExecuteTemplate(&data, "admin.html", struct {
+		Language, BasePath string
+		Brand              branding.Brand
+	}{language, u.basePath, brand}); err != nil {
+		http.Error(w, "Brand unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	_, _ = w.Write(u.localPaths(data.Bytes()))
 }
 
 func (u *UI) handleEmailTemplateList(w http.ResponseWriter, r *http.Request) {

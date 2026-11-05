@@ -225,5 +225,9 @@ func validLogoResolution(value string) bool {
 }
 
 func logoClientExists(clientID string) (string, []any) {
+	// rauthy is a branding namespace, not an OAuth client.
+	if clientID == GlobalBrandID {
+		return "1", nil
+	}
 	return `(EXISTS(SELECT 1 FROM managed_oauth_clients WHERE id=? AND deleted=0) OR EXISTS(SELECT 1 FROM managed_oauth_client_bootstrap WHERE id=?) OR EXISTS(SELECT 1 FROM dynamic_oauth_clients WHERE client_id=?))`, []any{clientID, clientID, clientID}
 }

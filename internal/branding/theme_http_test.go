@@ -129,7 +129,7 @@ func TestThemeHandlerBrowserAdminReadAndGuardedMutations(t *testing.T) {
 	}
 	put := httptest.NewRecorder()
 	handler.Theme(put, themeRequest(http.MethodPut, "/auth/v1/theme/client-a", bytes.NewReader(body), "client-a", ""))
-	if put.Code != http.StatusOK || put.Header().Get("Clear-Site-Data") != `"cache"` || clientChecks != 1 {
+	if put.Code != http.StatusOK || put.Header().Get("Clear-Site-Data") != `"cache"` || clientChecks != 2 {
 		t.Fatalf("PUT status=%d headers=%v clientChecks=%d", put.Code, put.Header(), clientChecks)
 	}
 	got, err = store.GetDefault(ctx, "client-a")

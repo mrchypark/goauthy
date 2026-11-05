@@ -34,6 +34,7 @@ type ThemeCSS struct {
 
 type Theme struct {
 	ClientID     string           `json:"client_id"`
+	BrandName    string           `json:"brand_name,omitempty"`
 	Light        ThemeCSS         `json:"light"`
 	Dark         ThemeCSS         `json:"dark"`
 	BorderRadius string           `json:"border_radius"`
@@ -99,6 +100,9 @@ func DefaultTheme(clientID string) Theme {
 
 func (t Theme) Validate() error {
 	if !clientIDPattern.MatchString(t.ClientID) {
+		return ErrInvalidTheme
+	}
+	if utf8.RuneCountInString(t.BrandName) > 120 || (t.BrandName != "" && strings.TrimSpace(t.BrandName) == "") || strings.ContainsFunc(t.BrandName, unicode.IsControl) {
 		return ErrInvalidTheme
 	}
 	if err := t.Light.Validate(); err != nil {

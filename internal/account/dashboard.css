@@ -12,6 +12,12 @@ body{padding:28px 24px;font-size:14px}main{max-width:800px;padding:0;background:
 
 /* Compact controls; the shared brand stylesheet reserves the language chevron space. */
 .account-tools{gap:6px}.account-tools>label{display:flex;align-items:center;gap:6px;margin:0;font-size:12px;font-weight:500}.account-tools .button{min-height:32px;padding:5px 10px;line-height:20px}.account-tools [data-language-select]{min-height:32px;line-height:20px}.page-header{padding-bottom:12px}.account-nav{padding-block:6px;gap:16px}section{padding:16px 0}h2{margin-bottom:8px}label{margin:10px 0 4px}.hint,.status{margin:6px 0}input,select,textarea{min-height:36px;padding:6px 10px}button,.button{min-height:36px;margin-top:8px;padding:7px 12px;line-height:20px}
+.account-nav a[hidden]{display:none}
 @media(pointer:coarse){button,.button,input,select,.account-tools .button,.account-tools [data-language-select]{min-height:44px}}
 
 .account-topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}.account-topbar .brand-lockup{margin:0}.account-topbar [data-language-select]{flex:none;width:auto}.page-header h1{margin:0}.account-topbar+.page-header{gap:12px}
+.common-brand{--account-ink:hsl(var(--text-high,156 46% 17%));--account-muted:hsl(var(--text,145 8% 41%));--account-paper:hsl(var(--bg,50 27% 96%));--account-line:hsl(var(--bg-high,130 12% 86%));color:var(--account-ink);background:var(--account-paper)}
+.common-brand input,.common-brand select,.common-brand textarea{background-color:hsl(var(--bg-high,60 40% 98%));color:var(--account-ink)}
+.common-brand button,.common-brand .button{background:hsl(var(--action,153 28% 25%));border-color:hsl(var(--action,153 28% 25%));color:var(--btn-text,#faf9f5)}
+.common-brand .secondary{background:transparent;color:hsl(var(--action,153 28% 25%))}
+.common-brand-logo{width:auto;max-width:120px;height:36px;object-fit:contain}

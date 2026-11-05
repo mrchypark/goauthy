@@ -809,6 +809,10 @@ func run() (err error) {
 		return fmt.Errorf("configure admin UI: %w", err)
 	}
 	adminUI.SetIssuer(issuer)
+	commonBrand := func(ctx context.Context) (branding.Brand, error) {
+		return themeStore.Brand(ctx, clientLogoStore, branding.GlobalBrandID)
+	}
+	adminUI.SetBrandResolver(commonBrand)
 	adminUI.SetCSRFTokenProvider(adminCSRFTokenProvider(issuer))
 	if emailTemplates, tplErr := recovery.LoadEmailTemplates(os.Getenv("GOAUTHY_EMAIL_TEMPLATES_FILE")); tplErr == nil {
 		adminUI.SetTemplateProvider(&emailTemplateAdapter{templates: emailTemplates})
@@ -967,6 +971,7 @@ func run() (err error) {
 	accountHandler.ConfigurePasskeyAdministrators(apiKeyStore, rbacStore.IsAdmin)
 	accountHandler.ConfigureAdminForceMFA(bootstrapForceMFA)
 	accountHandler.ConfigureSelfDelete(selfDeleteEnabled)
+	accountHandler.SetBrandResolver(commonBrand)
 	deviceStore := device.NewStore(db)
 	if err := rbacHandler.BindDeviceSessions(deviceStore); err != nil {
 		return fmt.Errorf("configure account devices: %w", err)
@@ -1032,17 +1037,17 @@ func run() (err error) {
 		if err != nil {
 			return login.LoginBranding{}, err
 		}
-		var result login.LoginBranding
+		brand, err := themeStore.Brand(ctx, clientLogoStore, id)
+		if err != nil {
+			return login.LoginBranding{}, err
+		}
+		result := login.LoginBranding{Name: brand.Name}
 		if theme.Login != nil {
 			result.English, result.Korean = theme.Login.CopyFor("en"), theme.Login.CopyFor("ko")
 		}
-		asset, err := clientLogoStore.GetFallback(ctx, id)
-		if err != nil && !errors.Is(err, branding.ErrLogoNotFound) {
-			return result, err
-		}
-		if err == nil {
+		if brand.LogoURL != "" {
 			issuerURL, _ := url.Parse(issuer)
-			result.LogoURL = strings.TrimRight(issuerURL.Path, "/") + "/auth/v1/clients/" + url.PathEscape(id) + "/logo?updated=" + strconv.FormatInt(asset.Updated, 10)
+			result.LogoURL = strings.TrimRight(issuerURL.Path, "/") + brand.LogoURL
 		}
 		return result, nil
 	})
@@ -1190,6 +1195,7 @@ func run() (err error) {
 	handler.Handle("GET /oidc/jwks.json", oidc.JWKSHandler(db, keyring, issuer))
 	handler.Handle("POST /oidc/token", oauthServer.TokenHandler())
 	handler.Handle("POST /oidc/introspect", oauthServer.IntrospectionHandler())
+	handler.Handle("GET /oidc/client-configuration", oauthServer.ClientConfigurationHandler())
 	handler.Handle("POST /oidc/revoke", oauthServer.RevocationHandler())
 	handler.Handle("GET /oidc/userinfo", oauthServer.UserInfoHandler())
 	handler.Handle("POST /oidc/userinfo", oauthServer.UserInfoHandler())
@@ -1384,6 +1390,7 @@ func run() (err error) {
 	handler.HandleFunc("GET /auth/v1/clients/{id}/login-restriction", rbacHandler.LoginRestriction)
 	handler.HandleFunc("PUT /auth/v1/clients/{id}/login-restriction", rbacHandler.LoginRestriction)
 	handler.Handle("GET /auth/v1/theme/global.css", branding.GlobalCSSHandler())
+	handler.Handle("GET /auth/v1/elysdui.css", login.UIStylesheet())
 	handler.Handle("GET /auth/v1/branding/{name}", branding.BrandAssetHandler())
 	handler.HandleFunc("GET /auth/v1/theme/{client_id}/{timestamp}", themeHandler.Theme)
 	handler.HandleFunc("POST /auth/v1/theme/{client_id}", themeHandler.Theme)

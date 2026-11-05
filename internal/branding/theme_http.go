@@ -109,6 +109,12 @@ func (h *ThemeHandler) post(w http.ResponseWriter, r *http.Request, clientID str
 	if _, ok := h.authorize(w, r, apikey.Read); !ok {
 		return
 	}
+	if clientID != GlobalBrandID {
+		if err := h.clientExists(r.Context(), clientID); err != nil {
+			h.themeMutationError(w, err)
+			return
+		}
+	}
 	theme, err := h.store.GetDefault(r.Context(), clientID)
 	if err != nil {
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
@@ -127,9 +133,11 @@ func (h *ThemeHandler) put(w http.ResponseWriter, r *http.Request, clientID stri
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	if err := h.clientExists(r.Context(), clientID); err != nil {
-		h.themeMutationError(w, err)
-		return
+	if clientID != GlobalBrandID {
+		if err := h.clientExists(r.Context(), clientID); err != nil {
+			h.themeMutationError(w, err)
+			return
+		}
 	}
 	if err := h.store.PutAuthorized(r.Context(), theme, h.apiKeys, principal); err != nil {
 		h.themeMutationError(w, err)
@@ -143,6 +151,12 @@ func (h *ThemeHandler) delete(w http.ResponseWriter, r *http.Request, clientID s
 	principal, ok := h.authorize(w, r, apikey.Delete)
 	if !ok {
 		return
+	}
+	if clientID != GlobalBrandID {
+		if err := h.clientExists(r.Context(), clientID); err != nil {
+			h.themeMutationError(w, err)
+			return
+		}
 	}
 	if err := h.store.DeleteAuthorized(r.Context(), clientID, h.apiKeys, principal); err != nil {
 		h.themeMutationError(w, err)

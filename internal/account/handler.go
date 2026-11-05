@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mrchypark/goauthy/internal/apikey"
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/identity"
@@ -36,6 +37,7 @@ var ErrExternalLinkSession = errors.New("invalid external link session")
 
 // Handler exposes the small authenticated password-change surface.
 type Handler struct {
+	brand                   func(context.Context) (branding.Brand, error)
 	issuer                  string
 	browser                 *browser.Store
 	identity                *identity.Store

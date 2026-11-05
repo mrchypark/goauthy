@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
@@ -47,13 +46,20 @@ func TestUserListHTTPPaginationAndWire(t *testing.T) {
 			}
 		}
 	}
-	cursor := w.Header().Get("X-Continuation-Token")
-	if cursor == "" {
-		t.Fatal("missing cursor")
+	if token := w.Header().Get("X-Continuation-Token"); token != "" {
+		t.Fatalf("single full page must not have a continuation token: %q", token)
 	}
-	empty := request("?page_size=1&continuation_token=" + url.QueryEscape(cursor))
-	if empty.Code != 206 || strings.TrimSpace(empty.Body.String()) != "[]" || empty.Header().Get("X-User-Count") != "2" || empty.Header().Get("X-Continuation-Token") != "" {
-		t.Fatalf("empty status=%d headers=%v body=%s", empty.Code, empty.Header(), empty.Body.String())
+	if err := h.SetUserListThreshold(1); err != nil {
+		t.Fatal(err)
+	}
+	first := request("?page_size=1")
+	cursor := first.Header().Get("X-Continuation-Token")
+	if first.Code != 206 || cursor == "" {
+		t.Fatalf("first page status=%d headers=%v", first.Code, first.Header())
+	}
+	last := request("?page_size=1&continuation_token=" + url.QueryEscape(cursor))
+	if last.Code != 206 || last.Header().Get("X-User-Count") != "2" || last.Header().Get("X-Continuation-Token") != "" {
+		t.Fatalf("last page status=%d headers=%v body=%s", last.Code, last.Header(), last.Body.String())
 	}
 	if err := h.SetUserListThreshold(3); err != nil {
 		t.Fatal(err)

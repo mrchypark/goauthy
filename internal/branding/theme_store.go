@@ -134,7 +134,8 @@ func (s *ThemeStore) PutAuthorized(ctx context.Context, theme Theme, keys *apike
 	if err != nil {
 		return err
 	}
-	statement := rhiza.SQLStatement{SQL: `INSERT INTO client_themes(client_id,version,updated_at_unix_ms,document_json) SELECT ?,1,?,? WHERE (EXISTS(SELECT 1 FROM managed_oauth_clients WHERE id=? AND deleted=0) OR EXISTS(SELECT 1 FROM managed_oauth_client_bootstrap WHERE id=?) OR EXISTS(SELECT 1 FROM dynamic_oauth_clients WHERE client_id=?)) AND ` + apikey.GuardExistsSQL() + ` ON CONFLICT(client_id) DO UPDATE SET version=excluded.version,updated_at_unix_ms=excluded.updated_at_unix_ms,document_json=excluded.document_json`, Args: []any{theme.ClientID, s.now().UTC().UnixMilli(), string(data), theme.ClientID, theme.ClientID, theme.ClientID, id}}
+	exists, existsArgs := logoClientExists(theme.ClientID)
+	statement := rhiza.SQLStatement{SQL: `INSERT INTO client_themes(client_id,version,updated_at_unix_ms,document_json) SELECT ?,1,?,? WHERE ` + exists + ` AND ` + apikey.GuardExistsSQL() + ` ON CONFLICT(client_id) DO UPDATE SET version=excluded.version,updated_at_unix_ms=excluded.updated_at_unix_ms,document_json=excluded.document_json`, Args: append([]any{theme.ClientID, s.now().UTC().UnixMilli(), string(data)}, append(existsArgs, id)...)}
 	response, authorized, err := keys.RunMutation(ctx, principal, "Clients", apikey.Update, id, []rhiza.SQLStatement{statement})
 	if err != nil {
 		return err
@@ -156,13 +157,17 @@ func (s *ThemeStore) DeleteAuthorized(ctx context.Context, clientID string, keys
 	if err != nil {
 		return err
 	}
-	statement := rhiza.SQLStatement{SQL: `DELETE FROM client_themes WHERE client_id=? AND ` + apikey.GuardExistsSQL(), Args: []any{clientID, id}}
-	_, authorized, err := keys.RunMutation(ctx, principal, "Clients", apikey.Delete, id, []rhiza.SQLStatement{statement})
+	exists, existsArgs := logoClientExists(clientID)
+	statements := []rhiza.SQLStatement{{SQL: `UPDATE api_key_mutation_guards SET request_id=request_id WHERE request_id=? AND ` + exists + ` AND ` + apikey.GuardExistsSQL(), Args: append([]any{id}, append(existsArgs, id)...)}, {SQL: `DELETE FROM client_themes WHERE client_id=? AND ` + exists + ` AND ` + apikey.GuardExistsSQL(), Args: append([]any{clientID}, append(existsArgs, id)...)}}
+	response, authorized, err := keys.RunMutation(ctx, principal, "Clients", apikey.Delete, id, statements)
 	if err != nil {
 		return err
 	}
 	if !authorized {
 		return apikey.ErrForbidden
+	}
+	if response.RowsAffected < 3 {
+		return clients.ErrNotFound
 	}
 	return nil
 }
