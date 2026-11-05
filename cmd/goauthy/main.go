@@ -887,6 +887,9 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
+	if err := oauthServer.PinBootstrapConnections(ctx, connectionsResource); err != nil {
+		return fmt.Errorf("pin bootstrap connections policy: %w", err)
+	}
 	if connectionsResource != "" {
 		if err := rbacHandler.BindConnectionUseResource(connectionsResource); err != nil {
 			return fmt.Errorf("configure connection use resource: %w", err)
