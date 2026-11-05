@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/storage"
@@ -286,10 +287,11 @@ func (s *Service) CleanupExpiredTokens(ctx context.Context) (int64, error) {
 		return 0, errors.New("recovery service unavailable")
 	}
 
+	cutoff := s.now().UTC().UnixMilli()
 	result, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
-		RequestID: recoveryMutationID("cleanup-expired-tokens"),
-		SQL:       `DELETE FROM identity_password_reset_tokens WHERE expires_at < ?`,
-		Args:      []any{s.now().UTC().UnixMilli()},
+		RequestID: recoveryMutationID("cleanup-expired-tokens", strconv.FormatInt(cutoff, 10)),
+		SQL:       `DELETE FROM identity_password_reset_tokens WHERE usage='password_reset' AND expires_at_unix_ms < ?`,
+		Args:      []any{cutoff},
 	})
 	if err != nil {
 		return 0, err

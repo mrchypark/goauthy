@@ -24,12 +24,12 @@ func TestThemeStoreFallbackAndCrossStoreUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	builtin := DefaultTheme("rauthy")
+	builtin := DefaultTheme(GlobalBrandID)
 	got, err := second.GetFallback(ctx, "client-a")
 	if err != nil || !reflect.DeepEqual(got, builtin) {
 		t.Fatalf("default error=%v", err)
 	}
-	global := DefaultTheme("rauthy")
+	global := DefaultTheme(GlobalBrandID)
 	global.BorderRadius = "8px"
 	if err := first.Put(ctx, global); err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestThemeStoreFallbackAndCrossStoreUpdates(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, global) {
 		t.Fatalf("delete did not reveal global theme: %v", err)
 	}
-	if err := first.Delete(ctx, "rauthy"); err != nil {
+	if err := first.Delete(ctx, GlobalBrandID); err != nil {
 		t.Fatal(err)
 	}
 	got, err = second.GetFallback(ctx, "client-a")
@@ -127,7 +127,7 @@ func TestThemeMutationsRejectRevokedAPIKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err = store.GetDefault(ctx, theme.ClientID)
-	if err != nil || got.ClientID != "rauthy" {
+	if err != nil || got.ClientID != GlobalBrandID {
 		t.Fatalf("admin delete failed: %v", err)
 	}
 }
@@ -152,7 +152,7 @@ func TestThemePutCannotRecreateDeletedClientTheme(t *testing.T) {
 		t.Fatalf("deleted client theme write: %v", err)
 	}
 	got, err := store.GetDefault(ctx, theme.ClientID)
-	if err != nil || got.ClientID != "rauthy" {
+	if err != nil || got.ClientID != GlobalBrandID {
 		t.Fatalf("orphan theme persisted: %v", err)
 	}
 }
@@ -176,7 +176,7 @@ func TestThemeStylesheetURLTracksEffectiveFallback(t *testing.T) {
 	if _, err := strconv.ParseInt(parts[5], 10, 64); err != nil {
 		t.Fatal(err)
 	}
-	global := DefaultTheme("rauthy")
+	global := DefaultTheme(GlobalBrandID)
 	global.BorderRadius = "19px"
 	if err := store.Put(ctx, global); err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestThemeStylesheetURLTracksEffectiveFallback(t *testing.T) {
 	if err != nil || first == second {
 		t.Fatalf("global update kept stale CSS URL: %v", err)
 	}
-	if err := store.Delete(ctx, "rauthy"); err != nil {
+	if err := store.Delete(ctx, GlobalBrandID); err != nil {
 		t.Fatal(err)
 	}
 	third, err := store.StylesheetURL(ctx, clientID)

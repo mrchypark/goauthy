@@ -82,6 +82,19 @@ func TestAuthorizePasskeyScriptCapturesStartJSON(t *testing.T) {
 	if strings.Contains(body, "Array.from(new Uint8Array(assertion.rawId))") {
 		t.Fatalf("rawId must be base64url string via toBase64URL, not numeric array")
 	}
+	for _, want := range []string{
+		`function showPasskeyError(titleKey,detailKey)`,
+		`err.setAttribute('role','alert')`, `err.removeAttribute('aria-live')`,
+		`className='auth-error-icon'`, `setAttribute('aria-hidden','true')`,
+		`className='auth-error-title'`, `className='auth-error-detail'`,
+		`function translatePasskeyMessage(key)`, `typeof globalThis.GoAuthyI18n.t==='function'?globalThis.GoAuthyI18n.t(key):key`,
+		`title.setAttribute('data-i18n',titleKey)`, `detail.setAttribute('data-i18n',detailKey)`,
+		`showPasskeyError('Passkey sign-in failed','Please try your passkey again.')`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("passkey failure alert missing %q", want)
+		}
+	}
 }
 
 func TestAuthorizeLocaleNonceWithoutPasskeys(t *testing.T) {
@@ -149,7 +162,7 @@ func TestOTPStepUpEndpointsDoNotDependOnEntryPath(t *testing.T) {
 	for _, entry := range []string{"/identity/auth/login", "/identity/oidc/device/login", "/identity/account/connection-login"} {
 		r := httptest.NewRequest(http.MethodPost, entry, nil)
 		w := httptest.NewRecorder()
-		h.renderOTPStepUp(w, r, oauth.AuthorizationRequest{ClientID: "review", RedirectURI: h.issuer})
+		h.renderOTPStepUp(w, r, oauth.AuthorizationRequest{ClientID: "review", RedirectURI: h.issuer}, http.StatusOK)
 		if w.Code != http.StatusOK {
 			t.Fatalf("render: %d", w.Code)
 		}

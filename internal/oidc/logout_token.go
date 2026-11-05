@@ -97,7 +97,7 @@ func VerifyLogoutToken(compact string, keys jose.JSONWebKeySet, issuer, audience
 		return LogoutTokenClaims{}, err
 	}
 	payloadType, hasType := raw["typ"]
-	if hasNonce || !validLogoutEvents(raw["events"]) || !validRauthyLogoutType(payloadType, hasType) {
+	if hasNonce || !validLogoutEvents(raw["events"]) || !validLogoutPayloadType(payloadType, hasType) {
 		return LogoutTokenClaims{}, fmt.Errorf("%w: invalid logout event claims", errInvalidLogoutToken)
 	}
 	claims := LogoutTokenClaims{Issuer: payload.Issuer, Subject: payload.Subject, JTI: payload.JTI, SessionID: payload.SessionID}
@@ -171,8 +171,7 @@ func validLogoutEvents(value any) bool {
 	return ok && len(event) == 0
 }
 
-// Rauthy has emitted this non-standard payload claim. It is optional, but a
-// present value must retain its documented meaning.
-func validRauthyLogoutType(value any, present bool) bool {
+// Some deployed logout tokens include this optional non-standard payload claim.
+func validLogoutPayloadType(value any, present bool) bool {
 	return !present || value == "logout+jwt"
 }

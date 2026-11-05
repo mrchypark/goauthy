@@ -69,7 +69,7 @@ func TestAdminCatalogSessionsUIAcrossPods(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := chromedp.Run(browser, network.SetCookie(adminCookie.Name, adminCookie.Value).WithDomain(parsed.Hostname()).WithPath("/").WithSecure(parsed.Scheme == "https"), chromedp.Navigate(primary+"/auth/v1/admin/attributes"), catalogListReady()); err != nil {
+	if err := chromedp.Run(browser, englishUILocale(primary), network.SetCookie(adminCookie.Name, adminCookie.Value).WithDomain(parsed.Hostname()).WithPath("/").WithSecure(parsed.Scheme == "https"), chromedp.Navigate(primary+"/auth/v1/admin/attributes"), catalogListReady()); err != nil {
 		t.Fatalf("catalog UI unavailable: %v", err)
 	}
 	if err := chromedp.Run(browser,

@@ -3,13 +3,41 @@
   const t = globalThis.GoAuthyI18n?.t || ((s, values) => String(s).replace(/\{(\w+)\}/g, (_, key) => values?.[key] ?? `{${key}}`));
   const state = { account: null, csrf: '', attributes: [], attributeValues: {}, attributesLoaded: false, passkeys: [], passkeysLoaded: false, passkeyBusy: false, actionBusy: false, selfDeleteAllowed: false };
   const $ = (selector) => document.querySelector(selector);
-  const status = (id, message, error) => { const el = document.getElementById(id); if (el) { el.textContent = message; el.className = `status${error ? ' error' : ''}`; } };
+  const status = (id, message, error) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.className = `status${error ? ' error' : ''}`;
+    el.setAttribute('role', error ? 'alert' : 'status');
+    el.setAttribute('aria-live', error ? 'assertive' : 'polite');
+    if (!error) { el.textContent = message; return; }
+    const title = id === 'profile-status' ? 'Your account could not be loaded.' : 'Please check this message.';
+    const icon = document.createElement('span'); icon.className = 'status-icon'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = '⚠';
+    const heading = document.createElement('strong'); heading.textContent = t(title);
+    const detail = document.createElement('span'); detail.className = 'status-detail'; detail.textContent = message;
+    el.replaceChildren(icon, heading, detail);
+  };
   const basePath = () => { const path = window.location.pathname; const marker = path.lastIndexOf('/account'); return marker < 0 ? '' : path.slice(0, marker); };
   const endpoint = (path) => `${basePath()}${path}`;
   const request = (url, options = {}) => {
     globalThis.GoAuthyI18n?.setBusy?.(true);
     return fetch(endpoint(url), Object.assign({ credentials: 'same-origin' }, options)).then(async (response) => {
-      if (!response.ok) { const error = new Error(response.status === 401 || response.status === 403 ? t('Your session has expired. Sign in again.') : t('Request failed ({status}).', { status: response.status })); error.status = response.status; throw error; }
+      if (!response.ok) {
+        let body = null;
+        try { body = await response.json?.(); } catch (_) { /* retain the generic status message */ }
+        const wrongCurrentPassword = response.status === 401 && body?.error_code === 'invalid_current_password';
+        const unknownMutationOutcome = response.status === 503 && body?.error_code === 'mutation_outcome_unknown';
+        const message = wrongCurrentPassword
+          ? t('The current password is incorrect. Check it and try again.')
+          : unknownMutationOutcome
+            ? t('Password change outcome is unknown. Check the current state before retrying.')
+            : response.status === 401 || response.status === 403
+              ? t('Your session has expired. Sign in again.')
+              : t('Request failed ({status}).', { status: response.status });
+        const error = new Error(message);
+        error.status = response.status;
+        if (body?.error_code) error.code = body.error_code;
+        throw error;
+      }
       return response;
     }).finally(() => globalThis.GoAuthyI18n?.setBusy?.(false));
   };
@@ -29,15 +57,18 @@
   const syncNavigation = () => document.querySelectorAll?.('.account-nav a').forEach((link) => { const section = document.querySelector(link.getAttribute('href')); link.hidden = !section || section.hidden; });
 
   function displayProfile(account) {
-    const profile = $('#profile'); profile.textContent = '';
-    const heading = document.createElement('h2'); heading.id = 'profile-heading'; heading.textContent = [account.given_name, account.family_name].filter(Boolean).join(' ') || t('Your profile'); profile.append(heading);
+    const profile = $('#profile-content'); profile.textContent = '';
+    const heading = document.createElement('h3'); heading.id = 'profile-name'; heading.textContent = [account.given_name, account.family_name].filter(Boolean).join(' ') || account.email || t('Your profile'); profile.append(heading);
     const email = document.createElement('p'); email.textContent = account.email || ''; profile.append(email);
     if (account.email_verified === false) { const note = document.createElement('p'); note.className = 'hint'; note.textContent = t('Email address is not verified.'); profile.append(note); }
     $('#preferred-username').value = account.preferred_username || '';
     $('#password-section').hidden = Boolean(account.features && account.features.password === false);
     const conversion = $('#passwordless-section'); conversion.hidden = !(account.features && account.features.password && account.features.passkeys && state.passkeys.length); updateConversionControl();
     $('#passwordless-hint').textContent = account.features && account.features.passkey_conversion ? t('This requires an enrolled passkey and will remove password sign-in.') : t('Use a registered passkey to sign in again before converting.');
-    $('#password-restore-section').hidden = !(account.features && account.features.password === false);
+    const hasLocalPassword = account.features?.password !== false;
+    const hasRegisteredPasskey = state.passkeys.length > 0;
+    $('#passkey-form').hidden = !hasLocalPassword && !hasRegisteredPasskey;
+    $('#password-restore-section').hidden = hasLocalPassword || !hasRegisteredPasskey;
   }
 
   async function convertPasswordless() { if (state.actionBusy || state.passkeyBusy || !state.passkeysLoaded || !state.account || !state.account.features.passkey_conversion) return; if (!globalThis.confirm || !globalThis.confirm(t('Turn off password sign-in for this account?'))) return; state.actionBusy = true; $('#passwordless-convert').disabled = true; try { await request(`${subjectPath()}/self/convert_passkey`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf } }); await refreshAccount(); status('passwordless-status', t('Password sign-in disabled.')); } catch (error) { status('passwordless-status', error.message, true); $('#passwordless-convert').disabled = false; } finally { state.actionBusy = false; displayProfile(state.account); setPasskeyBusy(false); } }
@@ -95,6 +126,7 @@
   async function refreshAccount() {
     const account = await request('/account/data').then((r) => r.json());
     state.account = account; state.csrf = account.csrf_token || ''; displayProfile(account);
+    status('profile-status', '');
     return account;
   }
 
@@ -104,7 +136,13 @@
     try {
       const account = await refreshAccount(); const passkeySection = $('#passkeys-section'); passkeySection.hidden = !(account.features && account.features.passkeys); if (account.features && account.features.passkeys) { $('#passkeys-unsupported').hidden = webauthnAvailable('create') && webauthnAvailable('get'); try { await loadPasskeys(); } catch (error) { state.passkeysLoaded = false; status('passkey-status', t('Unable to load passkeys.'), true); } }
       if (account.subject) { try { const result = await request(`/auth/v1/users/${encodeURIComponent(account.subject)}/attr/editable`).then((r) => r.json()); state.attributes = result.values || []; renderAttributes(state.attributes); } catch (_) { $('#attributes-section').hidden = false; status('attributes-status', t('Unable to load editable details.'), true); } } await checkSelfDelete();
-    } catch (error) { $('#profile').textContent = error.message; } finally { syncNavigation(); }
+    } catch (error) {
+      state.account = null; state.csrf = ''; state.attributes = []; state.attributeValues = {}; state.attributesLoaded = false; state.passkeys = []; state.passkeysLoaded = false;
+      $('#profile-content').textContent = ''; $('#preferred-username').value = ''; $('#attributes').textContent = ''; $('#passkeys-list').textContent = '';
+      for (const id of ['password-current', 'password-new', 'password-confirm', 'passkey-current-password', 'password-restore-new', 'password-restore-confirm', 'self-delete-confirm']) $(`#${id}`).value = '';
+      for (const id of ['password-section', 'attributes-section', 'passkeys-section', 'passwordless-section', 'password-restore-section', 'self-delete-section']) $(`#${id}`).hidden = true;
+      status('profile-status', error.message, true);
+    } finally { syncNavigation(); }
   }
 
   async function submitUsername(event) {

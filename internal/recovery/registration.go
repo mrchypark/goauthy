@@ -47,7 +47,7 @@ func ExactRedirectURIs(values []string) RedirectValidator {
 	}
 }
 
-// RegistrationConfig is the pure policy for Rauthy's opt-in public
+// RegistrationConfig is the pure policy for the opt-in public
 // registration endpoint. Domain entries must be canonical lower-case DNS
 // names; allowing and blacklisting domains together is ambiguous and refused.
 type RegistrationConfig struct {
@@ -60,7 +60,7 @@ type RegistrationConfig struct {
 	UserValuesPolicy     identity.UserValuesPolicy
 }
 
-// UserValues is the public registration subset of Rauthy's user_values
+// UserValues is the public registration subset of user_values
 // request. The later persistence slice decides which configured attributes it
 // accepts; this type only bounds the request before that lookup.
 type UserValues struct {
@@ -73,7 +73,7 @@ type UserValues struct {
 	Timezone  string `json:"tz,omitempty"`
 }
 
-// RegistrationRequest mirrors Rauthy v0.36.2's public registration payload.
+// RegistrationRequest is the public registration payload.
 type RegistrationRequest struct {
 	Email             string      `json:"email"`
 	PreferredUsername *string     `json:"preferred_username,omitempty"`

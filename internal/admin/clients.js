@@ -1,6 +1,6 @@
 const clientWebScopes=['openid','email','profile','groups'],clientDeviceScopes=['goauthy.read','offline_access'];
 const clientWebFlow='authorization_code',clientDeviceFlow='urn:ietf:params:oauth:grant-type:device_code',clientRefreshFlow='refresh_token',clientCredentialsFlow='client_credentials';
-const clientFlows=[clientWebFlow,clientRefreshFlow,clientCredentialsFlow,clientDeviceFlow];
+const clientFlows=[clientWebFlow,clientRefreshFlow,clientCredentialsFlow,clientDeviceFlow,'password','urn:ietf:params:oauth:grant-type:token-exchange'];
 const clientValues=v=>String(v??'').split(/[\s,]+/).map(x=>x.trim()).filter(Boolean);
 const clientRedirects=v=>String(v??'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
 const clientLines=v=>(v||[]).join('\n');

@@ -18,20 +18,22 @@ import (
 // must not allow its stale handle to revoke or renew the replacement's lease.
 func TestNoPVCExportLeaseFencesStaleHandles(t *testing.T) {
 	t.Setenv("GOAUTHY_RECOVERY_S3_ENDPOINT", "") // This test owns a filesystem bucket.
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 	dir := t.TempDir()
 	objects := filepath.Join(dir, "objects")
 	config := noPVCExportConfig(t, dir, filepath.Join(dir, "writer"), objects)
+	config.CheckpointInterval = 10 * time.Second
 	db, err := rhiza.Open(ctx, config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, writeErr := db.Execute(ctx, rhiza.ExecuteRequest{RequestID: "lease-probe", SQL: "CREATE TABLE lease_probe (id INTEGER PRIMARY KEY)"})
-	closeErr := db.Close()
-	if err := errors.Join(writeErr, closeErr); err != nil {
-		t.Fatal(err)
+	if writeErr != nil {
+		_ = db.Close()
+		t.Fatal(writeErr)
 	}
+	root := closeNoPVCWriterAfterCertifiedCheckpoint(t, ctx, db, config)
 	bucket, err := filesystem.NewBucket(objects)
 	if err != nil {
 		t.Fatal(err)
@@ -45,15 +47,15 @@ func TestNoPVCExportLeaseFencesStaleHandles(t *testing.T) {
 		t.Fatal(err)
 	}
 	seal, _, ok := oldSnapshot.RecoveryBase()
-	if !ok {
+	if !ok || uint64(seal.Index) != root.Index || seal.RootHash != root.RootHash || root.Hash != seal.StateHash {
 		t.Fatal("missing certified base")
 	}
 	checkpoints := checkpoint.NewManager(bucket, prefix, t.TempDir(), 1)
-	root, err := checkpoints.OpenRoot(ctx, uint64(seal.Index), seal.RootHash)
+	admitted, err := checkpoints.OpenRoot(ctx, uint64(seal.Index), seal.RootHash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldPin, err := checkpoints.PinRecoveryRoot(ctx, root, "lease-probe", time.Minute)
+	oldPin, err := checkpoints.PinRecoveryRoot(ctx, admitted, "lease-probe", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +75,7 @@ func TestNoPVCExportLeaseFencesStaleHandles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	replacementPin, err := checkpoints.PinRecoveryRoot(ctx, root, "lease-probe", time.Minute)
+	replacementPin, err := checkpoints.PinRecoveryRoot(ctx, admitted, "lease-probe", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -35,14 +35,49 @@ func (s *Server) ForwardAuthHandler() http.Handler {
 		}
 		signature := s.accessTokens.AccessTokenSignature(r.Context(), token)
 		request, err := s.store.GetAccessTokenSession(r.Context(), signature, nil)
-		if err != nil || s.accessTokens.ValidateAccessToken(r.Context(), request, token) != nil || !request.GetGrantedScopes().Has(openidScope) || request.GetSession().GetSubject() == "" || sessionDPoPJKT(request.GetSession()) != "" {
+		if err != nil {
+			if oauthBackendUnavailable(err) {
+				writeOAuthServiceUnavailable(w)
+				if s.metrics != nil {
+					s.metrics.TokenReject()
+				}
+				return
+			}
 			writeForwardAuthUnauthorized(w)
 			if s.metrics != nil {
 				s.metrics.TokenReject()
 			}
 			return
 		}
-		if _, err := s.store.GetClient(r.Context(), request.GetClient().GetID()); err != nil || s.oidc.ValidateSubject(r.Context(), request.GetSession().GetSubject()) != nil {
+		if s.accessTokens.ValidateAccessToken(r.Context(), request, token) != nil || !request.GetGrantedScopes().Has(openidScope) || request.GetSession().GetSubject() == "" || sessionDPoPJKT(request.GetSession()) != "" {
+			writeForwardAuthUnauthorized(w)
+			if s.metrics != nil {
+				s.metrics.TokenReject()
+			}
+			return
+		}
+		if _, err := s.store.GetClient(r.Context(), request.GetClient().GetID()); err != nil {
+			if oauthBackendUnavailable(err) {
+				writeOAuthServiceUnavailable(w)
+				if s.metrics != nil {
+					s.metrics.TokenReject()
+				}
+				return
+			}
+			writeForwardAuthUnauthorized(w)
+			if s.metrics != nil {
+				s.metrics.TokenReject()
+			}
+			return
+		}
+		if err := s.oidc.ValidateSubject(r.Context(), request.GetSession().GetSubject()); err != nil {
+			if oauthBackendUnavailable(err) {
+				writeOAuthServiceUnavailable(w)
+				if s.metrics != nil {
+					s.metrics.TokenReject()
+				}
+				return
+			}
 			writeForwardAuthUnauthorized(w)
 			if s.metrics != nil {
 				s.metrics.TokenReject()
@@ -51,6 +86,13 @@ func (s *Server) ForwardAuthHandler() http.Handler {
 		}
 		policy, policySet, err := s.clientGroupPolicy(r.Context(), request.GetClient().GetID())
 		if err != nil {
+			if oauthBackendUnavailable(err) {
+				writeOAuthServiceUnavailable(w)
+				if s.metrics != nil {
+					s.metrics.TokenReject()
+				}
+				return
+			}
 			writeForwardAuthUnauthorized(w)
 			if s.metrics != nil {
 				s.metrics.TokenReject()
@@ -61,6 +103,13 @@ func (s *Server) ForwardAuthHandler() http.Handler {
 		if policySet || s.oidc.ForwardAuthEnabled {
 			principal, err = s.currentPrincipal(r.Context(), request.GetSession().GetSubject())
 			if err != nil {
+				if oauthBackendUnavailable(err) {
+					writeOAuthServiceUnavailable(w)
+					if s.metrics != nil {
+						s.metrics.TokenReject()
+					}
+					return
+				}
 				writeForwardAuthUnauthorized(w)
 				if s.metrics != nil {
 					s.metrics.TokenReject()
@@ -86,6 +135,13 @@ func (s *Server) ForwardAuthHandler() http.Handler {
 			profile, profileErr := s.oidc.ResolveForwardAuthProfile(r.Context(), request.GetSession().GetSubject())
 			passkey, passkeyErr := s.oidc.ResolveForwardAuthPasskeyEnrollment(r.Context(), request.GetSession().GetSubject())
 			if err != nil || profileErr != nil || passkeyErr != nil {
+				if oauthBackendUnavailable(err) || oauthBackendUnavailable(profileErr) || oauthBackendUnavailable(passkeyErr) {
+					writeOAuthServiceUnavailable(w)
+					if s.metrics != nil {
+						s.metrics.TokenReject()
+					}
+					return
+				}
 				writeForwardAuthUnauthorized(w)
 				if s.metrics != nil {
 					s.metrics.TokenReject()
@@ -105,8 +161,15 @@ func (s *Server) ForwardAuthHandler() http.Handler {
 				return
 			}
 		}
-		if s.store.validateTokenAccounts(r.Context(), request) != nil {
+		if err := s.store.validateTokenAccounts(r.Context(), request); err != nil {
 			clearForwardAuthHeaders(w.Header())
+			if oauthBackendUnavailable(err) {
+				writeOAuthServiceUnavailable(w)
+				if s.metrics != nil {
+					s.metrics.TokenReject()
+				}
+				return
+			}
 			writeForwardAuthUnauthorized(w)
 			if s.metrics != nil {
 				s.metrics.TokenReject()

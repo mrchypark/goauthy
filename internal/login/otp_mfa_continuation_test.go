@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -224,6 +225,75 @@ func TestForcedMFAOTPStepUpCompletesAsMFA(t *testing.T) {
 				t.Fatalf("replay status=%d location=%q body=%q", replay.Code, replay.Header().Get("Location"), replay.Body.String())
 			}
 		})
+	}
+}
+
+func TestForcedMFAOTPInvalidFormRendersRetryAndKeepsBoundCode(t *testing.T) {
+	t.Parallel()
+	h, db := testHandlerWithDB(t, true)
+	_, delivered := testOTPStepUp(t, h, db)
+	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{
+		RequestID: "otp-invalid-retry-profile",
+		SQL:       `INSERT INTO identity_user_profiles(subject,email,email_verified,preferred_username) VALUES('user-1','alice@example.test',1,'alice')`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	page := httptest.NewRecorder()
+	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
+	if page.Code != http.StatusOK {
+		t.Fatalf("authorize status=%d body=%q", page.Code, page.Body.String())
+	}
+	cookie := page.Result().Cookies()[0]
+	interaction := interactionToken(t, page.Body.String())
+	stepUp := httptest.NewRecorder()
+	h.Login(stepUp, postLogin(cookie, interaction, "alice", "correct password"))
+	if stepUp.Code != http.StatusOK {
+		t.Fatalf("step-up status=%d body=%q", stepUp.Code, stepUp.Body.String())
+	}
+	var message string
+	select {
+	case message = <-delivered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("forced-MFA step-up did not send its OTP")
+	}
+	match := regexp.MustCompile(`(?m)^([0-9]{6})\r?$`).FindStringSubmatch(message)
+	if len(match) != 2 {
+		t.Fatalf("SMTP fixture did not expose the generated OTP: %q", message)
+	}
+	code := match[1]
+	wrongCode := "000000"
+	if wrongCode == code {
+		wrongCode = "000001"
+	}
+
+	failed := httptest.NewRecorder()
+	failedRequest := postOTPForm(cookie, wrongCode)
+	failedRequest.Header.Set("Accept-Language", "ko")
+	h.OTPVerify(failed, failedRequest)
+	if failed.Code != http.StatusUnauthorized || !strings.HasPrefix(failed.Header().Get("Content-Type"), "text/html") {
+		t.Fatalf("invalid form status=%d content-type=%q body=%q", failed.Code, failed.Header().Get("Content-Type"), failed.Body.String())
+	}
+	for _, want := range []string{
+		`class="auth-error" role="alert"`, `class="auth-error-icon" aria-hidden="true">⚠`,
+		`data-i18n="Please check this message."`, `data-i18n="Check the code and try again."`,
+		"메시지를 확인해 주세요.", "인증 코드를 확인하고 다시 시도하세요.",
+		`role="status" aria-live="polite"`, `action="/auth/v1/users/otp/verify"`, `name="code"`,
+	} {
+		if !strings.Contains(failed.Body.String(), want) {
+			t.Fatalf("invalid form retry page missing %q: %s", want, failed.Body.String())
+		}
+	}
+	if !strings.Contains(failed.Header().Get("Content-Security-Policy"), "form-action 'self' http://localhost") {
+		t.Fatalf("retry page lost the validated callback form policy: %q", failed.Header().Get("Content-Security-Policy"))
+	}
+
+	completed := httptest.NewRecorder()
+	h.OTPVerify(completed, postOTPForm(cookie, code))
+	if completed.Code != http.StatusSeeOther {
+		t.Fatalf("valid retry status=%d body=%q", completed.Code, completed.Body.String())
+	}
+	if len(completed.Result().Cookies()) != 1 {
+		t.Fatalf("valid retry rotated %d session cookies, want 1", len(completed.Result().Cookies()))
 	}
 }
 

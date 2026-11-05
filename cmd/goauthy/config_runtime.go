@@ -147,6 +147,9 @@ func loadApplicationConfig(getenv func(string) string) (applicationConfig, error
 // for both entrypoints instead, so their presence and content are validated
 // before any database side effect.
 func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) error {
+	if envValue(getenv, "GOAUTHY_BOOTSTRAP_CLIENT_ID", "goauthy-dev") == branding.GlobalBrandID {
+		return errors.New("GOAUTHY_BOOTSTRAP_CLIENT_ID is reserved for global branding")
+	}
 	if _, err := scheduledBackupFromEnv(getenv, cfg.Rhiza); err != nil {
 		return err
 	}
@@ -284,7 +287,7 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 	if _, err := browserIDPolicyFromEnv(getenv, cfg.Issuer); err != nil {
 		return err
 	}
-	if strings.ContainsAny(envValue(getenv, "GOAUTHY_EMAIL_SUB_PREFIX", "Rauthy IAM"), "\r\n") {
+	if strings.ContainsAny(envValue(getenv, "GOAUTHY_EMAIL_SUB_PREFIX", "GoAuthy IAM"), "\r\n") {
 		return errors.New("GOAUTHY_EMAIL_SUB_PREFIX must not contain line breaks")
 	}
 

@@ -3,8 +3,19 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const elements = new Map();
+function node(tag = 'DIV', id = '') {
+  return {
+    tagName: tag, id, value: '', className: '', hidden: false, dataset: {}, children: [], attributes: {},
+    get textContent() { return this._textContent || this.children.map(child => child.textContent).join(''); },
+    set textContent(value) { this._textContent = String(value); this.children = []; },
+    setAttribute(name, value) { this.attributes[name] = String(value); },
+    addEventListener() {}, append(...children) { this._textContent = ''; this.children.push(...children); },
+    replaceChildren(...children) { this._textContent = ''; this.children = children; },
+    reset() {}, querySelector() { return { disabled: false }; }, querySelectorAll() { return []; },
+  };
+}
 function element(id) {
-  if (!elements.has(id)) elements.set(id, { id, value: '', textContent: '', className: '', hidden: true, dataset: {}, children: [], addEventListener() {}, append(...children) { this.children.push(...children); }, reset() {}, querySelector() { return { disabled: false }; }, querySelectorAll() { return []; } });
+  if (!elements.has(id)) { const el = node('DIV', id); el.hidden = true; elements.set(id, el); }
   return elements.get(id);
 }
 const form = (id) => Object.assign(element(id), { submitButton: { disabled: false }, querySelector() { return this.submitButton; }, querySelectorAll() { return []; }, reset() {} });
@@ -21,7 +32,7 @@ const context = {
   console,
   GoAuthyI18n: { t(message, values = {}) { const translated = message === 'Request failed ({status}).' && values.status === 406 ? '요청에 실패했습니다 ({status}).' : message; return translated.replace(/\{(\w+)\}/g, (match, name) => Object.hasOwn(values, name) ? String(values[name]) : match); } },
   window: { location: { pathname: '/account' } },
-  document: { querySelector(selector) { return element(selector[0] === '#' ? selector.slice(1) : selector); }, getElementById: element, createElement(tag) { return { tagName: tag, id: '', value: '', textContent: '', className: '', hidden: false, dataset: {}, htmlFor: '', append() {}, addEventListener() {} }; } },
+  document: { querySelector(selector) { return element(selector[0] === '#' ? selector.slice(1) : selector); }, getElementById: element, createElement(tag) { const el = node(tag); el.htmlFor = ''; return el; } },
   fetch: async (url, options) => { requests.push({ url, options }); return responses.shift(); },
 };
 context.globalThis = context;
@@ -30,9 +41,9 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
 (async () => {
   await context.accountDashboard.ready;
   assert.equal(context.accountDashboard.state.account.subject, 'user/1');
-  element('profile').children = [];
+  element('profile-content').children = [];
   context.accountDashboard.displayProfile({ email: 'a@example.test', email_verified: false });
-  assert.deepEqual(element('profile').children.map(child => child.textContent), ['Your profile', 'a@example.test', 'Email address is not verified.']);
+  assert.deepEqual(element('profile-content').children.map(child => child.textContent), ['a@example.test', 'a@example.test', 'Email address is not verified.']);
   element('preferred-username').value = 'new-name';
   const usernameForm = form('username-form');
   await context.accountDashboard.submitUsername({ preventDefault() {}, target: usernameForm });
@@ -177,7 +188,7 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
     await context.accountDashboard.checkSelfDelete();
     assert.equal(context.accountDashboard.state.selfDeleteAllowed, false);
     assert.equal(element('self-delete-section').hidden, failure === 406);
-    if (failure === 406) assert.match(element('self-delete-status').textContent, /^요청에 실패했습니다 \(406\)\.$/);
+    if (failure === 406) { assert.equal(element('self-delete-status').children[1].textContent, 'Please check this message.'); assert.match(element('self-delete-status').children[2].textContent, /^요청에 실패했습니다 \(406\)\.$/); }
     assert.equal(element('self-delete-button').disabled, true);
     element('self-delete-confirm').value = 'a@example.test';
     const forbiddenDelete = requests.length;
@@ -207,5 +218,89 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
   const afterDelete = requests.length;
   await context.accountDashboard.convertPasswordless();
   assert.equal(requests.length, afterDelete, 'terminal account must not fetch again');
+
+  const failureDetail = '<img src=x onerror=alert(1)> raw-safe-detail';
+  context.accountDashboard.connectionDeps.status('username-status', failureDetail, true);
+  const usernameStatus = element('username-status');
+  assert.equal(usernameStatus.attributes.role, 'alert');
+  assert.equal(usernameStatus.attributes['aria-live'], 'assertive');
+  assert.equal(usernameStatus.children[0].attributes['aria-hidden'], 'true');
+  assert.equal(usernameStatus.children[1].textContent, 'Please check this message.');
+  assert.equal(usernameStatus.children[2].textContent, failureDetail, 'error detail stays literal text');
+  assert.equal(usernameStatus.children.length, 3);
+  context.accountDashboard.connectionDeps.status('username-status', 'Username saved.');
+  assert.equal(usernameStatus.attributes.role, 'status');
+  assert.equal(usernameStatus.attributes['aria-live'], 'polite');
+  assert.equal(usernameStatus.textContent, 'Username saved.');
+
+  context.accountDashboard.state.account = { subject: 'user/1', features: { password: true, passkeys: true, passkey_conversion: true } };
+  context.accountDashboard.state.csrf = 'csrf';
+  context.accountDashboard.state.actionBusy = false;
+  context.accountDashboard.state.passkeys = [{ name: 'primary' }];
+  context.accountDashboard.state.passkeysLoaded = true;
+  context.confirm = () => true;
+  let conversionCalls = 0;
+  context.fetch = async () => ++conversionCalls === 1 ? { ok: true, status: 200 } : { ok: false, status: 503 };
+  await context.accountDashboard.convertPasswordless();
+  const conversionStatus = element('passwordless-status');
+  assert.equal(conversionCalls, 2, 'the conversion succeeds before account refresh fails');
+  assert.equal(conversionStatus.attributes.role, 'alert');
+  assert.equal(conversionStatus.children[1].textContent, 'Please check this message.');
+  assert.equal(conversionStatus.children[2].textContent, 'Request failed (503).');
+  assert.doesNotMatch(conversionStatus.textContent, /retry|try again/i, 'ambiguous write outcomes get no retry advice');
+
+  context.accountDashboard.state.account = { subject: 'stale-user' };
+  context.accountDashboard.state.csrf = 'stale-csrf';
+  context.accountDashboard.state.attributesLoaded = true;
+  context.accountDashboard.state.attributes = [{ name: 'private', value: 'stale' }];
+  element('profile-content').append(node('P'));
+  element('preferred-username').value = 'stale-name';
+  element('attributes').append(node('INPUT'));
+  context.fetch = async () => ({ ok: false, status: 503 });
+  await context.accountDashboard.load();
+  assert.equal(context.accountDashboard.state.account, null);
+  assert.equal(context.accountDashboard.state.csrf, '');
+  assert.equal(context.accountDashboard.state.attributes.length, 0);
+  assert.equal(element('profile-content').textContent, '');
+  assert.equal(element('preferred-username').value, '');
+  assert.equal(element('attributes').textContent, '');
+  const profileStatus = element('profile-status');
+  assert.equal(profileStatus.attributes.role, 'alert');
+  assert.equal(profileStatus.children[1].textContent, 'Your account could not be loaded.');
+  assert.equal(profileStatus.children[2].textContent, 'Request failed (503).');
+
+  context.accountDashboard.state.account = { subject: 'federated-user', features: { password: false, passkeys: true, passkey_conversion: false } };
+  context.accountDashboard.state.passkeysLoaded = true;
+  element('connections-section').hidden = false;
+  context.accountDashboard.renderPasskeys([]);
+  assert.equal(element('password-restore-section').hidden, true, 'federated accounts without a passkey cannot restore a password');
+  assert.equal(element('passkey-form').hidden, true, 'federated accounts without a passkey cannot add their first passkey');
+  assert.equal(element('connections-section').hidden, false, 'other account actions remain available');
+  context.accountDashboard.renderPasskeys([{ name: 'existing' }]);
+  assert.equal(element('password-restore-section').hidden, false, 'registered passkeys keep password restoration available');
+  assert.equal(element('passkey-form').hidden, false, 'registered passkey users can manage passkeys');
+  context.accountDashboard.state.account.features.password = true;
+  context.accountDashboard.renderPasskeys([]);
+  assert.equal(element('password-restore-section').hidden, true, 'password users do not see password restoration');
+  assert.equal(element('password-section').hidden, false, 'password users retain password actions');
+  assert.equal(element('passkey-form').hidden, false, 'password users can still enroll their first passkey');
+
+  element('password-current').value = 'WrongPassword1';
+  element('password-new').value = 'NewPassword2';
+  element('password-confirm').value = 'NewPassword2';
+  context.fetch = async () => ({ ok: false, status: 401, json: async () => ({ error_code: 'invalid_current_password' }) });
+  await context.accountDashboard.submitPassword({ preventDefault() {}, target: form('password-form') });
+  assert.equal(element('password-status').children[2].textContent, 'The current password is incorrect. Check it and try again.');
+  context.fetch = async () => ({ ok: false, status: 503, json: async () => ({ error_code: 'mutation_outcome_unknown' }) });
+  await context.accountDashboard.submitPassword({ preventDefault() {}, target: form('password-form') });
+  assert.equal(element('password-status').children[2].textContent, 'Password change outcome is unknown. Check the current state before retrying.');
+  for (const [status, errorCode, message] of [
+    [401, 'unexpected', 'Your session has expired. Sign in again.'],
+    [403, 'invalid_current_password', 'Your session has expired. Sign in again.'],
+    [503, 'unexpected', 'Request failed (503).'],
+  ]) {
+    context.fetch = async () => ({ ok: false, status, json: async () => ({ error_code: errorCode }) });
+    await assert.rejects(context.accountDashboard.connectionDeps.request('/account/test'), (error) => error.status === status && error.message === message);
+  }
   console.log('dashboard UI checks passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

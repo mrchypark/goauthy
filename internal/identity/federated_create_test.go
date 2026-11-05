@@ -135,11 +135,11 @@ func TestFederatedCreateAutoOnboardingFalseRejected(t *testing.T) {
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
 	result, err := store.CreateFederatedIdentity(ctx, FederatedCreationInput{
-		Subject: testFederatedSubject(testFederatedNamespace),
-		Config:  FederatedConfigSnapshot{Source: "registry", Version: "v1", Issuer: "https://accounts.google.com", ClientID: "test-client-id", Kind: "oidc", AutoOnboarding: false},
-		Email:   "onboard-reject@example.test",
+		Subject:       testFederatedSubject(testFederatedNamespace),
+		Config:        FederatedConfigSnapshot{Source: "registry", Version: "v1", Issuer: "https://accounts.google.com", ClientID: "test-client-id", Kind: "oidc", AutoOnboarding: false},
+		Email:         "onboard-reject@example.test",
 		EmailVerified: true,
-		SourceIP: "10.0.0.4",
+		SourceIP:      "10.0.0.4",
 	})
 	if err != ErrFederatedProviderChanged || result.Created {
 		t.Fatalf("expected provider changed, got result=%#v err=%v", result, err)
@@ -154,16 +154,16 @@ func TestFederatedCreateVersionChangedRejected(t *testing.T) {
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
 	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
 		RequestID: "federated-test-version-rotate",
-		SQL:       `UPDATE auth_provider_runtime_versions SET version = 'v2' WHERE provider_id = '`+testFederatedProviderID+`'`,
+		SQL:       `UPDATE auth_provider_runtime_versions SET version = 'v2' WHERE provider_id = '` + testFederatedProviderID + `'`,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := store.CreateFederatedIdentity(ctx, FederatedCreationInput{
-		Subject: testFederatedSubject(testFederatedNamespace),
-		Config:  testFederatedProvider,
-		Email:   "version-change@example.test",
+		Subject:       testFederatedSubject(testFederatedNamespace),
+		Config:        testFederatedProvider,
+		Email:         "version-change@example.test",
 		EmailVerified: true,
-		SourceIP: "10.0.0.5",
+		SourceIP:      "10.0.0.5",
 	})
 	if err != ErrFederatedProviderChanged || result.Created {
 		t.Fatalf("expected provider changed, got result=%#v err=%v", result, err)
@@ -178,16 +178,16 @@ func TestFederatedCreateDisabledProviderRejected(t *testing.T) {
 	store.now = func() time.Time { return time.UnixMilli(2_000_000).UTC() }
 	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
 		RequestID: "federated-test-disable-provider",
-		SQL:       `UPDATE auth_providers SET enabled = 0 WHERE id = '`+testFederatedProviderID+`'`,
+		SQL:       `UPDATE auth_providers SET enabled = 0 WHERE id = '` + testFederatedProviderID + `'`,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := store.CreateFederatedIdentity(ctx, FederatedCreationInput{
-		Subject: testFederatedSubject(testFederatedNamespace),
-		Config:  testFederatedProvider,
-		Email:   "disabled-provider@example.test",
+		Subject:       testFederatedSubject(testFederatedNamespace),
+		Config:        testFederatedProvider,
+		Email:         "disabled-provider@example.test",
 		EmailVerified: true,
-		SourceIP: "10.0.0.6",
+		SourceIP:      "10.0.0.6",
 	})
 	if err != ErrFederatedProviderChanged || result.Created {
 		t.Fatalf("expected provider changed, got result=%#v err=%v", result, err)
@@ -303,7 +303,7 @@ func seedRauthyAdminRole(t *testing.T, store *Store) {
 	t.Helper()
 	if _, err := storage.Execute(context.Background(), store.db, rhiza.ExecuteRequest{
 		RequestID: "seed-rauthy-admin-role",
-		SQL:       "INSERT INTO rbac_roles(id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) VALUES('admin-role-id','rauthy_admin',NULL,1,0,0)",
+		SQL:       "INSERT INTO rbac_roles(id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) VALUES('admin-role-id','goauthy_admin',NULL,1,0,0)",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -336,11 +336,11 @@ func TestFederatedCreateAdminMappingTrue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := map[string]bool{"NewUserRegistered": false, "NewRauthyAdmin": false}
+	found := map[string]bool{"NewUserRegistered": false, "NewGoAuthyAdmin": false}
 	for _, row := range rows.Rows {
 		found[row[0].(string)] = true
 	}
-	if !found["NewUserRegistered"] || !found["NewRauthyAdmin"] {
+	if !found["NewUserRegistered"] || !found["NewGoAuthyAdmin"] {
 		t.Fatalf("expected both creation events, got %#v", found)
 	}
 }
@@ -372,8 +372,8 @@ func TestFederatedCreateAdminMappingFalse(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, row := range rows.Rows {
-		if row[0].(string) == "NewRauthyAdmin" {
-			t.Fatalf("unexpected NewRauthyAdmin event for AdminMapping=false")
+		if row[0].(string) == "NewGoAuthyAdmin" {
+			t.Fatalf("unexpected NewGoAuthyAdmin event for AdminMapping=false")
 		}
 	}
 }
@@ -405,8 +405,8 @@ func TestFederatedCreateAdminMappingNil(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, row := range rows.Rows {
-		if row[0].(string) == "NewRauthyAdmin" {
-			t.Fatalf("unexpected NewRauthyAdmin event for AdminMapping=nil")
+		if row[0].(string) == "NewGoAuthyAdmin" {
+			t.Fatalf("unexpected NewGoAuthyAdmin event for AdminMapping=nil")
 		}
 	}
 }
@@ -416,7 +416,7 @@ func TestFederatedCreateAdminMissingRoleRollback(t *testing.T) {
 	store := testFederatedStore(t)
 	ctx := context.Background()
 	store.now = func() time.Time { return time.UnixMilli(3_000_003).UTC() }
-	// Do NOT seed rauthy_admin role.
+	// Do NOT seed goauthy_admin role.
 	result, err := store.CreateFederatedIdentity(ctx, FederatedCreationInput{
 		Subject:       testFederatedSubject(testFederatedNamespace),
 		Config:        testFederatedProvider,

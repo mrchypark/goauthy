@@ -1,7 +1,7 @@
 # Local test image only. Supply the Ternal checkout as a named BuildKit context:
 # --build-context ternal=/absolute/path/to/ternal
 FROM golang:1.27-alpine
-RUN apk add --no-cache curl openssl iproute2 netcat-openbsd procps chromium
+RUN apk add --no-cache curl openssl iproute2 netcat-openbsd procps chromium git
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

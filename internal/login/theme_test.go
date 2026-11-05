@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/mrchypark/goauthy/internal/branding"
 )
 
 func TestThemeLinksResolveOAuthClientAndDirectPagesUseGlobalClient(t *testing.T) {
@@ -40,10 +42,10 @@ func TestThemeLinksResolveOAuthClientAndDirectPagesUseGlobalClient(t *testing.T)
 	fedCMRequest := httptest.NewRequest(http.MethodGet, "/auth/login", nil)
 	fedCMRequest.RemoteAddr = "198.51.100.11:1234"
 	h.FedCMLanding(fedCMLanding, fedCMRequest)
-	if fedCMLanding.Code != http.StatusOK || clientsString(clients) != "browser-client,rauthy" {
+	if fedCMLanding.Code != http.StatusOK || clientsString(clients) != "browser-client,"+branding.GlobalBrandID {
 		t.Fatalf("FedCM landing status=%d resolver clients=%q", fedCMLanding.Code, clientsString(clients))
 	}
-	assertThemeLinks(t, fedCMLanding.Body.String(), `/auth/v1/theme/rauthy/123`)
+	assertThemeLinks(t, fedCMLanding.Body.String(), `/auth/v1/theme/`+branding.GlobalBrandID+`/123`)
 	fedCMCookies := fedCMLanding.Result().Cookies()
 	if len(fedCMCookies) != 1 {
 		t.Fatalf("FedCM landing cookies=%d", len(fedCMCookies))
@@ -62,35 +64,35 @@ func TestThemeLinksResolveOAuthClientAndDirectPagesUseGlobalClient(t *testing.T)
 	fedCMPost.AddCookie(fedCMCookies[0])
 	fedCMSuccess := httptest.NewRecorder()
 	h.FedCMLanding(fedCMSuccess, fedCMPost)
-	if fedCMSuccess.Code != http.StatusOK || clientsString(clients) != "browser-client,rauthy,rauthy" {
+	if fedCMSuccess.Code != http.StatusOK || clientsString(clients) != "browser-client,"+branding.GlobalBrandID+","+branding.GlobalBrandID {
 		t.Fatalf("FedCM success status=%d resolver clients=%q", fedCMSuccess.Code, clientsString(clients))
 	}
-	assertThemeLinks(t, fedCMSuccess.Body.String(), `/auth/v1/theme/rauthy/123`)
+	assertThemeLinks(t, fedCMSuccess.Body.String(), `/auth/v1/theme/`+branding.GlobalBrandID+`/123`)
 
 	devicePage := httptest.NewRecorder()
 	deviceRequest := httptest.NewRequest(http.MethodGet, "/oidc/device/login?user_code=AB12CD34", nil)
 	deviceRequest.RemoteAddr = "198.51.100.12:1234"
 	h.DeviceLoginHandler(false).ServeHTTP(devicePage, deviceRequest)
-	if devicePage.Code != http.StatusOK || clientsString(clients) != "browser-client,rauthy,rauthy,rauthy" {
+	if devicePage.Code != http.StatusOK || clientsString(clients) != "browser-client,"+branding.GlobalBrandID+","+branding.GlobalBrandID+","+branding.GlobalBrandID {
 		t.Fatalf("device page status=%d resolver clients=%q", devicePage.Code, clientsString(clients))
 	}
-	assertThemeLinks(t, devicePage.Body.String(), `/auth/v1/theme/rauthy/123`)
+	assertThemeLinks(t, devicePage.Body.String(), `/auth/v1/theme/`+branding.GlobalBrandID+`/123`)
 
 	connectionPage := httptest.NewRecorder()
 	connectionRequest := httptest.NewRequest(http.MethodGet, "/account/connection-login?handoff_id="+testHandoffID, nil)
 	connectionRequest.RemoteAddr = "198.51.100.13:1234"
 	h.ConnectionHandoffLoginHandler(false).ServeHTTP(connectionPage, connectionRequest)
-	if connectionPage.Code != http.StatusOK || clientsString(clients) != "browser-client,rauthy,rauthy,rauthy,rauthy" {
+	if connectionPage.Code != http.StatusOK || clientsString(clients) != "browser-client,"+branding.GlobalBrandID+","+branding.GlobalBrandID+","+branding.GlobalBrandID+","+branding.GlobalBrandID {
 		t.Fatalf("connection page status=%d resolver clients=%q", connectionPage.Code, clientsString(clients))
 	}
-	assertThemeLinks(t, connectionPage.Body.String(), `/auth/v1/theme/rauthy/123`)
+	assertThemeLinks(t, connectionPage.Body.String(), `/auth/v1/theme/`+branding.GlobalBrandID+`/123`)
 }
 
 func TestThemeLinkEscapesUntrustedResolverURL(t *testing.T) {
 	t.Parallel()
 	h := testHandler(t)
 	h.SetThemeURLResolver(func(context.Context, string) (string, error) {
-		return `/auth/v1/theme/rauthy/123\"><script>alert(1)</script>`, nil
+		return `/auth/v1/theme/` + branding.GlobalBrandID + `/123\"><script>alert(1)</script>`, nil
 	})
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
@@ -106,7 +108,7 @@ func TestThemeLinkEscapesUntrustedResolverURL(t *testing.T) {
 	if strings.Contains(body, `<script>alert(1)</script>`) {
 		t.Fatalf("literal injection script present in body: %q", body)
 	}
-	wantEscaped := `/auth/v1/theme/rauthy/123%5c%22%3e%3cscript%3ealert%281%29%3c/script%3e`
+	wantEscaped := `/auth/v1/theme/` + branding.GlobalBrandID + `/123%5c%22%3e%3cscript%3ealert%281%29%3c/script%3e`
 	if !strings.Contains(body, `<link rel="stylesheet" href="`+wantEscaped+`">`) {
 		t.Fatalf("escaped malicious URL not in stylesheet href: %q", body)
 	}

@@ -12,7 +12,7 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-const schemaVersion = 111
+const schemaVersion = 112
 
 // migrateThroughV97 applies schema versions v1 through v97. It is the
 // unchanged prefix of Migrate, extracted so tests can reach a clean v97
@@ -426,6 +426,9 @@ func Migrate(ctx context.Context, db *rhiza.DB) error {
 	}
 	if err := migrateSchemaV111(ctx, db); err != nil {
 		return fmt.Errorf("migrate schema v111: %w", err)
+	}
+	if err := migrateSchemaV112(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v112: %w", err)
 	}
 	return nil
 }
@@ -1207,7 +1210,7 @@ func migrateSchemaV59(ctx context.Context, db *rhiza.DB) error {
 			id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=43),
 			timestamp INTEGER NOT NULL CHECK(timestamp>=0),
 			level INTEGER NOT NULL CHECK(level BETWEEN 0 AND 3),
-			typ TEXT NOT NULL CHECK(typ IN ('InvalidLogins','IpBlacklisted','IpBlacklistRemoved','JwksRotated','NewUserRegistered','NewRauthyAdmin','NewRauthyVersion','PossibleBruteForce','RauthyStarted','RauthyHealthy','RauthyUnhealthy','SecretsMigrated','UserEmailChange','UserPasswordReset','Test','BackchannelLogoutFailed','ScimTaskFailed','ForcedLogout','UserLoginRevoke','SuspiciousApiScan','LoginNewLocation','TokenIssued','CredentialStuffing','EmailSendError')),
+			typ TEXT NOT NULL CHECK(typ IN ('InvalidLogins','IpBlacklisted','IpBlacklistRemoved','JwksRotated','NewUserRegistered','NewGoAuthyAdmin','NewGoAuthyVersion','PossibleBruteForce','GoAuthyStarted','GoAuthyHealthy','GoAuthyUnhealthy','SecretsMigrated','UserEmailChange','UserPasswordReset','Test','BackchannelLogoutFailed','ScimTaskFailed','ForcedLogout','UserLoginRevoke','SuspiciousApiScan','LoginNewLocation','TokenIssued','CredentialStuffing','EmailSendError')),
 			ip TEXT CHECK(ip IS NULL OR length(ip) BETWEEN 2 AND 45),
 			data INTEGER,
 			text TEXT CHECK(text IS NULL OR length(text)<=4096)

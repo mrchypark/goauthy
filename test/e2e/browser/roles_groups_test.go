@@ -71,7 +71,7 @@ func testRolesGroupsBeforeReplacement(t *testing.T, primary, secondary, tertiary
 	rbacAssertAbsent(t, client, secondary, "roles", "e2e-delete-role")
 	rbacAssertAbsent(t, client, tertiary, "groups", "e2e-delete-group")
 	rbacPatchMembership(t, client, tertiary, csrf, rbacMembership{
-		Roles:  []string{"e2e-claim-role", rbacRenamedRole, "rauthy_admin"},
+		Roles:  []string{"e2e-claim-role", rbacRenamedRole, "goauthy_admin"},
 		Groups: []string{"e2e-claim-group", rbacRenamedGroup},
 	})
 }
@@ -79,10 +79,10 @@ func testRolesGroupsBeforeReplacement(t *testing.T, primary, secondary, tertiary
 func testRolesGroupsClaims(t *testing.T, primary, secondary, tertiary, username, password, clientSecret string) {
 	client, csrf := rbacAuthenticatedClient(t, primary, secondary, username, password)
 	wantGroups := []string{"e2e-claim-group", rbacRenamedGroup}
-	issued, _ := rbacIssueClaims(t, newBrowserClient(t), primary, primary, tertiary, username, password, clientSecret, true, []string{"e2e-claim-role", rbacRenamedRole, "rauthy_admin"})
+	issued, _ := rbacIssueClaims(t, newBrowserClient(t), primary, primary, tertiary, username, password, clientSecret, true, []string{"e2e-claim-role", rbacRenamedRole, "goauthy_admin"})
 	claimRole := rbacAssertListed(t, client, primary, "roles", rbacEntity{Name: "e2e-claim-role"})
 	rbacRename(t, client, secondary, "roles", claimRole.ID, rbacRenamedClaimRole, map[string]any{"stage": "claim-renamed"}, csrf)
-	wantRoles := []string{rbacRenamedClaimRole, rbacRenamedRole, "rauthy_admin"}
+	wantRoles := []string{rbacRenamedClaimRole, rbacRenamedRole, "goauthy_admin"}
 	rbacAssertIntrospectionClaims(t, client, tertiary, clientSecret, issued.AccessToken, wantRoles, wantGroups, true)
 	rbacAssertRefreshedClaims(t, client, primary, tertiary, clientSecret, issued.RefreshToken, wantRoles, true)
 	rbacAssertClaims(t, newBrowserClient(t), primary, primary, tertiary, username, password, clientSecret, true, wantRoles)
@@ -100,7 +100,7 @@ func testRolesGroupsAfterReplacement(t *testing.T, primary, secondary, tertiary,
 	// An empty PatchOp preserves both dimensions and returns their current
 	// state, so this asserts recovery without repairing missing membership.
 	rbacAssertMembership(t, client, secondary, csrf, rbacMembership{
-		Roles:  []string{"e2e-claim-role", rbacRenamedRole, "rauthy_admin"},
+		Roles:  []string{"e2e-claim-role", rbacRenamedRole, "goauthy_admin"},
 		Groups: []string{"e2e-claim-group", rbacRenamedGroup},
 	})
 }

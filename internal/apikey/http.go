@@ -252,7 +252,7 @@ func auditQuery(u *url.URL) (int, *audit.Cursor, error) {
 }
 func (h *Handler) principal(w http.ResponseWriter, r *http.Request, mutation bool, right Right) (*Principal, bool, bool) {
 	if HasAuthorization(r) {
-		// Rauthy does not allow API keys to manage API keys. Keep this
+		// API keys must not manage API keys. Keep this
 		// boundary closed even when the presented key has ApiKeys rights.
 		return nil, false, false
 	}

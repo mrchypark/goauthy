@@ -34,7 +34,7 @@ exactly `ternal-goauthy-0` through `ternal-goauthy-2` at
 `ternal-goauthy.ternal-auth.svc.cluster.local:8444`, with distinct voter
 tokens. The standalone overlay does not read the member or admin-token keys.
 The bootstrap user is intentionally a `ternal-admins` member with the
-`rauthy_admin` administrator role.
+`goauthy_admin` administrator role.
 
 The image `goauthy:ternal-no-pvc-candidate` is deliberately unbuilt and
 unpublished. Replace it only with a reviewed, qualified immutable digest. Add

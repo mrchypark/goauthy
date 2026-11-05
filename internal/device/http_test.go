@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/storage"
+	"github.com/mrchypark/rhiza"
 )
 
 var deviceHTTPTestNow = time.Unix(1_700_000_000, 0).UTC()
@@ -47,6 +49,44 @@ func TestDeviceAuthorizationHTTP(t *testing.T) {
 	u, err := url.Parse(got.VerificationURIComplete)
 	if err != nil || u.Query().Get("user_code") != got.UserCode {
 		t.Fatalf("complete=%q err=%v", got.VerificationURIComplete, err)
+	}
+}
+
+func TestDeviceAuthorizationAcceptsManagedClientIDAt256ByteLimit(t *testing.T) {
+	ctx, store, _ := testStore(t)
+	clientID := strings.Repeat("a", 256)
+	_, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
+		RequestID: "device-client-id-256-regression",
+		SQL:       `INSERT INTO managed_oauth_clients(id,generation,revision,enabled,deleted,metadata_json) VALUES(?,?,?,1,0,?)`,
+		Args:      []any{clientID, "managed-generation", int64(1), `{"confidential":false,"redirect_uris":[],"scopes":["goauthy.read"],"default_scopes":["goauthy.read"],"enabled_flows":["urn:ietf:params:oauth:grant-type:device_code"]}`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorize := func(r *http.Request, gotID string, scopes []string) error {
+		if gotID != clientID || strings.Join(scopes, " ") != "goauthy.read" {
+			return errors.New("unexpected managed client authorization input")
+		}
+		SetManagedClient(r, clientID, "managed-generation", 1)
+		return nil
+	}
+	h := testDeviceHandler(t, store, authorize, nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, formRequest(http.MethodPost, deviceAuthorizationPath, url.Values{
+		"client_id": {clientID},
+		"scope":     {"goauthy.read"},
+	}))
+	if w.Code != http.StatusOK {
+		t.Fatalf("device authorization for 256-byte managed client ID status=%d body=%s", w.Code, w.Body.String())
+	}
+	var response struct {
+		DeviceCode string `json:"device_code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.DeviceCode == "" {
+		t.Fatal("successful authorization returned an empty device code")
 	}
 }
 

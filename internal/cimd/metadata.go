@@ -231,7 +231,7 @@ func validFlowValue(value string) bool {
 }
 
 // sanitizeGrantTypes is intentionally the only lenient CIMD flow handling.
-// Known Rauthy grants are retained for metadata fidelity, while Go's
+// Known upstream grants are retained for metadata fidelity, while Go's
 // effective ephemeral client still narrows execution to authorization_code.
 func sanitizeGrantTypes(values []string, present bool, ignore bool) ([]string, bool) {
 	if !present {

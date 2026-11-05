@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS build
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -6,10 +6,12 @@ ENV GOOS=$TARGETOS GOARCH=$TARGETARCH
 
 WORKDIR /src
 COPY go.mod go.sum ./
+RUN apk add --no-cache git
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy ./cmd/goauthy
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy-rhiza-init ./cmd/goauthy-rhiza-init
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy-bootstrap-secrets ./cmd/goauthy-bootstrap-secrets
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy-backup ./cmd/goauthy-backup
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy-backchannel-sink ./cmd/goauthy-backchannel-sink
@@ -63,12 +65,13 @@ COPY --from=checkpoint-fault-build /goauthy-checkpoint-fault /goauthy-checkpoint
 USER 65532:65532
 ENTRYPOINT ["/goauthy-checkpoint-fault"]
 
-FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine AS journal-test-build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS journal-test-build
 ARG TARGETOS
 ARG TARGETARCH
 ENV GOOS=$TARGETOS GOARCH=$TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
+RUN apk add --no-cache git
 RUN go mod download
 COPY internal ./internal
 RUN CGO_ENABLED=0 go test -c -o /storage.test ./internal/storage
@@ -93,6 +96,7 @@ ENTRYPOINT ["/bin/sh", "/e2e-journal-entrypoint.sh"]
 FROM scratch
 
 COPY --from=build /goauthy /goauthy
+COPY --from=build /goauthy-rhiza-init /goauthy-rhiza-init
 COPY --from=build /goauthy-backup /goauthy-backup
 COPY --from=build /goauthy-bootstrap-secrets /goauthy-bootstrap-secrets
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt

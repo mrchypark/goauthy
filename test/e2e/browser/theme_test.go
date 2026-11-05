@@ -59,13 +59,13 @@ func TestThemeLive(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("theme DELETE status=%d", response.StatusCode)
 	}
-	defaultTheme := branding.DefaultTheme("rauthy")
+	defaultTheme := branding.DefaultTheme(branding.GlobalBrandID)
 	for _, node := range nodes {
 		got := readThemeJSON(t, admin, node, managed.ID, headers)
 		if !reflect.DeepEqual(got, defaultTheme) {
 			t.Fatalf("theme default fallback node=%s returned a non-default theme", node)
 		}
-		assertThemeCSS(t, node, managed.ID, "identity", "none", defaultTheme.CSS())
+		assertThemeCSS(t, node, managed.ID, "identity", "", defaultTheme.CSS())
 	}
 }
 
@@ -235,7 +235,7 @@ func decodeThemeCSS(encoding string, body []byte) ([]byte, error) {
 		return decoded, closeErr
 	case "br":
 		return io.ReadAll(brotli.NewReader(bytes.NewReader(body)))
-	case "none":
+	case "":
 		return body, nil
 	default:
 		return nil, io.ErrUnexpectedEOF

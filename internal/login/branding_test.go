@@ -44,16 +44,16 @@ func TestClientLoginBrandingEscapesCopyAndKeepsAuthenticationFields(t *testing.T
 func TestAccountLoginCommonBrandAndCopy(t *testing.T) {
 	h := testHandler(t)
 	h.SetLoginBrandingResolver(func(_ context.Context, id string) (LoginBranding, error) {
-		if id != "rauthy" {
+		if id != branding.GlobalBrandID {
 			t.Fatalf("account brand=%q", id)
 		}
-		return LoginBranding{Name: `ID "<operator>"`, LogoURL: "/auth/v1/clients/rauthy/logo?updated=7", English: branding.LoginCopy{Title: "Your common account", Description: "One account for both apps", Button: "Continue"}}, nil
+		return LoginBranding{Name: `ID "<operator>"`, LogoURL: "/auth/v1/clients/" + branding.GlobalBrandID + "/logo?updated=7", English: branding.LoginCopy{Title: "Your common account", Description: "One account for both apps", Button: "Continue"}}, nil
 	})
 	r := httptest.NewRequest("GET", "/account/login", nil)
 	r.RemoteAddr = "203.0.113.8:1234"
 	w := httptest.NewRecorder()
 	h.AccountLoginHandler(false).ServeHTTP(w, r)
-	for _, want := range []string{`ID &#34;&lt;operator&gt;&#34;`, `Your common account`, `One account for both apps`, `data-brand-en="Your common account"`, `name="csrf_token"`, `action="/account/login"`, `src="/auth/v1/clients/rauthy/logo?updated=7"`} {
+	for _, want := range []string{`ID &#34;&lt;operator&gt;&#34;`, `Your common account`, `One account for both apps`, `data-brand-en="Your common account"`, `name="csrf_token"`, `action="/account/login"`, `src="/auth/v1/clients/` + branding.GlobalBrandID + `/logo?updated=7"`} {
 		if w.Code != 200 || !strings.Contains(w.Body.String(), want) {
 			t.Fatalf("status=%d missing %q body=%s", w.Code, want, w.Body.String())
 		}
@@ -80,7 +80,7 @@ func TestClientLoginBrandingFailureDoesNotRenderPartialForm(t *testing.T) {
 func TestClientLoginBrandingLeavesDirectLoginInstructions(t *testing.T) {
 	h := testHandler(t)
 	h.SetLoginBrandingResolver(func(_ context.Context, id string) (LoginBranding, error) {
-		if id != "rauthy" {
+		if id != branding.GlobalBrandID {
 			t.Fatalf("direct login brand=%q", id)
 		}
 		return LoginBranding{Name: "Common ID", English: branding.LoginCopy{Title: "Custom title", Description: "Wrong security instructions", Button: "Custom button"}}, nil

@@ -37,7 +37,7 @@ type OAuth2 struct {
 }
 
 func NewOAuth2(cfg OAuth2Config, clientSecret string) (*OAuth2, error) {
-	if !validText(cfg.ClientID) || !validText(clientSecret) || !validCallback(cfg.CallbackURL) || !oauthEndpoint(cfg.AuthorizationURL) || !oauthEndpoint(cfg.TokenURL) || len(cfg.Scopes) == 0 || len(cfg.Scopes) > 64 {
+	if !validText(cfg.ClientID) || !validText(clientSecret) || !validCallback(cfg.CallbackURL) || !oauthEndpoint(cfg.AuthorizationURL) || !oauthEndpoint(cfg.TokenURL) || len(cfg.Scopes) == 0 && !githubPublicOAuth2Profile(cfg.AuthorizationURL, cfg.TokenURL, cfg.IdentityEndpoint, cfg.SubjectField) || len(cfg.Scopes) > 64 {
 		return nil, ErrOAuth2Config
 	}
 	if (cfg.IdentityEndpoint == "") != (cfg.SubjectField == "") || cfg.IdentityEndpoint != "" && (!oauthEndpoint(cfg.IdentityEndpoint) || !validSubjectField(cfg.SubjectField)) {

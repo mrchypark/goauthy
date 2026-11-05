@@ -135,3 +135,56 @@ func TestUnauthorizedBrowserKeepsNavigationAndDenial(t *testing.T) {
 		t.Fatal("denied user received admin UI")
 	}
 }
+
+func TestElyAdminScreensPreserveNavigationAndAssets(t *testing.T) {
+	h, _ := NewUI(func(http.ResponseWriter, *http.Request, bool) bool { return true })
+	h.SetIssuer("https://auth.test/tenant")
+	for _, screen := range []string{"dashboard", "users", "users/new", "users/subject", "branding", "clients", "clients/new", "clients/client/theme", "roles", "groups", "api-keys", "scopes", "attributes", "collections", "collections/new", "providers", "sessions", "events", "blacklist", "templates"} {
+		t.Run(screen, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/auth/v1/admin/"+screen, nil)
+			r.AddCookie(&http.Cookie{Name: "goauthy_ui_locale", Value: "ko"})
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			for _, want := range []string{`lang="ko"`, `href="/tenant/auth/v1/ui/app.css"`, `data-slot="select"`, `data-slot="button"`, `id="admin-menu-toggle"`, `aria-controls="admin-navigation"`, `aria-expanded="false"`, `data-i18n="Menu"`, `id="app"`, `src="/tenant/auth/v1/admin/app.js"`, `</html>`} {
+				if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), want) {
+					t.Errorf("status=%d missing %s", w.Code, want)
+				}
+			}
+			if strings.Contains(w.Body.String(), "/assets/") || strings.Contains(w.Body.String(), "hx-post") {
+				t.Fatal("Ely introduced an alternate mutation or unprefixed asset path")
+			}
+		})
+	}
+	h.browserAdmin = func(w http.ResponseWriter, _ *http.Request, _ bool) bool { w.WriteHeader(401); return false }
+	r := httptest.NewRequest(http.MethodGet, "/auth/v1/admin/users", nil)
+	r.Header.Set("Accept", "text/html")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), `data-slot="button"`) || !strings.Contains(w.Body.String(), `href="/tenant/auth/v1/ui/app.css"`) || !strings.Contains(w.Body.String(), "</html>") {
+		t.Fatal("denied page lost Ely controls, assets, or complete rendering", w.Body.String())
+	}
+}
+
+type elyPreviewProvider struct{}
+
+func (elyPreviewProvider) Types() []string           { return []string{"otp"} }
+func (elyPreviewProvider) Languages(string) []string { return []string{"en"} }
+func (elyPreviewProvider) Render(string, string) (EmailTemplateInfo, error) {
+	return EmailTemplateInfo{Header: "Preview <header>", Text: "Sample", Footer: "Footer"}, nil
+}
+
+func TestElyEmailPreviewAssetsAndEscaping(t *testing.T) {
+	h, _ := NewUI(func(http.ResponseWriter, *http.Request, bool) bool { return true })
+	h.SetIssuer("https://auth.test/tenant")
+	h.SetTemplateProvider(elyPreviewProvider{})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/auth/v1/admin/email-templates/preview?type=otp&lang=en", nil))
+	for _, want := range []string{`href="/tenant/auth/v1/ui/app.css"`, `Preview &lt;header&gt;`, `123456`, `</html>`} {
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), want) {
+			t.Errorf("status=%d missing %s", w.Code, want)
+		}
+	}
+	if strings.Contains(w.Body.String(), "<script") || w.Header().Get("X-Frame-Options") != "SAMEORIGIN" {
+		t.Fatal("preview changed script or frame contract")
+	}
+}

@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -81,6 +82,14 @@ type Service struct {
 	keyring                           EnvelopeKeyring
 	now                               func() time.Time
 	random                            io.Reader
+	retentionMu                       sync.Mutex
+	retentionRegistered               map[string]struct{}
+	retentionInFlight                 map[string]*cookieRetentionRegistration
+}
+
+type cookieRetentionRegistration struct {
+	done chan struct{}
+	err  error
 }
 
 type Credential struct {
@@ -242,7 +251,7 @@ func (s *Service) beginLogin(ctx context.Context, subject, username, interaction
 	return opts, code, expires, err
 }
 
-// BeginModificationProof starts the service WebAuthn ceremony Rauthy uses to
+// BeginModificationProof starts the service WebAuthn ceremony used to
 // authorize MFA-key changes. The proof returned by FinishModificationProof is
 // generated here but is kept only inside this encrypted ceremony state.
 func (s *Service) BeginModificationProof(ctx context.Context, subject, username, sessionDigest string) (*protocol.CredentialAssertion, string, time.Time, error) {
@@ -610,7 +619,7 @@ func (s *Service) Delete(ctx context.Context, subject, name string) error {
 
 // DeleteForAdministrator is the administrative reset operation. Unlike Delete,
 // it intentionally permits removal of the final user-verified passkey, matching
-// Rauthy. The replicated DELETE itself checks the active actor's current admin
+// GoAuthy. The replicated DELETE itself checks the active actor's current admin
 // membership, so a role revocation between a request check and this mutation
 // cannot authorize a reset.
 func (s *Service) DeleteForAdministrator(ctx context.Context, actor, subject, name string) error {
@@ -629,7 +638,7 @@ func (s *Service) DeleteForAdministrator(ctx context.Context, actor, subject, na
 	if !iok || !vok || version < 0 {
 		return ErrInvalid
 	}
-	res, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: rid("passkey-admin-delete", actor, subject, id, strconv.FormatInt(version, 10)), SQL: `DELETE FROM identity_webauthn_credentials WHERE subject=? AND credential_id=? AND credential_version=? AND EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='rauthy_admin')`, Args: []any{subject, id, version, actor}})
+	res, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: rid("passkey-admin-delete", actor, subject, id, strconv.FormatInt(version, 10)), SQL: `DELETE FROM identity_webauthn_credentials WHERE subject=? AND credential_id=? AND credential_version=? AND EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='goauthy_admin')`, Args: []any{subject, id, version, actor}})
 	if err != nil || res.RowsAffected != 1 {
 		return ErrConflict
 	}
@@ -653,7 +662,7 @@ func (s *Service) HasCredentials(ctx context.Context, subject string) (bool, err
 }
 
 // IssuePasswordModificationToken is deliberately unavailable once an account
-// has a passkey: Rauthy requires a fresh mfa_code in that case.
+// has a passkey: GoAuthy requires a fresh mfa_code in that case.
 func (s *Service) IssuePasswordModificationToken(ctx context.Context, subject, sessionDigest string) (string, time.Time, error) {
 	if !validSubject(subject) || !validDigest(sessionDigest) {
 		return "", time.Time{}, ErrInvalid
@@ -772,8 +781,8 @@ func (s *Service) ConsumeModificationToken(ctx context.Context, subject, session
 	return nil
 }
 
-func (s *Service) PasswordlessCookie(subject string) (string, error) {
-	if !validSubject(subject) {
+func (s *Service) PasswordlessCookie(ctx context.Context, subject string) (string, error) {
+	if s == nil || ctx == nil || ctx.Err() != nil || s.db == nil || s.keyring == nil || s.renewTTL <= 0 || !validSubject(subject) {
 		return "", ErrInvalid
 	}
 	exp := s.now().UTC().Add(s.renewTTL).Unix()
@@ -782,8 +791,92 @@ func (s *Service) PasswordlessCookie(subject string) (string, error) {
 	if err != nil {
 		return "", ErrInvalid
 	}
+	// Read the key identifier from the exact envelope that will be returned.
+	// Consulting the active key separately races with key rotation between
+	// selecting a key and sealing the cookie.
+	keyID, err := s.keyring.PurposeEnvelopeKeyID(passwordlessCookiePurpose, envelope)
+	if err != nil || keyID == "" {
+		return "", ErrInvalid
+	}
+	if err := s.registerPasswordlessCookieKeyTTL(ctx, keyID); err != nil {
+		return "", ErrInvalid
+	}
+	// TTL registration is only retention evidence, never issuance permission.
+	// Recheck the writer fence for every cookie, after fixing the cookie expiry
+	// above and using the key ID parsed from that exact envelope.
+	if err := storage.CheckEnvelopeWriterAllowed(ctx, s.db, keyID); err != nil {
+		return "", ErrInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return "", ErrInvalid
+	}
 	return base64.RawURLEncoding.EncodeToString(envelope), nil
 }
+
+func (s *Service) registerPasswordlessCookieKeyTTL(ctx context.Context, keyID string) error {
+	for {
+		s.retentionMu.Lock()
+		if _, ok := s.retentionRegistered[keyID]; ok {
+			s.retentionMu.Unlock()
+			return ctx.Err()
+		}
+		if pending := s.retentionInFlight[keyID]; pending != nil {
+			s.retentionMu.Unlock()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-pending.done:
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return pending.err
+			}
+		}
+		pending := &cookieRetentionRegistration{done: make(chan struct{})}
+		if s.retentionInFlight == nil {
+			s.retentionInFlight = make(map[string]*cookieRetentionRegistration)
+		}
+		s.retentionInFlight[keyID] = pending
+		s.retentionMu.Unlock()
+
+		err := storage.RegisterPasswordlessCookieKeyTTL(ctx, s.db, keyID, s.renewTTL)
+
+		s.retentionMu.Lock()
+		if err == nil {
+			if s.retentionRegistered == nil {
+				s.retentionRegistered = make(map[string]struct{})
+			}
+			s.retentionRegistered[keyID] = struct{}{}
+		}
+		pending.err = err
+		delete(s.retentionInFlight, keyID)
+		close(pending.done)
+		s.retentionMu.Unlock()
+		return err
+	}
+}
+
+// PasswordlessCookieTTL returns the configured lifetime for newly issued
+// passwordless cookies. Retirement uses it to retain the master key long
+// enough to decrypt cookies issued before the key was fenced.
+func (s *Service) PasswordlessCookieTTL() time.Duration {
+	if s == nil {
+		return 0
+	}
+	return s.renewTTL
+}
+
+// PasswordlessCookieTTLForConfig returns a conservative lifetime for cookie
+// decryption during key retirement. Even with passkeys currently disabled, an
+// older cookie may have been issued under the default lifetime.
+func PasswordlessCookieTTLForConfig(config *Config) time.Duration {
+	ttl := defaultRenewTTL
+	if config != nil && config.RenewTTL > ttl {
+		ttl = config.RenewTTL
+	}
+	return ttl
+}
+
 func (s *Service) SubjectFromCookie(v string) (string, error) {
 	if len(v) == 0 || len(v) > maxPasswordlessCookieLength {
 		return "", ErrInvalid
@@ -1253,7 +1346,7 @@ func nilIfEmpty(v string) any {
 }
 func validSubject(v string) bool { return len(v) > 0 && len(v) <= 512 }
 
-// validName mirrors Rauthy's passkey-name character class. unicode.IsSpace is
+// validName uses GoAuthy's passkey-name character class. unicode.IsSpace is
 // used for its Unicode whitespace semantics, matching Rust regex's Unicode
 // \s behaviour; names are limited by code points, not UTF-8 bytes.
 func validName(v string) bool {

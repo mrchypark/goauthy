@@ -187,8 +187,8 @@ func userCreationAuthority(actor string, roles, groups []string) (string, []any)
 	values = append(values, stringsAny(groups)...)
 	for _, group := range groups {
 		delegated += ` AND EXISTS(SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id
-		 WHERE m.subject=? AND substr(r.name,1,13)='rauthy_admin:' AND
-		 (substr(r.name,14)=? OR (substr(r.name,-1)='*' AND substr(?,1,length(r.name)-14)=substr(r.name,14,length(r.name)-14))))`
+		 WHERE m.subject=? AND substr(r.name,1,14)='goauthy_admin:' AND
+		 (substr(r.name,15)=? OR (substr(r.name,-1)='*' AND substr(?,1,length(r.name)-15)=substr(r.name,15,length(r.name)-15))))`
 		values = append(values, actor, group, group)
 	}
 	return guard + " OR (" + delegated + ")", append(args, values...)

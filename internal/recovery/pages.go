@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mrchypark/goauthy/internal/i18n"
+	"github.com/mrchypark/goauthy/internal/ui"
 )
 
 //go:embed pages.html
@@ -15,7 +16,7 @@ var pagesHTML string
 
 //go:embed pages.js
 var pagesJS []byte
-var recoveryPage = template.Must(template.New("recovery").Parse(pagesHTML))
+var recoveryPage = template.Must(template.Must(ui.NewTemplates("recovery")).Parse(pagesHTML))
 
 // Page serves presentation only. Recovery authority stays in the existing APIs.
 func (s *Service) Page(w http.ResponseWriter, r *http.Request) {

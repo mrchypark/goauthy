@@ -68,7 +68,7 @@ func runEventCleanup(ctx context.Context, store *eventlog.Store, interval, reten
 	}
 }
 
-// tokenIssuedConfigFromEnv preserves the pinned Rauthy generation defaults.
+// tokenIssuedConfigFromEnv preserves the pinned token-issuance defaults.
 func tokenIssuedConfigFromEnv(getenv func(string) string) (bool, eventlog.Level, error) {
 	generate := getenv("GOAUTHY_EVENT_GENERATE_TOKEN_ISSUED")
 	if generate != "" && generate != "true" && generate != "false" {

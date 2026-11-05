@@ -187,7 +187,7 @@ func VerifyIDToken(compact string, keys jose.JSONWebKeySet, issuer, audience str
 }
 
 // VerifyLogoutIDToken verifies an ID token hint for RP-initiated logout.
-// Rauthy v0.36.2 permits a 600-second clock leeway only for this use.
+// This verification permits a 600-second clock leeway only for this use.
 func VerifyLogoutIDToken(compact string, keys jose.JSONWebKeySet, issuer, audience string, now time.Time) (IDTokenClaims, error) {
 	return verifyIDToken(compact, keys, issuer, audience, now, logoutIDTokenClockLeeway)
 }

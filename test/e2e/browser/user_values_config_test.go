@@ -69,7 +69,7 @@ func TestUserValuesConfigPrivateAcrossPods(t *testing.T) {
 		assertUserValuesConfig(t, admin, base, mode, map[string]string{"Sec-Fetch-Site": "cross-site"}, 401)
 	}
 	apiKeyStatus(t, admin, http.MethodDelete, primary+"/auth/v1/api_keys/"+readName, nil, rbacMutationHeaders(csrf), 200, "revoke config read key")
-	role := rbacAssertListed(t, admin, primary, "roles", rbacEntity{Name: "rauthy_admin:preferred/*"})
+	role := rbacAssertListed(t, admin, primary, "roles", rbacEntity{Name: "goauthy_admin:preferred/*"})
 	apiKeyStatus(t, admin, http.MethodDelete, secondary+"/auth/v1/roles/"+role.ID, nil, rbacMutationHeaders(csrf), 200, "revoke delegated config reader")
 	for _, base := range nodes {
 		assertUserValuesConfig(t, anonymous, base, mode, readHeaders, 401)

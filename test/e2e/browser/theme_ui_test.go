@@ -13,7 +13,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
@@ -40,15 +42,14 @@ func TestThemeLoginUI(t *testing.T) {
 	ctx, cancel := newCollectionUIContext(t, nil, primary)
 	defer cancel()
 	observer := newThemeUIObserver(ctx)
-	if err := chromedp.Run(ctx,
+	runThemeUIStage(t, ctx, observer, "initial setup", 5*time.Second,
 		network.Enable(),
 		emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: "light"}}),
-		chromedp.Navigate(authorizeURL),
-		chromedp.WaitVisible(`input[name="username"]`),
-		themeUILoaded(),
-	); err != nil {
-		t.Fatalf("navigate authorization login page: %v", err)
-	}
+	)
+	runThemeUIStage(t, ctx, observer, "initial navigation", 15*time.Second, chromedp.Navigate(authorizeURL))
+	// BySearch also matches the selector text inside the enabled passkey script.
+	runThemeUIStage(t, ctx, observer, "initial username visibility", 10*time.Second, chromedp.WaitVisible(`input[name="username"]`, chromedp.ByQuery))
+	runThemeUIStage(t, ctx, observer, "initial six stylesheets", 10*time.Second, themeUILoaded())
 	initialState := readThemeUIState(t, ctx, initial.Light)
 	assertThemeUILinks(t, initialState.Links, managed.ID)
 	assertThemeUIResponses(t, observer, initialState.Links)
@@ -56,14 +57,12 @@ func TestThemeLoginUI(t *testing.T) {
 
 	updated := themeUIUpdatedTheme(managed.ID)
 	putThemeUI(t, admin, primary, headers, managed.ID, updated)
-	if err := chromedp.Run(ctx,
+	runThemeUIStage(t, ctx, observer, "dark media", 5*time.Second,
 		emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: "dark"}}),
-		chromedp.Reload(),
-		chromedp.WaitVisible(`input[name="username"]`),
-		themeUILoaded(),
-	); err != nil {
-		t.Fatalf("reload authorization login page: %v", err)
-	}
+	)
+	runThemeUIStage(t, ctx, observer, "updated reload", 15*time.Second, chromedp.Reload())
+	runThemeUIStage(t, ctx, observer, "updated username visibility", 10*time.Second, chromedp.WaitVisible(`input[name="username"]`, chromedp.ByQuery))
+	runThemeUIStage(t, ctx, observer, "updated six stylesheets", 10*time.Second, themeUILoaded())
 	updatedState := readThemeUIState(t, ctx, updated.Dark)
 	assertThemeUILinks(t, updatedState.Links, managed.ID)
 	updatedThemeURL := themeUIClientURL(t, updatedState.Links, managed.ID)
@@ -71,6 +70,51 @@ func TestThemeLoginUI(t *testing.T) {
 		t.Fatalf("theme cache URL did not change after update: %q", updatedThemeURL)
 	}
 	assertThemeUIResponses(t, observer, updatedState.Links)
+}
+
+func runThemeUIStage(t *testing.T, ctx context.Context, observer *themeUIObserver, name string, timeout time.Duration, actions ...chromedp.Action) {
+	t.Helper()
+	stage, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	started := time.Now()
+	if err := chromedp.Run(stage, actions...); err != nil {
+		// Diagnose through the live parent context after the stage deadline expires.
+		diagnostic, stop := context.WithTimeout(ctx, 3*time.Second)
+		defer stop()
+		var state json.RawMessage
+		var matches []*cdp.Node
+		diagnosticErr := chromedp.Run(diagnostic, chromedp.Evaluate(`(() => {
+			const input = document.querySelector('input[name="username"]');
+			return {
+				path: location.pathname,
+				ready: document.readyState,
+				usernamePresent: input !== null,
+				usernameHasBox: input !== null && input.getClientRects().length > 0,
+				usernameVisibility: input === null ? null : getComputedStyle(input).visibility,
+				stylesheets: [...document.querySelectorAll('link[rel="stylesheet"]')].map(link => ({
+					path: new URL(link.href).pathname, loaded: link.sheet !== null
+				}))
+			};
+		})()`, &state), chromedp.Nodes(`input[name="username"]`, &matches, chromedp.BySearch))
+		matchNames := make([]string, 0, len(matches))
+		for _, node := range matches {
+			matchNames = append(matchNames, node.NodeName)
+		}
+		observer.mu.Lock()
+		responses := make(map[string]int64, len(observer.responses))
+		for address, status := range observer.responses {
+			if parsed, parseErr := url.Parse(address); parseErr == nil {
+				responses[parsed.Path] = status
+			}
+		}
+		documents := append([]string(nil), observer.documents...)
+		cspFailures := len(observer.cspFailures)
+		observer.mu.Unlock()
+		// CDP errors can contain authorization URLs; report types and deadline state only.
+		t.Fatalf("theme stage=%q elapsed=%s error_type=%T deadline=%t diagnostic_ok=%t state=%s search_node_names=%v documents=%v css_statuses=%v css_csp_failures=%d",
+			name, time.Since(started).Round(time.Millisecond), err, stage.Err() == context.DeadlineExceeded, diagnosticErr == nil, state, matchNames, documents, responses, cspFailures)
+	}
+	t.Logf("theme stage=%q passed elapsed=%s", name, time.Since(started).Round(time.Millisecond))
 }
 
 type themeUIClient struct {
@@ -156,6 +200,7 @@ type themeUIObserver struct {
 	mu          sync.Mutex
 	responses   map[string]int64
 	cspFailures []string
+	documents   []string
 }
 
 func newThemeUIObserver(ctx context.Context) *themeUIObserver {
@@ -165,12 +210,17 @@ func newThemeUIObserver(ctx context.Context) *themeUIObserver {
 		defer observer.mu.Unlock()
 		switch event := event.(type) {
 		case *network.EventResponseReceived:
+			if event.Type == network.ResourceTypeDocument {
+				if parsed, err := url.Parse(event.Response.URL); err == nil {
+					observer.documents = append(observer.documents, fmt.Sprintf("%s:%d", parsed.Path, event.Response.Status))
+				}
+			}
 			if event.Type == network.ResourceTypeStylesheet {
 				observer.responses[event.Response.URL] = event.Response.Status
 			}
 		case *network.EventLoadingFailed:
 			if event.Type == network.ResourceTypeStylesheet && (string(event.BlockedReason) == "csp" || strings.Contains(event.ErrorText, "ERR_BLOCKED_BY_CSP")) {
-				observer.cspFailures = append(observer.cspFailures, event.ErrorText)
+				observer.cspFailures = append(observer.cspFailures, "stylesheet blocked by CSP")
 			}
 		}
 	})
@@ -178,7 +228,7 @@ func newThemeUIObserver(ctx context.Context) *themeUIObserver {
 }
 
 func themeUILoaded() chromedp.Action {
-	return chromedp.Poll(`(() => { const links = [...document.querySelectorAll('link[rel="stylesheet"]')]; return links.length === 2 && links.every(link => link.sheet !== null); })()`, nil)
+	return chromedp.Poll(`(() => { const links = [...document.querySelectorAll('link[rel="stylesheet"]')]; return links.length === 6 && links.every(link => link.sheet !== null); })()`, nil)
 }
 
 type themeUIState struct {
@@ -240,26 +290,24 @@ func readThemeUIState(t *testing.T, ctx context.Context, theme branding.ThemeCSS
 
 func assertThemeUILinks(t *testing.T, links []string, clientID string) {
 	t.Helper()
-	if len(links) != 2 {
-		t.Fatalf("theme login stylesheet links=%d, want 2: %v", len(links), links)
+	if len(links) != 6 {
+		t.Fatalf("theme login stylesheet links=%d, want four Ely, global, and client stylesheets", len(links))
 	}
-	global := false
+	origin := primaryOrigin(t, os.Getenv("GOAUTHY_E2E_URL"))
+	expected := []string{"/auth/v1/ui/app.css", "/auth/v1/ui/ely-controls.css", "/auth/v1/ui/ely-patterns.css", "/auth/v1/ui/brand.css", "/auth/v1/theme/global.css"}
 	clientPrefix := "/auth/v1/theme/" + url.PathEscape(clientID) + "/"
-	client := false
-	for _, link := range links {
+	for i, link := range links {
 		parsed, err := url.Parse(link)
-		if err != nil {
-			t.Fatalf("invalid theme stylesheet URL %q: %v", link, err)
+		if err != nil || parsed.Scheme+"://"+parsed.Host != origin {
+			t.Fatalf("theme stylesheet %d is not same-origin", i)
 		}
-		switch parsed.Path {
-		case "/auth/v1/theme/global.css":
-			global = true
-		default:
-			client = client || strings.HasPrefix(parsed.Path, clientPrefix)
+		if i < len(expected) {
+			if parsed.Path != expected[i] {
+				t.Fatalf("theme stylesheet %d path=%q want=%q", i, parsed.Path, expected[i])
+			}
+		} else if !strings.HasPrefix(parsed.Path, clientPrefix) || strings.TrimPrefix(parsed.Path, clientPrefix) == "" {
+			t.Fatal("client theme stylesheet must load last")
 		}
-	}
-	if !global || !client {
-		t.Fatalf("theme login links global=%t client=%t links=%v", global, client, links)
 	}
 }
 
@@ -271,7 +319,7 @@ func assertThemeUIResponses(t *testing.T, observer *themeUIObserver, links []str
 		t.Fatalf("theme login stylesheet CSP failures=%v", observer.cspFailures)
 	}
 	for _, link := range links {
-		if status, ok := observer.responses[link]; !ok || status != http.StatusOK {
+		if status, ok := observer.responses[link]; !ok || (status != http.StatusOK && status != http.StatusNotModified) {
 			t.Fatalf("theme stylesheet was not fetched successfully url=%q status=%d fetched=%t", link, status, ok)
 		}
 	}

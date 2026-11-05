@@ -53,6 +53,7 @@ func TestEventLogV59StrictConstraints(t *testing.T) {
 		{"negative timestamp", "2234567890123456789012345678901234567890123", int64(-1), int64(0), "Test"},
 		{"high level", "3234567890123456789012345678901234567890123", int64(0), int64(4), "Test"},
 		{"unknown type", "4234567890123456789012345678901234567890123", int64(0), int64(0), "NoSuchEvent"},
+		{"legacy renamed type", "5234567890123456789012345678901234567890123", int64(0), int64(0), "NewRauthyAdmin"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -63,6 +64,9 @@ func TestEventLogV59StrictConstraints(t *testing.T) {
 	}
 	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "event-v59-valid", SQL: `INSERT INTO event_log(id,timestamp,level,typ) VALUES(?,?,?,?)`, Args: []any{validID, int64(0), int64(0), "Test"}}); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "event-v59-canonical", SQL: `INSERT INTO event_log(id,timestamp,level,typ) VALUES(?,?,?,?)`, Args: []any{"6234567890123456789012345678901234567890123", int64(0), int64(1), "NewGoAuthyAdmin"}}); err != nil {
+		t.Fatalf("canonical event type rejected by fresh CHECK: %v", err)
 	}
 }
 

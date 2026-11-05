@@ -1,8 +1,9 @@
+const GLOBAL_BRAND_ID = 'goauthy';
 async function clientTheme(id) {
   const t = globalThis.GoAuthyI18n?.t || ((key, values = {}) => String(key).replace(/\{(\w+)\}/g, (match, name) => Object.hasOwn(values, name) ? String(values[name]) : match));
   const h = (key, values) => esc(t(key, values));
   const clientID = String(id ?? ''), endpoint = '/auth/v1/theme/' + encodeURIComponent(clientID);
-  const common = clientID === 'rauthy';
+  const common = clientID === GLOBAL_BRAND_ID;
   const colorFields = ['text', 'text_high', 'bg', 'bg_high', 'action', 'accent', 'error'];
   const colorLabels = {text: 'Text', text_high: 'Strong text', bg: 'Background', bg_high: 'Raised background', action: 'Action', accent: 'Accent', error: 'Error'};
   const invalidPreviewMessage = t('The preview omits invalid CSS values; your input is kept for server validation.');
@@ -19,6 +20,12 @@ async function clientTheme(id) {
     by('theme-logo-delete').textContent = t('Remove common logo');
   }
   let copyLanguage = 'en', logoVersion = Date.now(), logoPending = false;
+  const previewText = (key, values = {}) => {
+    const messages = globalThis.GoAuthyI18n?.messages || {};
+    const text = copyLanguage === 'ko' && Object.hasOwn(messages, key) ? messages[key] : key;
+    return String(text).replace(/\{(\w+)\}/g, (match, name) => Object.hasOwn(values, name) ? String(values[name]) : match);
+  };
+  const previewHTML = (key, values) => esc(previewText(key, values));
   const logoURL = () => `/auth/v1/clients/${encodeURIComponent(clientID)}/logo?v=${logoVersion}`;
   const syncPreviewLogo = () => {
     const image = by('theme-logo-image'), previewImage = frame.contentDocument?.getElementById('theme-logo-image');
@@ -49,7 +56,7 @@ async function clientTheme(id) {
   const loadTheme = async () => {
     const requested = await requestTheme(clientID);
     const usesGlobal = requested?.client_id !== clientID;
-    const globalTheme = common ? requested : await requestTheme('rauthy');
+    const globalTheme = common ? requested : await requestTheme(GLOBAL_BRAND_ID);
     const loaded = usesGlobal ? globalTheme : requested;
     if (!loaded?.light || !loaded?.dark) throw Error(t('Theme data is incomplete.'));
     commonName = globalTheme?.brand_name || 'GoAuthy';
@@ -118,9 +125,13 @@ async function clientTheme(id) {
       updatePreview();
     }; });
   };
-  const sampleDocument = () => `<!doctype html><html lang="${document.documentElement?.lang === 'ko' ? 'ko' : 'en'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/auth/v1/theme/global.css"></head><body class="auth-page"><header class="auth-topbar"><a class="auth-brand"><img id="theme-logo-image" class="client-login-logo" alt="${h(common ? 'Sign-in preview sample' : clientID)}" hidden><span id="theme-default-brand" class="auth-brand"><span class="brand-symbol" aria-hidden="true"></span><span id="theme-brand-label">GoAuthy</span></span></a></header><main class="auth-panel"><p class="auth-eyebrow">${h('PREVIEW')}</p><h1 id="theme-sample-title">${h(common ? 'Sign in' : 'Sign in to {client}', {client: clientID})}</h1><p id="theme-sample-description" class="auth-intro">${h('Enter your account details to continue.')}</p><div id="theme-sample-fields" inert><label>${h('Email')}<input type="email" value="alex@example.test"></label><label>${h('Password')}<input type="password" value="sample-password"></label><button id="theme-sample-button" type="button">${h('Continue')}</button></div><p class="auth-error">${h('Example error message')}</p></main></body></html>`;
+  const sampleDocument = () => `<!doctype html><html lang="${copyLanguage}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/auth/v1/ui/app.css"><link rel="stylesheet" href="/auth/v1/ui/ely-controls.css"><link rel="stylesheet" href="/auth/v1/ui/ely-patterns.css"><link rel="stylesheet" href="/auth/v1/ui/brand.css"><link rel="stylesheet" href="/auth/v1/theme/global.css"></head><body class="auth-page"><header class="auth-topbar"><a class="auth-brand"><img id="theme-logo-image" class="client-login-logo" alt="${previewHTML(common ? 'Sign-in preview sample' : clientID)}" hidden><span id="theme-default-brand" class="auth-brand"><span class="brand-symbol" aria-hidden="true"></span><span id="theme-brand-label">GoAuthy</span></span></a></header><main class="auth-panel"><p class="auth-eyebrow" data-i18n="PREVIEW">${previewHTML('PREVIEW')}</p><h1 id="theme-sample-title">${previewHTML(common ? 'Sign in' : 'Sign in to {client}', {client: clientID})}</h1><p id="theme-sample-description" class="auth-intro">${previewHTML('Enter your account details to continue.')}</p><div id="theme-sample-fields" inert><label><span data-i18n="Email">${previewHTML('Email')}</span><input type="email" value="alex@example.test"></label><label><span data-i18n="Password">${previewHTML('Password')}</span><input type="password" value="sample-password"></label><button id="theme-sample-button" type="button">${previewHTML('Continue')}</button></div><p class="auth-error" data-i18n="Example error message">${previewHTML('Example error message')}</p></main></body></html>`;
   const updatePreview = () => {
     if (!theme || !frame.contentDocument?.body) return;
+    frame.contentDocument.documentElement.lang = copyLanguage;
+    frame.contentDocument.querySelectorAll('[data-i18n]').forEach(label => { label.textContent = previewText(label.getAttribute('data-i18n')); });
+    const logo = frame.contentDocument.getElementById('theme-logo-image');
+    if (logo) logo.alt = previewText(common ? 'Sign-in preview sample' : clientID);
     const body = frame.contentDocument.body;
     body.className = mode === 'dark' ? 'auth-page theme-dark' : 'auth-page theme-light';
     const selected = theme[mode];
@@ -144,9 +155,9 @@ async function clientTheme(id) {
     title.dataset.brandEn = theme.login.copy.en.title || ''; title.dataset.brandKo = theme.login.copy.ko.title || '';
     description.dataset.brandEn = theme.login.copy.en.description || ''; description.dataset.brandKo = theme.login.copy.ko.description || '';
     button.dataset.brandEn = theme.login.copy.en.button || ''; button.dataset.brandKo = theme.login.copy.ko.button || '';
-    title.textContent = copy.title || fallback.title || t(common ? 'Sign in' : 'Sign in to {client}', {client: clientID});
-    description.textContent = copy.description || fallback.description || t('Enter your account details to continue.');
-    button.textContent = copy.button || fallback.button || t('Continue');
+    title.textContent = copy.title || fallback.title || previewText(common ? 'Sign in' : 'Sign in to {client}', {client: clientID});
+    description.textContent = copy.description || fallback.description || previewText('Enter your account details to continue.');
+    button.textContent = copy.button || fallback.button || previewText('Continue');
     frame.contentDocument.querySelector('.auth-panel').style.setProperty('width', `min(100%, ${theme.login.card_width || 420}px)`);
     frame.contentDocument.querySelector('.auth-panel').style.setProperty('max-width', theme.login.card_width ? `${theme.login.card_width}px` : '');
     const brand = frame.contentDocument.querySelector('.auth-topbar .auth-brand');

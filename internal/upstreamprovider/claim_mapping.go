@@ -15,7 +15,7 @@ import (
 )
 
 // EvaluateClaimMapping evaluates a single JSONPath claim mapping against raw
-// JSON payload bytes, following Rauthy-compatible semantics:
+// JSON payload bytes with stable semantic comparison:
 //
 //	path nil -> nil (no decision)
 //	path present, value nil -> error (misconfigured)
@@ -23,7 +23,7 @@ import (
 //	valid path, no match -> false
 //	valid path, any match -> true
 //
-// The value comparison follows Rauthy's serde_json::Value serialization:
+// The value comparison follows the upstream serde_json::Value serialization:
 // string nodes are compared as JSON-quoted strings; non-string scalar nodes
 // (bool, int, float, null) are compared as literal-quoted JSON values.
 // Arrays and objects are serialized to JSON then quoted for comparison.
@@ -149,7 +149,7 @@ func isDigitOrSign(b byte) bool {
 	return unicode.IsDigit(rune(b)) || b == '+' || b == '-' || b == '.'
 }
 
-// yamlNodeToSerializedString converts a yaml.Node to the Rauthy-compatible
+// yamlNodeToSerializedString converts a yaml.Node to the stable
 // serialized string for comparison. The encoding mirrors the Rust code:
 //
 //	if !value.is_string() {

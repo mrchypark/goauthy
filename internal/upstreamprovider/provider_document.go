@@ -14,11 +14,11 @@ import (
 type AuthProviderType string
 
 const (
-	AuthProviderTypeCustom          AuthProviderType = "custom"
-	AuthProviderTypeGitHub          AuthProviderType = "github"
-	AuthProviderTypeGoogle          AuthProviderType = "google"
-	AuthProviderTypeOIDC            AuthProviderType = "oidc"
-	AuthProviderTypeOAuthUserInfo   AuthProviderType = "oauth_userinfo"
+	AuthProviderTypeCustom        AuthProviderType = "custom"
+	AuthProviderTypeGitHub        AuthProviderType = "github"
+	AuthProviderTypeGoogle        AuthProviderType = "google"
+	AuthProviderTypeOIDC          AuthProviderType = "oidc"
+	AuthProviderTypeOAuthUserInfo AuthProviderType = "oauth_userinfo"
 )
 
 func (t AuthProviderType) valid() bool {
@@ -30,8 +30,7 @@ func (t AuthProviderType) valid() bool {
 	}
 }
 
-// UnmarshalJSON accepts exactly the five lowercase enum values from
-// rauthy_api_types::auth_providers::AuthProviderType.
+// UnmarshalJSON accepts exactly the five lowercase provider API enum values.
 func (t *AuthProviderType) UnmarshalJSON(data []byte) error {
 	var value string
 	if err := json.Unmarshal(data, &value); err != nil {

@@ -83,7 +83,7 @@ func addProtocolOperations(doc *openapi3.T, features Features) error {
 		"scopes": openapi3.NewArraySchema().WithItems(stringSchema), "default_scopes": openapi3.NewArraySchema().WithItems(stringSchema),
 		"audience": openapi3.NewArraySchema().WithItems(stringSchema), "default_aud": openapi3.NewArraySchema().WithItems(stringSchema),
 	}, "version", "issuer", "client_id", "client_kind", "enabled", "confidential", "redirect_uris", "grant_types", "scopes", "default_scopes", "audience", "default_aud").WithoutAdditionalProperties()
-	operation("GET", "/oidc/client-configuration", "clientConfiguration", "Read the authenticated bootstrap client's effective OAuth configuration", nil, 200, 400, 401, 503)
+	operation("GET", "/oidc/client-configuration", "clientConfiguration", "Read the authenticated bootstrap client's effective OAuth configuration", nil, 200, 400, 401, 500)
 	operation("POST", "/oidc/revoke", "revoke", "Revoke a token", formBody(ref("RevocationRequest", form(map[string]*openapi3.Schema{"token": stringSchema, "token_type_hint": stringSchema}, "token")), true), 200, 400, 401)
 	operation("GET", "/oidc/userinfo", "userInfoGet", "Return claims for the bearer token", nil, 200, 401)
 	operation("POST", "/oidc/userinfo", "userInfoPost", "Return claims for the bearer token", nil, 200, 401)

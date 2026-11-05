@@ -15,14 +15,37 @@ Each pending login has random state, verifier, nonce and a separate browser bind
 
 Pages use `Referrer-Policy: strict-origin`: native form POSTs retain the app's Origin for the exact-origin logout check while referrers disclose no path or query. `no-referrer` would make the form send `Origin: null`, which logout rejects. Missing, null and other-app Origins remain rejected.
 
-## Existing local bundle
+## Run from the repository
 
-The bundle at `/Users/cypark/.local/share/goauthy/local-v0.3.3` provides private managed-client registration, launchd controls and durable provider data. Registration uses authenticated browser-admin endpoints and CSRF; it creates only the two named clients, checks any existing configuration and preserves existing secret files. It never uses raw SQL, rotates credentials, resets accounts or replaces keys.
+With GoAuthy running and the two confidential managed clients registered with the
+redirects above, save each client secret in an owner-only regular file. Set
+`DEMO_A_SECRET_FILE` and `DEMO_B_SECRET_FILE` to those file paths, then run each
+command from the repository in a separate terminal:
+
+```sh
+go run ./cmd/goauthy-demo -name 'GoAuthy Demo A' -listen 127.0.0.1:18081 \
+  -client-id goauthy-demo-a -client-secret-file "$DEMO_A_SECRET_FILE" -force-login
+# In another terminal:
+go run ./cmd/goauthy-demo -name 'GoAuthy Demo B' -listen 127.0.0.1:18082 \
+  -client-id goauthy-demo-b -client-secret-file "$DEMO_B_SECRET_FILE"
+```
+
+## Existing local acceptance bundle
+
+For a separately prepared native bundle at
+`$HOME/.local/share/goauthy/local-v0.3.3`, the examples below reuse its local
+acceptance tools. `goauthy-local`, `register-demo-clients`, `configure-demo-users`,
+`verify-local` and `verify-demo-users` are not provided by this repository; these
+commands assume that bundle and its dependencies already exist. Registration
+uses authenticated browser-admin endpoints and CSRF; it creates only the two
+named clients, checks any existing configuration and preserves existing secret
+files. It never uses raw SQL, rotates credentials, resets accounts or replaces
+keys.
 
 The configured ordinary account signs in with **`demo-user@goauthy.local`**, using the private `secrets/demo-user-password` file in that bundle. `demo-user` is its preferred display username, not its password login identifier. Both demo clients require the group prefix `demo-service-users`; the ordinary account belongs to that group, has no roles, and the bootstrap administrator has no matching group. The existing prefix policy controls admission rather than excluding admin roles globally.
 
 ```sh
-b=/Users/cypark/.local/share/goauthy/local-v0.3.3
+b="$HOME/.local/share/goauthy/local-v0.3.3"
 "$b/register-demo-clients"
 
 # Run serially in the repository, after coordinating the local Go build slot.

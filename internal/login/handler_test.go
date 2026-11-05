@@ -32,6 +32,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/oauth"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/passkey"
+	"github.com/mrchypark/goauthy/internal/rbac"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -97,7 +98,10 @@ func TestPasswordLoginRejectionLogsOnlyFixedDiagnostics(t *testing.T) {
 
 func TestLoginCompletesAuthorizationAndRotatesSession(t *testing.T) {
 	t.Parallel()
-	h := testHandler(t)
+	h, db := testHandlerWithDB(t, false)
+	if _, err := rbac.NewStore(db).EnsureBootstrapPrincipal(context.Background(), "user-1", []string{rbac.AdminRole}, nil); err != nil {
+		t.Fatalf("assign admin role: %v", err)
+	}
 	get := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
 	page := httptest.NewRecorder()
 	h.Authorize(page, get)
@@ -133,7 +137,7 @@ func TestLoginCompletesAuthorizationAndRotatesSession(t *testing.T) {
 	completed := httptest.NewRecorder()
 	h.Login(completed, postLogin(init, interaction, "alice", "correct password"))
 	location, err := url.Parse(completed.Header().Get("Location"))
-	if err != nil || completed.Code != http.StatusSeeOther || location.Query().Get("code") == "" || location.Query().Get("state") != strings.Repeat("s", 32) {
+	if err != nil || completed.Code != http.StatusSeeOther || location.Scheme+"://"+location.Host+location.Path != authorizeValues().Get("redirect_uri") || location.Query().Get("code") == "" || location.Query().Get("state") != strings.Repeat("s", 32) {
 		t.Fatalf("login status=%d location=%q err=%v", completed.Code, completed.Header().Get("Location"), err)
 	}
 	rotated := completed.Result().Cookies()[0]
@@ -160,14 +164,15 @@ func TestHTMLLoginFailureKeepsOAuthInteractionForRetry(t *testing.T) {
 		if clientID != "browser-client" {
 			t.Fatalf("branding client=%q", clientID)
 		}
-		return LoginBranding{LogoURL: "/auth/v1/clients/browser-client/logo?v=2"}, nil
+		return LoginBranding{Name: "Browser Client", LogoURL: "/auth/v1/clients/browser-client/logo?v=2", English: branding.LoginCopy{Description: "Sign in to Browser Client"}}, nil
 	})
 	page := httptest.NewRecorder()
 	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
 	init := page.Result().Cookies()[0]
 	interaction := interactionToken(t, page.Body.String())
 
-	failedRequest := postLogin(init, interaction, "alice", "wrong password")
+	failedUsername := `<script>alert(1)</script>`
+	failedRequest := postLogin(init, interaction, failedUsername, "wrong password")
 	failedRequest.Header.Set("Accept", "text/html")
 	failedRequest.Header.Set("Accept-Language", "ko")
 	failed := httptest.NewRecorder()
@@ -176,8 +181,12 @@ func TestHTMLLoginFailureKeepsOAuthInteractionForRetry(t *testing.T) {
 		t.Fatalf("HTML failure status=%d headers=%v cookies=%#v", failed.Code, failed.Header(), failed.Result().Cookies())
 	}
 	for _, want := range []string{
-		`role="alert"`, "사용자 이름 또는 비밀번호를 확인하고 다시 시도하세요.",
-		`action="/auth/login"`, `value="` + interaction + `"`,
+		`id="login-error" class="auth-error" role="alert"`, `data-i18n="Login failed">로그인하지 못했습니다`,
+		`aria-hidden="true">⚠</span>`, `data-i18n="Check your username or password">사용자 이름 또는 비밀번호를 확인하세요.`,
+		`data-i18n="Check your username or password"`, `data-brand-ko="계속할 서비스: browser-client"`,
+		`id="login-client-context"><span data-i18n="Continue to">다음으로 계속</span> browser-client</p>`,
+		`data-login-progress hidden data-i18n="Signing in…">Signing in…</p>`,
+		`method="post" action="/auth/login"`, `value="` + interaction + `"`,
 		`href="/auth/v1/theme/browser-client.css?v=2"`,
 		`src="/auth/v1/clients/browser-client/logo?v=2"`,
 	} {
@@ -185,11 +194,45 @@ func TestHTMLLoginFailureKeepsOAuthInteractionForRetry(t *testing.T) {
 			t.Errorf("retry page missing %q: %s", want, failed.Body.String())
 		}
 	}
+	var submitButton string
+	for _, tag := range regexp.MustCompile(`<button\b[^>]*>`).FindAllString(failed.Body.String(), -1) {
+		if strings.Contains(tag, `type="submit"`) {
+			submitButton = tag
+			break
+		}
+	}
+	if submitButton == "" || regexp.MustCompile(`\s(?:name|value)=`).MatchString(submitButton) {
+		t.Fatalf("login submit button missing or has a named value: %q", submitButton)
+	}
 	if !strings.Contains(failed.Header().Get("Content-Security-Policy"), "form-action 'self' http://localhost") {
 		t.Fatalf("retry CSP lost registered callback origin: %q", failed.Header().Get("Content-Security-Policy"))
 	}
-	if strings.Contains(failed.Body.String(), "alice") || strings.Contains(failed.Body.String(), "wrong password") || strings.Contains(failed.Body.String(), "Unable to continue") {
-		t.Fatal("failed login exposed user input or generic browser error page")
+	if !strings.Contains(failed.Body.String(), `name="username" value="&lt;script&gt;alert(1)&lt;/script&gt;"`) || strings.Contains(failed.Body.String(), failedUsername) || strings.Contains(failed.Body.String(), "wrong password") || strings.Contains(failed.Body.String(), "Unable to continue") {
+		t.Fatal("failed login did not safely retain only the submitted username")
+	}
+	if !strings.Contains(failed.Body.String(), "Check your username or password") {
+		t.Fatal("failed login did not show the generic actionable error")
+	}
+	unknownRequest := postLogin(init, interaction, "nobody", "wrong password")
+	unknownRequest.Header.Set("Accept", "text/html")
+	unknownRequest.Header.Set("Accept-Language", "ko")
+	unknown := httptest.NewRecorder()
+	branding.BrowserPageErrors(h.issuer, http.HandlerFunc(h.Login)).ServeHTTP(unknown, unknownRequest)
+	if unknown.Code != failed.Code || !strings.Contains(unknown.Body.String(), `name="username" value="nobody"`) || !strings.Contains(unknown.Body.String(), "Check your username or password") {
+		t.Fatalf("unknown-user retry status=%d body=%s", unknown.Code, unknown.Body.String())
+	}
+	normalizeRetry := func(body string) string {
+		body = regexp.MustCompile(`nonce="[^"]+"`).ReplaceAllString(body, `nonce="[nonce]"`)
+		return regexp.MustCompile(`(<input\b[^>]*\bname="username"[^>]*\bvalue=")[^"]*(")`).ReplaceAllString(body, `${1}[username]${2}`)
+	}
+	failedBody, unknownBody := normalizeRetry(failed.Body.String()), normalizeRetry(unknown.Body.String())
+	if failedBody != unknownBody {
+		at := 0
+		for at < len(failedBody) && at < len(unknownBody) && failedBody[at] == unknownBody[at] {
+			at++
+		}
+		start, end := max(0, at-60), min(max(len(failedBody), len(unknownBody)), at+120)
+		t.Fatalf("known and unknown-user retry pages differ beyond the username and per-response CSP nonce near %d: known=%q unknown=%q", at, failedBody[start:min(end, len(failedBody))], unknownBody[start:min(end, len(unknownBody))])
 	}
 	if _, err := h.browser.LoadAuthorizationInteractionReadOnly(context.Background(), init.Value, interaction); err != nil {
 		t.Fatalf("failed login consumed interaction: %v", err)
@@ -200,6 +243,45 @@ func TestHTMLLoginFailureKeepsOAuthInteractionForRetry(t *testing.T) {
 	location, err := url.Parse(completed.Header().Get("Location"))
 	if err != nil || completed.Code != http.StatusSeeOther || location.Scheme+"://"+location.Host+location.Path != authorizeValues().Get("redirect_uri") || location.Query().Get("state") != strings.Repeat("s", 32) || location.Query().Get("code") == "" || strings.Contains(location.Path, "dashboard") {
 		t.Fatalf("OAuth login status=%d location=%q err=%v", completed.Code, completed.Header().Get("Location"), err)
+	}
+}
+
+func TestBoundedLoginUsernamePreservesSupportedEmailLength(t *testing.T) {
+	if got := boundedLoginUsername(strings.Repeat("x", 254)); got != strings.Repeat("x", 254) {
+		t.Fatalf("supported maximum username was truncated to %d bytes", len(got))
+	}
+	if got := boundedLoginUsername(strings.Repeat("x", 255)); got != strings.Repeat("x", 254) {
+		t.Fatalf("oversized username length=%d, want 254", len(got))
+	}
+}
+
+func TestLoginPageLocalizesEachFailureStatus(t *testing.T) {
+	for _, test := range []struct {
+		status                             int
+		titleKey, title, detailKey, detail string
+		credentialGuidance                 bool
+	}{
+		{http.StatusUnauthorized, "Login failed", "로그인하지 못했습니다", "Check your username or password", "사용자 이름 또는 비밀번호를 확인하세요.", true},
+		{http.StatusTooManyRequests, "Too many attempts", "시도 횟수가 많습니다.", "Please wait before trying again.", "잠시 후 다시 시도하세요.", false},
+		{http.StatusServiceUnavailable, "Sign-in temporarily unavailable", "로그인 서비스를 일시적으로 사용할 수 없습니다.", "Please try again shortly.", "잠시 후 다시 시도하세요.", false},
+	} {
+		t.Run(strconv.Itoa(test.status), func(t *testing.T) {
+			h := testHandler(t)
+			request := httptest.NewRequest(http.MethodGet, authorizePath, nil)
+			request.Header.Set("Accept-Language", "ko")
+			response := httptest.NewRecorder()
+			h.renderAuthenticationPage(response, request, oauth.AuthorizationRequest{ClientID: "browser-client", RedirectURI: "http://client.example/callback"}, loginPageData{Status: test.status})
+			body := response.Body.String()
+			if !strings.Contains(body, `role="alert"`) || !strings.Contains(body, `aria-hidden="true">⚠</span>`) ||
+				!strings.Contains(body, `data-i18n="`+test.titleKey+`">`+test.title+`</strong>`) ||
+				!strings.Contains(body, `data-i18n="`+test.detailKey+`">`+test.detail+`</span>`) {
+				t.Fatalf("status %d error did not retain localized guidance: %s", test.status, response.Body.String())
+			}
+			if strings.Index(body, `id="login-error"`) > strings.Index(body, `name="password"`) ||
+				strings.Contains(body, `data-i18n="Check your username or password"`) != test.credentialGuidance {
+				t.Fatalf("status %d alert placement or guidance is incorrect: %s", test.status, body)
+			}
+		})
 	}
 }
 
@@ -607,7 +689,7 @@ func TestLoginPolicyBlocksWithoutConsumingInteraction(t *testing.T) {
 		t.Fatalf("HTML block status=%d headers=%v cookies=%#v", htmlResponse.Code, htmlResponse.Header(), htmlResponse.Result().Cookies())
 	}
 	for _, want := range []string{
-		"시도 횟수가 많습니다. 잠시 후 다시 시도하세요.", `value="` + interaction + `"`,
+		"시도 횟수가 많습니다.", "잠시 후 다시 시도하세요.", `value="` + interaction + `"`,
 		`href="/auth/v1/theme/browser-client.css?v=3"`, `src="/auth/v1/clients/browser-client/logo?v=3"`,
 	} {
 		if !strings.Contains(htmlResponse.Body.String(), want) {
@@ -1235,7 +1317,7 @@ func TestWebAuthnStartRejectsInvalidBrowserAndPasswordlessCookies(t *testing.T) 
 	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
 	init := page.Result().Cookies()[0]
 	interaction := interactionToken(t, page.Body.String())
-	valid, err := h.passkeys.PasswordlessCookie("user-1")
+	valid, err := h.passkeys.PasswordlessCookie(t.Context(), "user-1")
 	if err != nil {
 		t.Fatal(err)
 	}

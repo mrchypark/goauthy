@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-for command in cp curl dirname go grep head nc sed tr; do
+for command in cp curl dirname go grep head nc ps sed tr mktemp rm mkdir sleep; do
 	command -v "$command" >/dev/null 2>&1 || {
 		echo "missing required tool: $command" >&2
 		exit 1
@@ -14,31 +14,61 @@ case "$port" in ''|*[!0-9]*) echo 'GOAUTHY_STANDALONE_ADMIN_PORT must be a decim
 	echo 'GOAUTHY_STANDALONE_ADMIN_PORT must be between 1024 and 65535' >&2
 	exit 1
 }
-if nc -z 127.0.0.1 "$port" >/dev/null 2>&1; then
-	echo "standalone admin port $port is already in use; choose GOAUTHY_STANDALONE_ADMIN_PORT" >&2
-	exit 1
-fi
-
 script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 # shellcheck source=scripts/e2e-port-lock.sh
 . "$script_dir/e2e-port-lock.sh"
-temp_dir=$(mktemp -d)
+temp_dir=
 pid=
 root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 cd "$root"
+owned_child_active() {
+	state=$(ps -o stat= -p "$1" 2>/dev/null || true)
+	case "$state" in ''|Z*) return 1;; *) return 0;; esac
+}
+stop_owned_child() {
+	child=$1
+	[ -n "$child" ] || return 0
+	if owned_child_active "$child"; then
+		kill -TERM "$child" >/dev/null 2>&1 || true
+		attempt=0
+		while [ "$attempt" -lt 5 ] && owned_child_active "$child"; do sleep 1; attempt=$((attempt + 1)); done
+		if owned_child_active "$child"; then
+			kill -KILL "$child" >/dev/null 2>&1 || true
+			attempt=0
+			while [ "$attempt" -lt 5 ] && owned_child_active "$child"; do sleep 1; attempt=$((attempt + 1)); done
+		fi
+	fi
+	owned_child_active "$child" && return 1
+	wait "$child" 2>/dev/null || true
+	return 0
+}
 cleanup() {
 	status=$?
 	trap - 0 1 2 15
-	if [ -n "$pid" ]; then
-		kill -TERM "$pid" >/dev/null 2>&1 || true
-		wait "$pid" 2>/dev/null || true
+	cleanup_failed=0
+	stop_owned_child "$pid" || cleanup_failed=1
+	if [ "$cleanup_failed" -eq 0 ] && [ -n "$temp_dir" ] && [ -d "$temp_dir" ]; then
+		rm -rf "$temp_dir" || cleanup_failed=1
+		[ ! -e "$temp_dir" ] || cleanup_failed=1
 	fi
-	rm -rf "$temp_dir"
+	if [ "$cleanup_failed" -ne 0 ]; then
+		if [ -n "$temp_dir" ] && [ -d "$temp_dir" ]; then
+			echo "fixture cleanup incomplete; temporary directory retained: $temp_dir" >&2
+		else
+			echo 'fixture cleanup incomplete; owned process or temporary files remain' >&2
+		fi
+		status=1
+	fi
 	e2e_port_lock_release
 	exit "$status"
 }
 trap cleanup 0 1 2 15
 e2e_port_lock_acquire
+if nc -z 127.0.0.1 "$port" >/dev/null 2>&1; then
+	echo "standalone admin port $port is already in use; choose GOAUTHY_STANDALONE_ADMIN_PORT" >&2
+	exit 1
+fi
+temp_dir=$(mktemp -d)
 
 data_dir=$temp_dir/data
 master_key_dir=$temp_dir/master-keys
@@ -75,12 +105,12 @@ wait_ready() {
 	# curl retries are bounded by both attempts and wall time; no arbitrary sleep.
 	curl --fail --silent --show-error --retry 300 --retry-connrefused --retry-delay 0 --retry-max-time 30 \
 		"$base/livez" >/dev/null 2>&1 || {
-		cat "$temp_dir/server.log" >&2
+		echo 'standalone admin GoAuthy livez readiness failed' >&2
 		return 1
 	}
 	curl --fail --silent --show-error --retry 300 --retry-connrefused --retry-delay 0 --retry-max-time 30 \
 		"$base/readyz" >/dev/null 2>&1 || {
-		cat "$temp_dir/server.log" >&2
+		echo 'standalone admin GoAuthy readyz readiness failed' >&2
 		return 1
 	}
 }

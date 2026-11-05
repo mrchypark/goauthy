@@ -9,10 +9,9 @@ import (
 	"github.com/mrchypark/goauthy/internal/branding"
 )
 
-// ProviderMinimalResponse is the pinned rauthy v0.36.2
-// AuthProviderTemplate fields for the public /providers/minimal endpoint.
-// Updated is 0 when no logo is present; the field is always included
-// to match the upstream response shape exactly.
+// ProviderMinimalResponse is the response shape for the public
+// /providers/minimal endpoint. Updated is 0 when no logo is present; the
+// field is always included.
 type ProviderMinimalResponse struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
@@ -35,7 +34,7 @@ type RegistryHandler struct {
 // database handle for provider updated-at lookups.
 func NewRegistryHandler(
 	store *RegistryStore,
-	keys    *apikey.Store,
+	keys *apikey.Store,
 	browserAdmin branding.BrowserAdministrator,
 ) (*RegistryHandler, error) {
 	if store == nil || keys == nil {

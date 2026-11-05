@@ -28,7 +28,7 @@ type CallbackResult struct {
 // Profile claim fields (Email, EmailVerified, GivenName, FamilyName) are
 // preserved from the same verified signed payload. They are optional:
 // nil means the provider did not include the claim. This is foundation
-// for Rauthy federated onboarding/profile updates — not a full feature.
+// for federated onboarding/profile updates — not a full feature.
 //
 // rawClaims holds the full JSON payload bytes from the signature-verified
 // ID token. Unexported: accessible only within this package for claim mapping.

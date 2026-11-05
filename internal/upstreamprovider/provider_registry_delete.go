@@ -10,8 +10,8 @@ import (
 
 // DeleteAuthorized atomically removes a provider, its logos, external
 // links, and runtime version metadata. Users and user profiles are
-// intentionally preserved. Missing providers succeed (no affected-row
-// check) matching the pinned rauthy v0.36.2 entity delete behavior.
+// intentionally preserved. Missing providers succeed without an
+// affected-row check.
 func (s *RegistryStore) DeleteAuthorized(ctx context.Context, providerID, requestID string, keys *apikey.Store, principal *apikey.Principal) error {
 	if s == nil || s.db == nil || keys == nil || providerID == "" || requestID == "" {
 		return ErrInvalidConfig

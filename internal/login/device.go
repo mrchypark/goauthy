@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/device"
 )
@@ -65,7 +66,7 @@ func (h *Handler) deviceLoginGet(w http.ResponseWriter, r *http.Request, forceMF
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	themeURL, err := h.resolveThemeURL(r.Context(), "rauthy")
+	themeURL, err := h.resolveThemeURL(r.Context(), branding.GlobalBrandID)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
@@ -166,7 +167,7 @@ func parseDeviceLoginForm(w http.ResponseWriter, r *http.Request) (deviceLoginFo
 	}
 	return deviceLoginForm{Interaction: i, CSRFToken: c, Username: u, Password: p}, nil
 }
-func utf8Valid(v string) bool { return len(v) <= 256 && utf8.ValidString(v) }
+func utf8Valid(v string) bool { return utf8.ValidString(v) && utf8.RuneCountInString(v) <= 256 }
 func randomDeviceLoginID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -176,21 +177,18 @@ func randomDeviceLoginID() (string, error) {
 }
 
 func (h *Handler) createLoginInteraction(r *http.Request, peerIP string, payload []byte) (browser.IssuedAuthorizationInteraction, string, *http.Cookie, error) {
-	var session browser.IssuedSession
-	if current, token, ok := h.session(r); ok && !current.Authenticated() && current.PeerIP != "" {
-		session = browser.IssuedSession{Session: current, Token: token}
-	} else {
-		var err error
-		session, err = h.browser.CreateInitSession(r.Context(), h.now().Add(interactionLifetime), peerIP)
-		if err != nil {
-			return browser.IssuedAuthorizationInteraction{}, "", nil, err
-		}
-	}
 	interactionToken, err := randomDeviceLoginID()
 	if err != nil {
 		return browser.IssuedAuthorizationInteraction{}, "", nil, err
 	}
-	interaction, err := h.browser.CreateAuthorizationInteraction(r.Context(), session.Token, interactionToken, payload, h.now().Add(interactionLifetime))
+	var session browser.IssuedSession
+	var interaction browser.IssuedAuthorizationInteraction
+	if current, token, ok := h.session(r); ok && !current.Authenticated() && current.PeerIP != "" {
+		session = browser.IssuedSession{Session: current, Token: token}
+		interaction, err = h.browser.CreateAuthorizationInteraction(r.Context(), session.Token, interactionToken, payload, h.now().Add(interactionLifetime))
+	} else {
+		session, interaction, err = h.browser.CreateInitSessionWithAuthorizationInteraction(r.Context(), peerIP, interactionToken, payload, h.now().Add(interactionLifetime))
+	}
 	if err != nil {
 		return browser.IssuedAuthorizationInteraction{}, "", nil, err
 	}
@@ -261,7 +259,7 @@ func (h *Handler) connectionHandoffLoginGet(w http.ResponseWriter, r *http.Reque
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	themeURL, err := h.resolveThemeURL(r.Context(), "rauthy")
+	themeURL, err := h.resolveThemeURL(r.Context(), branding.GlobalBrandID)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return

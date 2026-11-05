@@ -1,13 +1,14 @@
 # Backup scheduling implementation
 
-The target remains Rauthy v0.36.2's configurable backup schedule, encrypted
-object-store publication and retention, using Rhiza v0.12.3 without GoAuthy PVCs.
-Calendar, replicated lease/completion slots and server worker lifecycle are
-implemented and qualified. Basic scheduled DR, source-storage outage,
-two-voter loss/recovery, signer rotation and paused-holder fresh-Kind DR passed
-on 2026-09-09. Operator-managed recovery keys remain required; automatic secret
-distribution is optional. Earlier dated pending/failed records below are
-historical and superseded by the final named PASS records, not deleted evidence.
+The implementation targets Rauthy's configurable backup schedule, encrypted
+object-store publication and retention. Its current Rhiza module version is the
+one pinned in [`go.mod`](../go.mod); that source pin is not itself a restore or
+HA qualification. The dated qualification records below are historical: the
+2026-09-09 gates used Rhiza v0.12.3 and do not qualify the current pin. Treat
+them as evidence for that tested baseline only. Operator-managed recovery keys
+remain required; automatic secret distribution is optional. Earlier
+dated pending/failed records below are retained as historical evidence; where
+a named final PASS supersedes one, the record says so.
 
 ## Package selection and direct code
 
@@ -84,9 +85,15 @@ Final backup/CLI race tests passed (1.974s/2.167s) and vet passed. See
 ownership or schedule retention; the server composes Create with RunSlot and
 Prune as described below.
 
-## HA ownership research (component implemented below)
+## Historical HA ownership design proposal (v0.12.3 API research)
 
-Rhiza v0.12.3's public `DB.KVCAS` is the smallest candidate for coordination:
+This section records the earlier KVCAS design investigation, not a current
+operator qualification or a claim that the current Rhiza pin has passed HA
+testing. The current implementation and its verification limits are described
+in [Replicated lease component](#replicated-lease-component).
+
+The investigated Rhiza v0.12.3 public `DB.KVCAS` API was a candidate for
+coordination:
 `KVMutationRequest` carries an exact expected value/existence condition and
 `TTLMS`; the replicated materializer treats expired values as absent before
 performing the comparison. `MutationReceipt.Applied` distinguishes a won CAS
@@ -135,7 +142,8 @@ ignores its context. Callers choose a TTL between one second and one hour.
 WithLease alone does not record slot completion or provide exactly-once
 publication. RunSlot supplies the completion watermark, and the server wires
 the timer and configuration described below. Three-voter failure qualification
-remains required before marking automatic backup parity complete.
+against the current Rhiza pin remains required before marking automatic backup
+parity complete.
 
 Lease component verification (2026-09-09): real standalone Rhiza tests cover
 competing/independent scopes, positive renewal past the original TTL, callback
@@ -359,7 +367,8 @@ do not establish the cause of the earlier generic rotation failure.
 
 ### Paused-holder qualification boundaries (2026-09-09)
 
-Pinned Rhiza v0.12.3 `pkg/network/server.go` stamps KV command observation and
+The 2026-09-09 implementation evidence used Rhiza v0.12.3, whose
+`pkg/network/server.go` stamps KV command observation and
 expiry at submission; `pkg/materializer/materializer.go` applies CAS only when
 expiry/existence and expected bytes match. GoAuthy uses that native comparison
 for renewal and conditional release. A separate read of ownership cannot fence
@@ -514,7 +523,8 @@ This run does not prove a paused-holder failure, and the sanitized message does
 not establish the native acquisition error's cause. No lease or quorum timing
 was changed. The independent expire-all Kind DR profile is running next.
 
-Static diagnostic classification now recognizes public Rhiza v0.12.3
+Historical diagnostic implementation and test notes (Rhiza v0.12.3): static
+diagnostic classification recognizes the public
 `ErrCommitUnknown`, `ErrNotReady`, `ErrQuorumUnavailable`,
 `ErrDurabilityUnavailable`, `ErrRequestConflict`, and `ErrInvalidRequest`.
 Unknown commit takes precedence over wrapped cancellation/timeout/availability

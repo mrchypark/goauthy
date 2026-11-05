@@ -1,25 +1,28 @@
 # Rhiza runtime profiles
 
-Production supports two explicit Rhiza modes, currently pinned to `v0.12.3` in
-`go.mod`. `standalone` uses one embedded member and a single data directory.
+The application defines two explicit Rhiza modes. Its source dependency is
+pinned in [`go.mod`](../../go.mod); that source pin does not identify the
+version deployed in production. `standalone` uses one embedded member and a
+single data directory.
 Both `standalone` and the legacy
 `dev` profile reject peer and voter/admin-token inputs. `standalone` now also
 accepts an optional S3 bucket and prefix with fixed `before-ack` durability,
 using the same object-store validation as cluster mode; partial configuration
-fails closed. `dev` remains local-only. The existing manifests below retain
-their PVC layout; the dedicated [Ternal profile](../ternal-no-pvc/README.md)
-is isolated and uses no PVC.
+fails closed. `dev` remains local-only. The base manifests below use per-pod
+`emptyDir` storage, so application data is ephemeral across pod replacement.
+The dedicated [Ternal profile](../ternal-no-pvc/README.md) is isolated and also
+uses no PVC.
 `make e2e-standalone` passed runtime smoke and restart verification, including
 JWKS key persistence, plus the shared browser authorization-code/refresh flow
 with primary and secondary URLs pointed at the same standalone endpoint.
 
-The production `cluster` mode is exactly three embedded voters. Its Secret JSON
+The `cluster` mode is exactly three embedded voters. Its Secret JSON
 contains distinct voter tokens for each member and a separate
 `GOAUTHY_RHIZA_ADMIN_TOKEN`; `GOAUTHY_RHIZA_PEER_TOKEN` is retained only as a
 legacy admin-token alias. Source validation and static Kubernetes configuration
 are verified. The exact-three base HA gate passed on the historical Rhiza `v0.10.0`
-baseline. The current Rhiza `v0.12.3` full-profile Kind gate also passes pod
-replacement, quorum-loss readiness 503, restoration and rolling restart
+baseline. The historical Rhiza `v0.12.3` full-profile Kind gate passed pod replacement,
+quorum-loss readiness 503, restoration and rolling restart
 ([feature ledger](../../docs/features.md)). Kind evidence does not qualify a
 pinned production image or the separate standalone and exact-three release
 profiles; mixed-version upgrades remain unqualified.
@@ -36,7 +39,7 @@ performs a StatefulSet rolling restart. JWKS key identity must persist through
 each recovery.
 
 This is a fixed **three-voter embedded Rhiza HA profile**. Each StatefulSet pod
-uses its own PVC and its pod name as `NodeID`; all three receive the same,
+uses its own ephemeral `emptyDir` data volume and its pod name as `NodeID`; all three receive the same,
 ordered `quic://goauthy-{0,1,2}.goauthy.goauthy.svc.cluster.local:8444` member
 list. A namespace-local VersityGW StatefulSet with a POSIX backend supplies
 the shared S3-compatible checkpoint store, and the app chooses Rhiza
@@ -60,6 +63,9 @@ referenced checkpoint blocks, then verifies the sentinel token, JWKS `kid`, and
 a new cross-pod write/read. The latest gate passed with checkpoint index `82`,
 `config_id` `1`, generation `11`, and `2` files / `2` blocks. The object-store
 prefix is the backup; Kubernetes Secrets are re-provisioned separately.
+The manifest's `rhiza_version` identifies the producer module version for
+provenance only; it does not establish restore compatibility. Qualify restores
+against the intended producer and consumer builds as a separate operator gate.
 The harness sets the cluster-only `GOAUTHY_RHIZA_CHECKPOINT_INTERVAL=1s` so
 `checkpoint/CURRENT` appears deterministically; production overrides are bounded
 to `1s` through `24h`, and standalone/dev reject the setting. Cluster S3
@@ -68,7 +74,7 @@ durability remains fixed at `before-ack`.
 The namespace enforces Kubernetes Restricted Pod Security Admission. The
 StatefulSet also sets non-root execution, `RuntimeDefault` seccomp, read-only
 root filesystem, no privilege escalation, dropped capabilities, probes,
-resource bounds, a PVC, preferred hostname anti-affinity, and default-deny ingress/egress.
+resource bounds, ephemeral data volumes, preferred hostname anti-affinity, and default-deny ingress/egress.
 The `goauthy` PodDisruptionBudget requires two available pods during voluntary
 eviction; anti-affinity remains preferred so one-node Kind stays schedulable. The explicit ingress
 policy permits port 8080 only from pods in the same namespace; `kubectl

@@ -214,3 +214,20 @@ func TestConnectionHandoffPageLocaleAndSafeExit(t *testing.T) {
 		t.Fatalf("status=%d language=%q body=%s", w.Code, w.Header().Get("Content-Language"), w.Body.String())
 	}
 }
+
+func TestElyConnectionHandoffKeepsNativeConsent(t *testing.T) {
+	var out bytes.Buffer
+	data := connectionHandoffPageData{BasePath: "/tenant", Action: "/tenant/account/connection-handoffs/ticket", CSRF: "csrf"}
+	if err := connectionHandoffPage.Execute(&out, data); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, want := range []string{`/tenant/auth/v1/ui/`, `data-slot="button"`, `method="post" action="/tenant/account/connection-handoffs/ticket"`, `name="csrf_token" value="csrf"`, `name="decision" value="approve"`, `name="decision" value="deny"`, `name="reviewed" value="yes" required`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+	if strings.Contains(body, "<script") || strings.Contains(body, "hx-") {
+		t.Fatal("script or enhanced submission added")
+	}
+}

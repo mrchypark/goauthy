@@ -130,7 +130,7 @@ func (s *Store) updatePreferredUsername(ctx context.Context, actor, target strin
 	values = append(values, target)
 	if !api {
 		decision += `WHEN NOT (?=? OR ` + adminGuard() + `) THEN CASE
-		 WHEN EXISTS(SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject=? AND (r.name='rauthy_admin' OR substr(r.name,1,13)='rauthy_admin:')) THEN 403
+		 WHEN EXISTS(SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject=? AND (r.name='goauthy_admin' OR substr(r.name,1,14)='goauthy_admin:')) THEN 403
 		 WHEN NOT EXISTS(SELECT 1 FROM rbac_user_groups tm JOIN rbac_groups g ON g.id=tm.group_id WHERE tm.subject=? AND ` + userUpdateGroupScope("g.name") + `) THEN 428
 		 WHEN EXISTS(SELECT 1 FROM identity_user_profiles WHERE subject=? AND preferred_username IS NOT NULL) THEN 403
 		 ELSE 200 END ELSE 200 END`

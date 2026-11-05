@@ -342,6 +342,9 @@ func TestNoPVCAccountAndSigningKeyRecovery(t *testing.T) {
 		}
 	}
 	cfg.CheckpointInterval = time.Hour
+	if phase == "write-checkpoint" {
+		cfg.CheckpointInterval = 10 * time.Second
+	}
 	db, err := rhiza.Open(ctx, cfg)
 	if phase == "reject-checkpoint" || phase == "reject-checkpoint-root" || phase == "reject-checkpoint-blocks" {
 		if err == nil {
@@ -426,9 +429,7 @@ func TestNoPVCAccountAndSigningKeyRecovery(t *testing.T) {
 			t.Fatal("failure fixture authentication", err)
 		}
 		if phase == "write-checkpoint" {
-			if err := db.Close(); err != nil {
-				t.Fatal(err)
-			}
+			closeNoPVCWriterAfterCertifiedCheckpoint(t, ctx, db, cfg)
 			return
 		}
 		os.Exit(0) // Intentionally skip Close and all defers, like losing the pod.

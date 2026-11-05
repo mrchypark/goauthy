@@ -24,7 +24,7 @@ type sharedGeneratedBootstrapRow struct {
 	created      int64
 }
 
-// BootstrapWithSharedGeneratedSecrets coordinates Rauthy Generate bootstrap
+// BootstrapWithSharedGeneratedSecrets coordinates shared generated bootstrap
 // across nodes. The shared encrypted record and digest-only API-key rows are
 // one fenced Rhiza transaction; the local artifact is only a non-overwriting
 // export of that committed winner.

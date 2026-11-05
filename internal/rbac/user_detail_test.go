@@ -125,7 +125,7 @@ func TestUserDetailDelegatedScopeAndCommitBarrier(t *testing.T) {
 			h, s, admin, _ := membershipHTTPFixture(t)
 			ctx := context.Background()
 			insertActive(t, s.db, "delegated")
-			role, err := s.CreateRole(ctx, "admin", "rauthy_admin:team/*", nil)
+			role, err := s.CreateRole(ctx, "admin", "goauthy_admin:team/*", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -156,9 +156,9 @@ func TestUserDetailDelegatedScopeAndCommitBarrier(t *testing.T) {
 				return
 			}
 			sql := map[string]string{
-				"scope":        `UPDATE rbac_roles SET name='rauthy_admin:other/*' WHERE name='rauthy_admin:team/*'`,
+				"scope":        `UPDATE rbac_roles SET name='goauthy_admin:other/*' WHERE name='goauthy_admin:team/*'`,
 				"group":        `DELETE FROM rbac_user_groups WHERE subject='member'`,
-				"target-admin": `INSERT INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) SELECT 'member',id,0 FROM rbac_roles WHERE name='rauthy_admin'`,
+				"target-admin": `INSERT INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) SELECT 'member',id,0 FROM rbac_roles WHERE name='goauthy_admin'`,
 				"role":         `DELETE FROM rbac_user_roles WHERE subject='delegated'`,
 				"disabled":     `UPDATE identity_users SET disabled=1 WHERE subject='delegated'`,
 				"session":      `UPDATE browser_sessions SET revoked_at_unix_ms=1 WHERE subject='delegated'`,
@@ -219,7 +219,7 @@ func TestUserDetailExactAndWildcardScopes(t *testing.T) {
 	h, s, _, _ := membershipHTTPFixture(t)
 	ctx := context.Background()
 	insertActive(t, s.db, "delegated")
-	role, err := s.CreateRole(ctx, "admin", "rauthy_admin:team/a", nil)
+	role, err := s.CreateRole(ctx, "admin", "goauthy_admin:team/a", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestUserDetailExactAndWildcardScopes(t *testing.T) {
 		scope string
 		want  int
 	}{{"team/a", 200}, {"team", 428}, {"team/*", 200}, {"team/b*", 428}, {"*", 200}} {
-		if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: fmt.Sprintf("detail-scope-%d", i), SQL: `UPDATE rbac_roles SET name=? WHERE id=?`, Args: []any{"rauthy_admin:" + tc.scope, role.ID}}); err != nil {
+		if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: fmt.Sprintf("detail-scope-%d", i), SQL: `UPDATE rbac_roles SET name=? WHERE id=?`, Args: []any{"goauthy_admin:" + tc.scope, role.ID}}); err != nil {
 			t.Fatal(err)
 		}
 		if w := detailRequest(h, cookie, "", "member"); w.Code != tc.want {

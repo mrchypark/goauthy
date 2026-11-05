@@ -18,7 +18,7 @@ import (
 
 const eventStreamIOTimeout = 5 * time.Second
 
-// EventsStream implements the Rauthy SSE wire format. A durable commit cursor,
+// EventsStream implements the SSE wire format. A durable commit cursor,
 // not the wall clock or an at-most-once notification, controls progression.
 func (h *Handler) EventsStream(w http.ResponseWriter, r *http.Request) {
 	h.securityHeaders(w)

@@ -64,7 +64,7 @@ API Key 자체는 이 관리자 등록 body에 넣지 않는다. 삭제되지 �
 이 API는 **GoAuthy full-admin browser session** 또는 **관리자 OIDC access token**을
 받는다. Bearer 요청에는 Cookie를 넣지 않는다. GET은 `goauthy.providers.read`,
 POST/PUT/DELETE는 `goauthy.providers.write`가 필요하고 현재 DB의 full
-`rauthy_admin` 역할도 확인한다. 토큰/역할은 저장 시점에도 다시 검사한다.
+`goauthy_admin` 역할도 확인한다. 토큰/역할은 저장 시점에도 다시 검사한다.
 `GOAUTHY_PROVIDERS_RESOURCE`가 비어 있으면 Bearer 관리는 거절한다. 설정된 값은
 `GOAUTHY_BOOTSTRAP_ALLOWED_RESOURCES`에 있어야 하며, 해당 resource가 토큰의
 granted audience에 정확히 포함돼야 한다(client ID audience만으로는 부족하다).

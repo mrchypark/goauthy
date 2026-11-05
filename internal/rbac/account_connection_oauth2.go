@@ -77,15 +77,14 @@ func (h *Handler) AccountConnectionOAuth2Callback(w http.ResponseWriter, r *http
 		h.badRequest(w)
 		return
 	}
-	if len(query["error"]) > 0 {
-		if len(query["error"]) != 1 || len(query["error_description"]) > 1 {
+	for _, values := range query {
+		if len(values) != 1 {
 			h.badRequest(w)
 			return
 		}
-		h.badRequest(w)
-		return
 	}
-	if len(query["state"]) != 1 || len(query["code"]) != 1 || len(query) != 2 || query.Get("state") == "" || query.Get("code") == "" {
+	denied := len(query["error"]) != 0
+	if query.Get("state") == "" || denied && (query.Get("error") == "" || len(query["code"]) != 0) || !denied && query.Get("code") == "" {
 		h.badRequest(w)
 		return
 	}
@@ -100,7 +99,12 @@ func (h *Handler) AccountConnectionOAuth2Callback(w http.ResponseWriter, r *http
 		return
 	}
 	callback := h.issuer + "/auth/v1/saas/callback/" + url.PathEscape(providerID)
-	status, err := h.saasCredentials.CompleteOAuth2(r.Context(), h.saasProviderStore, owner, "", "", providerID, upstreamprovider.DigestSHA256(cookies[0].Value), callback, query.Get("state"), query.Get("code"), authority)
+	if denied {
+		_ = h.saasCredentials.RejectOAuth2(r.Context(), h.saasProviderStore, owner, providerID, upstreamprovider.DigestSHA256(cookies[0].Value), callback, query.Get("state"), query.Get("iss"), authority)
+		h.badRequest(w)
+		return
+	}
+	status, err := h.saasCredentials.CompleteOAuth2(r.Context(), h.saasProviderStore, owner, "", "", providerID, upstreamprovider.DigestSHA256(cookies[0].Value), callback, query.Get("state"), query.Get("code"), authority, query.Get("iss"))
 	if err != nil {
 		h.oauth2ConnectionError(w, err)
 		return

@@ -7,7 +7,7 @@ import (
 	"strconv"
 )
 
-const GlobalBrandID = "rauthy"
+const GlobalBrandID = "goauthy"
 
 // Brand contains display-only values for the central account and admin shells.
 type Brand struct {

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestAdminCRUDUsesBrowserAdminAndRauthyShape(t *testing.T) {
+func TestAdminCRUDUsesBrowserAdminAndGoAuthyShape(t *testing.T) {
 	now := func() time.Time { return fixedTime(1_000_000_000) }
 	s := newTestStoreWithClock(t, now, 100)
 	h := NewAdminHandler(s, nil, func(w http.ResponseWriter, r *http.Request, mutation bool) bool { return true })

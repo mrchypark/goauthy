@@ -88,3 +88,23 @@ func TestWriteOAuth2CompletionJSONCompatibility(t *testing.T) {
 		t.Fatalf("status=%d body=%s decoded=%+v", w.Code, w.Body.String(), got)
 	}
 }
+
+func TestElyOAuth2CompletionUsesIssuerAssetsWithoutScripts(t *testing.T) {
+	h := &Handler{issuer: "https://issuer.example.test/tenant"}
+	w := httptest.NewRecorder()
+	h.renderOAuth2CompletionPage(w, httptest.NewRequest(http.MethodGet, "/account/connections/oauth2/callback", nil))
+	body := w.Body.String()
+	for _, want := range []string{`href="/tenant/auth/v1/ui/app.css"`, `href="/tenant/auth/v1/ui/brand.css"`, `href="https://issuer.example.test/tenant/account/account.css"`, `class="ui-alert"`, `id="oauth2-account-link"`, `rel="noreferrer"`, `href="https://issuer.example.test/tenant/account"`, `requires separate explicit approval`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+	for _, forbidden := range []string{"<script", "<form", "hx-"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("unexpected %s", forbidden)
+		}
+	}
+	if w.Header().Get("Content-Security-Policy") != "default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" {
+		t.Fatal("completion CSP changed")
+	}
+}

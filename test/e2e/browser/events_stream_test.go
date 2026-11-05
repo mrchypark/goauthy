@@ -40,9 +40,9 @@ func TestCreationEventsStream(t *testing.T) {
 	ids := map[eventlog.Type]string{}
 	for _, base := range nodes {
 		events := collectStreamEvents(t, client, base, "latest=1000&level=info", func(events []eventlog.Event) bool {
-			return hasEvent(events, "admin-created@goauthy.e2e", eventlog.NewUserRegistered) && hasEvent(events, "admin-created@goauthy.e2e", eventlog.NewRauthyAdmin) && hasEvent(events, "open@goauthy.e2e", eventlog.NewUserRegistered) && hasEvent(events, "Reset via Password Reset Form: open@goauthy.e2e", eventlog.UserPasswordReset)
+			return hasEvent(events, "admin-created@goauthy.e2e", eventlog.NewUserRegistered) && hasEvent(events, "admin-created@goauthy.e2e", eventlog.NewGoAuthyAdmin) && hasEvent(events, "open@goauthy.e2e", eventlog.NewUserRegistered) && hasEvent(events, "Reset via Password Reset Form: open@goauthy.e2e", eventlog.UserPasswordReset)
 		})
-		for _, typ := range []eventlog.Type{eventlog.NewUserRegistered, eventlog.NewRauthyAdmin} {
+		for _, typ := range []eventlog.Type{eventlog.NewUserRegistered, eventlog.NewGoAuthyAdmin} {
 			matches := matchingEvents(events, "admin-created@goauthy.e2e", typ)
 			if len(matches) != 1 {
 				t.Fatalf("history stream node=%s type=%s count=%d", base, typ, len(matches))

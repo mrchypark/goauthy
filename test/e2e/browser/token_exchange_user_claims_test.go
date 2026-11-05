@@ -47,13 +47,13 @@ func TestTokenExchangeUserClaimsAcrossPods(t *testing.T) {
 	// and groups it references are removed.
 	t.Cleanup(func() { exchangeUserClaimsSetMembership(t, admin, primary, headers, original) })
 
-	exchangeUserClaimsSetMembership(t, admin, primary, headers, rbacMembership{Roles: []string{sourceRole.Name, "rauthy_admin"}, Groups: []string{sourceGroup.Name}})
+	exchangeUserClaimsSetMembership(t, admin, primary, headers, rbacMembership{Roles: []string{sourceRole.Name, "goauthy_admin"}, Groups: []string{sourceGroup.Name}})
 	customClaimsPutValue(t, admin, primary, csrf, "source-value")
 	source := exchangeUserClaimsSource(t, newBrowserClient(t), primary, secondary, username, password, secret)
 
 	// The target must resolve this state at exchange time instead of copying the
 	// source token's persisted claims.
-	exchangeUserClaimsSetMembership(t, admin, primary, headers, rbacMembership{Roles: []string{currentRole.Name, "rauthy_admin"}, Groups: []string{currentGroup.Name}})
+	exchangeUserClaimsSetMembership(t, admin, primary, headers, rbacMembership{Roles: []string{currentRole.Name, "goauthy_admin"}, Groups: []string{currentGroup.Name}})
 	customClaimsPutValue(t, admin, primary, csrf, "current-value")
 
 	form := func(scope string) url.Values {
@@ -65,12 +65,12 @@ func TestTokenExchangeUserClaimsAcrossPods(t *testing.T) {
 		}
 	}
 	full := exchangeUserClaimsExchange(t, newBrowserClient(t), secondary, secret, form("goauthy.read groups "+customClaimsScope))
-	exchangeUserClaimsAssertJWT(t, full.AccessToken, publicJWKS(t, newBrowserClient(t), tertiary), primary, "goauthy.read groups "+customClaimsScope, []string{currentRole.Name, "rauthy_admin"}, []string{currentGroup.Name}, "current-value")
-	exchangeUserClaimsAssertIntrospection(t, newBrowserClient(t), tertiary, secret, full.AccessToken, []string{currentRole.Name, "rauthy_admin"}, []string{currentGroup.Name}, "current-value")
+	exchangeUserClaimsAssertJWT(t, full.AccessToken, publicJWKS(t, newBrowserClient(t), tertiary), primary, "goauthy.read groups "+customClaimsScope, []string{currentRole.Name, "goauthy_admin"}, []string{currentGroup.Name}, "current-value")
+	exchangeUserClaimsAssertIntrospection(t, newBrowserClient(t), tertiary, secret, full.AccessToken, []string{currentRole.Name, "goauthy_admin"}, []string{currentGroup.Name}, "current-value")
 
 	downscoped := exchangeUserClaimsExchange(t, newBrowserClient(t), secondary, secret, form("goauthy.read"))
-	exchangeUserClaimsAssertJWT(t, downscoped.AccessToken, publicJWKS(t, newBrowserClient(t), tertiary), primary, "goauthy.read", []string{currentRole.Name, "rauthy_admin"}, nil, "")
-	exchangeUserClaimsAssertIntrospection(t, newBrowserClient(t), tertiary, secret, downscoped.AccessToken, []string{currentRole.Name, "rauthy_admin"}, nil, "")
+	exchangeUserClaimsAssertJWT(t, downscoped.AccessToken, publicJWKS(t, newBrowserClient(t), tertiary), primary, "goauthy.read", []string{currentRole.Name, "goauthy_admin"}, nil, "")
+	exchangeUserClaimsAssertIntrospection(t, newBrowserClient(t), tertiary, secret, downscoped.AccessToken, []string{currentRole.Name, "goauthy_admin"}, nil, "")
 }
 
 func exchangeUserClaimsMembership(t *testing.T, client *http.Client, base string, headers map[string]string) rbacMembership {

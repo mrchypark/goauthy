@@ -57,14 +57,14 @@ func (s *ClientLogoStore) Find(ctx context.Context, clientID, resolution string)
 }
 
 // GetFallback returns the public client logo: small for the requested client,
-// then small for the global rauthy client.
+// then small for the canonical global brand.
 func (s *ClientLogoStore) GetFallback(ctx context.Context, clientID string) (StoredLogo, error) {
 	if s == nil || s.db == nil || !validClientID(clientID) {
 		return StoredLogo{}, ErrLogoNotFound
 	}
 	result, err := s.db.Query(ctx, rhiza.QueryRequest{
-		SQL:  `SELECT res,content_type,data,updated FROM client_logos WHERE client_id IN (?, 'rauthy') AND res IN ('small', 'svg') ORDER BY CASE WHEN client_id=? THEN 0 ELSE 1 END LIMIT 1`,
-		Args: []any{clientID, clientID}, Consistency: rhiza.ConsistencyLinearizable,
+		SQL:  `SELECT res,content_type,data,updated FROM client_logos WHERE client_id IN (?, ?) AND res IN ('small', 'svg') ORDER BY CASE WHEN client_id=? THEN 0 ELSE 1 END LIMIT 1`,
+		Args: []any{clientID, GlobalBrandID, clientID}, Consistency: rhiza.ConsistencyLinearizable,
 	})
 	if err != nil {
 		return StoredLogo{}, err
@@ -225,7 +225,7 @@ func validLogoResolution(value string) bool {
 }
 
 func logoClientExists(clientID string) (string, []any) {
-	// rauthy is a branding namespace, not an OAuth client.
+	// The canonical global brand is a namespace, not a special OAuth client.
 	if clientID == GlobalBrandID {
 		return "1", nil
 	}

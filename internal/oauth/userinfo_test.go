@@ -3,7 +3,6 @@ package oauth
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
@@ -78,7 +78,7 @@ func TestUserInfoRejectsInvalidTokenAndTransport(t *testing.T) {
 
 func TestUserInfoSubjectValidationAndMethod(t *testing.T) {
 	t.Parallel()
-	server := userInfoTestServer(t, oauthTestDB(t), errors.New("disabled"))
+	server := userInfoTestServer(t, oauthTestDB(t), identity.ErrInactiveSubject)
 	token := issueUserInfoToken(t, server)
 	assertUserInfoUnauthorized(t, server, userInfoRequest(http.MethodGet, token, nil))
 	server.oidc.ValidateSubject = nil
@@ -87,6 +87,18 @@ func TestUserInfoSubjectValidationAndMethod(t *testing.T) {
 	server.UserInfoHandler().ServeHTTP(response, userInfoRequest(http.MethodPut, token, nil))
 	if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != "GET, POST" {
 		t.Fatalf("method status=%d headers=%v", response.Code, response.Header())
+	}
+}
+
+func TestUserInfoBackendUnavailableReturnsServiceUnavailable(t *testing.T) {
+	t.Parallel()
+	server := userInfoTestServer(t, oauthTestDB(t), nil)
+	token := issueUserInfoToken(t, server)
+	server.oidc.ValidateSubject = func(context.Context, string) error { return rhiza.ErrQuorumUnavailable }
+	response := httptest.NewRecorder()
+	server.UserInfoHandler().ServeHTTP(response, userInfoRequest(http.MethodGet, token, nil))
+	if response.Code != http.StatusServiceUnavailable || response.Header().Get("Cache-Control") != "no-store" || strings.Contains(response.Body.String(), "user-1") {
+		t.Fatalf("status=%d headers=%v body=%q", response.Code, response.Header(), response.Body.String())
 	}
 }
 

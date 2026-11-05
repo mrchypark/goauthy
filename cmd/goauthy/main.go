@@ -60,6 +60,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/goauthy/internal/tlsconfig"
 	"github.com/mrchypark/goauthy/internal/tracing"
+	"github.com/mrchypark/goauthy/internal/ui"
 	"github.com/mrchypark/goauthy/internal/upstreamprovider"
 	"github.com/mrchypark/goauthy/internal/webid"
 	"github.com/mrchypark/rhiza"
@@ -178,6 +179,9 @@ func run() (err error) {
 	}
 
 	rhizaConfig := appConfig.Rhiza
+	if err := configureGCSMutationGate(os.Getenv, rhizaConfig); err != nil {
+		return err
+	}
 	backupConfig, err := scheduledBackupFromEnv(os.Getenv, rhizaConfig)
 	if err != nil {
 		return err
@@ -300,7 +304,7 @@ func run() (err error) {
 	var registrationHandler http.Handler
 	var dynamicClientStore *dcr.Store
 	if registrationToken != "" || dcrAnonymous {
-		dynamicClientStore = dcr.NewStore(db, dcr.Config{AllowRFC8252LoopbackRedirects: loopbackRedirects, ScopePolicy: dynamicClientScopePolicy, ReservedClientIDs: []string{clientID}, Keyring: keyring})
+		dynamicClientStore = dcr.NewStore(db, dcr.Config{AllowRFC8252LoopbackRedirects: loopbackRedirects, ScopePolicy: dynamicClientScopePolicy, ReservedClientIDs: []string{clientID, branding.GlobalBrandID}, Keyring: keyring})
 		registrationHandler, err = dcr.NewHandler(dynamicClientStore, issuer, registrationToken, dcr.HandlerConfig{Anonymous: dcrAnonymous, AnonymousRateLimitWindow: dcrRateLimitWindow, SoftwareStatements: softwareStatementConfig, AllowedResources: allowedResources})
 		if err != nil {
 			return fmt.Errorf("configure DCR handler: %w", err)
@@ -354,7 +358,7 @@ func run() (err error) {
 		return errors.New("GOAUTHY_BOOTSTRAP_USER_ROLES and GOAUTHY_BOOTSTRAP_USER_GROUPS require GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE")
 	}
 	rbacStore := rbac.NewStore(db)
-	managedClients := clients.NewStore(db, keyring, clientID)
+	managedClients := clients.NewStore(db, keyring, clientID, branding.GlobalBrandID)
 	if err := managedClients.EnsureBootstrap(ctx, clientID); err != nil {
 		return fmt.Errorf("reserve bootstrap client: %w", err)
 	}
@@ -493,14 +497,14 @@ func run() (err error) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			runNotifications(workerCtx, notifications, time.Now, func(error) { slog.Error("event notification worker step failed") })
+			runNotifications(workerCtx, notifications, time.Now, func(err error) { logWorkerFailure("notifications", "step", err) })
 		}()
 	}
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
-		if err := runEventCleanup(workerCtx, eventStore, eventCleanupInterval, eventRetention, time.Now, func(error) {
-			slog.Error("lifecycle event cleanup failed")
+		if err := runEventCleanup(workerCtx, eventStore, eventCleanupInterval, eventRetention, time.Now, func(err error) {
+			logWorkerFailure("event_cleanup", "cleanup", err)
 		}); err != nil {
 			slog.Error("lifecycle event cleanup stopped")
 		}
@@ -508,8 +512,8 @@ func run() (err error) {
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
-		if err := runUserExpiry(workerCtx, identityStore, userExpiryConfig, time.Now, func(error) {
-			slog.Error("account expiry cleanup failed")
+		if err := runUserExpiry(workerCtx, identityStore, userExpiryConfig, time.Now, func(err error) {
+			logWorkerFailure("account_expiry", "expiry", err)
 		}); err != nil {
 			slog.Error("account expiry worker stopped")
 		}
@@ -525,8 +529,8 @@ func run() (err error) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			if err := scimRuntime.Run(workerCtx, scimWorkerInterval, time.Now, func(error) {
-				slog.Error("SCIM synchronization failed")
+			if err := scimRuntime.Run(workerCtx, scimWorkerInterval, time.Now, func(err error) {
+				logWorkerFailure("scim", "synchronization", err)
 			}); err != nil {
 				slog.Error("SCIM worker stopped")
 			}
@@ -554,7 +558,7 @@ func run() (err error) {
 			}
 		}()
 	}
-	housekeepingJobs := buildHousekeepingJobs(db, recoveryService, loginPolicyStore, keyring, emailOutbox)
+	housekeepingJobs := buildHousekeepingJobs(db, recoveryService, loginPolicyStore, keyring, emailOutbox, passkeyConfig)
 	if scheduler := housekeeping.New(housekeepingJobs, housekeepingErrorHandler); len(housekeepingJobs) > 0 {
 		workers.Add(1)
 		go func() {
@@ -1016,7 +1020,7 @@ func run() (err error) {
 	}
 	emailSubjectPrefix, prefixConfigured := os.LookupEnv("GOAUTHY_EMAIL_SUB_PREFIX")
 	if !prefixConfigured {
-		emailSubjectPrefix = "Rauthy IAM"
+		emailSubjectPrefix = "GoAuthy IAM"
 	}
 	if strings.ContainsAny(emailSubjectPrefix, "\r\n") {
 		return errors.New("GOAUTHY_EMAIL_SUB_PREFIX must not contain line breaks")
@@ -1151,7 +1155,30 @@ func run() (err error) {
 	if err := accountHandler.ConfigureDynamicExternalLinks(dynamicDispatcher.linkStartHandler(), dynamicDispatcher.exists); err != nil {
 		return fmt.Errorf("configure dynamic upstream account links: %w", err)
 	}
-	logoutHandler, err := logout.NewHandler(issuer, db, browserStore, oauthServer, []logout.Client{{ID: clientID, PostLogoutRedirectURIs: postLogoutRedirectURIs}})
+	resolveLogoutClient := func(ctx context.Context, id string) (logout.Client, bool, error) {
+		if id == clientID {
+			return logout.Client{}, false, nil
+		}
+		registered, resolveErr := managedClients.GetClient(ctx, id)
+		if resolveErr == nil {
+			return logout.Client{ID: registered.GetID()}, true, nil
+		}
+		if !errors.Is(resolveErr, fosite.ErrNotFound) {
+			return logout.Client{}, false, resolveErr
+		}
+		if dynamicClientStore == nil {
+			return logout.Client{}, false, nil
+		}
+		registered, resolveErr = dynamicClientStore.GetClient(ctx, id)
+		if errors.Is(resolveErr, fosite.ErrNotFound) {
+			return logout.Client{}, false, nil
+		}
+		if resolveErr != nil {
+			return logout.Client{}, false, resolveErr
+		}
+		return logout.Client{ID: registered.GetID()}, true, nil
+	}
+	logoutHandler, err := logout.NewHandler(issuer, db, browserStore, oauthServer, []logout.Client{{ID: clientID, PostLogoutRedirectURIs: postLogoutRedirectURIs}}, resolveLogoutClient)
 	if err != nil {
 		return err
 	}
@@ -1392,6 +1419,9 @@ func run() (err error) {
 	handler.Handle("GET /auth/v1/theme/global.css", branding.GlobalCSSHandler())
 	handler.Handle("GET /auth/v1/elysdui.css", login.UIStylesheet())
 	handler.Handle("GET /auth/v1/branding/{name}", branding.BrandAssetHandler())
+	if err := ui.BindAssets(handler); err != nil {
+		return fmt.Errorf("configure UI assets: %w", err)
+	}
 	handler.HandleFunc("GET /auth/v1/theme/{client_id}/{timestamp}", themeHandler.Theme)
 	handler.HandleFunc("POST /auth/v1/theme/{client_id}", themeHandler.Theme)
 	handler.HandleFunc("PUT /auth/v1/theme/{client_id}", themeHandler.Theme)
@@ -1429,7 +1459,7 @@ func run() (err error) {
 
 	// --- Metrics server (opt-in, disabled by default) -----------------------
 	var metricsServer *http.Server
-	var appHandler http.Handler = branding.BrowserPageErrors(issuer, handler)
+	var appHandler http.Handler = branding.BrowserPageErrorsWithBrand(issuer, handler, commonBrand)
 	if geoConfig.Enabled {
 		appHandler = geoblock.Middleware(geoConfig.Policy, geoConfig.Header, trustedProxies, geoReader, appHandler)
 	}
@@ -1455,7 +1485,7 @@ func run() (err error) {
 		identityStore.SetMetrics(registry)
 		appHandler = registry.Instrument(appHandler)
 
-		metricsMux := newMetricsMux(registry, metricsToken, db.Handler(), newArchiveStatsHandler(db))
+		metricsMux := newMetricsMux(registry, metricsToken, db.Handler(), newArchiveStatsHandler())
 		metricsServer = &http.Server{
 			Addr:              metricsAddr,
 			Handler:           metricsMux,
@@ -1501,14 +1531,16 @@ func newMetricsMux(registry *metrics.Registry, token string, objectStoreHandler,
 	return mux
 }
 
-func newArchiveStatsHandler(db *rhiza.DB) http.Handler {
+const unavailableArchiveStatsV1 = `{"schema_version":1,"stages":{"publication_admission":{"available":false,"count":null,"duration_ns_sum":null},"archive_load":{"available":false,"count":null,"duration_ns_sum":null},"extent_build_upload":{"available":false,"count":null,"duration_ns_sum":null},"head_publish":{"available":false,"count":null,"duration_ns_sum":null},"publication_release":{"available":false,"count":null,"duration_ns_sum":null}}}`
+
+func newArchiveStatsHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(db.ArchiveStats())
+		_, _ = w.Write([]byte(unavailableArchiveStatsV1 + "\n"))
 	})
 }
 

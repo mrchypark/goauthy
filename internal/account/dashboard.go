@@ -10,23 +10,17 @@ import (
 	"net/url"
 	"strings"
 
-	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/ui"
 )
 
 //go:embed dashboard.html dashboard.js dashboard.css locale.js connections.js connection_grants.js devices.js
 var dashboardFS embed.FS
 
-var dashboardTemplate = func() *template.Template {
-	t, err := ui.NewTemplates()
-	if err != nil {
-		panic(err)
-	}
-	return template.Must(t.ParseFS(dashboardFS, "dashboard.html"))
-}()
+var dashboardTemplate = template.Must(template.Must(ui.NewTemplates("dashboard.html")).ParseFS(dashboardFS, "dashboard.html"))
 
 func (h *Handler) SetBrandResolver(resolve func(context.Context) (branding.Brand, error)) {
 	h.brand = resolve
@@ -70,9 +64,16 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		unauthorized(w)
 		return
 	}
-	profile, err := h.identity.AccountProfileBySubject(r.Context(), session.Subject)
+	var profile identity.AccountProfile
+	var passkeyOnly bool
+	var err error
+	if r.URL.Path == "/account/data" {
+		profile, passkeyOnly, err = h.identity.AccountDataBySubject(r.Context(), session.Subject)
+	} else {
+		profile, err = h.identity.AccountProfileBySubject(r.Context(), session.Subject)
+	}
 	if err != nil {
-		if errors.Is(err, identity.ErrInactiveSubject) {
+		if errors.Is(err, identity.ErrInactiveSubject) && !errors.Is(err, identity.ErrAccountDataMode) {
 			unauthorized(w)
 		} else {
 			http.Error(w, "Account unavailable", http.StatusServiceUnavailable)
@@ -85,11 +86,6 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 		csrf, err := browser.DeriveCSRFToken(token)
 		if err != nil {
 			unauthorized(w)
-			return
-		}
-		passkeyOnly, err := h.identity.IsPasskeyOnly(r.Context(), session.Subject)
-		if err != nil {
-			http.Error(w, "Account unavailable", http.StatusServiceUnavailable)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -141,7 +137,7 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		_ = dashboardTemplate.ExecuteTemplate(w, "dashboard.html", struct {
+		_ = dashboardTemplate.Execute(w, struct {
 			BasePath, Language string
 			IsAdmin            bool
 			Brand              branding.Brand

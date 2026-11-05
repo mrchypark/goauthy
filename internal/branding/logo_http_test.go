@@ -26,7 +26,7 @@ func TestClientLogoHandlerPublicFallbackCacheAndCSP(t *testing.T) {
 	}
 	seedLogoClient(t, ctx, db, "client-a", false)
 	seedLogo(t, ctx, db, "client-a", "small", "image/webp", []byte("client-logo"), 11)
-	seedLogo(t, ctx, db, "rauthy", "small", "image/webp", []byte("global-logo"), 12)
+	seedLogo(t, ctx, db, GlobalBrandID, "small", "image/webp", []byte("global-logo"), 12)
 	keys, err := apikey.NewStore(db)
 	if err != nil {
 		t.Fatal(err)

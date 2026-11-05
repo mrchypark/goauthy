@@ -26,7 +26,7 @@ type EmailTemplate struct {
 	ButtonTextRequestNew string
 }
 
-// EmailTemplates contains password-event copy indexed by Rauthy language.
+// EmailTemplates contains password-event copy indexed by language.
 type EmailTemplates struct {
 	passwordReset      map[string]EmailTemplate
 	passwordNew        map[string]EmailTemplate
@@ -42,7 +42,7 @@ func (t EmailTemplates) PasswordReset(lang string) EmailTemplate {
 	return defaultEmailTemplates().passwordReset["en"]
 }
 
-// PasswordResetExact returns copy only for a configured Rauthy language.
+// PasswordResetExact returns copy only for a configured language.
 // Use it at startup where an unsupported configured language must fail closed.
 func (t EmailTemplates) PasswordResetExact(lang string) (EmailTemplate, error) {
 	template, ok := t.passwordReset[lang]
@@ -60,7 +60,7 @@ func (t EmailTemplates) PasswordNew(lang string) EmailTemplate {
 	return defaultEmailTemplates().passwordNew["en"]
 }
 
-// PasswordNewExact returns copy only for a configured Rauthy language.
+// PasswordNewExact returns copy only for a configured language.
 func (t EmailTemplates) PasswordNewExact(lang string) (EmailTemplate, error) {
 	template, ok := t.passwordNew[lang]
 	if !ok {
@@ -78,7 +78,7 @@ func (t EmailTemplates) AlreadyRegistered(lang string) EmailTemplate {
 	return defaultEmailTemplates().registeredAlready["en"]
 }
 
-// AlreadyRegisteredExact returns copy only for a configured Rauthy language.
+// AlreadyRegisteredExact returns copy only for a configured language.
 func (t EmailTemplates) AlreadyRegisteredExact(lang string) (EmailTemplate, error) {
 	template, ok := t.registeredAlready[lang]
 	if !ok {
@@ -127,7 +127,7 @@ func (t EmailTemplates) TemplateLanguages(typ string) []string {
 	return langs
 }
 
-// LoadEmailTemplates loads strict Rauthy-compatible password-event copy
+// LoadEmailTemplates loads strict password-event copy
 // overrides. An empty path returns built-in defaults.
 func LoadEmailTemplates(path string) (EmailTemplates, error) {
 	templates := defaultEmailTemplates()

@@ -10,7 +10,7 @@ API-key/master-key audit API. Full event parity is **incomplete**.
 |---|---|---|
 | [x] | Typed event record and durable schema | stdlib JSON, `crypto/sha256`, `encoding/base64`, `net/netip`; Rhiza SQL. Real migration, constraints, nullable wire fields, deterministic query tests. |
 | [x] | `NewUserRegistered` from public and administrator creation | Existing identity transaction; commit-time creation witnesses. Duplicate, denied and rolled-back creation adds no event. |
-| [x] | `NewRauthyAdmin` on direct administrator creation | Same transaction, resulting `rauthy_admin` membership; Info registration plus Notice admin event. |
+| [x] | `NewGoAuthyAdmin` on direct administrator creation | Same transaction, resulting `goauthy_admin` membership; Info registration plus Notice admin event. |
 | [x] | `POST /auth/v1/events` | stdlib HTTP/JSON, existing API-key and browser/RBAC guards; single linearizable query; OpenAPI schema tests. Live evidence is scoped in [status](status.md). |
 | [x] | Retention worker | stdlib context/ticker and Rhiza ordered DELETE, 1000 rows per transaction; fixed-cutoff drain, same-clock progress and cancellation tests. |
 | [ ] | Configurable per-type levels and persistence threshold | Defaults only: registration Info, administrator Notice. |
@@ -29,8 +29,8 @@ API-key/master-key audit API. Full event parity is **incomplete**.
 
 The other DTO types are accepted for filtering but have **no lifecycle emitter**
 yet: `IpBlacklistRemoved`,
-`NewRauthyVersion`, `PossibleBruteForce`, `RauthyStarted`, `RauthyHealthy`,
-`RauthyUnhealthy`, `SecretsMigrated`,
+`NewGoAuthyVersion`, `PossibleBruteForce`, `GoAuthyStarted`, `GoAuthyHealthy`,
+`GoAuthyUnhealthy`, `SecretsMigrated`,
 `UserLoginRevoke`, `SuspiciousApiScan`, `LoginNewLocation`,
 `CredentialStuffing`, `EmailSendError`. Similar existing audit records do not
 count as these emitters.

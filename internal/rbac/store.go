@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	AdminRole       = "rauthy_admin"
+	AdminRole       = "goauthy_admin"
 	maxMemberships  = 64
 	maxMetadataSize = 8192
 )
@@ -150,7 +150,7 @@ func (s *Store) run(ctx context.Context, key *apikey.Principal, group string, ri
 func ValidateRoleName(name string) error  { return validateName(name, false) }
 func ValidateGroupName(name string) error { return validateName(name, true) }
 
-// ValidateGroupPrefix preserves Rauthy's published prefix grammar exactly.
+// ValidateGroupPrefix preserves the published prefix grammar exactly.
 // Unlike group names, whitespace is permitted and the raw value is significant.
 func ValidateGroupPrefix(prefix string) error {
 	if !groupPrefixPattern.MatchString(prefix) {
@@ -476,7 +476,7 @@ func (s *Store) update(ctx context.Context, actor string, key *apikey.Principal,
 	now := s.now().UTC().Truncate(time.Millisecond).UnixMilli()
 	reserved := ""
 	if !group {
-		reserved = ` AND name <> 'rauthy_admin'`
+		reserved = ` AND name <> 'goauthy_admin'`
 	}
 	members, column := "rbac_user_groups", "group_id"
 	if !group {
@@ -536,7 +536,7 @@ func (s *Store) delete(ctx context.Context, actor string, key *apikey.Principal,
 	}
 	reserved := ""
 	if role {
-		reserved = ` AND name <> 'rauthy_admin'`
+		reserved = ` AND name <> 'goauthy_admin'`
 	}
 	guard := fmt.Sprintf(`EXISTS (SELECT 1 FROM %s WHERE id=? AND revision=?%s) AND %s`, table, reserved, adminGuard())
 	now := s.now().UTC().Truncate(time.Millisecond).UnixMilli()
@@ -626,6 +626,8 @@ func (s *Store) EnsureBootstrapPrincipal(ctx context.Context, subject string, ro
 		id := bootstrapID("group", name)
 		stmts = append(stmts, rhiza.SQLStatement{SQL: `INSERT OR IGNORE INTO rbac_groups (id,name,meta_json,revision,created_at_unix_ms,updated_at_unix_ms) SELECT ?, ?, NULL, 1, ?, ? WHERE EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0)`, Args: []any{id, name, now, now, subject}})
 	}
+	one := int64(1)
+	stmts = append(stmts, rhiza.SQLStatement{SQL: `SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM identity_users WHERE subject=? AND disabled=0) OR EXISTS(SELECT 1 FROM rbac_roles WHERE name=?)`, Args: []any{subject, AdminRole}, WantRows: true, ExpectedReturnedRows: &one})
 	stmts = append(stmts, rhiza.SQLStatement{SQL: `INSERT OR IGNORE INTO rbac_principal_versions (subject,revision,updated_at_unix_ms) SELECT ?,1,? WHERE EXISTS (SELECT 1 FROM identity_users WHERE subject=? AND disabled=0)`, Args: []any{subject, now, subject}})
 	roleNames := namesPlaceholders(roles)
 	groupNames := namesPlaceholders(groups)
@@ -648,7 +650,7 @@ func (s *Store) EnsureBootstrapPrincipal(ctx context.Context, subject string, ro
 	return principal, err
 }
 
-// PatchPrincipal applies the role/group portion of Rauthy's user PATCH
+// PatchPrincipal applies the role/group portion of the user PATCH
 // operation. It reads one revision, then uses that revision as a one-shot CAS
 // inside the Rhiza command; a concurrent membership change is a conflict, not
 // an unbounded retry.
@@ -892,8 +894,8 @@ func membershipAuthorizationGuard(actor string, api bool, target string, groups 
 
 func delegatedMembershipGuard(actor, target string, groups []string, replaceRoles, replaceGroups bool) (string, []any) {
 	parts := []string{
-		`EXISTS (SELECT 1 FROM identity_users au JOIN rbac_user_roles am ON am.subject=au.subject JOIN rbac_roles ar ON ar.id=am.role_id WHERE au.subject=? AND au.disabled=0 AND substr(ar.name,1,13)='rauthy_admin:')`,
-		`NOT EXISTS (SELECT 1 FROM rbac_user_roles tm JOIN rbac_roles tr ON tr.id=tm.role_id WHERE tm.subject=? AND (tr.name='rauthy_admin' OR substr(tr.name,1,13)='rauthy_admin:'))`,
+		`EXISTS (SELECT 1 FROM identity_users au JOIN rbac_user_roles am ON am.subject=au.subject JOIN rbac_roles ar ON ar.id=am.role_id WHERE au.subject=? AND au.disabled=0 AND substr(ar.name,1,14)='goauthy_admin:')`,
+		`NOT EXISTS (SELECT 1 FROM rbac_user_roles tm JOIN rbac_roles tr ON tr.id=tm.role_id WHERE tm.subject=? AND (tr.name='goauthy_admin' OR substr(tr.name,1,14)='goauthy_admin:'))`,
 	}
 	args := []any{actor, target}
 	if replaceRoles {
@@ -908,10 +910,10 @@ func delegatedMembershipGuard(actor, target string, groups []string, replaceRole
 			AND NOT EXISTS (
 				SELECT 1 FROM rbac_user_roles am JOIN rbac_roles ar ON ar.id=am.role_id
 				JOIN identity_users au ON au.subject=am.subject
-				WHERE am.subject=? AND au.disabled=0 AND substr(ar.name,1,13)='rauthy_admin:'
-				AND (ar.name='rauthy_admin:*' OR
-					(substr(ar.name,-1)='*' AND substr(dg.name,1,length(ar.name)-14)=substr(ar.name,14,length(ar.name)-14)) OR
-					(substr(ar.name,-1)<>'*' AND substr(ar.name,14)=dg.name))
+				WHERE am.subject=? AND au.disabled=0 AND substr(ar.name,1,14)='goauthy_admin:'
+				AND (ar.name='goauthy_admin:*' OR
+					(substr(ar.name,-1)='*' AND substr(dg.name,1,length(ar.name)-15)=substr(ar.name,15,length(ar.name)-15)) OR
+					(substr(ar.name,-1)<>'*' AND substr(ar.name,15)=dg.name))
 			)
 		)`, placeholders))
 		args = append(args, stringsAny(groups)...)
@@ -987,7 +989,7 @@ func lastAdminGuard(target string, roles []string, replaceRoles bool, now int64)
 	if !replaceRoles || containsName(roles, AdminRole) {
 		return "1=1", nil
 	}
-	return `NOT (EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE r.name='rauthy_admin' AND u.subject=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?)) AND (SELECT COUNT(DISTINCT u.subject) FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name='rauthy_admin')=1)`, []any{target, now, now}
+	return `NOT (EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE r.name='goauthy_admin' AND u.subject=? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?)) AND (SELECT COUNT(DISTINCT u.subject) FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name='goauthy_admin')=1)`, []any{target, now, now}
 }
 
 func (s *Store) ensureMembershipEntities(ctx context.Context, roles, groups []string) error {
@@ -1010,7 +1012,7 @@ func (s *Store) ensureMembershipEntities(ctx context.Context, roles, groups []st
 
 func (s *Store) isLastActiveAdmin(ctx context.Context, target string) bool {
 	now := s.now().UTC().Truncate(time.Millisecond).UnixMilli()
-	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(DISTINCT u.subject) FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name='rauthy_admin' AND EXISTS (SELECT 1 FROM identity_users tu JOIN rbac_user_roles tm ON tm.subject=tu.subject JOIN rbac_roles tr ON tr.id=tm.role_id WHERE tu.subject=? AND tu.disabled=0 AND (tu.user_expires_at_unix_ms IS NULL OR tu.user_expires_at_unix_ms>?) AND tr.name='rauthy_admin')`, Args: []any{now, target, now}, Consistency: rhiza.ConsistencyLinearizable})
+	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(DISTINCT u.subject) FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name='goauthy_admin' AND EXISTS (SELECT 1 FROM identity_users tu JOIN rbac_user_roles tm ON tm.subject=tu.subject JOIN rbac_roles tr ON tr.id=tm.role_id WHERE tu.subject=? AND tu.disabled=0 AND (tu.user_expires_at_unix_ms IS NULL OR tu.user_expires_at_unix_ms>?) AND tr.name='goauthy_admin')`, Args: []any{now, target, now}, Consistency: rhiza.ConsistencyLinearizable})
 	return err == nil && len(result.Rows) == 1 && len(result.Rows[0]) == 1 && result.Rows[0][0] == int64(1)
 }
 
@@ -1263,7 +1265,7 @@ func delegatedAdminGuard() string {
 		SELECT 1 FROM identity_users u
 		JOIN rbac_user_roles m ON m.subject=u.subject
 		JOIN rbac_roles r ON r.id=m.role_id
-		WHERE u.subject=? AND u.disabled=0 AND substr(r.name,1,13)='rauthy_admin:'
+		WHERE u.subject=? AND u.disabled=0 AND substr(r.name,1,14)='goauthy_admin:'
 	)`
 }
 
@@ -1304,7 +1306,7 @@ func delegatedAdminTarget(roles []Entity) bool {
 }
 
 func adminGuard() string {
-	return `EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='rauthy_admin')`
+	return `EXISTS (SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.subject=? AND u.disabled=0 AND r.name='goauthy_admin')`
 }
 func validSubject(v string) bool { return v != "" && len(v) <= 512 }
 func (s *Store) randomID() (string, error) {

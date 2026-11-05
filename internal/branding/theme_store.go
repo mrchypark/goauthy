@@ -42,15 +42,15 @@ func (s *ThemeStore) get(ctx context.Context, clientID string, fallback bool) (T
 	query := `SELECT client_id,version,document_json FROM client_themes WHERE client_id=?`
 	args := []any{clientID}
 	if fallback {
-		query = `SELECT client_id,version,document_json FROM client_themes WHERE client_id IN (?, 'rauthy') ORDER BY CASE WHEN client_id=? THEN 0 ELSE 1 END LIMIT 1`
-		args = append(args, clientID)
+		query = `SELECT client_id,version,document_json FROM client_themes WHERE client_id IN (?, ?) ORDER BY CASE WHEN client_id=? THEN 0 ELSE 1 END LIMIT 1`
+		args = append(args, GlobalBrandID, clientID)
 	}
 	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: query, Args: args, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil {
 		return Theme{}, err
 	}
 	if len(result.Rows) == 0 {
-		return DefaultTheme("rauthy"), nil
+		return DefaultTheme(GlobalBrandID), nil
 	}
 	if len(result.Rows) != 1 || len(result.Rows[0]) != 3 {
 		return Theme{}, errors.New("invalid theme result")

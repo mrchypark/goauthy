@@ -26,14 +26,14 @@ func TestGlobalBrandThemeAuthorizedWithoutOAuthClient(t *testing.T) {
 		}
 		return allowed
 	}, func(context.Context, string) error { return clients.ErrNotFound })
-	theme := DefaultTheme("rauthy")
+	theme := DefaultTheme(GlobalBrandID)
 	theme.BrandName = `GoAuthy ID "<operator>"`
 	body, _ := json.Marshal(theme)
 	for _, tc := range []struct {
 		allowed bool
 		id      string
 		want    int
-	}{{true, "rauthy", 200}, {false, "rauthy", 403}, {true, "missing", 404}} {
+	}{{true, GlobalBrandID, 200}, {false, GlobalBrandID, 403}, {true, "missing", 404}} {
 		allowed = tc.allowed
 		theme.ClientID = tc.id
 		body, _ = json.Marshal(theme)
@@ -44,7 +44,7 @@ func TestGlobalBrandThemeAuthorizedWithoutOAuthClient(t *testing.T) {
 		}
 	}
 	got, err := store.GetFallback(ctx, "app-a")
-	if err != nil || got.ClientID != "rauthy" || got.BrandName != theme.BrandName {
+	if err != nil || got.ClientID != GlobalBrandID || got.BrandName != theme.BrandName {
 		t.Fatalf("global fallback=%+v %v", got, err)
 	}
 	if err := store.PutAuthorized(ctx, DefaultTheme("missing"), keys, nil); !errors.Is(err, clients.ErrNotFound) {
@@ -55,7 +55,7 @@ func TestGlobalBrandThemeAuthorizedWithoutOAuthClient(t *testing.T) {
 			allowed bool
 			id      string
 			want    int
-		}{{false, "rauthy", 403}, {true, "missing", 404}, {true, "rauthy", 200}} {
+			}{{false, GlobalBrandID, 403}, {true, "missing", 404}, {true, GlobalBrandID, 200}} {
 			allowed = tc.allowed
 			w := httptest.NewRecorder()
 			handler.Theme(w, themeRequest(method, "/auth/v1/theme/"+tc.id, nil, tc.id, ""))
@@ -78,7 +78,7 @@ func TestGlobalBrandRuntimeInheritanceAndOverrides(t *testing.T) {
 	store, _ := NewThemeStore(db)
 	logos, _ := NewClientLogoStore(db)
 	keys, _ := apikey.NewStore(db)
-	global := DefaultTheme("rauthy")
+	global := DefaultTheme(GlobalBrandID)
 	global.BrandName = `GoAuthy ID "<operator>"`
 	global.Light.Action = []uint16{150, 50, 40}
 	global.Login = &LoginAppearance{Copy: map[string]LoginCopy{"en": {Title: "One account"}}}
@@ -86,11 +86,11 @@ func TestGlobalBrandRuntimeInheritanceAndOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 	asset := LogoAsset{Resolution: "small", ContentType: "image/webp", Data: []byte("global")}
-	if err := logos.ReplaceAuthorized(ctx, "rauthy", []LogoAsset{asset}, keys, nil); err != nil {
+	if err := logos.ReplaceAuthorized(ctx, GlobalBrandID, []LogoAsset{asset}, keys, nil); err != nil {
 		t.Fatal(err)
 	}
 	second, _ := NewThemeStore(db)
-	for _, id := range []string{"rauthy", "app-a", "app-b"} {
+	for _, id := range []string{GlobalBrandID, "app-a", "app-b"} {
 		brand, err := second.Brand(ctx, logos, id)
 		if err != nil || brand.Name != global.BrandName || brand.LogoURL == "" || brand.ThemeURL == "" {
 			t.Fatalf("brand %s=%+v %v", id, brand, err)
@@ -127,14 +127,14 @@ func TestGlobalBrandRuntimeInheritanceAndOverrides(t *testing.T) {
 	if got.Login.CopyFor("en").Title != "One account" || string(logo.Data) != "global" {
 		t.Fatal("deleting overrides did not restore inheritance")
 	}
-	if err := store.DeleteAuthorized(ctx, "rauthy", keys, nil); err != nil {
+	if err := store.DeleteAuthorized(ctx, GlobalBrandID, keys, nil); err != nil {
 		t.Fatal(err)
 	}
-	brand, _ = second.Brand(ctx, logos, "rauthy")
+	brand, _ = second.Brand(ctx, logos, GlobalBrandID)
 	if brand.Name != "GoAuthy" || brand.LogoURL == "" {
 		t.Fatalf("reset name/logo independence=%+v", brand)
 	}
-	result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT id FROM managed_oauth_clients WHERE id='rauthy' UNION ALL SELECT id FROM managed_oauth_client_bootstrap WHERE id='rauthy' UNION ALL SELECT client_id FROM dynamic_oauth_clients WHERE client_id='rauthy'`})
+	result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT id FROM managed_oauth_clients WHERE id=? UNION ALL SELECT id FROM managed_oauth_client_bootstrap WHERE id=? UNION ALL SELECT client_id FROM dynamic_oauth_clients WHERE client_id=?`, Args: []any{GlobalBrandID, GlobalBrandID, GlobalBrandID}})
 	if err != nil || len(result.Rows) != 0 {
 		t.Fatalf("branding created an OAuth client: %+v %v", result, err)
 	}
@@ -154,33 +154,33 @@ func TestGlobalBrandRevokedAPIKeyCannotMutate(t *testing.T) {
 		t.Fatal(err)
 	}
 	principal := &principalValue
-	theme := DefaultTheme("rauthy")
+	theme := DefaultTheme(GlobalBrandID)
 	theme.BrandName = "Original"
 	asset := LogoAsset{Resolution: "small", ContentType: "image/webp", Data: []byte("original")}
 	if err := store.PutAuthorized(ctx, theme, keys, principal); err != nil {
 		t.Fatal(err)
 	}
-	if err := logos.ReplaceAuthorized(ctx, "rauthy", []LogoAsset{asset}, keys, principal); err != nil {
+	if err := logos.ReplaceAuthorized(ctx, GlobalBrandID, []LogoAsset{asset}, keys, principal); err != nil {
 		t.Fatal(err)
 	}
 	if err := keys.Delete(ctx, nil, principal.Name); err != nil {
 		t.Fatal(err)
 	}
 	theme.BrandName = "Denied"
-	for _, err := range []error{store.PutAuthorized(ctx, theme, keys, principal), store.DeleteAuthorized(ctx, "rauthy", keys, principal), logos.ReplaceAuthorized(ctx, "rauthy", []LogoAsset{asset}, keys, principal), logos.DeleteAuthorized(ctx, "rauthy", keys, principal)} {
+	for _, err := range []error{store.PutAuthorized(ctx, theme, keys, principal), store.DeleteAuthorized(ctx, GlobalBrandID, keys, principal), logos.ReplaceAuthorized(ctx, GlobalBrandID, []LogoAsset{asset}, keys, principal), logos.DeleteAuthorized(ctx, GlobalBrandID, keys, principal)} {
 		if !errors.Is(err, apikey.ErrForbidden) {
 			t.Fatalf("revoked global mutation=%v", err)
 		}
 	}
-	got, _ := store.GetDefault(ctx, "rauthy")
-	logo, _ := logos.GetFallback(ctx, "rauthy")
+	got, _ := store.GetDefault(ctx, GlobalBrandID)
+	logo, _ := logos.GetFallback(ctx, GlobalBrandID)
 	if got.BrandName != "Original" || string(logo.Data) != "original" {
 		t.Fatal("revoked global mutation changed durable brand")
 	}
 }
 
 func TestGlobalBrandNameValidation(t *testing.T) {
-	theme := DefaultTheme("rauthy")
+	theme := DefaultTheme(GlobalBrandID)
 	for _, name := range []string{"", `GoAuthy ID "<operator>"`, "공통 계정"} {
 		theme.BrandName = name
 		if err := theme.Validate(); err != nil {
@@ -200,7 +200,7 @@ func TestGlobalBrandLogoMutationWithoutOAuthClient(t *testing.T) {
 	store, _ := NewClientLogoStore(db)
 	keys, _ := apikey.NewStore(db)
 	asset := LogoAsset{Resolution: "svg", ContentType: "image/svg+xml", Data: []byte(`<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h10v10H0z"/></svg>`)}
-	if err := store.ReplaceAuthorized(ctx, "rauthy", []LogoAsset{asset}, keys, nil); err != nil {
+	if err := store.ReplaceAuthorized(ctx, GlobalBrandID, []LogoAsset{asset}, keys, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.ReplaceAuthorized(ctx, "missing", []LogoAsset{asset}, keys, nil); !errors.Is(err, clients.ErrNotFound) {
@@ -210,10 +210,20 @@ func TestGlobalBrandLogoMutationWithoutOAuthClient(t *testing.T) {
 	if err != nil || !bytes.Equal(logo.Data, asset.Data) {
 		t.Fatalf("global logo=%+v %v", logo, err)
 	}
-	if err := store.DeleteAuthorized(ctx, "rauthy", keys, nil); err != nil {
+	if err := store.DeleteAuthorized(ctx, GlobalBrandID, keys, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.GetFallback(ctx, "app-b"); !errors.Is(err, ErrLogoNotFound) {
 		t.Fatalf("global reset=%v", err)
+	}
+}
+
+func TestLegacyBrandIDIsNotReserved(t *testing.T) {
+	if GlobalBrandID != "goauthy" {
+		t.Fatalf("canonical global brand=%q", GlobalBrandID)
+	}
+	condition, args := logoClientExists("rauthy")
+	if condition == "1" || len(args) != 3 || args[0] != "rauthy" {
+		t.Fatalf("legacy branding ID is reserved: condition=%q args=%v", condition, args)
 	}
 }

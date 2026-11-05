@@ -18,7 +18,7 @@ import (
 type LoginLocationMessage struct {
 	To, Language, IP, UserAgent, RevokeURL, AccountURL string
 	// SubjectPrefix is supplied by the parent configuration/wiring for the
-	// Rauthy-compatible subject.
+	// Configured mail subject prefix.
 	SubjectPrefix string
 	Theme         *branding.Theme
 	Location      *string
@@ -61,7 +61,7 @@ body {
 <a href="{{.AccountURL}}" data-faded="true">{{.AccountLink}}</a>
 </body></html>`))
 
-// SendLoginLocation sends the fixed Rauthy v0.36.2 login-location warning.
+// SendLoginLocation sends the fixed login-location warning.
 func (s *SMTPSender) SendLoginLocation(ctx context.Context, message LoginLocationMessage) error {
 	if s == nil || s.send == nil {
 		return errors.New("SMTP sender unavailable")

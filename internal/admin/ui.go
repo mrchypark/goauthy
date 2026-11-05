@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	ui "github.com/mrchypark/elysdui/ui/gohtmx"
 	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/i18n"
+	"github.com/mrchypark/goauthy/internal/ui"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -19,21 +19,7 @@ import (
 //go:embed admin.html admin.css locale.js module_locale.js elysdui.js admin.js dashboard.js catalog.js sessions.js collections.js clients.js themes.js providers.js blacklist.js events.js templates.js
 var uiFS embed.FS
 
-var adminTemplate = func() *template.Template {
-	t, err := ui.NewTemplates()
-	if err != nil {
-		panic(err)
-	}
-	return template.Must(t.ParseFS(uiFS, "admin.html"))
-}()
-
-var elysAssets = func() *http.ServeMux {
-	mux := http.NewServeMux()
-	if err := ui.BindAssets(mux); err != nil {
-		panic(err)
-	}
-	return mux
-}()
+var adminTemplate = template.Must(template.Must(ui.NewTemplates("admin.html")).ParseFS(uiFS, "admin.html"))
 
 type CSRFTokenProvider func(http.ResponseWriter, *http.Request) bool
 
@@ -156,15 +142,6 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(data)
 		return
 	}
-	if r.URL.Path == "/auth/v1/admin/elysdui.css" || r.URL.Path == "/auth/v1/admin/elysdui-patterns.css" {
-		assetRequest := r.Clone(r.Context())
-		assetRequest.URL.Path = "/assets/app.css"
-		if strings.HasSuffix(r.URL.Path, "elysdui-patterns.css") {
-			assetRequest.URL.Path = "/assets/ely-patterns.css"
-		}
-		elysAssets.ServeHTTP(w, assetRequest)
-		return
-	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	brand := branding.Brand{Name: "GoAuthy"}
 	if u.brand != nil {
@@ -180,7 +157,7 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Vary", "Accept-Language")
 	w.Header().Add("Vary", "Cookie")
 	var data bytes.Buffer
-	if err := adminTemplate.ExecuteTemplate(&data, "admin.html", struct {
+	if err := adminTemplate.Execute(&data, struct {
 		Language, BasePath string
 		Brand              branding.Brand
 	}{language, u.basePath, brand}); err != nil {
@@ -239,8 +216,14 @@ func (u *UI) handleEmailTemplatePreview(w http.ResponseWriter, r *http.Request) 
 	case "email_change_confirm":
 		info.Text = strings.ReplaceAll(info.Text, "{{.NewEmail}}", sampleNewEmail)
 	}
+	var head bytes.Buffer
+	if err := adminTemplate.ExecuteTemplate(&head, "goauthy-head", u.basePath); err != nil {
+		http.Error(w, "Preview unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	_, _ = fmt.Fprintf(w, `<!doctype html>
 <html><head><meta charset="utf-8"><title>Email Preview</title>
+%s
 <link rel="stylesheet" href="../admin.css"><link rel="stylesheet" href="../../branding/brand.css">
 </head><body class="email-preview">
 <h1>%s</h1>
@@ -251,6 +234,7 @@ func (u *UI) handleEmailTemplatePreview(w http.ResponseWriter, r *http.Request) 
 %s
 <footer><p>%s</p></footer>
 </body></html>`,
+		head.String(),
 		template.HTMLEscapeString(info.Header),
 		template.HTMLEscapeString(info.Text),
 		func() string {

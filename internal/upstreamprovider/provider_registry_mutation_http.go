@@ -11,18 +11,15 @@ import (
 )
 
 // reservedProviderIssuers contains issuer strings that must never be
-// created through the public API. Matches the pinned rauthy v0.36.2
-// PROVIDER_ATPROTO constant.
+// created through the public API.
 var reservedProviderIssuers = map[string]bool{
 	"atproto": true,
 }
 
-// alphanumericAlphabet is the 62-character set matching the pinned
-// rauthy v0.36.2 rand::distr::Alphanumeric used by get_rand/new_store_id.
+// alphanumericAlphabet is the 62-character set used for provider IDs.
 const alphanumericAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 
-// GenerateProviderID returns a 24-character random alphanumeric ASCII
-// string matching the pinned rauthy v0.36.2 new_store_id() output.
+// GenerateProviderID returns a 24-character random alphanumeric ASCII ID.
 func GenerateProviderID() (string, error) {
 	// 24 characters; each byte selects one of 62 alphanumeric chars.
 	// We discard bytes >= 248 (62*4) to avoid modulo bias.
@@ -73,10 +70,8 @@ func decodeProviderBody(w http.ResponseWriter, r *http.Request) (ProviderRequest
 // CreateProvider handles POST /auth/v1/providers/create. It validates
 // the request body, enforces reserved-issuer and PKCE-or-secret rules,
 // generates a random provider ID, and persists the new provider.
-//
-// Pinned rauthy v0.36.2 POST /providers/create does NOT enforce
-// client_secret_basic | client_secret_post; that restriction is
-// PUT-only.
+// The create route does not enforce client_secret_basic or
+// client_secret_post; that restriction applies only to updates.
 func (h *RegistryHandler) CreateProvider(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
@@ -189,7 +184,7 @@ func (h *RegistryHandler) UpdateProvider(w http.ResponseWriter, r *http.Request)
 }
 
 // DeleteProvider handles DELETE /auth/v1/providers/{id}. Missing providers
-// succeed silently, matching the pinned rauthy v0.36.2 behavior.
+// succeed silently.
 func (h *RegistryHandler) DeleteProvider(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		w.Header().Set("Allow", http.MethodDelete)

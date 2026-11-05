@@ -261,7 +261,7 @@ func customClaimsIssue(t *testing.T, client *http.Client, issuerBase, authorizeB
 func customClaimsAssertSignedAccessToken(t *testing.T, token string, keys jose.JSONWebKeySet, issuer, clientID, scope, want string) {
 	t.Helper()
 	claims := verifyPublicAccessToken(t, token, keys, issuer, clientID, scope, "")
-	if claims.Subject == "" || !containsString(claims.Roles, "rauthy_admin") || claims.CustomClaims.AtRoot || len(claims.CustomClaims.Nested) != 0 || len(claims.CustomClaims.Root) != 0 || !reflect.DeepEqual(claims.CustomClaims.Values[customClaimsAttribute], json.RawMessage(`"`+want+`"`)) {
+	if claims.Subject == "" || !containsString(claims.Roles, "goauthy_admin") || claims.CustomClaims.AtRoot || len(claims.CustomClaims.Nested) != 0 || len(claims.CustomClaims.Root) != 0 || !reflect.DeepEqual(claims.CustomClaims.Values[customClaimsAttribute], json.RawMessage(`"`+want+`"`)) {
 		t.Fatalf("signed custom access claims=%#v want=%q", claims, want)
 	}
 

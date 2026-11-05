@@ -13,16 +13,25 @@ logo, and colors. App login uses its saved theme or inherits the entire common
 theme when absent; its own logo wins independently over the common logo.
 Removing an app override restores inheritance.
 
-The existing theme and logo stores persist common settings under the reserved
-`rauthy` branding ID. This does not create an OAuth client or change OAuth client
-lookup, registration, or authorization. Existing administrator/CSRF guards and
-Clients-scoped API-key rights also protect common settings, including atomic
-checks for revoked keys. SVG upload sanitization and page CSP remain in effect.
+The theme and logo stores persist common settings under the canonical `goauthy`
+branding ID. It is not an OAuth client, but anonymous DCR reserves it alongside
+the configured bootstrap client ID so dynamic registration cannot claim it.
+Other client lookup and authority rules remain unchanged. Existing
+administrator/CSRF guards and Clients-scoped API-key rights also protect common
+settings, including atomic checks for revoked keys. SVG upload sanitization and
+page CSP remain in effect.
+
+**Upgrade risk:** Installations that stored common branding under the previous
+`rauthy` ID will not automatically inherit those theme and logo settings under
+`goauthy`. The old records are not deleted, and `rauthy` can also identify a real
+client, so copying or renaming them blindly could overwrite or misattribute data.
+Back up and inspect both IDs and any matching OAuth clients before an operator
+recreates or deliberately migrates the intended common settings.
 
 **Reset common theme to defaults** deletes the common theme document, restoring
 the built-in `GoAuthy` name, colors, and login text. Logo changes save separately;
-**Remove common logo** removes only the common logo. Existing installations
-retain the `GoAuthy` fallback until an operator saves a name.
+**Remove common logo** removes only the common logo. Fresh installations retain
+the `GoAuthy` fallback until an administrator saves a name.
 
 The admin JavaScript and page templates are embedded in the Go executable.
 Rebuild and restart `cmd/goauthy` to expose the editor; saved settings themselves

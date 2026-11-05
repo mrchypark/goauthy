@@ -1,4 +1,4 @@
-// Package claims stores Rauthy-compatible custom attribute and scope policy.
+// Package claims stores custom attribute and scope policy.
 package claims
 
 import (

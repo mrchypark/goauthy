@@ -8,15 +8,35 @@ remains in [docs/status.md](docs/status.md), while Rauthy parity is tracked sepa
 
 [프로젝트 목표·진행 현황·남은 작업](docs/status.md)
 
+[Independent verification runbook](docs/independent-verification.md)
+
+[서비스 개발자 로그인 연동 규칙](docs/idp-consumer-contract.md#서비스-개발자-로그인-연동-규칙)
+
 GoAuthy uses Rauthy `v0.36.2` as a fixed behavior baseline while also providing
 GoAuthy-specific external-connection and credential-delegation capabilities. Rauthy parity
 is a compatibility ledger rather than the sole product roadmap. Earlier documentation
 cited the official Rhiza `v0.19.0` release (commit
 [`abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8`](https://github.com/mrchypark/rhiza/commit/abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8)).
-The current Go build pins Rhiza `v0.19.1-0.20261008214459-3895b723e194` in `go.mod`,
-resolving to upstream commit [`3895b723e194`](https://github.com/mrchypark/rhiza/commit/3895b723e194).
-PR #146 inherits this pin unchanged from its base and corrects the stale release citation;
-it does not change the Rhiza dependency. Rhiza
+The current Rhiza integration candidate is official `v0.21.2`,
+resolving to upstream commit [`8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd`](https://github.com/mrchypark/rhiza/commit/8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd).
+It reconciles a lost Local maintenance-release acknowledgement only when stable
+remote readback proves the exact expected free control at a changed object version.
+It does not clear orphaned held tokens or change the public API or archive format.
+Fresh focused GoAuthy filesystem loss/recovery and binding checks passed normally
+and with the race detector. The archive-adoption/ACK-tail recovery SDK contract
+also passed on pinned S3, GCS, and Azure emulators with no skips. This does not
+qualify the init/main application journey on each provider. The new image, live
+Kubernetes, and production-cloud behavior remain unqualified. GoAuthy pins its
+Fosite fork at `github.com/mrchypark/fosite v0.49.0-goauthy.1` for the security
+correction and minimum compatibility changes only; it is not a feature fork.
+The policy is to return to upstream only after the fix is published upstream
+and qualified for GoAuthy. This pin does not establish a passing latest security
+scan; see the [dependency and release qualification limits](docs/no-pvc-dr.md#current-v0212-qualification-and-release-gates).
+This release requires Go 1.27.3; the root Docker build uses the same minimum.
+Rhiza v0.21 removes the archive-statistics API. GoAuthy's protected
+`/metrics/archive/v1` compatibility response keeps schema version 1 and its fixed
+stage names, with `available: false` and `null` count/duration values. Those nulls
+mean unavailable, not zero. Rhiza
 `v0.9.0` is retracted because its published proxy-cached commit was wrong.
 v0.10.0 remains the historical baseline for earlier recorded runs.
 Rhiza v0.10.0 introduced bounded graph reachability APIs; GoAuthy does not need or
@@ -93,7 +113,7 @@ DNS, TLS and dropped-connection failures plus `429`/`5xx` retry; malformed or
 permanent `4xx` responses are dead-lettered. `identity.DeleteUser`
 atomically snapshots a tombstone, cleans owned identity state, invalidates stale
 user-sync outbox rows, and durably enqueues SCIM delete work. Admin deletion is
-`DELETE /auth/v1/users/{subject}` for a direct `rauthy_admin` browser session
+`DELETE /auth/v1/users/{subject}` for a direct `goauthy_admin` browser session
 with same-origin `X-CSRF-Token`, or a `Users:delete` API key; an empty body and
 `204` success are required, with `404` for missing/inactive subjects and `409`
 for the final active admin. Self deletion is `GET`/`DELETE
@@ -203,13 +223,19 @@ issuer-path/browser parity remains pending.
 
 ## Rhiza production profiles
 
-GoAuthy has two explicit Rhiza `v0.12.3` runtime modes. `standalone` is the
+The current integration candidate uses Rhiza `v0.21.2` for both runtime modes.
+`standalone` is the
 production single-node topology: one embedded member and no peer inputs.
 The default Kubernetes profile uses `emptyDir`, an object-store bucket/prefix,
 fixed `before-ack` durability and `GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE=true`.
-Its local state is rebuildable. The runtime still permits explicitly configured
-local-only standalone fixtures; their cold-copy tests are not object-store DR. The legacy `dev` profile remains local-only. Both
-single-node profiles reject peer, voter-token and admin-token settings.
+Its local state is rebuildable. The existing `standalone` and default
+Kubernetes profiles use Rhiza `Local: false`; the standalone cold-copy tests
+cover only that profile's local-directory copy behavior and do not qualify
+object-store DR. The opt-in `standalone-local` profile uses Rhiza `Local: true`
+with required S3 or GCS object storage; see the
+[standalone-local recovery contract](docs/no-pvc-dr.md#opt-in-standalone-local-profile).
+The legacy `dev` profile remains local-only. Both single-node profiles reject
+peer, voter-token and admin-token settings.
 The isolated [Ternal no-PVC profile](deploy/ternal-no-pvc/README.md) does not
 change existing deployments. `make e2e-standalone` passed runtime
 smoke plus restart verification, including persistence of the JWKS key ID, and
@@ -232,10 +258,10 @@ also passes normal/cross-pod flows, pod replacement, quorum-loss readiness 503,
 quorum restoration and rolling restart; see [dated verification](docs/status.md).
 Standalone and exact-three HA have identical application semantics; HA pods
 must use matching SCIM provider configuration, including stable IDs and policies.
-With the current Rhiza v0.12.3 integration, startup failure paths still
-intentionally skip `db.Close()` until all startup initialization succeeds; the
-startup-close workaround remains pending verification against the upgraded runtime;
-normal post-start shutdown still closes the database as usual.
+The startup path still skips `db.Close()` until initialization succeeds. This
+guard was added for a checkpoint-corruption hazard confirmed on Rhiza v0.10.0;
+its behavior on v0.21.2 remains unverified. The maintenance-release fix does not
+qualify this startup guard. Normal post-start shutdown closes the database as usual.
 
 Bootstrap authentication is password-only for the initial administrator by
 default; passkeys are optional. `GOAUTHY_BOOTSTRAP_FORCE_MFA=true` is an
@@ -528,8 +554,14 @@ tokens and `attr_include_access` on UserInfo/introspection as the honest
 opaque-token surrogate. Code/refresh persistence repeats the active identity,
 principal revision and claims-catalog revision predicates, preventing stale
 membership or custom-claim snapshots from minting artifacts. Admin reads and
-writes require current browser `rauthy_admin`; bootstrap client scope policy is
+writes require current browser `goauthy_admin`; bootstrap client scope policy is
 an explicit partial route at `GET`/`PUT /auth/v1/clients/{id}/scopes`.
+
+GoAuthy's reserved system role is `goauthy_admin`; delegated user administration
+uses `goauthy_admin:<group>` with the existing exact or trailing-`*` matching.
+Only the configured bootstrap administrator receives the system role automatically.
+Ordinary users receive it only through an explicit administrator assignment.
+
 `claims_at_root` is supported and fails closed on reserved-name collisions.
 Deterministic focused tests cover strict JSON, migration replay, rename/delete
 cascade and revision-race denial without sleep-based assertions. On 2026-09-01,
@@ -574,7 +606,7 @@ its revision-guarded nested/root values only in `client_credentials` access
 JWTs; dynamic clients, UserInfo and introspection remain excluded. Its fresh
 dedicated three-pod E2E passes cross-pod nested/root/clear policy, public-JWKS
 verification and reserved-root collision denial. The existing membership
-PATCH now includes source-tested delegated `rauthy_admin:<group>` exact,
+PATCH now includes source-tested delegated `goauthy_admin:<group>` exact,
 trailing-prefix and all-groups policy with atomic escalation guards; dedicated
 Kind evidence and full static-client/user management remain pending.
 

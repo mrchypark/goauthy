@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
@@ -32,14 +33,22 @@ func TestNeedsProfileUpdateDisabledReturnsFalse(t *testing.T) {
 	}
 }
 
-func TestNeedsProfileUpdateRauthyClientExempt(t *testing.T) {
+func TestNeedsProfileUpdateCanonicalClientExemptOnly(t *testing.T) {
 	t.Parallel()
 	s := testStore(t)
 	ctx := context.Background()
+	bootstrapPassword(t, s, "exempt-sub", "exempt-user", []byte("Password1"))
+	seedProfile(t, s, "exempt-sub", "exempt@example.test", "exemptuser", nil, "Family", `{}`)
 	policy := UserValuesPolicy{RevalidateDuringLogin: true, GivenName: "required"}
-	needs, err := s.NeedsProfileUpdate(ctx, policy, "any", "rauthy")
+	needs, err := s.NeedsProfileUpdate(ctx, policy, "exempt-sub", branding.GlobalBrandID)
 	if err != nil || needs {
-		t.Fatalf("rauthy exempt: needs=%v err=%v", needs, err)
+		t.Fatalf("canonical exempt: needs=%v err=%v", needs, err)
+	}
+	for _, clientID := range []string{"other-client", "rauthy"} {
+		needs, err = s.NeedsProfileUpdate(ctx, policy, "exempt-sub", clientID)
+		if err != nil || !needs {
+			t.Fatalf("%s must be revalidated: needs=%v err=%v", clientID, needs, err)
+		}
 	}
 }
 
@@ -117,7 +126,8 @@ func TestNeedsProfileUpdateInvalidPreferredUsername(t *testing.T) {
 	seedProfile(t, s, "pu-sub", "pu@example.test", "Admin", "Given", "Family", `{}`)
 	policy := UserValuesPolicy{GivenName: "required", RevalidateDuringLogin: true}
 	if policy.PreferredUsername == nil {
-		policy.PreferredUsername, _ = NewPreferredUsernamePolicy("required", "", nil)
+		policy.PreferredUsername, _ = NewPreferredUsernamePolicy("required", "", []string{"admin"})
+		policy.PreferredUsername = policy.PreferredUsername.WithImmutable(false)
 	}
 	needs, err := s.NeedsProfileUpdate(ctx, policy, "pu-sub", "other-client")
 	if err != nil {

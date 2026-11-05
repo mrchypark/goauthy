@@ -169,7 +169,7 @@ func (s *Store) CreateFederatedIdentity(ctx context.Context, input FederatedCrea
 
 	if input.AdminMapping != nil && *input.AdminMapping {
 		statements = append(statements, rhiza.SQLStatement{
-			SQL:                 `INSERT OR IGNORE INTO rbac_user_roles(subject, role_id, granted_at_unix_ms) SELECT ?, id, ? FROM rbac_roles WHERE name = 'rauthy_admin'`,
+			SQL:                 `INSERT OR IGNORE INTO rbac_user_roles(subject, role_id, granted_at_unix_ms) SELECT ?, id, ? FROM rbac_roles WHERE name = 'goauthy_admin'`,
 			Args:                []any{subject, now.UnixMilli()},
 			ExpectedRowsAffected: &one,
 		})
@@ -185,7 +185,7 @@ func (s *Store) CreateFederatedIdentity(ctx context.Context, input FederatedCrea
 		return FederatedCreationResult{}, err
 	}
 	statements = append(statements, userEvent)
-	adminEvent, err := eventlog.Creation(requestID, email, input.SourceIP, true, now).Statement(condition+` AND EXISTS (SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id = m.role_id WHERE m.subject = ? AND r.name = 'rauthy_admin')`, conditionArgs(subject)...)
+	adminEvent, err := eventlog.Creation(requestID, email, input.SourceIP, true, now).Statement(condition+` AND EXISTS (SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id = m.role_id WHERE m.subject = ? AND r.name = 'goauthy_admin')`, conditionArgs(subject)...)
 	if err != nil {
 		return FederatedCreationResult{}, err
 	}

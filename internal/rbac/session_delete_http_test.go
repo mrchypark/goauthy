@@ -136,7 +136,7 @@ func TestDeleteSessionByIDHTTPSelfReaderDelegatedAndRandomFailure(t *testing.T) 
 		t.Fatalf("reader status=%d body=%s", w.Code, w.Body)
 	}
 	count(t, store.db, `SELECT COUNT(*) FROM browser_sessions WHERE token_digest=?`, sid, 1)
-	role, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/*", nil)
+	role, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/*", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

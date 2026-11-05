@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"unicode"
+
+	"github.com/mrchypark/goauthy/internal/ui"
 )
 
 // BrowserAdministrator is the existing same-origin, peer-bound browser-admin
@@ -27,7 +29,7 @@ type Route struct {
 //go:embed index.html
 var indexFS embed.FS
 
-var indexTemplate = template.Must(template.ParseFS(indexFS, "index.html"))
+var indexTemplate = template.Must(template.Must(ui.NewTemplates("index.html")).ParseFS(indexFS, "index.html"))
 
 // Handler serves the browser-admin index. It does not access storage or
 // expose an API-key authorization path.

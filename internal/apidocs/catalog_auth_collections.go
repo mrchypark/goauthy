@@ -46,7 +46,7 @@ func addAuthCollectionOperations(doc *openapi3.T) error {
 	add := func(method, path, id, summary string, body, response *openapi3.Schema, security *openapi3.SecurityRequirements, cas, etag bool, code int) {
 		op := &openapi3.Operation{OperationID: id, Summary: summary, Tags: []string{"Authentication collections"}, Security: security, Responses: openapi3.NewResponses()}
 		if path == "/auth/v1/auth-collections" || path == "/auth/v1/auth-collections/{collection_id}" {
-			op.Description = "Requires an authenticated browser session with the rauthy_admin role. API keys and caller-supplied owners are not accepted."
+			op.Description = "Requires an authenticated browser session with the goauthy_admin role. API keys and caller-supplied owners are not accepted."
 		}
 		if path == "/auth/v1/auth-collections/{collection_id}" || path == "/auth/v1/account/connections/{collection_id}" {
 			op.AddParameter(openapi3.NewPathParameter("collection_id").WithSchema(str))

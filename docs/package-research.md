@@ -4,6 +4,12 @@
 
 Existing Fosite v0.49.0 supplies client authentication and the resource-owner grant protocol. `internal/oauth/password_grant.go` adapts it to pinned Rauthy default scopes, password-origin ID tokens, conditional refresh, recovery errors and guarded persistence; `internal/identity` owns credential verification, generation snapshots, login timestamps and schema86 failure counters. Managed/DCR registration remains in `internal/clients` and `internal/dcr`; signing uses existing `internal/oidc` and go-jose. No new dependency was added.
 
+## Fosite JOSE v4 maintenance fork (2026-11-01)
+
+GoAuthy keeps the canonical `github.com/ory/fosite` import path and replaces the upstream v0.49.0 module with the versioned [GoAuthy fork release](https://github.com/mrchypark/fosite/releases/tag/v0.49.0-goauthy.1). The fork is pinned to tag `v0.49.0-goauthy.1` at commit `06741a29e6f11260e9d6fe45222eedc00cb38959`, based on upstream Ory Fosite v0.49.0 commit `653c812`. It migrates the source from go-jose v3 to v4.1.6, updates JWT serialization and parse algorithm allowlists, handles JOSE v4 key types, and adds JOSE security regressions. This is a GoAuthy fork release, not an official Ory release.
+
+Return to upstream Ory Fosite when it publishes a maintained release with equivalent JOSE v4 support and security behavior, then verify GoAuthy's focused normal and race tests against that release. Until that condition is met, retain the exact versioned replacement and its checksums; do not restore a repository-local source copy.
+
 `internal/recovery` reuses its reset issuance, cookie/CSRF consumption and go-mail SMTP sender. `TestExpiredPasswordGrantDeliversResetSMTP` now joins the OAuth HTTP endpoint, real recovery service, loopback SMTP, delivered link consumption and signed ID-token checks. This is a local integration qualification, not production email or distributed DR. Fosite wraps non-NotFound credential errors; the scoped handler preserves the explicitly signaled reset-required denial without changing unrelated credential checks.
 
 Remaining application work includes unconditional sessionless login state, managed per-client logout metadata and endpoint isolation, location notifications, and full pinned failure/error parity. Existing logout tables and consumers must be integrated rather than treating a configured global callback URI as a substitute for a client's own endpoint. Runtime and DR evidence remains in `status.md` and `no-pvc-dr.md`.
@@ -1026,14 +1032,14 @@ automatic deletion is implied by these guards.
 `Casbin` and `Oso` were considered and not selected. Both are general policy
 engines; neither supplies Rauthy's `PatchOp` wire contract, durable normalized
 membership model, browser-session/CSRF authorization boundary, or a single
-Rhiza transaction which prevents removing the final active `rauthy_admin`.
+Rhiza transaction which prevents removing the final active `goauthy_admin`.
 Adding either would duplicate the small direct policy and make replicated
 revision/CAS behavior less auditable. Re-evaluate only if a future feature
 needs configurable multi-resource policy beyond this fixed user-membership
 contract.
 
 The in-flight slice follows fixed Rauthy v0.36.2 role/group CRUD routes and
-uses `rauthy_admin` only as the initial bootstrap administrator. Roles are
+uses `goauthy_admin` only as the initial bootstrap administrator. Roles are
 canonical, bounded arrays in every end-user ID token, UserInfo and
 introspection response. Groups are released only for a granted `groups` scope;
 client-credentials, device authorization and token exchange reject that scope.
@@ -1072,9 +1078,9 @@ GoAuthy now wires the roles/groups-only subset at
 yet emulate the full upstream `UserResponse` or expose Rauthy's full-user
 `PUT`. The GoAuthy security deviation is explicit:
 unknown role/group names will fail closed instead of being silently dropped,
-and a mutation must reject removal of the final active `rauthy_admin` in the
+and a mutation must reject removal of the final active `goauthy_admin` in the
 same Rhiza request. That protects availability of the management boundary but
-is not wire-identical upstream behavior. Delegated `rauthy_admin:<prefix>`
+is not wire-identical upstream behavior. Delegated `goauthy_admin:<prefix>`
 group administration and API-key `Users:Update` remain unimplemented.
 
 Deterministic fixed-clock/random tests cover request shape, replacement/clear,
@@ -1105,7 +1111,7 @@ below remain unimplemented.
 
 | Need | Selected implementation | Why |
 |---|---|---|
-| Scope/attribute admin HTTP boundary | stdlib `net/http`, `encoding/json`, `regexp`; existing browser session, CSRF and Fetch-Metadata policy | The wire contract is small and security-sensitive. No web/admin package owns GoAuthy's issuer-bound browser session, exact `rauthy_admin` authorization rule, strict JSON rejection, or the bootstrap-client-only partial route surface. |
+| Scope/attribute admin HTTP boundary | stdlib `net/http`, `encoding/json`, `regexp`; existing browser session, CSRF and Fetch-Metadata policy | The wire contract is small and security-sensitive. No web/admin package owns GoAuthy's issuer-bound browser session, exact `goauthy_admin` authorization rule, strict JSON rejection, or the bootstrap-client-only partial route surface. |
 | Catalog, per-user values, and bootstrap scope policy storage | official Rhiza `v0.10.0` (commit `2e645f913ba58574c001900eecab43b06aa4a590`) schema v26 relational SQL | Rhiza owns replicated storage and atomic writes. No maintained Go package owns Rauthy's custom-scope mapping contract plus canonical JSON defaults/values, rename-delete cascades into scope mappings and bootstrap client policies, current-admin checks, and cross-pod catalog revision semantics. |
 | OAuth/OIDC custom-claim carriage | existing `ory/fosite v0.49.0` session `Extra` + `go-jose/v4`; stdlib JSON normalization | Fosite carries restored session values and `go-jose/v4` signs ID tokens, but neither package decides which custom attributes appear on which surface, how root collisions fail closed, or how catalog/principal races prevent stale artifacts. That product policy must stay in direct code. |
 
@@ -1195,7 +1201,7 @@ The API-key HTTP surface is intentionally restricted to
 bound into the explicit roles/groups/claims administration handlers. A supplied
 API-Key header cannot fall back to ambient browser authority, and no OAuth,
 DCR, account, login or browser-session route accepts it. Browser use repeats
-the existing same-site, authenticated-current-subject, current-`rauthy_admin`,
+the existing same-site, authenticated-current-subject, current-`goauthy_admin`,
 and mutation CSRF checks.
 
 Rauthy encrypts its stored API-key digest. GoAuthy schema v28 stores only a
@@ -1408,7 +1414,7 @@ The Rauthy-compatible administrator credential reset is now a separate direct
 policy on top of `go-webauthn`: active browser administrators may list and
 delete another subject's named credential, while `Users:read` API keys are
 read-only. The destructive DELETE repeats the actor's active identity and
-current `rauthy_admin` membership inside the same Rhiza credential-version CAS.
+current `goauthy_admin` membership inside the same Rhiza credential-version CAS.
 An administrator deleting their own key must use the normal one-use
 `mfa_mod_token` self flow. This safety narrowing prevents stale-role and
 self-bypass races while preserving the upstream ability to reset another

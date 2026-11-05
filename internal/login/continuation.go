@@ -5,11 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/mrchypark/goauthy/internal/browser"
-	"github.com/mrchypark/goauthy/internal/device"
 	"io"
 	"net/http"
 
+	"github.com/mrchypark/goauthy/internal/branding"
+	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/device"
 	"github.com/mrchypark/goauthy/internal/oauth"
 )
 
@@ -137,7 +138,7 @@ func (h *Handler) startApprovalReauthentication(w http.ResponseWriter, r *http.R
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
 	}
-	theme, err := h.resolveThemeURL(r.Context(), "rauthy")
+	theme, err := h.resolveThemeURL(r.Context(), branding.GlobalBrandID)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return

@@ -7,6 +7,21 @@
   const messages = {
      'Enter a device code': '기기 코드 입력', 'Language': '언어', 'Change language': '언어 변경', 'Keep editing': '계속 편집',
     'Sign in': '로그인', 'Username': '사용자 이름', 'Password': '비밀번호',
+    'Signing in…': '로그인 중…',
+    'Login failed': '로그인하지 못했습니다',
+    'Too many attempts': '시도 횟수가 많습니다.',
+    'Sign-in temporarily unavailable': '로그인 서비스를 일시적으로 사용할 수 없습니다.',
+    'Please wait before trying again.': '잠시 후 다시 시도하세요.',
+    'Please try again shortly.': '잠시 후 다시 시도하세요.',
+    'Your account could not be loaded.': '계정을 불러올 수 없습니다.',
+    'Please check this message.': '메시지를 확인해 주세요.',
+    'Passkey sign-in failed': '패스키 로그인에 실패했습니다.',
+    'Please try your passkey again.': '패스키로 다시 시도하세요.',
+    'Check the code and try again.': '인증 코드를 확인하고 다시 시도하세요.',
+    'Check your username or password': '사용자 이름 또는 비밀번호를 확인하세요.',
+    'Too many attempts. Please wait before trying again.': '시도 횟수가 많습니다. 잠시 후 다시 시도하세요.',
+    'Sign-in is temporarily unavailable. Please try again shortly.': '로그인 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.',
+    'Password change outcome is unknown. Check the current state before retrying.': '비밀번호 변경 결과를 확인할 수 없습니다. 현재 상태를 확인한 뒤 다시 시도하세요.',
     'Continue to': '계속할 서비스:', 'Sign in with a passkey': '패스키로 로그인',
     'YOUR SECURE CONNECTION': '나만의 안전한 연결',
     'Complete the security key verification to continue.': '계속하려면 등록된 보안 키로 본인을 확인하세요.',
@@ -34,6 +49,29 @@
   globalThis.GoAuthyI18n = {language, messages, t, translate, setBusy};
   document.addEventListener('DOMContentLoaded', () => {
     translate();
+    const loginForm = document.getElementById('login-form');
+    if (loginForm) {
+      const progress = document.querySelector('[data-login-progress]');
+      const submitButton = document.getElementById('login-submit');
+      let submitting = false;
+      loginForm.addEventListener('submit', event => {
+        if (event.defaultPrevented) return;
+        if (submitting) {
+          event.preventDefault();
+          return;
+        }
+        submitting = true;
+        if (submitButton) submitButton.disabled = true;
+        if (progress) progress.hidden = false;
+        loginForm.setAttribute('aria-busy', 'true');
+      });
+      window.addEventListener('pageshow', () => {
+        submitting = false;
+        if (submitButton) submitButton.disabled = false;
+        if (progress) progress.hidden = true;
+        loginForm.removeAttribute('aria-busy');
+      });
+    }
     let dirty = false;
     document.addEventListener('input', event => {
       if (event.target.matches('input,textarea,select') && !event.target.matches('[data-language-select]')) dirty = true;

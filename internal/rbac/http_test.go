@@ -347,7 +347,7 @@ func TestPatchUserMembershipAllowsDelegatedGroupAdminOnly(t *testing.T) {
 	if _, err := store.CreateGroup(ctx, "admin", "other/x", nil); err != nil {
 		t.Fatal(err)
 	}
-	role, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/*", nil)
+	role, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/*", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

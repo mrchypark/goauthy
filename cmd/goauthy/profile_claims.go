@@ -19,10 +19,10 @@ func oidcProfileClaims(p identity.ProfileClaims, emailFallback bool) oidc.Profil
 		out.PreferredUsername = p.Email
 	}
 	if p.Phone != nil {
-		verified := false // No SMS verification provider, matching Rauthy.
+		verified := false // No SMS verification provider is configured.
 		out.PhoneNumberVerified = &verified
 	}
-	// Rauthy AddressClaim::try_build includes locality only alongside ZIP.
+	// Include address locality only alongside a postal code.
 	if p.Street != nil || p.ZIP != nil || p.Country != nil {
 		out.Address = make(map[string]string)
 		var formatted strings.Builder

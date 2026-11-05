@@ -3,7 +3,7 @@ package identity
 import "errors"
 
 // UserValuesPolicy is immutable deployment configuration for the ordinary
-// profile fields. Empty modes use Rauthy's defaults: given_name is required,
+// profile fields. Empty modes use the default policy: given_name is required,
 // every other field is optional. Hidden affects presentation, not admission.
 // Preferred-username policy and login-time revalidation are separate concerns.
 type UserValuesPolicy struct {
@@ -49,7 +49,7 @@ func (p UserValuesPolicy) ValidateFields(givenName, familyName *string, values *
 		(p.FamilyName == "required" && emptyUserValue(familyName)) {
 		return ErrRequiredUserValue
 	}
-	// Rauthy v0.36.2 validates nested requirements only when the enclosing
+	// Validate nested requirements only when the enclosing
 	// object is present. Preserve that explicit wire distinction, not a merge
 	// with the old persisted profile (PUT can clear optional values).
 	if values == nil {

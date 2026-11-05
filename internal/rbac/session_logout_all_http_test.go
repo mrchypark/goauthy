@@ -126,7 +126,7 @@ func TestLogoutAllSessionsHTTPDelegatedAndReaderDenied(t *testing.T) {
 	t.Parallel()
 	h, store, cookie, csrf := membershipHTTPFixture(t)
 	ctx := context.Background()
-	role, err := store.CreateRole(ctx, "admin", "rauthy_admin:team/*", nil)
+	role, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/*", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

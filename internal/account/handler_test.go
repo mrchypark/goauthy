@@ -94,7 +94,7 @@ func TestRegistrationCookieMatchesHostCookieContract(t *testing.T) {
 	}
 }
 
-func TestMFAWebAuthnStartExpiryUsesRauthyEpochSeconds(t *testing.T) {
+func TestMFAWebAuthnStartExpiryUsesGoAuthyEpochSeconds(t *testing.T) {
 	t.Parallel()
 	raw, err := json.Marshal(mfaWebAuthnStartResponse{Exp: 123})
 	if err != nil {
@@ -750,7 +750,7 @@ func TestPasskeyCrossSiteRequestsDoNotMutateState(t *testing.T) {
 	})
 }
 
-func TestIssueModificationTokenEnforcesRauthyFactorSelection(t *testing.T) {
+func TestIssueModificationTokenEnforcesGoAuthyFactorSelection(t *testing.T) {
 	t.Parallel()
 	validProof := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	for _, tc := range []struct {
@@ -1014,7 +1014,7 @@ func TestPasskeyMutationsRejectDuplicateJSONKeysWithoutStateChange(t *testing.T)
 	})
 }
 
-func TestValidPasskeyNameMatchesRauthyPolicy(t *testing.T) {
+func TestValidPasskeyNameMatchesGoAuthyPolicy(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name  string
@@ -1127,7 +1127,7 @@ func TestPasskeyAdminAndAPIKeyBoundaries(t *testing.T) {
 		t.Fatalf("admin reset without CSRF status=%d credentials=%d", response.Code, tableCount(t, db, `SELECT COUNT(*) FROM identity_webauthn_credentials WHERE credential_id='credential-target'`))
 	}
 
-	// Rauthy's admin reset intentionally deletes even the final UV passkey.
+	// GoAuthy's admin reset intentionally deletes even the final UV passkey.
 	// The target may therefore need administrator recovery before passkey-only login works again.
 	adminDelete := passkeyBrowserRequest(cookie, csrf, "subject-2", http.MethodDelete, nil)
 	adminDelete.SetPathValue("name", "final-uv")

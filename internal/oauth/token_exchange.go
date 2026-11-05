@@ -159,7 +159,7 @@ func (h *tokenExchangeHandler) HandleTokenEndpointRequest(ctx context.Context, r
 			}
 		}
 	}
-	// Pinned Rauthy narrows only subject scopes; actor and exchanger scope
+	// Narrow only subject scopes; actor and exchanger scope
 	// lists do not constrain this explicitly enabled exchange grant.
 	sourceScopes := source.GetGrantedScopes()
 	granted := append(fosite.Arguments(nil), sourceScopes...)

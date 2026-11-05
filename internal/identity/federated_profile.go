@@ -45,7 +45,7 @@ const federatedProfileSnapshotSQL = "SELECT json_object(" +
 	"'subject',u.subject,'username',u.username,'email',p.email,'email_verified',p.email_verified," +
 	"'given_name',p.given_name,'family_name',p.family_name," +
 	"'recovery',re.email," +
-	"'admin',EXISTS(SELECT 1 FROM rbac_user_roles rm JOIN rbac_roles rr ON rr.id=rm.role_id WHERE rm.subject=u.subject AND rr.name='rauthy_admin')," +
+	"'admin',EXISTS(SELECT 1 FROM rbac_user_roles rm JOIN rbac_roles rr ON rr.id=rm.role_id WHERE rm.subject=u.subject AND rr.name='goauthy_admin')," +
 	"'revision',v.revision," +
 	"'disabled',u.disabled,'expiry',u.user_expires_at_unix_ms)" +
 	" FROM identity_users u" +
@@ -67,7 +67,7 @@ const federatedProfileSnapshotGuardSQL = `SELECT subject FROM identity_users WHE
 		'subject',u.subject,'username',u.username,'email',p.email,'email_verified',p.email_verified,
 		'given_name',p.given_name,'family_name',p.family_name,
 		'recovery',re.email,
-		'admin',EXISTS(SELECT 1 FROM rbac_user_roles rm JOIN rbac_roles rr ON rr.id=rm.role_id WHERE rm.subject=u.subject AND rr.name='rauthy_admin'),
+		'admin',EXISTS(SELECT 1 FROM rbac_user_roles rm JOIN rbac_roles rr ON rr.id=rm.role_id WHERE rm.subject=u.subject AND rr.name='goauthy_admin'),
 		'revision',v.revision,
 		'disabled',u.disabled,'expiry',u.user_expires_at_unix_ms)
 	FROM identity_users u
@@ -168,15 +168,15 @@ func (s *Store) UpdateFederatedProfile(ctx context.Context, input FederatedProfi
 			if old.Admin == 0 {
 				adminChanged = true
 				roleStatements = append(roleStatements,
-					// INSERT fails if the rauthy_admin role does not exist.
-					rhiza.SQLStatement{SQL: "INSERT OR IGNORE INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) SELECT ?,id,? FROM rbac_roles WHERE name='rauthy_admin'", Args: []any{old.Subject, now.UnixMilli()}, ExpectedRowsAffected: &one},
+					// INSERT fails if the goauthy_admin role does not exist.
+					rhiza.SQLStatement{SQL: "INSERT OR IGNORE INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) SELECT ?,id,? FROM rbac_roles WHERE name='goauthy_admin'", Args: []any{old.Subject, now.UnixMilli()}, ExpectedRowsAffected: &one},
 				)
 			}
 		} else {
 			if old.Admin == 1 {
 				adminChanged = true
 				roleStatements = append(roleStatements,
-					rhiza.SQLStatement{SQL: "DELETE FROM rbac_user_roles WHERE subject=? AND role_id IN(SELECT id FROM rbac_roles WHERE name='rauthy_admin')", Args: []any{old.Subject}},
+					rhiza.SQLStatement{SQL: "DELETE FROM rbac_user_roles WHERE subject=? AND role_id IN(SELECT id FROM rbac_roles WHERE name='goauthy_admin')", Args: []any{old.Subject}},
 				)
 			}
 		}
@@ -216,9 +216,9 @@ func (s *Store) UpdateFederatedProfile(ctx context.Context, input FederatedProfi
 	if adminChanged && old.Admin == 1 && input.AdminMapping != nil && !*input.AdminMapping {
 		statements = append(statements, rhiza.SQLStatement{
 			SQL: `SELECT subject FROM identity_users WHERE subject=? AND NOT (
-			 disabled=0 AND EXISTS(SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject=? AND r.name='rauthy_admin')
+			 disabled=0 AND EXISTS(SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject=? AND r.name='goauthy_admin')
 			 AND NOT EXISTS(SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id
-			 WHERE u.subject<>? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name='rauthy_admin'))`,
+			 WHERE u.subject<>? AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?) AND r.name='goauthy_admin'))`,
 			Args: []any{old.Subject, old.Subject, old.Subject, now.UnixMilli()},
 			WantRows: true, ExpectedReturnedRows: &one,
 		})

@@ -94,6 +94,7 @@ func TestDeviceSessionsUI(t *testing.T) {
 		}
 	})
 	if err := chromedp.Run(browser,
+		englishUILocale(primary),
 		network.SetCookie(ordinaryCookie.Name, ordinaryCookie.Value).WithDomain(parsed.Hostname()).WithPath("/").WithSecure(parsed.Scheme == "https"),
 		chromedp.Navigate(primary+"/account"),
 		chromedp.WaitVisible("#devices-section"),

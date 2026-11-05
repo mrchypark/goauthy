@@ -51,7 +51,7 @@ func createWithExporter(ctx context.Context, source, destination objstore.Bucket
 		// Rhiza rejects a moving head or maintenance lock during snapshot acquisition.
 		// Retry only these exact native failures, before any remote publication;
 		// joined cleanup failures and other integrity/transport errors fail closed.
-		if attempt == 5 || (err.Error() != "shared archive head changed during chain load" && err.Error() != "shared archive state changed too often" && err.Error() != recovery.ErrArchiveBusy.Error() && err.Error() != checkpoint.ErrPublisherBusy.Error()) {
+		if attempt == 5 || !retryableSnapshotError(err) {
 			return CatalogEntry{}, err
 		}
 		timer := time.NewTimer((100 * time.Millisecond) << attempt)
@@ -66,4 +66,17 @@ func createWithExporter(ctx context.Context, source, destination objstore.Bucket
 		return CatalogEntry{}, err
 	}
 	return Publish(ctx, destination, catalogPrefix, sourcePrefix, file, key, time.Now())
+}
+
+func retryableSnapshotError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, checkpoint.ErrRecoveryAdmissionBusy) && err.Error() == checkpoint.ErrRecoveryAdmissionBusy.Error() {
+		return true
+	}
+	return err.Error() == "shared archive head changed during chain load" ||
+		err.Error() == "shared archive state changed too often" ||
+		err.Error() == recovery.ErrArchiveBusy.Error() ||
+		err.Error() == checkpoint.ErrPublisherBusy.Error()
 }

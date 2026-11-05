@@ -239,7 +239,7 @@ func (h *Handler) LoginRestriction(w http.ResponseWriter, r *http.Request) {
 	h.writeLoginRestriction(w, policy)
 }
 
-// PatchUserMembership handles the role/group-only subset of Rauthy's PATCH
+// PatchUserMembership handles the role/group-only subset of the user PATCH
 // /auth/v1/users/{id}. It intentionally does not claim to implement the full
 // UserResponse or arbitrary user-field PatchOp surface.
 func (h *Handler) PatchUserMembership(w http.ResponseWriter, r *http.Request) {
@@ -550,7 +550,7 @@ type membershipPatch struct {
 	ReplaceRoles, ReplaceGroups bool
 }
 
-// decodeMembershipPatch accepts Rauthy's PatchOp envelope but deliberately
+// decodeMembershipPatch accepts a PatchOp envelope but deliberately
 // limits keys to roles/groups until the rest of admin user management exists.
 func decodeMembershipPatch(w http.ResponseWriter, r *http.Request) (membershipPatch, error) {
 	if len(r.Header.Values("Content-Type")) != 1 {
@@ -816,7 +816,7 @@ func (h *Handler) writeLoginRestriction(w http.ResponseWriter, policy BootstrapC
 	}{policy.ClientID, policy.RestrictGroupPrefix, policy.Revision})
 }
 
-// entityResponse deliberately omits revision: Rauthy's public role/group
+// entityResponse deliberately omits revision: the public role/group
 // representation has only the stable ID, name, and optional metadata.
 type entityResponse struct {
 	ID   string          `json:"id"`
@@ -825,7 +825,7 @@ type entityResponse struct {
 }
 
 // membershipDocument is deliberately only the membership-compatible subset of
-// Rauthy's UserResponse while admin profile lifecycle is still unimplemented.
+// UserResponse while admin profile lifecycle is still unimplemented.
 type membershipDocument struct {
 	ID     string   `json:"id"`
 	Roles  []string `json:"roles"`

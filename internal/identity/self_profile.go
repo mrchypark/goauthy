@@ -122,8 +122,10 @@ func (s *Store) UpdateSelfProfileWithGuard(ctx context.Context, subject string, 
 	if err := ValidateUserValuesSyntax(*input.UserValues); err != nil {
 		return SelfProfileUpdateResult{}, err
 	}
-	if err := preferredPolicy.ValidateRegistration(finalPreferred); err != nil {
-		return SelfProfileUpdateResult{}, err
+	if !(preferredPolicy.Immutable() && old.Preferred != nil && finalPreferred != nil && *finalPreferred == *old.Preferred) {
+		if err := preferredPolicy.ValidateRegistration(finalPreferred); err != nil {
+			return SelfProfileUpdateResult{}, err
+		}
 	}
 
 	newValuesJSON := "{}"

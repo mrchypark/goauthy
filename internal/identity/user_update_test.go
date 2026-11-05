@@ -29,7 +29,7 @@ func userUpdateFixture(t *testing.T) (*Store, UserUpdate) {
 		 ('target','old@example.test',1,'keep-preferred','Old','Family','{"city":"Old City"}'),
 		 ('other','other@example.test',1,NULL,NULL,NULL,NULL),('admin','admin@example.test',1,NULL,NULL,NULL,NULL)`},
 		{SQL: `INSERT INTO identity_recovery_emails(subject,email) VALUES('target','old@example.test'),('other','other@example.test'),('admin','admin@example.test')`},
-		{SQL: `INSERT INTO rbac_roles(id,name,created_at_unix_ms,updated_at_unix_ms) VALUES('admin','rauthy_admin',0,0),('viewer','viewer',0,0),('editor','editor',0,0)`},
+		{SQL: `INSERT INTO rbac_roles(id,name,created_at_unix_ms,updated_at_unix_ms) VALUES('admin','goauthy_admin',0,0),('viewer','viewer',0,0),('editor','editor',0,0)`},
 		{SQL: `INSERT INTO rbac_groups(id,name,created_at_unix_ms,updated_at_unix_ms) VALUES('a','team/a',0,0),('b','team/b',0,0)`},
 		{SQL: `INSERT INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) VALUES('target','viewer',0),('admin','admin',0)`},
 		{SQL: `INSERT INTO rbac_user_groups(subject,group_id,granted_at_unix_ms) VALUES('target','a',0)`},
@@ -181,7 +181,7 @@ func TestUpdateUserDisableReactivateAndFinalAdministrator(t *testing.T) {
 	assertCount(t, s, `SELECT COUNT(*) FROM browser_sessions WHERE subject='target' AND revoked_at_unix_ms IS NOT NULL`, 1)
 	assertCount(t, s, `SELECT COUNT(*) FROM oauth_refresh_tokens WHERE signature='target-refresh' AND active=0`, 1)
 	assertCount(t, s, `SELECT COUNT(*) FROM oidc_backchannel_deliveries`, 0)
-	input.Email, input.Roles = "admin@example.test", []string{"rauthy_admin"}
+	input.Email, input.Roles = "admin@example.test", []string{"goauthy_admin"}
 	before := userUpdateSnapshot(t, s)
 	for _, variant := range []string{"disable", "demote", "expire"} {
 		dangerous := input
@@ -299,8 +299,8 @@ func TestUpdateUserPromotionEventsRollbackAndRetry(t *testing.T) {
 	t.Parallel()
 	s, input := userUpdateFixture(t)
 	password := "NextPassword2"
-	input.Email, input.Roles, input.Password, input.SourceIP = "new@example.test", []string{"rauthy_admin"}, &password, "203.0.113.8"
-	userUpdateExecute(t, s, "reject-promotion", []rhiza.SQLStatement{{SQL: `CREATE TRIGGER reject_promotion BEFORE INSERT ON event_log WHEN NEW.typ='NewRauthyAdmin' BEGIN SELECT RAISE(ABORT,'promotion event unavailable'); END`}})
+	input.Email, input.Roles, input.Password, input.SourceIP = "new@example.test", []string{"goauthy_admin"}, &password, "203.0.113.8"
+	userUpdateExecute(t, s, "reject-promotion", []rhiza.SQLStatement{{SQL: `CREATE TRIGGER reject_promotion BEFORE INSERT ON event_log WHEN NEW.typ='NewGoAuthyAdmin' BEGIN SELECT RAISE(ABORT,'promotion event unavailable'); END`}})
 	before := userUpdateSnapshot(t, s)
 	if _, err := s.UpdateUserWithGuard(context.Background(), "target", input, userUpdateTestAuthority); err == nil {
 		t.Fatal("failed final event committed password/profile/membership writes")
@@ -310,7 +310,7 @@ func TestUpdateUserPromotionEventsRollbackAndRetry(t *testing.T) {
 	if _, err := s.UpdateUserWithGuard(context.Background(), "target", input, userUpdateTestAuthority); err != nil {
 		t.Fatal(err)
 	}
-	assertCount(t, s, `SELECT COUNT(*) FROM event_log WHERE typ='NewRauthyAdmin' AND level=1 AND text='new@example.test' AND ip='203.0.113.8' AND timestamp=1800000000000`, 1)
+	assertCount(t, s, `SELECT COUNT(*) FROM event_log WHERE typ='NewGoAuthyAdmin' AND level=1 AND text='new@example.test' AND ip='203.0.113.8' AND timestamp=1800000000000`, 1)
 	assertCount(t, s, `SELECT COUNT(*) FROM event_log WHERE typ='UserPasswordReset' AND level=1 AND text='Reset done by admin for user new@example.test' AND ip IS NULL AND data IS NULL`, 1)
 	assertCount(t, s, `SELECT COUNT(*) FROM event_log WHERE typ='UserEmailChange'`, 1)
 	assertCount(t, s, `SELECT COUNT(*) FROM event_log WHERE typ='NewUserRegistered'`, 0)
@@ -324,7 +324,7 @@ func TestUpdateUserPromotionEventsRollbackAndRetry(t *testing.T) {
 func TestUpdateUserConcurrentDisablePreservesOneAdministrator(t *testing.T) {
 	t.Parallel()
 	s, input := userUpdateFixture(t)
-	input.Roles = []string{"rauthy_admin"}
+	input.Roles = []string{"goauthy_admin"}
 	if _, err := s.UpdateUserWithGuard(context.Background(), "target", input, userUpdateTestAuthority); err != nil {
 		t.Fatal(err)
 	}
@@ -349,5 +349,5 @@ func TestUpdateUserConcurrentDisablePreservesOneAdministrator(t *testing.T) {
 	if !((a == nil && errors.Is(b, ErrUpdateConflict)) || (b == nil && errors.Is(a, ErrUpdateConflict))) {
 		t.Fatalf("concurrent admin disabling: %v / %v", a, b)
 	}
-	assertCount(t, s, `SELECT COUNT(*) FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.disabled=0 AND r.name='rauthy_admin'`, 1)
+	assertCount(t, s, `SELECT COUNT(*) FROM identity_users u JOIN rbac_user_roles m ON m.subject=u.subject JOIN rbac_roles r ON r.id=m.role_id WHERE u.disabled=0 AND r.name='goauthy_admin'`, 1)
 }

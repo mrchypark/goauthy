@@ -50,19 +50,19 @@ func TestLoginLocationObserverRevokeFlowAndBrowserIdentity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		theme := branding.DefaultTheme("rauthy")
+		theme := branding.DefaultTheme(branding.GlobalBrandID)
 		theme.BorderRadius = "13px"
 		if err := themes.Put(ctx, theme); err != nil {
 			t.Fatal(err)
 		}
 
-		observer := loginLocationObserver(db, users, keyring, sender, "http://localhost:8080", "Rauthy IAM", nil)
+		observer := loginLocationObserver(db, users, keyring, sender, "http://localhost:8080", "GoAuthy IAM", nil)
 		observer(ctx, subject, "browser-a", "198.51.100.10", "Mozilla/5.0")
 		message := waitLoginLocationMessage(t, received)
 		if !strings.Contains(loginLocationMailText(t, message), "--border-radius:13px;") {
 			t.Fatal("persisted email theme missing")
 		}
-		if !strings.Contains(message, "Subject: Rauthy IAM - Security Warning") {
+		if !strings.Contains(message, "Subject: GoAuthy IAM - Security Warning") {
 			t.Fatal("configured subject prefix missing")
 		}
 		revokeURL, code := extractLoginLocationRevokeURL(t, message)
@@ -117,7 +117,7 @@ func TestLoginLocationObserverRevokeFlowAndBrowserIdentity(t *testing.T) {
 			return &location, nil
 		}
 
-		observer := loginLocationObserver(db, users, keyring, sender, "http://localhost:8080", "Rauthy IAM", lookup)
+		observer := loginLocationObserver(db, users, keyring, sender, "http://localhost:8080", "GoAuthy IAM", lookup)
 		observer(ctx, subject, "browser-a", ip, "Mozilla/5.0")
 		message := waitLoginLocationMessage(t, received)
 		if !lookupCalled {
@@ -146,7 +146,7 @@ func TestLoginLocationObserverRevokeFlowAndBrowserIdentity(t *testing.T) {
 		subject, email := "login-location-browser", "login-location-browser@example.test"
 		seedLoginLocationUser(t, db, subject, email)
 
-		observer := loginLocationObserver(db, users, keyring, sender, "http://localhost:8080", "Rauthy IAM", nil)
+		observer := loginLocationObserver(db, users, keyring, sender, "http://localhost:8080", "GoAuthy IAM", nil)
 		observer(ctx, subject, "browser-a", "198.51.100.20", "Mozilla/5.0")
 		_ = waitLoginLocationMessage(t, received)
 

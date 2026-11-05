@@ -222,7 +222,7 @@ func (h *passwordGrantHandler) PopulateTokenEndpointResponse(ctx context.Context
 	if err != nil {
 		return err
 	}
-	// Rauthy selects refresh issuance by enabled flow, not offline_access.
+	// Select refresh issuance by enabled flow, not offline_access.
 	if request.GetClient().GetGrantTypes().Has("refresh_token") {
 		refresh, signature, err := h.RefreshTokenStrategy.GenerateRefreshToken(ctx, request)
 		if err != nil {

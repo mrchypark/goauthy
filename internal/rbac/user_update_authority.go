@@ -13,7 +13,7 @@ func userUpdateAuthority(actor, target string, roles, groups []string) (string, 
 	guard := `EXISTS (SELECT 1 FROM identity_users WHERE subject=?) AND (` + adminGuard() + ` OR (` + delegatedAdminGuard() + `
 	 AND (?=? OR (
 	  NOT EXISTS (SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id
-	   WHERE m.subject=? AND (r.name='rauthy_admin' OR substr(r.name,1,13)='rauthy_admin:'))
+	   WHERE m.subject=? AND (r.name='goauthy_admin' OR substr(r.name,1,14)='goauthy_admin:'))
 	  AND EXISTS (SELECT 1 FROM rbac_user_groups m JOIN rbac_groups g ON g.id=m.group_id
 	   WHERE m.subject=? AND ` + userUpdateGroupScope("g.name") + `)
 	 ))
@@ -39,7 +39,7 @@ func userUpdateAuthority(actor, target string, roles, groups []string) (string, 
 // Literal/prefix matching deliberately avoids LIKE: '_' is a valid group name.
 func userUpdateGroupScope(groupSQL string) string {
 	return `EXISTS (SELECT 1 FROM rbac_user_roles am JOIN rbac_roles ar ON ar.id=am.role_id
-	 WHERE am.subject=? AND substr(ar.name,1,13)='rauthy_admin:' AND
-	 (substr(ar.name,14)=` + groupSQL + ` OR
-	  (substr(ar.name,-1)='*' AND substr(` + groupSQL + `,1,length(ar.name)-14)=substr(ar.name,14,length(ar.name)-14))))`
+	 WHERE am.subject=? AND substr(ar.name,1,14)='goauthy_admin:' AND
+	 (substr(ar.name,15)=` + groupSQL + ` OR
+	  (substr(ar.name,-1)='*' AND substr(` + groupSQL + `,1,length(ar.name)-15)=substr(ar.name,15,length(ar.name)-15))))`
 }

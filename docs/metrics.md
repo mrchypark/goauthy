@@ -1,11 +1,18 @@
 # Prometheus metrics
 
 Metrics are disabled unless `GOAUTHY_METRICS_LISTEN_ADDR` is set. When
-enabled, GoAuthy opens a separate TCP listener serving only:
+enabled, GoAuthy opens a separate TCP listener serving:
 
 ```text
 GET /metrics
+GET /metrics/object-store
+GET /metrics/archive/v1
 ```
+
+All three routes require the configured bearer token. The archive endpoint keeps
+its version 1 fixed stage shape for compatibility; on Rhiza v0.21.0 every stage
+is unavailable (`available: false`) with `null` count and duration values. These
+values mean unavailable, not zero.
 
 The application listener never exposes this endpoint, and the metrics
 listener does not expose GoAuthy authentication or API routes. Configure a

@@ -183,3 +183,38 @@ func loginRevokeTestKeyring(t *testing.T) *oidc.Keyring {
 	}
 	return keyring
 }
+
+func TestLoginRevokePageCSSOnlyIssuerAssets(t *testing.T) {
+	for _, prefix := range []string{"", "/tenant", "/auth/v1"} {
+		t.Run(prefix, func(t *testing.T) {
+			const route = "/auth/v1/users/subject-1/revoke/private-code"
+			r := httptest.NewRequest(http.MethodGet, prefix+route+"?ip=198.51.100.7", nil)
+			r.URL.Path = route // Match issuerPathMiddleware while retaining the public RequestURI.
+			w := httptest.NewRecorder()
+			NewLoginRevokeHandler(nil, nil).ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatal(w.Code)
+			}
+			if got := w.Header().Get("Content-Security-Policy"); got != "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" {
+				t.Fatalf("CSP=%q", got)
+			}
+			if w.Header().Get("Referrer-Policy") != "no-referrer" || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("X-Content-Type-Options") != "nosniff" {
+				t.Fatal("sensitive page headers changed")
+			}
+			body := w.Body.String()
+			for _, asset := range []string{"ui/app.css", "ui/ely-controls.css", "ui/ely-patterns.css", "ui/brand.css", "theme/global.css"} {
+				if !strings.Contains(body, `href="`+prefix+"/auth/v1/"+asset+`"`) {
+					t.Errorf("missing %s", asset)
+				}
+			}
+			for _, forbidden := range []string{"<script", "<style", "<form", "hx-", "private-code", "198.51.100.7"} {
+				if strings.Contains(body, forbidden) {
+					t.Errorf("unexpected %s", forbidden)
+				}
+			}
+			if !strings.Contains(body, `class="auth-panel"`) || !strings.Contains(body, `class="ui-alert"`) {
+				t.Fatal("missing shared layout or Ely alert")
+			}
+		})
+	}
+}

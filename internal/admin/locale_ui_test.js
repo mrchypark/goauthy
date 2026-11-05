@@ -16,7 +16,7 @@ const localizedKeys = [
   'Deleting…', 'Rotating…', 'Expiry must be a safe integer of at least 1719784800',
   'Create a named authorization entity.', 'Update {name} and preserve its immutable ID.',
   'Create user', 'Edit user', 'Email', 'Given name',
-  'Family name', 'Language', 'Roles', 'Groups', 'roles', 'groups', 'Comma-separated names', 'Preferred username',
+  'Family name', 'Language', 'Roles', 'Groups', 'roles', 'groups', 'JSON array of names', 'Names must be a JSON array of strings', 'Preferred username',
   'Time zone', 'Optional IANA name, for example Asia/Seoul', 'Account expiry',
   'Unix seconds; blank means no expiry', 'Unix seconds; blank clears', 'New password',
   'Leave blank to keep current', 'Enabled', 'Email verified', 'Subject {subject}',
@@ -63,7 +63,8 @@ assert.equal(context.GoAuthyI18n.t('Manage access rights and expiry. Plaintext s
 const html = fs.readFileSync(__dirname + '/admin.html', 'utf8');
 assert.match(html, /src="\/auth\/v1\/branding\/locale\.js" defer/);
 assert.match(html, /data-language-select/);
-assert.match(html, /{{template "button".*"admin-menu-toggle".*"admin-navigation".*"aria-expanded" "false".*"data-i18n" "Menu"/);
+// Rendered Ely menu attributes are checked by TestElyAdminScreensPreserveNavigationAndAssets.
+assert.equal(context.GoAuthyI18n.t('Menu'), '메뉴');
 assert.match(html, /<nav id="admin-navigation"/);
 assert.match(html, /<body\b[^>]* data-locale-mode="reload"/);
 assert.match(html, /href="\/oidc\/logout"/);

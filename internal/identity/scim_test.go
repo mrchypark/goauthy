@@ -273,7 +273,7 @@ func TestDeleteUserPreservesFinalDirectAdminConcurrently(t *testing.T) {
 	bootstrapPassword(t, store, "admin-a", "admin-a", []byte("CurrentPassword1"))
 	bootstrapPassword(t, store, "admin-b", "admin-b", []byte("CurrentPassword1"))
 	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "identity-delete-admin-role", Statements: []rhiza.SQLStatement{
-		{SQL: `INSERT INTO rbac_roles (id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('admin-role','rauthy_admin',1,0,0)`},
+		{SQL: `INSERT INTO rbac_roles (id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('admin-role','goauthy_admin',1,0,0)`},
 		{SQL: `INSERT INTO rbac_user_roles (subject,role_id,granted_at_unix_ms) VALUES ('admin-a','admin-role',0),('admin-b','admin-role',0)`},
 	}}); err != nil {
 		t.Fatal(err)
@@ -303,7 +303,7 @@ func TestDeleteUserPreservesFinalDirectAdminConcurrently(t *testing.T) {
 		t.Fatalf("deleted=%d blocked=%d", deleted, blocked)
 	}
 	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "identity-delete-delegated-only", Statements: []rhiza.SQLStatement{
-		{SQL: `INSERT INTO rbac_roles (id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('delegated-role','rauthy_admin:team',1,0,0)`},
+		{SQL: `INSERT INTO rbac_roles (id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('delegated-role','goauthy_admin:team',1,0,0)`},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestDeleteUserWithGuardRevalidatesAuthorityAtCommit(t *testing.T) {
 		ctx := context.Background()
 		bootstrapPassword(t, store, "delete-final-admin", "final-admin", []byte("CurrentPassword1"))
 		if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "identity-delete-guard-final-admin", Statements: []rhiza.SQLStatement{
-			{SQL: `INSERT INTO rbac_roles (id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('delete-final-role','rauthy_admin',1,0,0)`},
+			{SQL: `INSERT INTO rbac_roles (id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('delete-final-role','goauthy_admin',1,0,0)`},
 			{SQL: `INSERT INTO rbac_user_roles (subject,role_id,granted_at_unix_ms) VALUES ('delete-final-admin','delete-final-role',0)`},
 		}}); err != nil {
 			t.Fatal(err)
@@ -396,7 +396,7 @@ func TestDeleteUserWithGuardRevalidatesAuthorityAtCommit(t *testing.T) {
 		bootstrapPassword(t, store, "delete-actor", "actor", []byte("CurrentPassword1"))
 		bootstrapPassword(t, store, "delete-target", "target", []byte("CurrentPassword1"))
 		if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "identity-delete-guard-revoke-seed", Statements: []rhiza.SQLStatement{
-			{SQL: `INSERT INTO rbac_roles (id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('delete-guard-admin','rauthy_admin',1,0,0)`},
+			{SQL: `INSERT INTO rbac_roles (id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('delete-guard-admin','goauthy_admin',1,0,0)`},
 			{SQL: `INSERT INTO rbac_user_roles (subject,role_id,granted_at_unix_ms) VALUES ('delete-actor','delete-guard-admin',0)`},
 		}}); err != nil {
 			t.Fatal(err)
@@ -406,7 +406,7 @@ func TestDeleteUserWithGuardRevalidatesAuthorityAtCommit(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		authority := `EXISTS (SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject='delete-actor' AND r.name='rauthy_admin')`
+		authority := `EXISTS (SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject='delete-actor' AND r.name='goauthy_admin')`
 		if err := store.DeleteUserWithGuard(ctx, "delete-target", authority, nil); !errors.Is(err, ErrDeleteUnauthorized) {
 			t.Fatalf("delete err=%v", err)
 		}
@@ -417,7 +417,7 @@ func TestDeleteUserWithGuardRevalidatesAuthorityAtCommit(t *testing.T) {
 		store := scimDeleteStore(t)
 		ctx := context.Background()
 		bootstrapPassword(t, store, "delete-self", "self", []byte("CurrentPassword1"))
-		if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "identity-delete-guard-grant-seed", SQL: `INSERT INTO rbac_roles (id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('delete-self-admin','rauthy_admin',1,0,0)`}); err != nil {
+		if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "identity-delete-guard-grant-seed", SQL: `INSERT INTO rbac_roles (id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('delete-self-admin','goauthy_admin',1,0,0)`}); err != nil {
 			t.Fatal(err)
 		}
 		store.deleteUserAfterRead = func() {
@@ -425,7 +425,7 @@ func TestDeleteUserWithGuardRevalidatesAuthorityAtCommit(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		authority := `NOT EXISTS (SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject='delete-self' AND r.name='rauthy_admin')`
+		authority := `NOT EXISTS (SELECT 1 FROM rbac_user_roles m JOIN rbac_roles r ON r.id=m.role_id WHERE m.subject='delete-self' AND r.name='goauthy_admin')`
 		if err := store.DeleteUserWithGuard(ctx, "delete-self", authority, nil); !errors.Is(err, ErrDeleteUnauthorized) {
 			t.Fatalf("delete err=%v", err)
 		}
@@ -445,7 +445,7 @@ func TestDeleteUserKeepsExpiredAdministratorOutOfFinalAdminGuard(t *testing.T) {
 	bootstrapPassword(t, store, "usable-admin", "usable-admin", []byte("CurrentPassword1"))
 	bootstrapPassword(t, store, "expired-admin", "expired-admin", []byte("CurrentPassword1"))
 	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "identity-delete-expired-admin-seed", Statements: []rhiza.SQLStatement{
-		{SQL: `INSERT INTO rbac_roles (id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('expiry-admin-role','rauthy_admin',1,0,0)`},
+		{SQL: `INSERT INTO rbac_roles (id,name,revision,created_at_unix_ms,updated_at_unix_ms) VALUES ('expiry-admin-role','goauthy_admin',1,0,0)`},
 		{SQL: `INSERT INTO rbac_user_roles (subject,role_id,granted_at_unix_ms) VALUES ('usable-admin','expiry-admin-role',0),('expired-admin','expiry-admin-role',0)`},
 		{SQL: `UPDATE identity_users SET user_expires_at_unix_ms=? WHERE subject='expired-admin'`, Args: []any{now.UnixMilli()}},
 	}}); err != nil {

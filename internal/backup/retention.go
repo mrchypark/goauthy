@@ -29,7 +29,7 @@ func Prune(ctx context.Context, bucket objstore.Bucket, prefix string, keys []ed
 
 // PruneWithPolicy selects expired completed artifacts under the chosen policy.
 // RetainLatest protects the newest entry for each source; ExpireAll follows
-// Rauthy's upstream behavior and can delete every expired entry.
+// the upstream retention policy and can delete every expired entry.
 func PruneWithPolicy(ctx context.Context, bucket objstore.Bucket, prefix string, keys []ed25519.PublicKey, now time.Time, keepDays, maxEntries int, apply bool, policy RetentionPolicy) ([]CatalogEntry, error) {
 	if now.Unix() <= 0 || keepDays < 0 || keepDays > 65535 || policy != RetainLatest && policy != ExpireAll {
 		return nil, errors.New("invalid backup retention policy")
