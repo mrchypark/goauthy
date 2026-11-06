@@ -106,3 +106,90 @@ func TestElysduiDynamicAdminInBrowser(t *testing.T) {
 		t.Fatal("mobile form layout overflowed or did not use one column")
 	}
 }
+
+// Exercise the actual stylesheet cascade: theme --accent is HSL channels,
+// whereas --color-accent is a resolved color usable by background and outline.
+func TestAdminAccentComputedStylesInBrowser(t *testing.T) {
+	chrome := ""
+	for _, name := range []string{"chromium", "google-chrome", "google-chrome-stable"} {
+		if candidate, err := exec.LookPath(name); err == nil {
+			chrome = candidate
+			break
+		}
+	}
+	if chrome == "" {
+		chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+		if _, err := os.Stat(chrome); err != nil {
+			t.Fatal("Chrome required for computed-style regression")
+		}
+	}
+	mux := http.NewServeMux()
+	if err := sharedUI.BindAssets(mux); err != nil {
+		t.Fatal(err)
+	}
+	mux.HandleFunc("GET /admin.css", func(w http.ResponseWriter, _ *http.Request) {
+		css, err := uiFS.ReadFile("admin.css")
+		if err != nil {
+			t.Error(err)
+			http.Error(w, "stylesheet unavailable", 500)
+			return
+		}
+		w.Header().Set("Content-Type", "text/css")
+		_, _ = w.Write(css)
+	})
+	mux.HandleFunc("GET /theme.css", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/css")
+		_, _ = w.Write([]byte(branding.DefaultTheme(branding.GlobalBrandID).CSS()))
+	})
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<!doctype html><html><head>
+<link rel="stylesheet" href="/auth/v1/ui/app.css"><link rel="stylesheet" href="/auth/v1/ui/brand.css">
+<link rel="stylesheet" href="/admin.css"><link rel="stylesheet" href="/theme.css"></head><body>
+<div id="app"><button data-slot="button" data-variant="primary">Save</button>
+<input data-slot="input"><select data-slot="select"><option>One</option></select><textarea data-slot="textarea"></textarea></div>
+<div id="resolved" style="background-color:var(--color-accent)"></div></body></html>`))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	options := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(chrome), chromedp.Headless)
+	if os.Getenv("CI") == "true" {
+		options = append(options, chromedp.NoSandbox)
+	}
+	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), options...)
+	defer cancelAlloc()
+	ctx, cancelBrowser := chromedp.NewContext(alloc)
+	defer cancelBrowser()
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	var observed struct {
+		Raw, Expected, Background string
+		Focus                     []struct {
+			Slot, Color, Style, Width string
+			Visible                   bool
+		}
+	}
+	if err := chromedp.Run(ctx, chromedp.Navigate(server.URL), chromedp.KeyEvent("\t"), chromedp.Evaluate(`(() => {
+const expected = getComputedStyle(document.querySelector('#resolved')).backgroundColor;
+const button = document.querySelector('#app button');
+const result = {Raw:getComputedStyle(button).getPropertyValue('--accent').trim(), Expected:expected, Background:getComputedStyle(button).backgroundColor, Focus:[]};
+for (const element of document.querySelectorAll('#app [data-slot]')) {
+  element.focus(); const style = getComputedStyle(element);
+  result.Focus.push({Slot:element.dataset.slot, Color:style.outlineColor, Style:style.outlineStyle, Width:style.outlineWidth, Visible:element.matches(':focus-visible')});
+}
+return result;
+})()`, &observed)); err != nil {
+		t.Fatal(err)
+	}
+	if observed.Raw == "" || strings.Contains(observed.Raw, "(") || observed.Expected == "rgba(0, 0, 0, 0)" || observed.Background != observed.Expected {
+		t.Errorf("primary button computed colors: %+v", observed)
+	}
+	if len(observed.Focus) != 4 {
+		t.Fatalf("missing focus controls: %+v", observed)
+	}
+	for _, focus := range observed.Focus {
+		if !focus.Visible || focus.Color != observed.Expected || focus.Style != "solid" || focus.Width != "2px" {
+			t.Errorf("focus outline %s: %+v; want color=%s solid 2px", focus.Slot, focus, observed.Expected)
+		}
+	}
+}
