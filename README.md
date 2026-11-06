@@ -17,21 +17,18 @@ GoAuthy-specific external-connection and credential-delegation capabilities. Rau
 is a compatibility ledger rather than the sole product roadmap. Earlier documentation
 cited the official Rhiza `v0.19.0` release (commit
 [`abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8`](https://github.com/mrchypark/rhiza/commit/abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8)).
-The current Rhiza integration candidate is official `v0.21.2`,
-resolving to upstream commit [`8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd`](https://github.com/mrchypark/rhiza/commit/8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd).
-It reconciles a lost Local maintenance-release acknowledgement only when stable
-remote readback proves the exact expected free control at a changed object version.
-It does not clear orphaned held tokens or change the public API or archive format.
-Fresh focused GoAuthy filesystem loss/recovery and binding checks passed normally
-and with the race detector. The archive-adoption/ACK-tail recovery SDK contract
-also passed on pinned S3, GCS, and Azure emulators with no skips. This does not
-qualify the init/main application journey on each provider. The new image, live
-Kubernetes, and production-cloud behavior remain unqualified. GoAuthy pins its
+The current Rhiza integration candidate is official `v0.23.0`,
+resolving to upstream commit [`f050d6e30f57718736c8c4fdb5edef777183bc05`](https://github.com/mrchypark/rhiza/commit/f050d6e30f57718736c8c4fdb5edef777183bc05).
+Its bounded verification targets single-node Local object-store recovery without
+an operator. Historical provider receipts do not qualify the new SDK, managed
+HA, Kubernetes, or production-cloud operation; see the
+[current verification contract](docs/no-pvc-dr.md#current-v0230-integration).
+GoAuthy pins its
 Fosite fork at `github.com/mrchypark/fosite v0.49.0-goauthy.1` for the security
 correction and minimum compatibility changes only; it is not a feature fork.
 The policy is to return to upstream only after the fix is published upstream
 and qualified for GoAuthy. This pin does not establish a passing latest security
-scan; see the [dependency and release qualification limits](docs/no-pvc-dr.md#current-v0212-qualification-and-release-gates).
+scan; see the [dependency and release qualification limits](docs/no-pvc-dr.md#historical-v0212-qualification-and-release-gates).
 This release requires Go 1.27.3; the root Docker build uses the same minimum.
 Rhiza v0.21 removes the archive-statistics API. GoAuthy's protected
 `/metrics/archive/v1` compatibility response keeps schema version 1 and its fixed
@@ -223,7 +220,8 @@ issuer-path/browser parity remains pending.
 
 ## Rhiza production profiles
 
-The current integration candidate uses Rhiza `v0.21.2` for both runtime modes.
+The current integration candidate pins Rhiza `v0.23.0`. Verification targets
+`standalone-local`; existing runtime modes are not all requalified by this pin.
 `standalone` is the
 production single-node topology: one embedded member and no peer inputs.
 The default Kubernetes profile uses `emptyDir`, an object-store bucket/prefix,
@@ -260,7 +258,7 @@ Standalone and exact-three HA have identical application semantics; HA pods
 must use matching SCIM provider configuration, including stable IDs and policies.
 The startup path still skips `db.Close()` until initialization succeeds. This
 guard was added for a checkpoint-corruption hazard confirmed on Rhiza v0.10.0;
-its behavior on v0.21.2 remains unverified. The maintenance-release fix does not
+its behavior on v0.23.0 remains unverified. Local recovery tests do not
 qualify this startup guard. Normal post-start shutdown closes the database as usual.
 
 Bootstrap authentication is password-only for the initial administrator by
