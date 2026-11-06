@@ -6,7 +6,7 @@ const source = fs.readFileSync(__dirname + '/themes.js', 'utf8');
 const clone = value => JSON.parse(JSON.stringify(value));
 const makeTheme = client_id => ({client_id, light: {text: [200, 5, 37], text_high: [200, 15, 25], bg: [34, 25, 97], bg_high: [34, 20, 90], action: [34, 100, 40], accent: [265, 100, 53], error: [15, 100, 37], btn_text: 'white', theme_sun: 'hsla(var(--action) / .7)', theme_moon: 'hsla(var(--accent) / .85)'}, dark: {text: [34, 5, 75], text_high: [34, 7, 90], bg: [200, 40, 6], bg_high: [200, 20, 17], action: [34, 100, 59], accent: [265, 100, 53], error: [15, 100, 37], btn_text: 'hsl(var(--bg))', theme_sun: 'hsla(var(--action) / .7)', theme_moon: 'hsla(var(--accent) / .85)'}, border_radius: '5px'});
 
-function harness(messages = {}, language = 'ko') {
+function harness(messages = {}, language = 'ko', legacyStatus = null) {
   const nodes = new Map(), calls = [], vars = new Map(), removedVars = [], sampleVars = new Map(), frameBody = {style: {setProperty: (key, value) => vars.set(key, value), removeProperty: key => { removedVars.push(key); vars.delete(key); }}, dataset: {}};
   const sampleFields = {style: {setProperty: (key, value) => sampleVars.set(key, value)}};
   let sampleReady = true;
@@ -76,7 +76,7 @@ function harness(messages = {}, language = 'ko') {
     shell(title, subtitle, body, toolbar = '') { root.innerHTML = `${toolbar}${title}\n${subtitle}\n${body}`; for (const match of (toolbar + body).matchAll(/id="([^"]+)"/g)) node(match[1]); },
     api: async (path, opts = {}) => {
       calls.push({path, opts});
-      if (path === '/auth/v1/branding/legacy') return {resolved: true, legacy_theme: !!saved};
+      if (path === '/auth/v1/branding/legacy') return clone(legacyStatus || {resolved: true, legacy_theme: !!saved});
       if (opts.method === 'POST') {
         if (failNextPost) { failNextPost = false; throw Error('read unavailable'); }
         if (path === '/auth/v1/branding/theme') return clone(saved?.client_id === 'goauthy' ? saved : globalTheme);
@@ -292,7 +292,25 @@ function harness(messages = {}, language = 'ko') {
   const sameNamedClient = harness();
   await sameNamedClient.ctx.clientTheme('goauthy');
   assert.match(sameNamedClient.root.innerHTML, /Client login theme/);
-  assert.deepEqual(sameNamedClient.calls.slice(0, 3).map(x => x.path), ['/auth/v1/theme/goauthy', '/auth/v1/branding/legacy', '/auth/v1/branding/theme']);
+  assert.deepEqual(sameNamedClient.calls.map(x => x.path), ['/auth/v1/branding/legacy', '/auth/v1/branding/theme']);
+  await sameNamedClient.node('theme-save').onclick();
+  const sameNamedPut = sameNamedClient.calls.find(x => x.opts.method === 'PUT');
+  assert.equal(sameNamedPut.path, '/auth/v1/theme/goauthy');
+  assert.equal(sameNamedPut.opts.headers['If-None-Match'], '*', 'creating a same-named client theme must not overwrite another writer');
+
+  const resolvedClient = harness({}, 'ko', {resolved: true, legacy_theme: true, legacy_logo: false});
+  await resolvedClient.ctx.clientTheme('goauthy');
+  assert.deepEqual(resolvedClient.calls.map(x => x.path), ['/auth/v1/branding/legacy', '/auth/v1/theme/goauthy', '/auth/v1/branding/theme']);
+
+  for (const legacy of [{resolved: false, legacy_theme: true, legacy_logo: false}, {resolved: false, legacy_theme: false, legacy_logo: true}]) {
+    const ambiguous = harness({}, 'ko', legacy);
+    await ambiguous.ctx.clientTheme('goauthy');
+    assert.deepEqual(ambiguous.calls.map(x => x.path), ['/auth/v1/branding/legacy']);
+    assert.match(ambiguous.node('theme-status').textContent, /Resolve legacy branding/);
+    await ambiguous.node('theme-save').onclick();
+    await ambiguous.node('theme-reset-confirm').onclick();
+    assert.equal(ambiguous.calls.some(x => x.opts.method === 'PUT' || x.opts.method === 'DELETE'), false, 'ambiguous legacy theme or logo must remain untouched');
+  }
 
   const common = harness();
   await common.ctx.clientTheme('goauthy', true);
