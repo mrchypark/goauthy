@@ -10,7 +10,7 @@ case "$#:${1:-}" in
 esac
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 export GOENV=off GOWORK=off GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org
-export GOPRIVATE= GONOSUMDB= GONOPROXY=
+export GOPRIVATE='' GONOSUMDB='' GONOPROXY=''
 work=$(mktemp -d "${TMPDIR:-/tmp}/goauthy-local-upgrade.XXXXXX")
 child=
 cleanup() {
@@ -58,6 +58,15 @@ run_phase() {
   fi
   echo "phase=$phase_label exact-test=$phase_test completed; no skips"
 }
+copy_archive() {
+  # GNU cp -Rp loses filesystem object versions stored in xattrs. Darwin cp
+  # preserves them with -p; verify both implementations through SDK Attributes.
+  case "$(uname -s)" in
+    Linux) cp -a --preserve=xattr "$1" "$2" ;;
+    Darwin) cp -Rp "$1" "$2" ;;
+    *) echo 'unsupported archive metadata copy host' >&2; return 1 ;;
+  esac
+}
 trap cleanup 0
 trap 'exit 130' 2
 trap 'exit 143' 1 15
@@ -78,7 +87,11 @@ for phase in seed write; do
   GOAUTHY_LOCAL_COMPAT_VERSION=v0.21.2 GOAUTHY_LOCAL_COMPAT_PHASE=$phase run_phase "$phase" TestLocalArchiveVersionCompatibilityPhases "$work/producer" -test.timeout=2m
 done
 # Producer exits without Close after its BeforeAck receipt; keep an unopened copy.
-cp -Rp "$work/live" "$work/original"
+copy_archive "$work/live" "$work/original"
+GOAUTHY_LOCAL_COMPAT_COPY_MODE=byte-only-control \
+  run_phase metadata-loss-control TestLocalArchiveCopyMetadata "$work/consumer" -test.timeout=30s
+GOAUTHY_LOCAL_COMPAT_COPY_MODE=preserved GOAUTHY_LOCAL_COMPAT_COPY_ROOT="$work/original" \
+  run_phase original-metadata TestLocalArchiveCopyMetadata "$work/consumer" -test.timeout=30s
 digest() { (cd "$1" && find . -type f -exec shasum -a 256 {} + | LC_ALL=C sort); }
 digest "$work/original" > "$work/original.before"
 printf '%s\n' 'original tree manifest / binding / ACK receipt SHA256:'
@@ -104,10 +117,12 @@ cmp "$work/original/data/local-backup.json" "$work/live/data/local-backup.json"
 # namespace. Cold recovery must derive its binding from the archive itself.
 rm -rf "$work/live/data"
 rm -rf "$work/live/objects"
-cp -Rp "$work/original/objects" "$work/live/objects"
+copy_archive "$work/original/objects" "$work/live/objects"
+GOAUTHY_LOCAL_COMPAT_COPY_SOURCE_ROOT="$work/original" GOAUTHY_LOCAL_COMPAT_COPY_MODE=preserved GOAUTHY_LOCAL_COMPAT_COPY_ROOT="$work/live" \
+  run_phase restored-metadata TestLocalArchiveCopyMetadata "$work/consumer" -test.timeout=30s
 [ ! -e "$work/live/data" ]
 for phase in cold second; do
-  GOAUTHY_LOCAL_COMPAT_VERSION=v0.23.0 GOAUTHY_LOCAL_COMPAT_PHASE=$phase run_phase "$phase" TestLocalArchiveVersionCompatibilityPhases "$work/consumer" -test.timeout=2m
+  GOAUTHY_INIT_LIFECYCLE_TEST_ROOT="$work/live" GOAUTHY_LOCAL_COMPAT_VERSION=v0.23.0 GOAUTHY_LOCAL_COMPAT_PHASE=$phase run_phase "$phase" TestLocalArchiveVersionCompatibilityPhases "$work/consumer" -test.timeout=2m
   cmp "$work/original/data/local-backup.json" "$work/live/data/local-backup.json"
   if [ "$phase" = cold ]; then
     rm -rf "$work/live/data"
