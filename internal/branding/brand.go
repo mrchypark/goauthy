@@ -15,7 +15,7 @@ type Brand struct {
 }
 
 func (s *ThemeStore) Brand(ctx context.Context, logos *ClientLogoStore, clientID string) (Brand, error) {
-	global, err := s.GetDefault(ctx, GlobalBrandID)
+	global, err := s.GetGlobal(ctx)
 	if err != nil {
 		return Brand{}, err
 	}
@@ -28,12 +28,21 @@ func (s *ThemeStore) Brand(ctx context.Context, logos *ClientLogoStore, clientID
 	if err != nil {
 		return Brand{}, err
 	}
-	asset, err := logos.GetFallback(ctx, clientID)
+	var asset StoredLogo
+	if clientID == "" {
+		asset, err = logos.GetGlobal(ctx)
+	} else {
+		asset, err = logos.GetFallback(ctx, clientID)
+	}
 	if err != nil && !errors.Is(err, ErrLogoNotFound) {
 		return Brand{}, err
 	}
 	if err == nil {
-		brand.LogoURL = "/auth/v1/clients/" + url.PathEscape(clientID) + "/logo?updated=" + strconv.FormatInt(asset.Updated, 10)
+		if clientID == "" {
+			brand.LogoURL = "/auth/v1/branding/logo?updated=" + strconv.FormatInt(asset.Updated, 10)
+		} else {
+			brand.LogoURL = "/auth/v1/clients/" + url.PathEscape(clientID) + "/logo?updated=" + strconv.FormatInt(asset.Updated, 10)
+		}
 	}
 	return brand, nil
 }

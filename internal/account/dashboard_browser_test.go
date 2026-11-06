@@ -12,7 +12,7 @@ import (
 	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/chromedp"
 	"github.com/mrchypark/goauthy/internal/branding"
-	"github.com/mrchypark/goauthy/internal/login"
+	"github.com/mrchypark/goauthy/internal/ui"
 )
 
 func TestAccountBrowserLayoutAndKeyboard(t *testing.T) {
@@ -28,13 +28,19 @@ func TestAccountBrowserLayoutAndKeyboard(t *testing.T) {
 	mux.HandleFunc("/account", h.Dashboard)
 	mux.HandleFunc("/account/", h.Dashboard)
 	mux.Handle("/auth/v1/branding/{name}", branding.BrandAssetHandler())
-	mux.Handle("/auth/v1/elysdui.css", login.UIStylesheet())
+	if err := ui.BindAssets(mux); err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.AddCookie(cookie)
 		mux.ServeHTTP(w, r)
 	}))
 	defer server.Close()
-	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(chrome), chromedp.Headless)...)
+	options := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(chrome), chromedp.Headless)
+	if os.Getenv("CI") == "true" {
+		options = append(options, chromedp.NoSandbox)
+	}
+	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), options...)
 	defer cancelAlloc()
 	browser, cancel := chromedp.NewContext(alloc)
 	defer cancel()

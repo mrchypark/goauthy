@@ -30,26 +30,35 @@ func NewThemeStore(db *rhiza.DB) (*ThemeStore, error) {
 
 // GetDefault is the admin JSON contract: a missing client uses built-in defaults.
 func (s *ThemeStore) GetDefault(ctx context.Context, clientID string) (Theme, error) {
-	return s.get(ctx, clientID, false)
+	return s.get(ctx, clientID, false, false, false)
 }
 
 // GetFallback is the public CSS contract: try the client, then the global theme.
 func (s *ThemeStore) GetFallback(ctx context.Context, clientID string) (Theme, error) {
-	return s.get(ctx, clientID, true)
+	return s.get(ctx, clientID, true, false, false)
 }
 
-func (s *ThemeStore) get(ctx context.Context, clientID string, fallback bool) (Theme, error) {
+// GetGlobal returns only the explicitly stored common theme.
+func (s *ThemeStore) GetGlobal(ctx context.Context) (Theme, error) {
+	return s.get(ctx, GlobalBrandID, false, true, false)
+}
+
+func (s *ThemeStore) get(ctx context.Context, clientID string, fallback, global, inspectLegacy bool) (Theme, error) {
 	query := `SELECT client_id,version,document_json FROM client_themes WHERE client_id=?`
 	args := []any{clientID}
-	if fallback {
-		query = `SELECT client_id,version,document_json FROM client_themes WHERE client_id IN (?, ?) ORDER BY CASE WHEN client_id=? THEN 0 ELSE 1 END LIMIT 1`
-		args = append(args, GlobalBrandID, clientID)
+	if global {
+		query = `SELECT client_id,version,document_json FROM global_brand_themes WHERE client_id=?`
+	} else if !inspectLegacy {
+		query += ` AND (client_id!='goauthy' OR EXISTS(SELECT 1 FROM branding_legacy_resolution WHERE singleton=1))`
 	}
 	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: query, Args: args, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil {
 		return Theme{}, err
 	}
 	if len(result.Rows) == 0 {
+		if fallback {
+			return s.GetGlobal(ctx)
+		}
 		return DefaultTheme(GlobalBrandID), nil
 	}
 	if len(result.Rows) != 1 || len(result.Rows[0]) != 3 {
@@ -120,6 +129,23 @@ func (s *ThemeStore) Delete(ctx context.Context, clientID string) error {
 // PutAuthorized fences API-key authorization in the same transaction as the write.
 // A nil principal requires the caller's existing browser-admin boundary.
 func (s *ThemeStore) PutAuthorized(ctx context.Context, theme Theme, keys *apikey.Store, principal *apikey.Principal) error {
+	return s.putAuthorized(ctx, theme, keys, principal, false, false)
+}
+
+var ErrThemeConflict = errors.New("theme already exists")
+
+func (s *ThemeStore) PutIfAbsentAuthorized(ctx context.Context, theme Theme, keys *apikey.Store, principal *apikey.Principal) error {
+	return s.putAuthorized(ctx, theme, keys, principal, false, true)
+}
+
+func (s *ThemeStore) PutGlobalAuthorized(ctx context.Context, theme Theme, keys *apikey.Store, principal *apikey.Principal) error {
+	if theme.ClientID != GlobalBrandID {
+		return errors.New("invalid global theme id")
+	}
+	return s.putAuthorized(ctx, theme, keys, principal, true, false)
+}
+
+func (s *ThemeStore) putAuthorized(ctx context.Context, theme Theme, keys *apikey.Store, principal *apikey.Principal, global, ifAbsent bool) error {
 	if keys == nil {
 		return apikey.ErrForbidden
 	}
@@ -135,8 +161,17 @@ func (s *ThemeStore) PutAuthorized(ctx context.Context, theme Theme, keys *apike
 		return err
 	}
 	exists, existsArgs := logoClientExists(theme.ClientID)
-	statement := rhiza.SQLStatement{SQL: `INSERT INTO client_themes(client_id,version,updated_at_unix_ms,document_json) SELECT ?,1,?,? WHERE ` + exists + ` AND ` + apikey.GuardExistsSQL() + ` ON CONFLICT(client_id) DO UPDATE SET version=excluded.version,updated_at_unix_ms=excluded.updated_at_unix_ms,document_json=excluded.document_json`, Args: append([]any{theme.ClientID, s.now().UTC().UnixMilli(), string(data)}, append(existsArgs, id)...)}
-	response, authorized, err := keys.RunMutation(ctx, principal, "Clients", apikey.Update, id, []rhiza.SQLStatement{statement})
+	table := "client_themes"
+	if global {
+		table, exists, existsArgs = "global_brand_themes", "1", nil
+	}
+	if ifAbsent { exists += ` AND NOT EXISTS(SELECT 1 FROM client_themes WHERE client_id=?)`; existsArgs = append(existsArgs, theme.ClientID) }
+	statement := rhiza.SQLStatement{SQL: `INSERT INTO ` + table + `(client_id,version,updated_at_unix_ms,document_json) SELECT ?,1,?,? WHERE ` + exists + ` AND ` + apikey.GuardExistsSQL() + ` ON CONFLICT(client_id) DO UPDATE SET version=excluded.version,updated_at_unix_ms=excluded.updated_at_unix_ms,document_json=excluded.document_json`, Args: append([]any{theme.ClientID, s.now().UTC().UnixMilli(), string(data)}, append(existsArgs, id)...)}
+	statements := []rhiza.SQLStatement{statement}
+	if !global && theme.ClientID == GlobalBrandID {
+		statements = append([]rhiza.SQLStatement{claimEmptyBranding(exists, existsArgs, id)}, statements...)
+	}
+	response, authorized, err := keys.RunMutation(ctx, principal, "Clients", apikey.Update, id, statements)
 	if err != nil {
 		return err
 	}
@@ -144,12 +179,21 @@ func (s *ThemeStore) PutAuthorized(ctx context.Context, theme Theme, keys *apike
 		return apikey.ErrForbidden
 	}
 	if response.RowsAffected < 3 {
+		if ifAbsent { return ErrThemeConflict }
 		return clients.ErrNotFound
 	}
 	return nil
 }
 
 func (s *ThemeStore) DeleteAuthorized(ctx context.Context, clientID string, keys *apikey.Store, principal *apikey.Principal) error {
+	return s.deleteAuthorized(ctx, clientID, keys, principal, false)
+}
+
+func (s *ThemeStore) DeleteGlobalAuthorized(ctx context.Context, keys *apikey.Store, principal *apikey.Principal) error {
+	return s.deleteAuthorized(ctx, GlobalBrandID, keys, principal, true)
+}
+
+func (s *ThemeStore) deleteAuthorized(ctx context.Context, clientID string, keys *apikey.Store, principal *apikey.Principal, global bool) error {
 	if keys == nil {
 		return apikey.ErrForbidden
 	}
@@ -158,7 +202,14 @@ func (s *ThemeStore) DeleteAuthorized(ctx context.Context, clientID string, keys
 		return err
 	}
 	exists, existsArgs := logoClientExists(clientID)
-	statements := []rhiza.SQLStatement{{SQL: `UPDATE api_key_mutation_guards SET request_id=request_id WHERE request_id=? AND ` + exists + ` AND ` + apikey.GuardExistsSQL(), Args: append([]any{id}, append(existsArgs, id)...)}, {SQL: `DELETE FROM client_themes WHERE client_id=? AND ` + exists + ` AND ` + apikey.GuardExistsSQL(), Args: append([]any{clientID}, append(existsArgs, id)...)}}
+	table := "client_themes"
+	if global {
+		table, exists, existsArgs = "global_brand_themes", "1", nil
+	}
+	statements := []rhiza.SQLStatement{{SQL: `UPDATE api_key_mutation_guards SET request_id=request_id WHERE request_id=? AND ` + exists + ` AND ` + apikey.GuardExistsSQL(), Args: append([]any{id}, append(existsArgs, id)...)}, {SQL: `DELETE FROM ` + table + ` WHERE client_id=? AND ` + exists + ` AND ` + apikey.GuardExistsSQL(), Args: append([]any{clientID}, append(existsArgs, id)...)}}
+	if !global && clientID == GlobalBrandID {
+		statements = append([]rhiza.SQLStatement{claimEmptyBranding(exists, existsArgs, id)}, statements...)
+	}
 	response, authorized, err := keys.RunMutation(ctx, principal, "Clients", apikey.Delete, id, statements)
 	if err != nil {
 		return err
@@ -175,11 +226,20 @@ func (s *ThemeStore) DeleteAuthorized(ctx context.Context, clientID string, keys
 // StylesheetURL versions the public CSS URL by the effective stylesheet. This
 // also invalidates built-in defaults when a new binary changes their CSS.
 func (s *ThemeStore) StylesheetURL(ctx context.Context, clientID string) (string, error) {
-	theme, err := s.GetFallback(ctx, clientID)
+	var theme Theme
+	var err error
+	if clientID == "" {
+		theme, err = s.GetGlobal(ctx)
+	} else {
+		theme, err = s.GetFallback(ctx, clientID)
+	}
 	if err != nil {
 		return "", err
 	}
 	digest := sha256.Sum256([]byte(theme.CSS()))
 	version := binary.BigEndian.Uint64(digest[:8]) & ((1 << 63) - 1)
+	if clientID == "" {
+		return "/auth/v1/branding/theme/" + strconv.FormatUint(version, 10), nil
+	}
 	return "/auth/v1/theme/" + url.PathEscape(clientID) + "/" + strconv.FormatUint(version, 10), nil
 }

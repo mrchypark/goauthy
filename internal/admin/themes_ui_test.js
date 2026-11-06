@@ -76,9 +76,10 @@ function harness(messages = {}, language = 'ko') {
     shell(title, subtitle, body, toolbar = '') { root.innerHTML = `${toolbar}${title}\n${subtitle}\n${body}`; for (const match of (toolbar + body).matchAll(/id="([^"]+)"/g)) node(match[1]); },
     api: async (path, opts = {}) => {
       calls.push({path, opts});
+      if (path === '/auth/v1/branding/legacy') return {resolved: true, legacy_theme: !!saved};
       if (opts.method === 'POST') {
         if (failNextPost) { failNextPost = false; throw Error('read unavailable'); }
-        if (path.endsWith('/goauthy')) return clone(saved?.client_id === 'goauthy' ? saved : globalTheme);
+        if (path === '/auth/v1/branding/theme') return clone(saved?.client_id === 'goauthy' ? saved : globalTheme);
         return clone(saved || globalTheme);
       }
       if (opts.method === 'PUT') {
@@ -100,7 +101,7 @@ function harness(messages = {}, language = 'ko') {
   const h = harness(), id = 'client<& /id';
   await h.ctx.clientTheme(id);
   const endpoint = '/auth/v1/theme/' + encodeURIComponent(id);
-  assert.deepEqual(h.calls.slice(0, 2).map(x => [x.path, x.opts.method]), [[endpoint, 'POST'], ['/auth/v1/theme/goauthy', 'POST']]);
+  assert.deepEqual(h.calls.slice(0, 2).map(x => [x.path, x.opts.method]), [[endpoint, 'POST'], ['/auth/v1/branding/theme', 'POST']]);
   assert.match(h.root.innerHTML, /Client login theme/);
   assert.match(h.root.innerHTML, /href="\/auth\/v1\/admin\/clients"/);
   assert.match(h.root.innerHTML, /theme-workspace/);
@@ -230,7 +231,7 @@ function harness(messages = {}, language = 'ko') {
   await h.node('theme-reset').onclick();
   await h.node('theme-reset-confirm').onclick();
   const resetCalls = h.calls.slice(beforeReset);
-  assert.deepEqual(resetCalls.map(x => [x.path, x.opts.method]), [[endpoint, 'DELETE'], [endpoint, 'POST'], ['/auth/v1/theme/goauthy', 'POST']]);
+  assert.deepEqual(resetCalls.map(x => [x.path, x.opts.method]), [[endpoint, 'DELETE'], [endpoint, 'POST'], ['/auth/v1/branding/theme', 'POST']]);
   assert.match(h.node('theme-notice').textContent, /inherits the global theme/i);
   assert.equal(h.outputs.get('text').textContent, '200 5 37');
   assert.equal(h.confirmCount, 0);
@@ -288,8 +289,13 @@ function harness(messages = {}, language = 'ko') {
   await renamed.node('theme-reload').onclick();
   assert.equal(renamed.previewNodes.get('theme-brand-label').textContent, 'GoAuthy');
 
+  const sameNamedClient = harness();
+  await sameNamedClient.ctx.clientTheme('goauthy');
+  assert.match(sameNamedClient.root.innerHTML, /Client login theme/);
+  assert.deepEqual(sameNamedClient.calls.slice(0, 3).map(x => x.path), ['/auth/v1/theme/goauthy', '/auth/v1/branding/legacy', '/auth/v1/branding/theme']);
+
   const common = harness();
-  await common.ctx.clientTheme('goauthy');
+  await common.ctx.clientTheme('goauthy', true);
   assert.match(common.root.innerHTML, /Common brand/);
   assert.match(common.node('theme-fields').innerHTML, /Common brand name/);
   assert.equal(common.node('theme-reset').textContent, 'Reset common theme to defaults');
@@ -303,7 +309,7 @@ function harness(messages = {}, language = 'ko') {
   await common.node('theme-reload').onclick();
   assert.match(common.node('theme-fields').innerHTML, /GoAuthy ID &quot;&lt;operator&gt;&quot;/);
   assert.doesNotMatch(common.node('theme-fields').innerHTML, /"<operator>"/);
-  assert.ok(common.calls.some(call => call.path === '/auth/v1/theme/goauthy' && call.opts.method === 'PUT'));
+  assert.ok(common.calls.some(call => call.path === '/auth/v1/branding/theme' && call.opts.method === 'PUT'));
   await common.node('theme-reset-confirm').onclick();
   assert.equal(common.saved, null);
   assert.equal(common.node('theme-status').textContent, 'Common theme reset to defaults.');
@@ -314,7 +320,7 @@ function harness(messages = {}, language = 'ko') {
   vm.runInNewContext(fs.readFileSync(__dirname + '/module_locale.js', 'utf8'), {globalThis: {GoAuthyI18n: {messages: koreanMessages}}});
   const koreanCommon = harness(koreanMessages);
   koreanCommon.globalTheme.brand_name = 'GoAuthy ID';
-  await koreanCommon.ctx.clientTheme('goauthy');
+  await koreanCommon.ctx.clientTheme('goauthy', true);
   assert.equal(koreanCommon.previewNodes.get('theme-sample-title').textContent, 'Sign in');
   assert.equal(koreanCommon.previewNodes.get('theme-brand-label').textContent, 'GoAuthy ID');
   assert.match(koreanCommon.root.innerHTML, /대시보드로 돌아가기/);
@@ -329,7 +335,7 @@ function harness(messages = {}, language = 'ko') {
 
   for (const adminLanguage of ['ko', 'en']) {
     const localized = harness(koreanMessages, adminLanguage);
-    await localized.ctx.clientTheme('goauthy');
+    await localized.ctx.clientTheme('goauthy', true);
     localized.frame.onload();
     const adminMarkup = localized.root.innerHTML, callsBefore = localized.calls.length;
     const sampleText = () => ['title', 'description', 'button'].map(field => localized.previewNodes.get('theme-sample-' + field).textContent);

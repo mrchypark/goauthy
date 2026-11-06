@@ -26,7 +26,7 @@ func (s *ClientLogoStore) ReplaceFaviconAuthorized(ctx context.Context, clientID
 	if err != nil {
 		return err
 	}
-	exists, existsArgs := logoClientExists(clientID)
+	exists, existsArgs := brandingClientExists(clientID)
 	proofArgs := append([]any{requestID}, existsArgs...)
 	proofArgs = append(proofArgs, requestID)
 	statements := []rhiza.SQLStatement{{
@@ -70,7 +70,7 @@ func (s *ClientLogoStore) DeleteFaviconAuthorized(ctx context.Context, clientID 
 	if err != nil {
 		return err
 	}
-	exists, existsArgs := logoClientExists(clientID)
+	exists, existsArgs := brandingClientExists(clientID)
 	proofArgs := append([]any{requestID}, existsArgs...)
 	proofArgs = append(proofArgs, requestID)
 	statements := []rhiza.SQLStatement{{

@@ -37,6 +37,10 @@ func NewClientLogoStore(db *rhiza.DB) (*ClientLogoStore, error) {
 // Find returns the requested client asset. Nonfavicon requests fall back to
 // the client's SVG asset when the requested raster resolution is absent.
 func (s *ClientLogoStore) Find(ctx context.Context, clientID, resolution string) (StoredLogo, error) {
+	return s.find(ctx, clientID, resolution, false)
+}
+
+func (s *ClientLogoStore) find(ctx context.Context, clientID, resolution string, inspectLegacy bool) (StoredLogo, error) {
 	if s == nil || s.db == nil || !validClientID(clientID) || !validLogoResolution(resolution) {
 		return StoredLogo{}, ErrLogoNotFound
 	}
@@ -45,6 +49,9 @@ func (s *ClientLogoStore) Find(ctx context.Context, clientID, resolution string)
 	if resolution != "favicon" {
 		query = `SELECT res,content_type,data,updated FROM client_logos WHERE client_id=? AND res IN (?, 'svg') ORDER BY CASE WHEN res=? THEN 0 ELSE 1 END LIMIT 1`
 		args = []any{clientID, resolution, resolution}
+	}
+	if clientID == GlobalBrandID && resolution != "favicon" && !inspectLegacy {
+		query = `SELECT res,content_type,data,updated FROM (` + query + `) WHERE EXISTS(SELECT 1 FROM branding_legacy_resolution WHERE singleton=1)`
 	}
 	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: query, Args: args, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil {
@@ -62,10 +69,19 @@ func (s *ClientLogoStore) GetFallback(ctx context.Context, clientID string) (Sto
 	if s == nil || s.db == nil || !validClientID(clientID) {
 		return StoredLogo{}, ErrLogoNotFound
 	}
-	result, err := s.db.Query(ctx, rhiza.QueryRequest{
-		SQL:  `SELECT res,content_type,data,updated FROM client_logos WHERE client_id IN (?, ?) AND res IN ('small', 'svg') ORDER BY CASE WHEN client_id=? THEN 0 ELSE 1 END LIMIT 1`,
-		Args: []any{clientID, GlobalBrandID, clientID}, Consistency: rhiza.ConsistencyLinearizable,
-	})
+	logo, err := s.Find(ctx, clientID, "small")
+	if err == nil || !errors.Is(err, ErrLogoNotFound) {
+		return logo, err
+	}
+	return s.GetGlobal(ctx)
+}
+
+// GetGlobal reads the common logo without consulting client records.
+func (s *ClientLogoStore) GetGlobal(ctx context.Context) (StoredLogo, error) {
+	if s == nil || s.db == nil {
+		return StoredLogo{}, ErrLogoNotFound
+	}
+	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT res,content_type,data,updated FROM global_brand_logos WHERE client_id=? AND res IN ('small','svg') ORDER BY CASE WHEN res='small' THEN 0 ELSE 1 END LIMIT 1`, Args: []any{GlobalBrandID}, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil {
 		return StoredLogo{}, err
 	}
@@ -79,6 +95,14 @@ func (s *ClientLogoStore) GetFallback(ctx context.Context, clientID string) (Sto
 // before atomically replacing all nonfavicon resolutions. Existing favicons
 // are intentionally outside this replacement set.
 func (s *ClientLogoStore) ReplaceAuthorized(ctx context.Context, clientID string, assets []LogoAsset, keys *apikey.Store, principal *apikey.Principal) error {
+	return s.replaceAuthorized(ctx, clientID, assets, keys, principal, false)
+}
+
+func (s *ClientLogoStore) ReplaceGlobalAuthorized(ctx context.Context, assets []LogoAsset, keys *apikey.Store, principal *apikey.Principal) error {
+	return s.replaceAuthorized(ctx, GlobalBrandID, assets, keys, principal, true)
+}
+
+func (s *ClientLogoStore) replaceAuthorized(ctx context.Context, clientID string, assets []LogoAsset, keys *apikey.Store, principal *apikey.Principal, global bool) error {
 	if s == nil || s.db == nil || !validClientID(clientID) {
 		return ErrInvalidLogo
 	}
@@ -94,19 +118,26 @@ func (s *ClientLogoStore) ReplaceAuthorized(ctx context.Context, clientID string
 		return err
 	}
 	exists, existsArgs := logoClientExists(clientID)
+	table := "client_logos"
+	if global {
+		table, exists, existsArgs = "global_brand_logos", "1", nil
+	}
 	proofArgs := append([]any{requestID}, existsArgs...)
 	proofArgs = append(proofArgs, requestID)
 	statements := []rhiza.SQLStatement{{
 		SQL:  `UPDATE api_key_mutation_guards SET request_id=request_id WHERE request_id=? AND ` + exists + ` AND ` + apikey.GuardExistsSQL(),
 		Args: proofArgs,
 	}, {
-		SQL:  `DELETE FROM client_logos WHERE client_id=? AND res!='favicon' AND ` + exists + ` AND ` + apikey.GuardExistsSQL(),
+		SQL:  `DELETE FROM ` + table + ` WHERE client_id=? AND res!='favicon' AND ` + exists + ` AND ` + apikey.GuardExistsSQL(),
 		Args: append([]any{clientID}, append(existsArgs, requestID)...),
 	}}
+	if !global && clientID == GlobalBrandID {
+		statements = append([]rhiza.SQLStatement{claimEmptyBranding(exists, existsArgs, requestID)}, statements...)
+	}
 	updated := s.now().UTC().UnixMilli()
 	for _, asset := range validated {
 		statements = append(statements, rhiza.SQLStatement{
-			SQL:  `INSERT INTO client_logos(client_id,res,content_type,data,updated) SELECT ?,?,?,?,? WHERE ` + exists + ` AND ` + apikey.GuardExistsSQL(),
+			SQL:  `INSERT INTO ` + table + `(client_id,res,content_type,data,updated) SELECT ?,?,?,?,? WHERE ` + exists + ` AND ` + apikey.GuardExistsSQL(),
 			Args: append([]any{clientID, asset.Resolution, asset.ContentType, append([]byte(nil), asset.Data...), updated}, append(existsArgs, requestID)...),
 		})
 	}
@@ -126,6 +157,14 @@ func (s *ClientLogoStore) ReplaceAuthorized(ctx context.Context, clientID string
 // DeleteAuthorized removes all nonfavicon resolutions while preserving the
 // independently managed favicon.
 func (s *ClientLogoStore) DeleteAuthorized(ctx context.Context, clientID string, keys *apikey.Store, principal *apikey.Principal) error {
+	return s.deleteAuthorized(ctx, clientID, keys, principal, false)
+}
+
+func (s *ClientLogoStore) DeleteGlobalAuthorized(ctx context.Context, keys *apikey.Store, principal *apikey.Principal) error {
+	return s.deleteAuthorized(ctx, GlobalBrandID, keys, principal, true)
+}
+
+func (s *ClientLogoStore) deleteAuthorized(ctx context.Context, clientID string, keys *apikey.Store, principal *apikey.Principal, global bool) error {
 	if s == nil || s.db == nil || !validClientID(clientID) {
 		return ErrLogoNotFound
 	}
@@ -137,15 +176,22 @@ func (s *ClientLogoStore) DeleteAuthorized(ctx context.Context, clientID string,
 		return err
 	}
 	exists, existsArgs := logoClientExists(clientID)
+	table := "client_logos"
+	if global {
+		table, exists, existsArgs = "global_brand_logos", "1", nil
+	}
 	proofArgs := append([]any{requestID}, existsArgs...)
 	proofArgs = append(proofArgs, requestID)
 	statements := []rhiza.SQLStatement{{
 		SQL:  `UPDATE api_key_mutation_guards SET request_id=request_id WHERE request_id=? AND ` + exists + ` AND ` + apikey.GuardExistsSQL(),
 		Args: proofArgs,
 	}, {
-		SQL:  `DELETE FROM client_logos WHERE client_id=? AND res!='favicon' AND ` + exists + ` AND ` + apikey.GuardExistsSQL(),
+		SQL:  `DELETE FROM ` + table + ` WHERE client_id=? AND res!='favicon' AND ` + exists + ` AND ` + apikey.GuardExistsSQL(),
 		Args: append([]any{clientID}, append(existsArgs, requestID)...),
 	}}
+	if !global && clientID == GlobalBrandID {
+		statements = append([]rhiza.SQLStatement{claimEmptyBranding(exists, existsArgs, requestID)}, statements...)
+	}
 	response, authorized, err := keys.RunMutation(ctx, principal, "Clients", apikey.Update, requestID, statements)
 	if err != nil {
 		return err
@@ -225,9 +271,17 @@ func validLogoResolution(value string) bool {
 }
 
 func logoClientExists(clientID string) (string, []any) {
-	// The canonical global brand is a namespace, not a special OAuth client.
+	exists, args := brandingClientExists(clientID)
 	if clientID == GlobalBrandID {
-		return "1", nil
+		exists += ` AND (EXISTS(SELECT 1 FROM branding_legacy_resolution WHERE singleton=1) OR (NOT EXISTS(SELECT 1 FROM client_themes WHERE client_id='goauthy') AND NOT EXISTS(SELECT 1 FROM client_logos WHERE client_id='goauthy' AND res!='favicon')))`
 	}
+	return exists, args
+}
+
+func brandingClientExists(clientID string) (string, []any) {
 	return `(EXISTS(SELECT 1 FROM managed_oauth_clients WHERE id=? AND deleted=0) OR EXISTS(SELECT 1 FROM managed_oauth_client_bootstrap WHERE id=?) OR EXISTS(SELECT 1 FROM dynamic_oauth_clients WHERE client_id=?))`, []any{clientID, clientID, clientID}
+}
+
+func claimEmptyBranding(exists string, args []any, requestID string) rhiza.SQLStatement {
+	return rhiza.SQLStatement{SQL: `INSERT OR IGNORE INTO branding_legacy_resolution(singleton) SELECT 1 WHERE ` + exists + ` AND ` + apikey.GuardExistsSQL(), Args: append(append([]any{}, args...), requestID)}
 }

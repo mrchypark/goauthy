@@ -13,6 +13,7 @@ import (
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 	"github.com/mrchypark/goauthy/internal/branding"
+	sharedUI "github.com/mrchypark/goauthy/internal/ui"
 )
 
 func TestElysduiDynamicAdminInBrowser(t *testing.T) {
@@ -28,6 +29,9 @@ func TestElysduiDynamicAdminInBrowser(t *testing.T) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
+	if err := sharedUI.BindAssets(mux); err != nil {
+		t.Fatal(err)
+	}
 	mux.Handle("/auth/v1/admin/", ui)
 	mux.Handle("/auth/v1/branding/{name}", branding.BrandAssetHandler())
 	mux.HandleFunc("/auth/v1/admin/csrf", func(w http.ResponseWriter, _ *http.Request) {
@@ -53,7 +57,11 @@ func TestElysduiDynamicAdminInBrowser(t *testing.T) {
 		mux.ServeHTTP(w, r)
 	}))
 	defer missingLocale.Close()
-	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(chrome), chromedp.Flag("headless", true))...)
+	options := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(chrome), chromedp.Headless)
+	if os.Getenv("CI") == "true" {
+		options = append(options, chromedp.NoSandbox)
+	}
+	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), options...)
 	defer cancelAlloc()
 	ctx, cancel := chromedp.NewContext(alloc)
 	defer cancel()

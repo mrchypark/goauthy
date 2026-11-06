@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	nativewebp "github.com/HugoSmits86/nativewebp"
-	"github.com/mrchypark/goauthy/internal/branding"
 )
 
 const clientLogoCacheControl = "max-age=31104000, stale-while-revalidate=2592000, public"
@@ -40,7 +39,7 @@ func TestClientLogoLive(t *testing.T) {
 
 	global := make(map[string]clientLogoHTTPResponse, len(nodes))
 	for _, node := range nodes {
-		global[node] = readClientLogo(t, newBrowserClient(t), node, branding.GlobalBrandID, "")
+		global[node] = readClientLogo(t, newBrowserClient(t), node, "", "")
 		if global[node].Status != http.StatusOK && global[node].Status != http.StatusNotFound {
 			t.Fatalf("global logo node=%s status=%d", node, global[node].Status)
 		}
@@ -104,7 +103,7 @@ func TestClientLogoLive(t *testing.T) {
 	}
 	for _, node := range nodes {
 		assertClientLogoResponseEqual(t, readClientLogo(t, newBrowserClient(t), node, managed.ID, ""), global[node], node+" post-delete fallback")
-		assertClientLogoResponseEqual(t, readClientLogo(t, newBrowserClient(t), node, branding.GlobalBrandID, ""), global[node], node+" global logo changed")
+		assertClientLogoResponseEqual(t, readClientLogo(t, newBrowserClient(t), node, "", ""), global[node], node+" global logo changed")
 	}
 }
 
@@ -118,6 +117,9 @@ type clientLogoHTTPResponse struct {
 
 func clientLogoURL(base, clientID, query string) string {
 	endpoint := base + "/auth/v1/clients/" + url.PathEscape(clientID) + "/logo"
+	if clientID == "" {
+		endpoint = base + "/auth/v1/branding/logo"
+	}
 	if query != "" {
 		endpoint += "?" + query
 	}

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/dcr"
 	"github.com/mrchypark/goauthy/internal/identity"
@@ -379,17 +378,16 @@ func TestProfileRevalidationConcurrentProfileMutationDeniesCode(t *testing.T) {
 	}
 }
 
-func TestProfileRevalidationCanonicalClientExempt(t *testing.T) {
+func TestProfileRevalidationGoauthyClient(t *testing.T) {
 	t.Parallel()
 	db := oauthTestDB(t)
 	server := oauthTestServer(t, db, randomSecret(t))
 	identityStore := profileRevalidationIdentityStore(t, db)
 	seedOAuthUser(t, db, "user-1")
 
-	const clientID = branding.GlobalBrandID
+	const clientID = "goauthy"
 	const redirectURI = "https://goauthy.example.test/callback"
-	// Seed the privileged special client directly; production anonymous DCR
-	// reservation is covered separately in the server wiring test.
+	// Simulate a registration created before the ID was reserved.
 	server.store.dynamicClients = dcr.NewStore(db, dcr.Config{})
 	_, err := server.store.dynamicClients.Create(context.Background(), dcr.CreateRequest{
 		ClientID:                clientID,
@@ -428,8 +426,39 @@ func TestProfileRevalidationCanonicalClientExempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if location.Query().Get("code") == "" {
-		t.Fatalf("canonical client must bypass profile gate, got error=%q", location.Query().Get("error"))
+	if location.Query().Get("code") != "" || location.Query().Get("error") != "interaction_required" {
+		t.Fatalf("goauthy client must require profile update: %s", location.String())
+	}
+	assertNoAuthorizationState(t, db)
+
+	seedUserProfile(t, db, "user-1", "user-1@example.test", "user1", "Given", "Family", `{}`)
+	hookCalled := false
+	server.beforeAuthorizationIssue = func() {
+		hookCalled = true
+		server.beforeAuthorizationIssue = nil
+		if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{
+			RequestID: "goauthy-profile-race",
+			SQL:       `UPDATE identity_user_profiles SET given_name=NULL WHERE subject='user-1'`,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response = httptest.NewRecorder()
+	server.WriteAuthorization(response, httptest.NewRequest(http.MethodGet, "/oidc/authorize?"+values.Encode(), nil), "user-1", []string{"goauthy.read"})
+	location, err = url.Parse(response.Header().Get("Location"))
+	if err != nil || !hookCalled || location.Query().Get("code") != "" {
+		t.Fatalf("concurrent profile change: location=%v hook=%v err=%v", location, hookCalled, err)
+	}
+	assertNoAuthorizationState(t, db)
+
+	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "goauthy-profile-restore", SQL: `UPDATE identity_user_profiles SET given_name='Given' WHERE subject='user-1'`}); err != nil {
+		t.Fatal(err)
+	}
+	response = httptest.NewRecorder()
+	server.WriteAuthorization(response, httptest.NewRequest(http.MethodGet, "/oidc/authorize?"+values.Encode(), nil), "user-1", []string{"goauthy.read"})
+	location, err = url.Parse(response.Header().Get("Location"))
+	if err != nil || location.Query().Get("code") == "" {
+		t.Fatalf("valid profile must allow authorization: location=%v err=%v", location, err)
 	}
 }
 

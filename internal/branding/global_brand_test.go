@@ -12,8 +12,28 @@ import (
 
 	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/clients"
+	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
+
+func TestGlobalWritesRejectExistingGoauthyBootstrap(t *testing.T) {
+	ctx, db := clientFaviconDB(t)
+	themes, _ := NewThemeStore(db)
+	logos, _ := NewClientLogoStore(db)
+	keys, _ := apikey.NewStore(db)
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "ambiguous-global-bootstrap", SQL: `INSERT INTO managed_oauth_client_bootstrap(singleton,id) VALUES(1,'goauthy')`}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "ambiguous-global-theme", SQL: `INSERT INTO client_themes VALUES('goauthy',1,1,'{}')`}); err != nil {
+		t.Fatal(err)
+	}
+	asset := LogoAsset{Resolution: "svg", ContentType: "image/svg+xml", Data: []byte("<svg/>")}
+	for _, err := range []error{themes.PutAuthorized(ctx, DefaultTheme(GlobalBrandID), keys, nil), themes.DeleteAuthorized(ctx, GlobalBrandID, keys, nil), logos.ReplaceAuthorized(ctx, GlobalBrandID, []LogoAsset{asset}, keys, nil), logos.DeleteAuthorized(ctx, GlobalBrandID, keys, nil)} {
+		if !errors.Is(err, clients.ErrNotFound) {
+			t.Fatalf("ambiguous write: %v", err)
+		}
+	}
+}
 
 func TestGlobalBrandThemeAuthorizedWithoutOAuthClient(t *testing.T) {
 	ctx, db := clientFaviconDB(t)
@@ -38,7 +58,12 @@ func TestGlobalBrandThemeAuthorizedWithoutOAuthClient(t *testing.T) {
 		theme.ClientID = tc.id
 		body, _ = json.Marshal(theme)
 		w := httptest.NewRecorder()
-		handler.Theme(w, themeRequest(http.MethodPut, "/auth/v1/theme/"+tc.id, bytes.NewReader(body), tc.id, ""))
+		req := themeRequest(http.MethodPut, "/auth/v1/theme/"+tc.id, bytes.NewReader(body), tc.id, "")
+		if tc.id == GlobalBrandID {
+			handler.GlobalTheme(w, req)
+		} else {
+			handler.Theme(w, req)
+		}
 		if w.Code != tc.want {
 			t.Fatalf("allowed=%v id=%s status=%d body=%s", allowed, tc.id, w.Code, w.Body.String())
 		}
@@ -55,10 +80,15 @@ func TestGlobalBrandThemeAuthorizedWithoutOAuthClient(t *testing.T) {
 			allowed bool
 			id      string
 			want    int
-			}{{false, GlobalBrandID, 403}, {true, "missing", 404}, {true, GlobalBrandID, 200}} {
+		}{{false, GlobalBrandID, 403}, {true, "missing", 404}, {true, GlobalBrandID, 200}} {
 			allowed = tc.allowed
 			w := httptest.NewRecorder()
-			handler.Theme(w, themeRequest(method, "/auth/v1/theme/"+tc.id, nil, tc.id, ""))
+			req := themeRequest(method, "/auth/v1/theme/"+tc.id, nil, tc.id, "")
+			if tc.id == GlobalBrandID {
+				handler.GlobalTheme(w, req)
+			} else {
+				handler.Theme(w, req)
+			}
 			if w.Code != tc.want {
 				t.Fatalf("method=%s allowed=%v id=%s status=%d", method, allowed, tc.id, w.Code)
 			}
@@ -82,11 +112,11 @@ func TestGlobalBrandRuntimeInheritanceAndOverrides(t *testing.T) {
 	global.BrandName = `GoAuthy ID "<operator>"`
 	global.Light.Action = []uint16{150, 50, 40}
 	global.Login = &LoginAppearance{Copy: map[string]LoginCopy{"en": {Title: "One account"}}}
-	if err := store.PutAuthorized(ctx, global, keys, nil); err != nil {
+	if err := store.PutGlobalAuthorized(ctx, global, keys, nil); err != nil {
 		t.Fatal(err)
 	}
 	asset := LogoAsset{Resolution: "small", ContentType: "image/webp", Data: []byte("global")}
-	if err := logos.ReplaceAuthorized(ctx, GlobalBrandID, []LogoAsset{asset}, keys, nil); err != nil {
+	if err := logos.ReplaceGlobalAuthorized(ctx, []LogoAsset{asset}, keys, nil); err != nil {
 		t.Fatal(err)
 	}
 	second, _ := NewThemeStore(db)
@@ -127,7 +157,7 @@ func TestGlobalBrandRuntimeInheritanceAndOverrides(t *testing.T) {
 	if got.Login.CopyFor("en").Title != "One account" || string(logo.Data) != "global" {
 		t.Fatal("deleting overrides did not restore inheritance")
 	}
-	if err := store.DeleteAuthorized(ctx, GlobalBrandID, keys, nil); err != nil {
+	if err := store.DeleteGlobalAuthorized(ctx, keys, nil); err != nil {
 		t.Fatal(err)
 	}
 	brand, _ = second.Brand(ctx, logos, GlobalBrandID)
@@ -157,23 +187,23 @@ func TestGlobalBrandRevokedAPIKeyCannotMutate(t *testing.T) {
 	theme := DefaultTheme(GlobalBrandID)
 	theme.BrandName = "Original"
 	asset := LogoAsset{Resolution: "small", ContentType: "image/webp", Data: []byte("original")}
-	if err := store.PutAuthorized(ctx, theme, keys, principal); err != nil {
+	if err := store.PutGlobalAuthorized(ctx, theme, keys, principal); err != nil {
 		t.Fatal(err)
 	}
-	if err := logos.ReplaceAuthorized(ctx, GlobalBrandID, []LogoAsset{asset}, keys, principal); err != nil {
+	if err := logos.ReplaceGlobalAuthorized(ctx, []LogoAsset{asset}, keys, principal); err != nil {
 		t.Fatal(err)
 	}
 	if err := keys.Delete(ctx, nil, principal.Name); err != nil {
 		t.Fatal(err)
 	}
 	theme.BrandName = "Denied"
-	for _, err := range []error{store.PutAuthorized(ctx, theme, keys, principal), store.DeleteAuthorized(ctx, GlobalBrandID, keys, principal), logos.ReplaceAuthorized(ctx, GlobalBrandID, []LogoAsset{asset}, keys, principal), logos.DeleteAuthorized(ctx, GlobalBrandID, keys, principal)} {
+	for _, err := range []error{store.PutGlobalAuthorized(ctx, theme, keys, principal), store.DeleteGlobalAuthorized(ctx, keys, principal), logos.ReplaceGlobalAuthorized(ctx, []LogoAsset{asset}, keys, principal), logos.DeleteGlobalAuthorized(ctx, keys, principal)} {
 		if !errors.Is(err, apikey.ErrForbidden) {
 			t.Fatalf("revoked global mutation=%v", err)
 		}
 	}
-	got, _ := store.GetDefault(ctx, GlobalBrandID)
-	logo, _ := logos.GetFallback(ctx, GlobalBrandID)
+	got, _ := store.GetGlobal(ctx)
+	logo, _ := logos.GetGlobal(ctx)
 	if got.BrandName != "Original" || string(logo.Data) != "original" {
 		t.Fatal("revoked global mutation changed durable brand")
 	}
@@ -200,7 +230,7 @@ func TestGlobalBrandLogoMutationWithoutOAuthClient(t *testing.T) {
 	store, _ := NewClientLogoStore(db)
 	keys, _ := apikey.NewStore(db)
 	asset := LogoAsset{Resolution: "svg", ContentType: "image/svg+xml", Data: []byte(`<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h10v10H0z"/></svg>`)}
-	if err := store.ReplaceAuthorized(ctx, GlobalBrandID, []LogoAsset{asset}, keys, nil); err != nil {
+	if err := store.ReplaceGlobalAuthorized(ctx, []LogoAsset{asset}, keys, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.ReplaceAuthorized(ctx, "missing", []LogoAsset{asset}, keys, nil); !errors.Is(err, clients.ErrNotFound) {
@@ -210,7 +240,7 @@ func TestGlobalBrandLogoMutationWithoutOAuthClient(t *testing.T) {
 	if err != nil || !bytes.Equal(logo.Data, asset.Data) {
 		t.Fatalf("global logo=%+v %v", logo, err)
 	}
-	if err := store.DeleteAuthorized(ctx, GlobalBrandID, keys, nil); err != nil {
+	if err := store.DeleteGlobalAuthorized(ctx, keys, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.GetFallback(ctx, "app-b"); !errors.Is(err, ErrLogoNotFound) {

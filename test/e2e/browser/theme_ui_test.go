@@ -171,7 +171,11 @@ func putThemeUI(t *testing.T, admin *http.Client, primary string, headers map[st
 	}
 	putHeaders := cloneThemeHeaders(headers)
 	putHeaders["Content-Type"] = "application/json"
-	response := do(t, admin, http.MethodPut, primary+"/auth/v1/theme/"+url.PathEscape(clientID), bytes.NewReader(body), putHeaders)
+	endpoint := primary + "/auth/v1/theme/" + url.PathEscape(clientID)
+	if clientID == "" {
+		endpoint = primary + "/auth/v1/branding/theme"
+	}
+	response := do(t, admin, http.MethodPut, endpoint, bytes.NewReader(body), putHeaders)
 	response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("theme UI PUT status=%d", response.StatusCode)

@@ -51,11 +51,11 @@ func TestElyBrandingBrowser(t *testing.T) {
 	mux.Handle("GET /auth/v1/theme/global.css", branding.GlobalCSSHandler())
 	mux.Handle("GET /auth/v1/admin/", console)
 	// This existing POST endpoint reads theme data; fixture mutations are rejected.
-	mux.HandleFunc("POST /auth/v1/theme/goauthy", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /auth/v1/branding/theme", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(theme)
 	})
-	mux.Handle("GET /auth/v1/clients/goauthy/logo", branding.DefaultFaviconHandler())
+	mux.Handle("GET /auth/v1/branding/logo", branding.DefaultFaviconHandler())
 	mux.Handle("GET /favicon.ico", branding.DefaultFaviconHandler())
 	root := http.NewServeMux()
 	root.Handle("/tenant/", http.StripPrefix("/tenant", mux))

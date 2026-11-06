@@ -1,20 +1,13 @@
 package identity
 
-import (
-	"context"
-
-	"github.com/mrchypark/goauthy/internal/branding"
-)
+import "context"
 
 // NeedsProfileUpdate reports whether the stored profile for subject fails
 // the current deployment validation policy. A false result with a nil error
 // means the profile is valid or revalidation is not enabled. Read errors
 // and invalid deployment policies propagate as errors.
-func (s *Store) NeedsProfileUpdate(ctx context.Context, policy UserValuesPolicy, subject, clientID string) (bool, error) {
+func (s *Store) NeedsProfileUpdate(ctx context.Context, policy UserValuesPolicy, subject, _ string) (bool, error) {
 	if !policy.RevalidateDuringLogin {
-		return false, nil
-	}
-	if clientID == branding.GlobalBrandID {
 		return false, nil
 	}
 	if err := policy.Validate(); err != nil {

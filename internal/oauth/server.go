@@ -1370,7 +1370,7 @@ func (s *Server) completeAuthorization(w http.ResponseWriter, r *http.Request, s
 	// Capture the raw identity_user_profiles snapshot BEFORE ResolveProfile
 	// and NeedsProfileUpdate. The snapshot fences the code commit so a
 	// concurrent profile mutation cannot issue a code on a stale profile.
-	if s.needsProfileUpdate != nil && s.userValuesPolicy.RevalidateDuringLogin && authorizeRequest.GetClient().GetID() != branding.GlobalBrandID {
+	if s.needsProfileUpdate != nil && s.userValuesPolicy.RevalidateDuringLogin {
 		profileSnap, snapErr := s.store.captureProfileSnapshot(issueContext, subject)
 		if snapErr != nil {
 			s.provider.WriteAuthorizeError(r.Context(), w, authorizeRequest, fosite.ErrServerError)

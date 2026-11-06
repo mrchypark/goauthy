@@ -193,7 +193,11 @@ func cloneThemeHeaders(headers map[string]string) map[string]string {
 
 func readThemeJSON(t *testing.T, client *http.Client, node, clientID string, headers map[string]string) branding.Theme {
 	t.Helper()
-	response := do(t, client, http.MethodPost, node+"/auth/v1/theme/"+url.PathEscape(clientID), nil, headers)
+	endpoint := node + "/auth/v1/theme/" + url.PathEscape(clientID)
+	if clientID == "" {
+		endpoint = node + "/auth/v1/branding/theme"
+	}
+	response := do(t, client, http.MethodPost, endpoint, nil, headers)
 	defer response.Body.Close()
 	var theme branding.Theme
 	err := json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&theme)
