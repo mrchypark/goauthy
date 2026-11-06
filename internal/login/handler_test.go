@@ -1575,6 +1575,11 @@ func testHandlerWithManagedClients(t *testing.T, forceMFA bool) (*Handler, *rhiz
 }
 
 func testHandlerWithDBAndManaged(t testing.TB, forceMFA, managed bool) (*Handler, *rhiza.DB) {
+	h, db, _ := testHandlerWithDBAndManagedDirectory(t, forceMFA, managed)
+	return h, db
+}
+
+func testHandlerWithDBAndManagedDirectory(t testing.TB, forceMFA, managed bool) (*Handler, *rhiza.DB, string) {
 	t.Helper()
 	ctx := context.Background()
 	directory := t.TempDir()
@@ -1651,7 +1656,7 @@ func testHandlerWithDBAndManaged(t testing.TB, forceMFA, managed bool) (*Handler
 	// Existing login behavior tests exercise policy state but do not sleep.
 	h.wait = func(context.Context, time.Duration) error { return nil }
 	h.deadline = func(http.ResponseWriter, time.Time) error { return nil }
-	return h, db
+	return h, db, directory
 }
 
 func testOIDCKeyring(t testing.TB) *oidc.Keyring {

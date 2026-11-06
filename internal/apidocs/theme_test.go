@@ -81,3 +81,106 @@ func TestElysduiStylesheetIsPublicCSS(t *testing.T) {
 		t.Fatal("missing CSS response")
 	}
 }
+
+func TestCommonBrandingAndLegacyContracts(t *testing.T) {
+	data, err := Document("https://id.example.test", Features{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := openapi3.NewLoader().LoadFromData(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, route := range []struct {
+		method, path string
+		public       bool
+		status       int
+	}{
+		{"GET", "/auth/v1/branding/theme/{timestamp}", true, 200},
+		{"POST", "/auth/v1/branding/theme", false, 200},
+		{"PUT", "/auth/v1/branding/theme", false, 200},
+		{"DELETE", "/auth/v1/branding/theme", false, 200},
+		{"GET", "/auth/v1/branding/logo", true, 200},
+		{"PUT", "/auth/v1/branding/logo", false, 200},
+		{"DELETE", "/auth/v1/branding/logo", false, 200},
+		{"GET", "/auth/v1/branding/legacy", false, 200},
+		{"GET", "/auth/v1/branding/legacy/theme", false, 200},
+		{"GET", "/auth/v1/branding/legacy/logo", false, 200},
+		{"POST", "/auth/v1/branding/legacy/resolve", false, 204},
+	} {
+		item := doc.Paths.Value(route.path)
+		if item == nil {
+			t.Fatalf("missing %s", route.path)
+		}
+		op := item.GetOperation(route.method)
+		if op == nil || op.Responses.Status(route.status) == nil {
+			t.Fatalf("missing operation/status: %+v", route)
+		}
+		secured := op.Security != nil && len(*op.Security) > 0
+		if secured == route.public {
+			t.Fatalf("wrong security: %+v", route)
+		}
+	}
+	resolve := doc.Paths.Value("/auth/v1/branding/legacy/resolve").Post
+	if resolve.Responses.Status(200) != nil || resolve.Responses.Status(503) == nil {
+		t.Fatal("resolution must have empty 204 and atomic-failure 503")
+	}
+	schema := resolve.RequestBody.Value.Content.Get("application/json").Schema.Value
+	valid := map[string]any{"confirm_client_ownership": true, "copy_theme": false, "copy_logo": false}
+	if err := schema.VisitJSON(valid); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"confirm_client_ownership", "copy_theme", "copy_logo"} {
+		missing := map[string]any{"confirm_client_ownership": true, "copy_theme": false, "copy_logo": false}
+		delete(missing, field)
+		if schema.VisitJSON(missing) == nil {
+			t.Fatalf("missing %s accepted", field)
+		}
+		missing[field] = nil
+		if schema.VisitJSON(missing) == nil {
+			t.Fatalf("null %s accepted", field)
+		}
+	}
+	valid["confirm_client_ownership"] = false
+	if schema.VisitJSON(valid) == nil {
+		t.Fatal("unconfirmed ownership accepted")
+	}
+	theme := branding.DefaultTheme(branding.GlobalBrandID)
+	theme.Login = &branding.LoginAppearance{Copy: map[string]branding.LoginCopy{"en": {Title: "Synthetic title"}}, LogoAlignment: "center", CardWidth: 400}
+	raw, err := json.Marshal(theme)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	themeSchema := doc.Paths.Value("/auth/v1/branding/theme").Put.RequestBody.Value.Content.Get("application/json").Schema.Value
+	if err := themeSchema.VisitJSON(payload); err != nil {
+		t.Fatalf("actual theme DTO rejected: %v", err)
+	}
+	payload.(map[string]any)["client_id"] = "another-client"
+	if themeSchema.VisitJSON(payload) == nil {
+		t.Fatal("common theme accepted another client ID")
+	}
+	for _, path := range []string{"/auth/v1/branding/legacy", "/auth/v1/branding/legacy/theme", "/auth/v1/branding/legacy/logo"} {
+		if doc.Paths.Value(path).Get.Responses.Status(200).Value.Headers["Cache-Control"] == nil {
+			t.Fatalf("missing no-store header: %s", path)
+		}
+	}
+	legacyLogo := doc.Paths.Value("/auth/v1/branding/legacy/logo").Get
+	browserCSRF, key := false, false
+	for _, requirement := range *legacyLogo.Security {
+		_, browser := requirement["browserSession"]
+		_, csrf := requirement["csrfToken"]
+		_, apiKey := requirement["apiKey"]
+		browserCSRF = browserCSRF || browser && csrf
+		key = key || apiKey
+	}
+	if !browserCSRF || !key {
+		t.Fatal("legacy logo inspection needs CSRF for browser or API key")
+	}
+	if doc.Paths.Value("/auth/v1/branding/logo").Put.RequestBody.Value.Content.Get("multipart/form-data") == nil {
+		t.Fatal("common logo upload missing multipart schema")
+	}
+}
