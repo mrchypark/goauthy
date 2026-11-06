@@ -14,6 +14,47 @@ permissions:
   contents: read
 
 jobs:
+  storage-compatibility:
+    name: Storage SDK providers & Local upgrade
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        name: Checkout
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        name: Setup Go
+        with:
+          go-version-file: go.mod
+
+      - name: Check storage fixture shell syntax
+        run: |
+          sh -n scripts/test-object-store-contract.sh
+          sh -n scripts/test-rhiza-local-upgrade.sh
+
+      # Actual SDK adapters and archive recovery on all three providers.
+      # Azure is a generic SDK contract, not GoAuthy runtime provider support.
+      - name: Prepare compiler process supervisor
+        timeout-minutes: 5
+        run: sh scripts/e2e-stage-supervisor.sh --prepare
+
+      - name: Isolated S3 GCS Azure SDK contracts
+        timeout-minutes: 55
+        run: sh scripts/test-object-store-contract.sh
+
+      # Synthetic filesystem archive proof; does not qualify app init on clouds.
+      - name: Local archive v0.21.2 to v0.23.0 compatibility
+        timeout-minutes: 20
+        run: sh scripts/test-rhiza-local-upgrade.sh
+
+      - name: Upload SDK contract receipts
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: storage-sdk-contracts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/goauthy-object-contract-logs.*
+          if-no-files-found: warn
+
   browser-login-journey:
     name: Browser login journey
     runs-on: ubuntu-latest

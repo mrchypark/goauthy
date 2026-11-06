@@ -10,7 +10,14 @@ automatic migration path. In Kubernetes, each uses a disposable `DataDir`
 are separate recovery inputs. A local-directory copy is not the default DR
 mechanism.
 
-GoAuthy's current integration candidate is Rhiza v0.21.2 at source
+GoAuthy's current integration candidate is Rhiza v0.23.0 at source
+[`f050d6e30f57718736c8c4fdb5edef777183bc05`](https://github.com/mrchypark/rhiza/commit/f050d6e30f57718736c8c4fdb5edef777183bc05),
+requiring Go 1.27.3 or newer. This integration targets single-node Local recovery,
+without an operator. It does not qualify managed HA or change the legacy profile
+defaults. The [tagged application-owned init guide](https://github.com/mrchypark/rhiza/blob/v0.23.0/docs/local-init-container-recovery.md)
+retains the shared-DataDir `Open`/`Close` contract below.
+
+The earlier Rhiza v0.21.2 integration used source
 [`8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd`](https://github.com/mrchypark/rhiza/commit/8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd),
 requiring Go 1.27.3 or newer. Its Local maintenance-release fix reconciles an
 upload error only when stable remote readback proves the exact expected free
@@ -86,7 +93,55 @@ retained snapshots. Existing `Local: false` profiles keep periodic GC disabled.
 The v0.21.0 Local archive format has no automatic migration from older formats
 and does not convert a three-voter HA installation into Local mode.
 
-## Current v0.21.2 qualification and release gates
+## Current v0.23.0 integration
+
+The public Go SDK zip resolves to source
+`f050d6e30f57718736c8c4fdb5edef777183bc05`, with module checksum
+`h1:RFLhLytoi2Q84MD4WkA9Z8T7wvUp7LPj4nxIMFBSaNw=` and go.mod checksum
+`h1:Cmof+NGVUgCu4+HTenSu2h5SKW88w5KxBV1S9eJNevM=`.
+GoAuthy consumes this Go SDK and builds its own init binary; Rust archives and
+operator images are not required.
+
+Reproduce the focused filesystem-backed application and init contracts:
+
+```sh
+go test -mod=readonly -p 1 ./internal/storage ./cmd/goauthy-rhiza-init -run 'TestStandaloneLocal|TestRestoreInit' -count=1 -timeout=5m
+go test -mod=readonly -race -p 1 ./internal/storage ./cmd/goauthy-rhiza-init ./cmd/goauthy -run 'TestStandaloneLocal|TestRestoreInit' -count=1 -timeout=5m
+scripts/test-rhiza-local-upgrade.sh
+scripts/test-rhiza-local-upgrade.sh --race
+```
+
+The upgrade script builds GoAuthy's existing synthetic init tests with a
+v0.21.2 producer and the v0.23.0 SDK consumer, checking their build metadata.
+It separately exercises retained-directory upgrade and complete DataDir loss,
+a nonempty snapshot plus an acknowledged tail without producer Close, unchanged
+binding, original receipt replay without duplicate rows, a new write and a
+second total-loss recovery. Each consumer phase runs init Open/Close before
+main with the same configuration. Original archive/binding copies remain
+unopened and hash-checked. Negative node/prefix opens must refuse without
+changing archive or data bytes, except the documented process PID lock file.
+Only disposable filesystem archives are used; no existing data path is accepted.
+The producer also stores a synthetic blob sealed by GoAuthy's keyring. Consumer
+retained, cold and second-recovery phases verify its decrypted bytes without
+logging them. The disposable key directory stays outside DataDir and the archive:
+preserving master keys remains a separate recovery requirement. The launcher
+records fixture source hashes, both SDK build versions, original archive manifest
+and binding hashes, the synthetic ACK receipt and negative-control hashes.
+Every phase requires the exact named test to execute with no skips and a PASS
+receipt. The abrupt writer instead requires its explicit completion marker before
+process exit, preserving the no-Close simulation. These are SDK and actual init
+entrypoint-logic tests, not a packaged main HTTP or end-user login journey.
+
+Focused application/init tests passed normally and with the race detector.
+The cross-version oracle passed normally and with the race detector. Three-provider SDK execution and
+packaged S3/GCS application recovery have not been run for this candidate;
+historical provider receipts below are not new-version passes. Azure remains
+unsupported by GoAuthy's application configuration, independently of its generic
+SDK contract. Synthetic sealed-blob continuity does not qualify real account/token continuity,
+arbitrary production-data migration, downgrade, legacy cluster archive conversion,
+managed HA, Kubernetes, fencing, or production-cloud parity.
+
+## Historical v0.21.2 qualification and release gates
 
 The published Go SDK resolves to source `8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd`;
 its verified module checksum is
