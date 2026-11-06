@@ -2,10 +2,30 @@
 # Isolated SDK archive contract, including generic Azure (not app Azure support).
 set -eu
 umask 077
+check_platform() {
+  [ "$1/$2/$3/$4" = linux/arm64/linux/arm64 ] || {
+    echo "pinned emulator requires native linux/arm64: build=$1/$2 image=$3/$4" >&2
+    return 1
+  }
+}
+if [ "${1:-}" = --check-platform ]; then
+  [ "$#" -eq 5 ] || exit 2
+  shift
+  check_platform "$@"
+  exit "$?"
+fi
 [ "$#" -eq 0 ] || { echo 'usage: test-object-store-contract.sh' >&2; exit 2; }
+build_os=$(go env GOOS)
+build_arch=$(go env GOARCH)
+# These historical immutable manifests are arm64 images, not multiarch indexes.
+check_platform "$build_os" "$build_arch" linux arm64
+daemon_platform=$(timeout -k 5s 30s docker info --format '{{.OSType}}/{{.Architecture}}')
+case "$daemon_platform" in linux/aarch64) daemon_platform=linux/arm64 ;; esac
+check_platform "$build_os" "$build_arch" "${daemon_platform%/*}" "${daemon_platform#*/}"
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/goauthy-object-contract.XXXXXX")
 logs=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/goauthy-object-contract-logs.XXXXXX")
+printf 'build=%s/%s daemon=%s\n' "$build_os" "$build_arch" "$daemon_platform" > "$logs/platform.txt"
 owned_id=
 build_pid=
 owned_volumes=
@@ -80,9 +100,12 @@ for provider in s3 gcs azure; do
   esac
   timeout -k 5s 3m docker pull "$image" > "$logs/$provider-pull.log" 2>&1
   timeout -k 5s 30s docker image inspect "$image" --format '{{json .RepoDigests}}' > "$logs/$provider-digests.json"
+  image_platform=$(timeout -k 5s 30s docker image inspect "$image" --format '{{.Os}}/{{.Architecture}}')
+  printf '%s\n' "$image_platform" > "$logs/$provider-platform.txt"
+  check_platform "$build_os" "$build_arch" "${image_platform%/*}" "${image_platform#*/}"
   # Record a unique owned name before create, so interruption cannot lose it.
   owned_id="goauthy-contract-$(basename "$work")-$provider"
-  timeout -k 5s 30s docker create --name "$owned_id" --network none --label goauthy.fixture=object-contract "$image" > "$logs/$provider-container-id.txt"
+  timeout -k 5s 30s docker create --platform linux/arm64 --name "$owned_id" --network none --label goauthy.fixture=object-contract "$image" > "$logs/$provider-container-id.txt"
   created_id=$(cat "$logs/$provider-container-id.txt")
   case "$created_id" in ''|*[!0-9a-f]*) echo 'invalid created container ID; retaining owned name for cleanup' >&2; exit 1 ;; esac
   [ "${#created_id}" -eq 64 ] || { echo 'incomplete container ID; retaining owned name for cleanup' >&2; exit 1; }
