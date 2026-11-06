@@ -22,6 +22,10 @@ administrator/CSRF guards and Clients-scoped API-key rights also protect common
 settings, including atomic checks for revoked keys. SVG upload sanitization and
 page CSP remain in effect.
 
+Schema 114 adds the separate common-brand tables after bootstrap policy schema
+113. It preserves the bootstrap policy and existing client records without
+copying legacy branding or deciding its ownership.
+
 **Upgrade:** Existing `goauthy` and `rauthy` client records are retained, but
 are not automatically treated as common branding. Until an operator restores
 the common theme and logo, pages use the built-in defaults. Back up the database
