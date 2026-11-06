@@ -64,7 +64,7 @@ const usePolicyWithoutState = ` FROM auth_collection_connections c
 JOIN auth_collection_definitions d ON d.id=c.collection_id
 JOIN identity_users u ON u.subject=c.owner_subject
 JOIN saas_connection_credentials x ON x.connection_id=c.id AND x.owner_subject=c.owner_subject AND x.collection_id=c.collection_id AND x.generation=c.generation
-JOIN managed_oauth_clients m ON m.id=?
+JOIN connection_client_policies m ON m.id=?
 LEFT JOIN saas_providers p ON p.id=x.provider_id AND EXISTS(SELECT 1 FROM json_each(d.providers_json) pp WHERE pp.type='text' AND pp.value=x.provider_id)
 WHERE c.owner_subject=? AND c.collection_id=? AND c.id=? AND d.enabled=1 AND d.deleted=0
 AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?)

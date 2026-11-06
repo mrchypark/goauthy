@@ -12,7 +12,7 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-const schemaVersion = 113
+const schemaVersion = 114
 
 // migrateThroughV97 applies schema versions v1 through v97. It is the
 // unchanged prefix of Migrate, extracted so tests can reach a clean v97
@@ -430,13 +430,16 @@ func Migrate(ctx context.Context, db *rhiza.DB) error {
 	if err := migrateSchemaV112(ctx, db); err != nil {
 		return fmt.Errorf("migrate schema v112: %w", err)
 	}
-	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v113", Statements: []rhiza.SQLStatement{
+	if err := migrateBootstrapConnectionPolicy(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v113: %w", err)
+	}
+	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v114", Statements: []rhiza.SQLStatement{
 		{SQL: `CREATE TABLE IF NOT EXISTS global_brand_themes (client_id TEXT PRIMARY KEY, version INTEGER NOT NULL, updated_at_unix_ms INTEGER NOT NULL, document_json TEXT NOT NULL) STRICT`},
 		{SQL: `CREATE TABLE IF NOT EXISTS global_brand_logos (client_id TEXT NOT NULL, res TEXT NOT NULL, content_type TEXT NOT NULL, data BLOB NOT NULL, updated INTEGER NOT NULL, PRIMARY KEY(client_id,res)) STRICT`},
 		{SQL: `CREATE TABLE IF NOT EXISTS branding_legacy_resolution (singleton INTEGER PRIMARY KEY CHECK(singleton=1)) STRICT`},
-		{SQL: `INSERT OR IGNORE INTO goauthy_schema_migrations(version) VALUES(113)`},
+		{SQL: `INSERT OR IGNORE INTO goauthy_schema_migrations(version) VALUES(114)`},
 	}}); err != nil {
-		return fmt.Errorf("migrate schema v113: %w", err)
+		return fmt.Errorf("migrate schema v114: %w", err)
 	}
 	return nil
 }

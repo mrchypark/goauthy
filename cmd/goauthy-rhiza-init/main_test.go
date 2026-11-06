@@ -109,13 +109,13 @@ func TestRestoreInitMainAbruptDataLoss(t *testing.T) {
 			t.Fatalf("init unexpectedly ran application migrations: %v %v", rows.Rows, err)
 		}
 	} else {
-		initVerifySchema112(t, ctx, db) // Missing restored schema must not be recreated.
+		initVerifySchema(t, ctx, db) // Missing restored schema must not be recreated.
 		initVerifyRow(t, ctx, db)
 	}
 	if err := storage.Migrate(ctx, db); err != nil {
 		t.Fatalf("archive-enabled main migrations: %v", err)
 	}
-	initVerifySchema112(t, ctx, db)
+	initVerifySchema(t, ctx, db)
 	request := rhiza.ExecuteRequest{RequestID: "ack-before-abrupt-loss", SQL: "INSERT INTO init_main_proof VALUES (1, 'acknowledged')"}
 	if phase == "write" {
 		if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "init-main-schema", SQL: "CREATE TABLE init_main_proof (id INTEGER PRIMARY KEY,payload TEXT NOT NULL)"}); err != nil {
@@ -262,11 +262,10 @@ func initWaitReady(t *testing.T, ctx context.Context, db *rhiza.DB) {
 	}
 }
 
-func initVerifySchema112(t *testing.T, ctx context.Context, db *rhiza.DB) {
+func initVerifySchema(t *testing.T, ctx context.Context, db *rhiza.DB) {
 	t.Helper()
-	rows, err := db.Query(ctx, rhiza.QueryRequest{SQL: "SELECT MAX(version) FROM goauthy_schema_migrations", Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil || len(rows.Rows) != 1 || rows.Rows[0][0] != int64(112) {
-		t.Fatalf("schema=%v err=%v; want 112", rows.Rows, err)
+	if err := storage.Ready(ctx, db); err != nil {
+		t.Fatalf("restored schema must match current migrations: %v", err)
 	}
 }
 
