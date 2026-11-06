@@ -133,9 +133,12 @@ process exit, preserving the no-Close simulation. These are SDK and actual init
 entrypoint-logic tests, not a packaged main HTTP or end-user login journey.
 
 Focused application/init tests passed normally and with the race detector.
-The cross-version oracle passed normally and with the race detector. Three-provider SDK execution and
-packaged S3/GCS application recovery have not been run for this candidate;
-historical provider receipts below are not new-version passes. Azure remains
+The cross-version oracle passed normally and with the race detector. Pinned
+S3/GCS/Azure SDK contracts and the Linux cross-version oracle also passed in
+[PR176 final CI](https://github.com/mrchypark/goauthy/actions/runs/42146836993).
+The copy oracle checks SDK object versions as well as bytes and rejects a
+byte-only copy that loses version metadata. Packaged S3/GCS application recovery
+has not been run for this candidate. Azure remains
 unsupported by GoAuthy's application configuration, independently of its generic
 SDK contract. Synthetic sealed-blob continuity does not qualify real account/token continuity,
 arbitrary production-data migration, downgrade, legacy cluster archive conversion,
