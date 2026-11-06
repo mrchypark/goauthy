@@ -53,8 +53,8 @@ func TestConcurrentOpenRegistrationReissuePreservesFirstDeliveredProof(t *testin
 
 	// Each duplicate request makes three 32-byte IDs: its attempted new subject,
 	// its attempted initial proof, then its reissued proof after the pre-read.
-	// Pairing the first two calls makes both requests reach the pre-read before
-	// either can transact. At the third call, release one request and hold the
+	// Pair the third calls as well: only they establish that both requests have
+	// passed the eligibility pre-read. Then release one request and hold the
 	// other until the first response (and delivered proof) has completed.
 	var mu sync.Mutex
 	stage, calls := 0, 0
@@ -79,9 +79,15 @@ func TestConcurrentOpenRegistrationReissuePreservesFirstDeliveredProof(t *testin
 				<-ready
 			}
 		} else {
-			wait := calls > 1
+			ready := stageReady
+			first := calls == 1
+			if !first {
+				close(ready)
+			}
 			mu.Unlock()
-			if wait {
+			if first {
+				<-ready
+			} else {
 				<-releaseSecondReissue
 			}
 		}

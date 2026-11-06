@@ -1,9 +1,12 @@
 # Rhiza startup close guard
 
-The current greenfield integration candidate uses official Rhiza `v0.21.2`,
+The current integration candidate uses official Rhiza `v0.23.0`,
 resolving to upstream commit
-[`8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd`](https://github.com/mrchypark/rhiza/commit/8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd).
-This release reconciles a lost Local maintenance-release acknowledgement only
+[`f050d6e30f57718736c8c4fdb5edef777183bc05`](https://github.com/mrchypark/rhiza/commit/f050d6e30f57718736c8c4fdb5edef777183bc05).
+The bounded integration scope is single-node `standalone-local` object-store
+recovery without an operator; it does not qualify managed HA. See the
+[verification scope and reproduction commands](no-pvc-dr.md#current-v0230-integration).
+The earlier v0.21.2 release reconciled a lost Local maintenance-release acknowledgement only
 after stable readback proves the exact expected free control at a changed
 object version. Work errors and cancellation remain errors; this does not
 clear orphaned held controls. The public API and archive format are unchanged.
@@ -34,8 +37,8 @@ initialization has succeeded and the server lifecycle is about to begin. This
 guard addresses a checkpoint-corruption hazard confirmed on Rhiza v0.10.0 when
 a database was closed during startup, even if `DB.Ready()` became true
 transiently before a later migration, quorum, or configuration failure. The
-hazard's status on Rhiza v0.21.2 has not been runtime-verified. Its Local
-maintenance-release fix does not establish startup-close safety. Retain the
+hazard's status on Rhiza v0.23.0 has not been runtime-verified. Local
+recovery tests do not establish startup-close safety. Retain the
 guard until the upgraded startup path is checked. After startup, graceful
 shutdown still closes the database.
 
