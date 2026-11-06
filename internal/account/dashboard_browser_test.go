@@ -1,28 +1,18 @@
 package account
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"os/exec"
 	"testing"
-	"time"
 
 	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/chromedp"
 	"github.com/mrchypark/goauthy/internal/branding"
+	"github.com/mrchypark/goauthy/internal/testbrowser"
 	"github.com/mrchypark/goauthy/internal/ui"
 )
 
 func TestAccountBrowserLayoutAndKeyboard(t *testing.T) {
-	chrome, err := exec.LookPath("chromium")
-	if err != nil {
-		chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-		if _, err := os.Stat(chrome); err != nil {
-			t.Skip("Chrome unavailable")
-		}
-	}
 	h, _, _, cookie, _ := testPasswordHandler(t)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/account", h.Dashboard)
@@ -36,16 +26,7 @@ func TestAccountBrowserLayoutAndKeyboard(t *testing.T) {
 		mux.ServeHTTP(w, r)
 	}))
 	defer server.Close()
-	options := append(chromedp.DefaultExecAllocatorOptions[:], chromedp.ExecPath(chrome), chromedp.Headless)
-	if os.Getenv("CI") == "true" {
-		options = append(options, chromedp.NoSandbox)
-	}
-	alloc, cancelAlloc := chromedp.NewExecAllocator(context.Background(), options...)
-	defer cancelAlloc()
-	browser, cancel := chromedp.NewContext(alloc)
-	defer cancel()
-	ctx, timeout := context.WithTimeout(browser, 30*time.Second)
-	defer timeout()
+	ctx := testbrowser.Start(t)
 	for _, viewport := range []struct{ width, height int64 }{{1280, 800}, {390, 844}, {320, 640}} {
 		var valid bool
 		if err := chromedp.Run(ctx, chromedp.EmulateViewport(viewport.width, viewport.height), chromedp.Navigate(server.URL+"/account"), chromedp.WaitVisible(`#preferred-username`), chromedp.Evaluate(`document.documentElement.scrollWidth <= innerWidth && !!document.querySelector('#username-form button[data-slot=button]') && getComputedStyle(document.querySelector('#username-form button')).backgroundColor !== 'rgba(0, 0, 0, 0)' && getComputedStyle(document.querySelector('[data-language-select]')).backgroundImage !== 'none'`, &valid)); err != nil || !valid {
