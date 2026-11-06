@@ -15,7 +15,7 @@ const localizedKeys = [
   '{count} users', 'Metadata must be valid JSON', 'Request outcome is unknown. Check the current state before retrying.', 'Saving…', 'Creating…',
   'Deleting…', 'Rotating…', 'Expiry must be a safe integer of at least 1719784800',
   'Create a named authorization entity.', 'Update {name} and preserve its immutable ID.',
-  'Create user', 'Edit user', 'Send an activation email to a new user.', 'Email', 'Given name',
+  'Create user', 'Edit user', 'Email', 'Given name',
   'Family name', 'Language', 'Roles', 'Groups', 'roles', 'groups', 'JSON array of names', 'Names must be a JSON array of strings', 'Preferred username',
   'Time zone', 'Optional IANA name, for example Asia/Seoul', 'Account expiry',
   'Unix seconds; blank means no expiry', 'Unix seconds; blank clears', 'New password',

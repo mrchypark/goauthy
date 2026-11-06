@@ -279,7 +279,7 @@ func (s *Store) DeleteWithGuard(ctx context.Context, id string, rev int64, autho
 	}
 	one := int64(1)
 	statements := []rhiza.SQLStatement{
-		{SQL: "UPDATE managed_oauth_clients SET deleted=1,enabled=0,secret_hash=NULL,secret_envelope=NULL,revision=revision+1 WHERE id=? AND revision=? AND deleted=0 AND (" + guard + ") RETURNING id", Args: append([]any{id, rev}, args...), WantRows: true, ExpectedReturnedRows: &one},
+		{SQL: "UPDATE managed_oauth_clients SET deleted=1,enabled=0,secret_hash=NULL,secret_envelope=NULL,revision=revision+1 WHERE id=? AND revision=? AND deleted=0 AND (" + guard + ") AND (id!='goauthy' OR EXISTS(SELECT 1 FROM branding_legacy_resolution WHERE singleton=1) OR (NOT EXISTS(SELECT 1 FROM client_themes WHERE client_id=id) AND NOT EXISTS(SELECT 1 FROM client_logos WHERE client_id=id AND res!='favicon'))) RETURNING id", Args: append([]any{id, rev}, args...), WantRows: true, ExpectedReturnedRows: &one},
 		{SQL: `DELETE FROM oidc_backchannel_deliveries WHERE client_id=?`, Args: []any{id}},
 		{SQL: `DELETE FROM oidc_session_clients WHERE client_id=?`, Args: []any{id}},
 		{SQL: `DELETE FROM oidc_user_clients WHERE client_id=?`, Args: []any{id}},

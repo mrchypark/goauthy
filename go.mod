@@ -7,7 +7,7 @@ require (
 	filippo.io/age v1.3.2
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.6.1
 	github.com/HugoSmits86/nativewebp v1.3.0
-	github.com/andybalholm/brotli v1.1.1
+	github.com/andybalholm/brotli v1.2.6
 	github.com/chromedp/cdproto v0.0.0-20260714215040-dc233986426f
 	github.com/chromedp/chromedp v0.16.0
 	github.com/fxamacker/cbor/v2 v2.9.3
@@ -18,6 +18,7 @@ require (
 	github.com/go-webauthn/webauthn v0.18.0
 	github.com/minio/minio-go/v7 v7.0.95
 	github.com/mrchypark/ely-htmx v0.1.0
+	github.com/mrchypark/elysdui v0.2.0
 	github.com/mrchypark/rhiza v0.23.0
 	github.com/ory/fosite v0.49.0
 	github.com/oschwald/maxminddb-golang v1.13.1
@@ -114,7 +115,7 @@ require (
 	github.com/hashicorp/go-retryablehttp v0.7.7 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/klauspost/compress v1.18.7 // indirect
+	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect

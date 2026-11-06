@@ -12,7 +12,6 @@ import (
 
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
-	"github.com/mrchypark/goauthy/internal/branding"
 )
 
 func elyFixture(t *testing.T) (string, string, string) {
@@ -108,8 +107,8 @@ func TestElyBrandUI(t *testing.T) {
 	base, username, password := elyFixture(t)
 	admin, csrf := rbacAuthenticatedClient(t, base, base, username, password)
 	headers := rbacMutationHeaders(csrf)
-	original := readThemeJSON(t, admin, base, branding.GlobalBrandID, headers)
-	if got := readClientLogo(t, newBrowserClient(t), base, branding.GlobalBrandID, ""); got.Status != http.StatusNotFound {
+	original := readThemeJSON(t, admin, base, "", headers)
+	if got := readClientLogo(t, newBrowserClient(t), base, "", ""); got.Status != http.StatusNotFound {
 		t.Fatal("brand fixture must start without an existing common logo")
 	}
 	t.Cleanup(func() {
@@ -118,12 +117,12 @@ func TestElyBrandUI(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		r := do(t, admin, http.MethodPut, base+"/auth/v1/theme/"+branding.GlobalBrandID, bytes.NewReader(body), headers)
+		r := do(t, admin, http.MethodPut, base+"/auth/v1/branding/theme", bytes.NewReader(body), headers)
 		r.Body.Close()
 		if r.StatusCode != http.StatusOK {
 			t.Errorf("restore brand status=%d", r.StatusCode)
 		}
-		r = do(t, admin, http.MethodDelete, clientLogoURL(base, branding.GlobalBrandID, ""), nil, headers)
+		r = do(t, admin, http.MethodDelete, clientLogoURL(base, "", ""), nil, headers)
 		r.Body.Close()
 	})
 	ctx, cancel := newCollectionUIContext(t, nil, base)
@@ -144,7 +143,7 @@ func TestElyBrandUI(t *testing.T) {
 	); err != nil {
 		t.Fatal("brand save and reload through browser controls failed")
 	}
-	if readThemeJSON(t, admin, base, branding.GlobalBrandID, headers).BrandName != name {
+	if readThemeJSON(t, admin, base, "", headers).BrandName != name {
 		t.Fatal("brand name was not persisted")
 	}
 	logo := filepath.Join(t.TempDir(), "synthetic-logo.png")
@@ -161,7 +160,7 @@ func TestElyBrandUI(t *testing.T) {
 	); err != nil {
 		t.Fatal("brand logo upload, reload, and removal through browser controls failed")
 	}
-	if got := readClientLogo(t, newBrowserClient(t), base, branding.GlobalBrandID, ""); got.Status != http.StatusNotFound {
+	if got := readClientLogo(t, newBrowserClient(t), base, "", ""); got.Status != http.StatusNotFound {
 		t.Fatal("removed common logo remains public")
 	}
 }

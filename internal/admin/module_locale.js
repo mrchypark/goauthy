@@ -1,4 +1,12 @@
 Object.assign(globalThis.GoAuthyI18n.messages, {
+  'Creating an account requires password recovery and email delivery. Assign rauthy_admin to grant access to this administration page.':'계정을 만들려면 비밀번호 복구와 이메일 발송 기능이 필요합니다. 이 관리자 화면에 접근할 수 있도록 rauthy_admin 역할을 부여하세요.',
+  'Creating an account requires password recovery and email delivery. Administrator access requires the rauthy_admin role.':'계정을 만들려면 비밀번호 복구와 이메일 발송 기능이 필요합니다. 관리자 화면에 접근하려면 rauthy_admin 역할이 필요합니다.',
+  'Operators':'운영자', 'Service users':'서비스 사용자', 'New operator':'새 운영자', 'Create operator':'운영자 만들기', 'Edit operator':'운영자 수정',
+  'Both pages show the same full account list available to you. Appearance here does not grant administrator access; roles determine access. Service app access is not blocked by this page.':'두 화면에는 현재 관리자에게 표시 가능한 동일한 전체 계정 목록이 나옵니다. 이 목록에 표시된다고 관리자 권한이 부여되는 것은 아니며, 권한은 역할에 따라 결정됩니다. 이 화면은 서비스 앱 로그인을 차단하지 않습니다.',
+  'Both pages show the same full account list available to you. Appearance on the operators page does not grant administrator access; roles determine access. Service app access is not blocked by this page.':'두 화면에는 현재 관리자에게 표시 가능한 동일한 전체 계정 목록이 나옵니다. 운영자 목록에 표시된다고 관리자 권한이 부여되는 것은 아니며, 권한은 역할에 따라 결정됩니다. 이 화면은 서비스 앱 로그인을 차단하지 않습니다.',
+  'Accounts are shared with service users. Administrator access depends on roles; service app access is not blocked by this page.':'계정은 서비스 사용자와 공유됩니다. 관리자 접근 권한은 역할에 따라 결정되며, 이 화면은 서비스 앱 로그인을 차단하지 않습니다.',
+  'Accounts are shared with operators. Administrator access depends on roles; service app access is not blocked by this page.':'계정은 운영자와 공유됩니다. 관리자 접근 권한은 역할에 따라 결정되며, 이 화면은 서비스 앱 로그인을 차단하지 않습니다.',
+  'Send an activation email. Assign an administrator role explicitly to grant administrator access.':'활성화 이메일을 보냅니다. 관리자 접근을 허용하려면 관리자 역할을 명시적으로 부여하세요.',
   'Common brand':'공통 브랜드',
   'Common brand name':'공통 브랜드 이름',
   'Back to dashboard':'대시보드로 돌아가기',

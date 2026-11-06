@@ -54,3 +54,45 @@ func TestDeleteRegistrationCleansClientThemeAtomically(t *testing.T) {
 	}
 	assertTheme(0)
 }
+
+func TestDeleteGoauthyPreservesAmbiguousBranding(t *testing.T) {
+	ctx, store, db := testStore(t)
+	c, err := store.Create(ctx, validRequest("goauthy", TokenEndpointAuthNone))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "ambiguous-logo", SQL: `INSERT INTO client_logos VALUES('goauthy','small','image/webp',?,1)`, Args: []any{[]byte{1}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteRegistration(ctx, c.ClientID, c.RegistrationAccessToken); err == nil {
+		t.Fatal("delete succeeded")
+	}
+	result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT (SELECT COUNT(*) FROM client_logos WHERE client_id='goauthy'), (SELECT COUNT(*) FROM dynamic_oauth_clients WHERE client_id='goauthy')`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(result.Rows) != 1 || result.Rows[0][0] != int64(1) || result.Rows[0][1] != int64(1) {
+		t.Fatalf("rows: %v, err: %v", result.Rows, err)
+	}
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "resolved-logo", Statements: []rhiza.SQLStatement{{SQL: `INSERT INTO branding_legacy_resolution VALUES(1)`}, {SQL: `INSERT INTO global_brand_logos VALUES('goauthy','small','image/webp',?,1)`, Args: []any{[]byte{2}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteRegistration(ctx, c.ClientID, c.RegistrationAccessToken); err != nil {
+		t.Fatalf("resolved delete: %v", err)
+	}
+	result, err = db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(*) FROM global_brand_logos`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || result.Rows[0][0] != int64(1) {
+		t.Fatalf("global logo deleted: %v %v", result.Rows, err)
+	}
+}
+
+func TestDeleteGoauthyWithOnlyFavicon(t *testing.T) {
+	ctx, store, db := testStore(t)
+	c, err := store.Create(ctx, validRequest("goauthy", TokenEndpointAuthNone))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-favicon-only", SQL: `INSERT INTO client_logos VALUES('goauthy','favicon','image/webp',?,1)`, Args: []any{[]byte{1}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteRegistration(ctx, c.ClientID, c.RegistrationAccessToken); err != nil {
+		t.Fatalf("favicon-only delete: %v", err)
+	}
+}

@@ -5,29 +5,24 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
+	"github.com/ncruces/go-sqlite3/driver"
 )
 
 func TestAccountLoginFreshGETSingleMutation(t *testing.T) {
-	h, db := testHandlerWithDB(t, false)
-	readSlot := func() uint64 {
-		t.Helper()
-		result, err := db.Query(t.Context(), rhiza.QueryRequest{SQL: "SELECT 1", Consistency: rhiza.ConsistencyLinearizable})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return result.AppliedSlot
-	}
-	before := readSlot()
+	h, db, directory := testHandlerWithDBAndManagedDirectory(t, false, false)
+	before := committedLoginMutations(t, db, directory)
 	started := time.Now()
 	cookie, interactionToken, csrf := accountLoginPage(t, h)
-	after := readSlot()
+	after := committedLoginMutations(t, db, directory)
 	if got := after - before; got != 1 {
 		t.Fatalf("fresh account GET committed mutations=%d want=1", got)
 	}
@@ -46,6 +41,48 @@ func TestAccountLoginFreshGETSingleMutation(t *testing.T) {
 		t.Fatal("wrong peer accepted")
 	}
 	t.Logf("fresh account GET committed mutations=%d; peer/CSRF/TTL verified", after-before)
+}
+
+// AppliedSlot also includes consensus controls (for example leader schedules),
+// so its delta is not an SQL mutation count. Inspect the pinned SDK's receipt
+// ledger only in this isolated synthetic fixture, well within its retention window.
+func committedLoginMutations(t *testing.T, db *rhiza.DB, directory string) int64 {
+	t.Helper()
+	result, err := db.Query(t.Context(), rhiza.QueryRequest{
+		SQL:         `SELECT 1`,
+		Consistency: rhiza.ConsistencyLinearizable,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Never relax the public reserved-namespace policy. Open only this test's
+	// own SQLite file read-only after the public linearizable catch-up above.
+	reader, err := driver.Open((&url.URL{Scheme: "file", Path: filepath.Join(directory, "sqlite.db")}).String() + "?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	var count int64
+	if err := reader.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM _rhiza_idempotency WHERE status='committed'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("committed SQL receipts=%d applied slot=%d", count, result.AppliedSlot)
+	return count
+}
+
+func TestAccountLoginMutationCounterDistinguishesSeparateWrites(t *testing.T) {
+	_, db, directory := testHandlerWithDBAndManagedDirectory(t, false, false)
+	before := committedLoginMutations(t, db, directory)
+	for _, id := range []string{"login-counter-control-first", "login-counter-control-second"} {
+		if _, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{
+			RequestID: id, SQL: `UPDATE browser_sessions SET expires_at_unix_ms=expires_at_unix_ms WHERE 0`,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := committedLoginMutations(t, db, directory) - before; got != 2 {
+		t.Fatalf("two separate SQL mutations counted as %d, want 2", got)
+	}
 }
 
 func accountLoginPage(t *testing.T, h *Handler) (*http.Cookie, string, string) {

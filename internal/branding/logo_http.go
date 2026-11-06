@@ -41,24 +41,48 @@ func (h *ClientLogoHandler) Logo(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	switch r.Method {
 	case http.MethodGet:
-		h.get(w, r, id)
+		h.get(w, r, id, false)
 	case http.MethodPut:
-		h.put(w, r, id)
+		h.put(w, r, id, false)
 	case http.MethodDelete:
-		h.delete(w, r, id)
+		h.delete(w, r, id, false)
 	default:
 		w.Header().Set("Allow", "GET, PUT, DELETE")
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
-func (h *ClientLogoHandler) get(w http.ResponseWriter, r *http.Request, id string) {
+// GlobalLogo handles the common logo without interpreting an OAuth client ID.
+func (h *ClientLogoHandler) GlobalLogo(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.store == nil {
+		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		h.get(w, r, GlobalBrandID, true)
+	case http.MethodPut:
+		h.put(w, r, GlobalBrandID, true)
+	case http.MethodDelete:
+		h.delete(w, r, GlobalBrandID, true)
+	default:
+		w.Header().Set("Allow", "GET, PUT, DELETE")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (h *ClientLogoHandler) get(w http.ResponseWriter, r *http.Request, id string, global bool) {
 	_, cached, err := clientLogoUpdated(r)
 	if err != nil {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	logo, err := h.store.GetFallback(r.Context(), id)
+	var logo StoredLogo
+	if global {
+		logo, err = h.store.GetGlobal(r.Context())
+	} else {
+		logo, err = h.store.GetFallback(r.Context(), id)
+	}
 	if errors.Is(err, ErrLogoNotFound) {
 		http.NotFound(w, r)
 		return
@@ -76,7 +100,7 @@ func (h *ClientLogoHandler) get(w http.ResponseWriter, r *http.Request, id strin
 	_, _ = w.Write(logo.Data)
 }
 
-func (h *ClientLogoHandler) put(w http.ResponseWriter, r *http.Request, id string) {
+func (h *ClientLogoHandler) put(w http.ResponseWriter, r *http.Request, id string, global bool) {
 	principal, ok := h.authorize(w, r)
 	if !ok {
 		return
@@ -90,7 +114,12 @@ func (h *ClientLogoHandler) put(w http.ResponseWriter, r *http.Request, id strin
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	if err := h.store.ReplaceAuthorized(r.Context(), id, assets, h.apiKeys, principal); err != nil {
+	if global {
+		err = h.store.ReplaceGlobalAuthorized(r.Context(), assets, h.apiKeys, principal)
+	} else {
+		err = h.store.ReplaceAuthorized(r.Context(), id, assets, h.apiKeys, principal)
+	}
+	if err != nil {
 		h.logoMutationError(w, err)
 		return
 	}
@@ -98,12 +127,18 @@ func (h *ClientLogoHandler) put(w http.ResponseWriter, r *http.Request, id strin
 	w.WriteHeader(http.StatusOK)
 }
 
-func (h *ClientLogoHandler) delete(w http.ResponseWriter, r *http.Request, id string) {
+func (h *ClientLogoHandler) delete(w http.ResponseWriter, r *http.Request, id string, global bool) {
 	principal, ok := h.authorize(w, r)
 	if !ok {
 		return
 	}
-	if err := h.store.DeleteAuthorized(r.Context(), id, h.apiKeys, principal); err != nil {
+	var err error
+	if global {
+		err = h.store.DeleteGlobalAuthorized(r.Context(), h.apiKeys, principal)
+	} else {
+		err = h.store.DeleteAuthorized(r.Context(), id, h.apiKeys, principal)
+	}
+	if err != nil {
 		h.logoMutationError(w, err)
 		return
 	}

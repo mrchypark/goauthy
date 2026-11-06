@@ -25,8 +25,8 @@ import (
 // rather than accepting a challenge response as proof of successful login.
 func TestApprovalPasskeySignedCompletion(t *testing.T) {
 	t.Parallel()
-	for _, destination := range []string{"device", "handoff"} {
-		for _, mode := range []string{"passkey-only", "password-mfa"} {
+	for _, destination := range []string{"device", "handoff", "account"} {
+		for _, mode := range []string{"passkey-only", "password-mfa", "password-mfa-html"} {
 			for _, proof := range []string{"valid", "missing-uv", "bad-signature"} {
 				t.Run(destination+"/"+mode+"/"+proof, func(t *testing.T) {
 					h, db := testHandlerWithDB(t, false)
@@ -69,14 +69,48 @@ func TestApprovalPasskeySignedCompletion(t *testing.T) {
 						saved.DeviceCode = &code
 						want = h.issuer + "/oidc/device/verify?user_code=" + code
 					}
+					if destination == "account" {
+						saved.HandoffID = ""
+						saved.Account = true
+						want = h.issuer + "/"
+					}
 					cookie, interaction := approvalInteraction(t, h, saved)
+					var browserHandler http.Handler
+					var browserPath, csrf string
+					if mode == "password-mfa-html" {
+						switch destination {
+						case "device":
+							browserPath, browserHandler = "/oidc/device/login?user_code="+code, h.DeviceLoginHandler(true)
+						case "handoff":
+							browserPath, browserHandler = "/account/connection-login?handoff_id="+testHandoffID, h.ConnectionHandoffLoginHandler(true)
+						case "account":
+							browserPath, browserHandler = "/account/login", h.AccountLoginHandler(true)
+						}
+						page := httptest.NewRecorder()
+						browserHandler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, browserPath, nil))
+						csrfMatch := fedCMCSRFPattern.FindStringSubmatch(page.Body.String())
+						if page.Code != http.StatusOK || len(page.Result().Cookies()) == 0 || len(csrfMatch) != 2 {
+							t.Fatalf("login page=%d %s", page.Code, page.Body.String())
+						}
+						cookie, interaction, csrf = page.Result().Cookies()[0], interactionToken(t, page.Body.String()), csrfMatch[1]
+					}
 					body, _ := json.Marshal(map[string]any{"username": "passkey-owner", "purpose": map[string]string{"Login": interaction}})
 					request := httptest.NewRequest(http.MethodPost, "/auth/v1/users/webauthn_start", strings.NewReader(string(body)))
 					request.Header.Set("Content-Type", "application/json")
 					request.AddCookie(cookie)
 					start := httptest.NewRecorder()
-					if mode == "password-mfa" {
-						h.Login(start, postLogin(cookie, interaction, "alice", "correct password"))
+					if strings.HasPrefix(mode, "password-mfa") {
+						password := postLogin(cookie, interaction, "alice", "correct password")
+						if mode == "password-mfa-html" {
+							form := url.Values{"interaction": {interaction}, "csrf_token": {csrf}, "username": {"alice"}, "password": {"correct password"}}
+							password = httptest.NewRequest(http.MethodPost, strings.SplitN(browserPath, "?", 2)[0], strings.NewReader(form.Encode()))
+							password.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+							password.Header.Set("Accept", "text/html")
+							password.AddCookie(cookie)
+							browserHandler.ServeHTTP(start, password)
+						} else {
+							h.Login(start, password)
+						}
 					} else {
 						h.WebAuthnStart(start, request)
 					}
@@ -87,7 +121,25 @@ func TestApprovalPasskeySignedCompletion(t *testing.T) {
 						Code string                       `json:"code"`
 						RCR  protocol.CredentialAssertion `json:"rcr"`
 					}
-					if err := json.Unmarshal(start.Body.Bytes(), &challenge); err != nil {
+					challengeBody := start.Body.Bytes()
+					if mode == "password-mfa-html" {
+						body := start.Body.String()
+						marker := "try{await finishPasskey("
+						begin := strings.Index(body, marker)
+						if !strings.HasPrefix(start.Header().Get("Content-Type"), "text/html") || !strings.Contains(body, `id="passkey-challenge-btn"`) || begin < 0 || len(start.Result().Cookies()) != 0 {
+							t.Fatalf("invalid MFA challenge page: %d %s", start.Code, body)
+						}
+						begin += len(marker)
+						end := strings.Index(body[begin:], ");")
+						if end < 0 {
+							t.Fatal("malformed MFA challenge")
+						}
+						challengeBody = []byte(body[begin : begin+end])
+						if _, err := h.browser.LoadAuthorizationInteractionReadOnly(context.Background(), cookie.Value, interaction); err != nil {
+							t.Fatalf("password step consumed interaction: %v", err)
+						}
+					}
+					if err := json.Unmarshal(challengeBody, &challenge); err != nil || challenge.Code == "" {
 						t.Fatal(err)
 					}
 					clientData, _ := json.Marshal(map[string]any{"type": "webauthn.get", "challenge": b64(challenge.RCR.Response.Challenge), "origin": h.issuer, "crossOrigin": false})

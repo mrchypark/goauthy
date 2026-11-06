@@ -16,7 +16,7 @@ import (
 	"strings"
 )
 
-//go:embed admin.html admin.css locale.js module_locale.js admin.js dashboard.js catalog.js sessions.js collections.js clients.js themes.js providers.js blacklist.js events.js templates.js
+//go:embed admin.html admin.css locale.js module_locale.js elysdui.js admin.js dashboard.js catalog.js sessions.js collections.js clients.js themes.js providers.js blacklist.js events.js templates.js
 var uiFS embed.FS
 
 var adminTemplate = template.Must(template.Must(ui.NewTemplates("admin.html")).ParseFS(uiFS, "admin.html"))
@@ -129,7 +129,7 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/auth/v1/admin/app.js" {
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		for _, name := range []string{"locale.js", "module_locale.js", "dashboard.js", "catalog.js", "sessions.js", "collections.js", "clients.js", "themes.js", "providers.js", "blacklist.js", "events.js", "templates.js", "admin.js"} {
+		for _, name := range []string{"locale.js", "module_locale.js", "elysdui.js", "dashboard.js", "catalog.js", "sessions.js", "collections.js", "clients.js", "themes.js", "providers.js", "blacklist.js", "events.js", "templates.js", "admin.js"} {
 			data, _ := uiFS.ReadFile(name)
 			_, _ = w.Write(u.localPaths(data))
 			_, _ = w.Write([]byte("\n;\n"))

@@ -1,22 +1,16 @@
 const GLOBAL_BRAND_ID = 'goauthy';
-async function clientTheme(id) {
+async function clientTheme(id, common = false) {
   const t = globalThis.GoAuthyI18n?.t || ((key, values = {}) => String(key).replace(/\{(\w+)\}/g, (match, name) => Object.hasOwn(values, name) ? String(values[name]) : match));
   const h = (key, values) => esc(t(key, values));
-  const clientID = String(id ?? ''), endpoint = '/auth/v1/theme/' + encodeURIComponent(clientID);
-  const common = clientID === GLOBAL_BRAND_ID;
+  const clientID = String(id ?? ''), endpoint = common ? '/auth/v1/branding/theme' : '/auth/v1/theme/' + encodeURIComponent(clientID);
+  const logoEndpoint = common ? '/auth/v1/branding/logo' : `/auth/v1/clients/${encodeURIComponent(clientID)}/logo`;
   const colorFields = ['text', 'text_high', 'bg', 'bg_high', 'action', 'accent', 'error'];
   const colorLabels = {text: 'Text', text_high: 'Strong text', bg: 'Background', bg_high: 'Raised background', action: 'Action', accent: 'Accent', error: 'Error'};
   const invalidPreviewMessage = t('The preview omits invalid CSS values; your input is kept for server validation.');
-  let theme = null, mode = 'light', inherited = false, pending = false, commonName = 'GoAuthy';
+  let theme = null, mode = 'light', inherited = false, pending = false, commonName = 'GoAuthy', createOnly = false;
 
-  const toolbar = `<div class="theme-actions actions">
-    ${common ? '' : `<a class="button secondary" href="/auth/v1/admin/clients">${h('Back to clients')}</a>`}
-    <button id="theme-save" type="button">${h('Save theme')}</button>
-    <button id="theme-reload" class="button secondary" type="button">${h('Reload saved')}</button>
-    <button id="theme-reset" class="button secondary" type="button">${h('Reset to inherited theme')}</button>
-  </div><div id="theme-reset-review" hidden><p class="warning">${h('Remove this client theme and inherit the global theme?')}</p><div class="actions"><button id="theme-reset-confirm" type="button">${h('Confirm reset')}</button><button id="theme-reset-cancel" type="button" class="button secondary">${h('Cancel')}</button></div></div>`;
   shell(t(common ? 'Common brand' : 'Client login theme'), t(common ? 'Brand the central account and administration pages. Apps inherit these settings unless they have an override.' : 'Customize the sign-in logo, text, layout, and appearance for this OAuth client.'),
-    `<div class="theme-workspace"><section class="panel theme-editor"><p id="theme-notice" class="hint theme-notice" role="status"></p><div id="theme-status" class="theme-status" role="status"></div><div class="theme-mode" role="group" aria-label="${h('Preview mode')}"><button type="button" data-theme-mode="light" aria-pressed="true">${h('Light')}</button><button type="button" data-theme-mode="dark" aria-pressed="false">${h('Dark')}</button></div><div id="theme-fields"></div><section class="theme-logo"><h3>${h(common ? 'Common logo' : 'Client logo')}</h3><p class="hint">${h('Logo changes save immediately and are separate from theme settings.')}</p><img id="theme-logo-image" alt="${h(common ? 'Current common logo' : 'Current client logo')}" hidden><label>${h('Upload logo (PNG, JPEG, or SVG; up to 10 MiB)')}<input id="theme-logo-upload" type="file" accept="image/png,image/jpeg,image/svg+xml"></label><button id="theme-logo-delete" type="button" class="button secondary">${h('Remove client logo')}</button><div id="theme-logo-remove-review" hidden><p class="warning">${h(common ? 'Remove this common logo?' : 'Remove this client logo?')}</p><div class="actions"><button id="theme-logo-remove-confirm" type="button">${h('Confirm removal')}</button><button id="theme-logo-remove-cancel" type="button" class="button secondary">${h('Cancel')}</button></div></div><div id="theme-logo-status" class="theme-status" role="status"></div></section></section><section class="theme-preview" aria-label="${h('Sign-in preview sample')}"><h2>${h('Preview')}</h2><p class="hint">${h('Sample only. It does not submit credentials or represent the full sign-in flow.')}</p><iframe id="theme-preview-frame" class="theme-preview-frame" title="${h('Client theme preview')}" sandbox="allow-same-origin"></iframe></section></div>`, toolbar);
+    `<p><a class="button secondary" href="${common ? '/auth/v1/admin/dashboard' : '/auth/v1/admin/clients'}">${h(common ? 'Back to dashboard' : 'Back to clients')}</a></p><div class="theme-workspace"><section class="panel theme-editor"><p id="theme-notice" class="hint theme-notice" role="status"></p><div id="theme-status" class="theme-status" role="status"></div><div class="theme-mode" role="group" aria-label="${h('Preview mode')}"><button type="button" data-theme-mode="light" aria-pressed="true">${h('Light')}</button><button type="button" data-theme-mode="dark" aria-pressed="false">${h('Dark')}</button></div><div id="theme-fields"></div><div class="theme-actions actions"><button id="theme-save" type="button">${h('Save theme')}</button><button id="theme-reload" class="button secondary" type="button">${h('Reload saved')}</button><button id="theme-reset" class="button secondary" type="button">${h('Reset to inherited theme')}</button></div><div id="theme-reset-review" hidden><p class="warning">${h('Remove this client theme and inherit the global theme?')}</p><div class="actions"><button id="theme-reset-confirm" type="button">${h('Confirm reset')}</button><button id="theme-reset-cancel" type="button" class="button secondary">${h('Cancel')}</button></div></div><section class="theme-logo"><h3>${h(common ? 'Common logo' : 'Client logo')}</h3><p class="hint">${h('Logo changes save immediately and are separate from theme settings.')}</p><img id="theme-logo-image" alt="${h(common ? 'Current common logo' : 'Current client logo')}" hidden><label>${h('Upload logo (PNG, JPEG, or SVG; up to 10 MiB)')}<input id="theme-logo-upload" type="file" accept="image/png,image/jpeg,image/svg+xml"></label><button id="theme-logo-delete" type="button" class="button secondary">${h('Remove client logo')}</button><div id="theme-logo-remove-review" hidden><p class="warning">${h(common ? 'Remove this common logo?' : 'Remove this client logo?')}</p><div class="actions"><button id="theme-logo-remove-confirm" type="button">${h('Confirm removal')}</button><button id="theme-logo-remove-cancel" type="button" class="button secondary">${h('Cancel')}</button></div></div><div id="theme-logo-status" class="theme-status" role="status"></div></section></section><section class="theme-preview" aria-label="${h('Sign-in preview sample')}"><h2>${h('Preview')}</h2><p class="hint">${h('Sample only. It does not submit credentials or represent the full sign-in flow.')}</p><iframe id="theme-preview-frame" class="theme-preview-frame" title="${h('Client theme preview')}" sandbox="allow-same-origin"></iframe></section></div>`);
 
   const by = key => document.getElementById(key), status = by('theme-status'), fields = by('theme-fields'), frame = by('theme-preview-frame');
   if (common) {
@@ -32,7 +26,7 @@ async function clientTheme(id) {
     return String(text).replace(/\{(\w+)\}/g, (match, name) => Object.hasOwn(values, name) ? String(values[name]) : match);
   };
   const previewHTML = (key, values) => esc(previewText(key, values));
-  const logoURL = () => `/auth/v1/clients/${encodeURIComponent(clientID)}/logo?v=${logoVersion}`;
+  const logoURL = () => `${logoEndpoint}?v=${logoVersion}`;
   const syncPreviewLogo = () => {
     const image = by('theme-logo-image'), previewImage = frame.contentDocument?.getElementById('theme-logo-image');
     if (!image || !previewImage) return;
@@ -55,14 +49,17 @@ async function clientTheme(id) {
     }
     image.src = logoURL();
   };
-  const requestTheme = async targetID => {
-    const result = await api('/auth/v1/theme/' + encodeURIComponent(targetID), {method: 'POST'});
+  const requestTheme = async global => {
+    const result = await api(global ? '/auth/v1/branding/theme' : endpoint, {method: 'POST'});
     return result;
   };
   const loadTheme = async () => {
-    const requested = await requestTheme(clientID);
-    const usesGlobal = requested?.client_id !== clientID;
-    const globalTheme = common ? requested : await requestTheme(GLOBAL_BRAND_ID);
+    const legacy = !common && clientID === GLOBAL_BRAND_ID ? await api('/auth/v1/branding/legacy') : null;
+    if (legacy && !legacy.resolved && (legacy.legacy_theme || legacy.legacy_logo)) throw Error(t('Resolve legacy branding before editing this client.'));
+    createOnly = !!legacy && !legacy.legacy_theme;
+    const requested = createOnly ? null : await requestTheme(common);
+    const usesGlobal = createOnly || requested?.client_id !== clientID;
+    const globalTheme = common ? requested : await requestTheme(true);
     const loaded = usesGlobal ? globalTheme : requested;
     if (!loaded?.light || !loaded?.dark) throw Error(t('Theme data is incomplete.'));
     commonName = globalTheme?.brand_name || 'GoAuthy';
@@ -200,7 +197,8 @@ async function clientTheme(id) {
     status.textContent = t('Saving…');
     try {
       const payload = {...theme}; if (!Object.keys(payload.login.copy.en).length && !Object.keys(payload.login.copy.ko).length && !payload.login.logo_alignment && !payload.login.card_width) delete payload.login;
-      await api(endpoint, {method: 'PUT', responseType: 'empty', body: JSON.stringify({...payload, client_id: clientID})});
+      await api(endpoint, {method: 'PUT', responseType: 'empty', ...(createOnly ? {headers: {'If-None-Match': '*'}} : {}), body: JSON.stringify({...payload, client_id: clientID})});
+      createOnly = false;
       inherited = false;
       updateNotice();
       status.className = 'theme-status success';
@@ -244,7 +242,7 @@ async function clientTheme(id) {
     if (file.size > 10 * 1024 * 1024 - 64 * 1024) { logoStatus.className = 'theme-status error'; logoStatus.textContent = t('Logo file must be 10 MiB or smaller.'); event.target.value = ''; return; }
     const body = new FormData(); body.append('file', file);
     logoPending = true; by('theme-logo-upload').disabled = true; by('theme-logo-delete').disabled = true; logoStatus.className = 'theme-status'; logoStatus.textContent = t('Saving logo…');
-    try { await api(`/auth/v1/clients/${encodeURIComponent(clientID)}/logo`, {method: 'PUT', body, responseType: 'empty'}); logoVersion++; refreshLogo(); logoStatus.className = 'theme-status success'; logoStatus.textContent = t('Logo saved.'); }
+    try { await api(logoEndpoint, {method: 'PUT', body, responseType: 'empty'}); logoVersion++; refreshLogo(); logoStatus.className = 'theme-status success'; logoStatus.textContent = t('Logo saved.'); }
     catch (error) { logoStatus.className = 'theme-status error'; logoStatus.textContent = error.message; }
     finally { logoPending = false; by('theme-logo-upload').disabled = false; by('theme-logo-delete').disabled = false; event.target.value = ''; }
   };
@@ -253,7 +251,7 @@ async function clientTheme(id) {
   by('theme-logo-remove-confirm').onclick = async () => {
     if (pending || logoPending) return;
     const logoStatus = by('theme-logo-status'); logoPending = true; by('theme-logo-delete').disabled = true; by('theme-logo-upload').disabled = true; logoStatus.className = 'theme-status'; logoStatus.textContent = t('Removing logo…');
-    try { await api(`/auth/v1/clients/${encodeURIComponent(clientID)}/logo`, {method: 'DELETE', responseType: 'empty'}); logoVersion++; refreshLogo(); by('theme-logo-remove-review').hidden = true; logoStatus.className = 'theme-status success'; logoStatus.textContent = t('Logo removed.'); }
+    try { await api(logoEndpoint, {method: 'DELETE', responseType: 'empty'}); logoVersion++; refreshLogo(); by('theme-logo-remove-review').hidden = true; logoStatus.className = 'theme-status success'; logoStatus.textContent = t('Logo removed.'); }
     catch (error) { logoStatus.className = 'theme-status error'; logoStatus.textContent = error.message; }
     finally { logoPending = false; by('theme-logo-delete').disabled = false; by('theme-logo-upload').disabled = false; }
   };

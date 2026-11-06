@@ -41,6 +41,9 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
 (async () => {
   await context.accountDashboard.ready;
   assert.equal(context.accountDashboard.state.account.subject, 'user/1');
+  element('profile-content').children = [];
+  context.accountDashboard.displayProfile({ email: 'a@example.test', email_verified: false });
+  assert.deepEqual(element('profile-content').children.map(child => child.textContent), ['a@example.test', 'a@example.test', 'Email address is not verified.']);
   element('preferred-username').value = 'new-name';
   const usernameForm = form('username-form');
   await context.accountDashboard.submitUsername({ preventDefault() {}, target: usernameForm });

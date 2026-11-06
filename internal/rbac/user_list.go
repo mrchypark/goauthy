@@ -80,7 +80,7 @@ func (s *Store) listUsers(ctx context.Context, guard string, args []any, options
 	}
 	limitExpr := "CASE WHEN (SELECT count FROM total) < ? THEN -1 ELSE ? END"
 	offsetExpr := "CASE WHEN (SELECT count FROM total) < ? THEN 0 ELSE ? END"
-	queryArgs = append(queryArgs, int64(threshold), int64(pageSize), int64(threshold), int64(options.Offset))
+	queryArgs = append(queryArgs, int64(threshold), int64(pageSize)+1, int64(threshold), int64(options.Offset))
 	sql := `WITH authorized AS (SELECT 1 AS ok WHERE ` + guard + `),
 allusers AS (
  SELECT u.subject, u.created_at_unix_ms, u.last_login_at_unix_ms,
@@ -157,7 +157,12 @@ SELECT * FROM combined ORDER BY item ASC, created_at_unix_ms ASC, subject ASC`
 		}
 	}
 	out.Paginated = out.Count >= int64(threshold)
-	if out.Paginated && len(out.Users) > 0 {
+	if out.Paginated && len(out.Users) > int(pageSize) {
+		if options.Backwards {
+			out.Users, keys = out.Users[1:], keys[1:]
+		} else {
+			out.Users, keys = out.Users[:pageSize], keys[:pageSize]
+		}
 		boundary := keys[len(keys)-1]
 		if options.Backwards {
 			boundary = keys[0]

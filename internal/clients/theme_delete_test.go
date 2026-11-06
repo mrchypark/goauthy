@@ -58,3 +58,49 @@ func TestDeleteWithGuardCleansClientThemeAtomically(t *testing.T) {
 	}
 	assertTheme(0)
 }
+
+func TestDeleteGoauthyPreservesAmbiguousBranding(t *testing.T) {
+	s, ctx := testStore(t)
+	in := newClient(false)
+	in.ID = "goauthy"
+	c, err := s.CreateWithGuard(ctx, in, auth())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "ambiguous-theme", SQL: `INSERT INTO client_themes VALUES('goauthy',1,1,'{}')`}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteWithGuard(ctx, c.ID, c.Revision, auth()); !errors.Is(err, ErrConflict) {
+		t.Fatalf("delete: %v", err)
+	}
+	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT (SELECT COUNT(*) FROM client_themes WHERE client_id='goauthy'), (SELECT COUNT(*) FROM managed_oauth_clients WHERE id='goauthy' AND deleted=0)`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(result.Rows) != 1 || result.Rows[0][0] != int64(1) || result.Rows[0][1] != int64(1) {
+		t.Fatalf("rows: %v, err: %v", result.Rows, err)
+	}
+	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "resolved-theme", Statements: []rhiza.SQLStatement{{SQL: `INSERT INTO branding_legacy_resolution VALUES(1)`}, {SQL: `INSERT INTO global_brand_themes VALUES('goauthy',1,1,'{}')`}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteWithGuard(ctx, c.ID, c.Revision, auth()); err != nil {
+		t.Fatalf("resolved delete: %v", err)
+	}
+	result, err = s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT COUNT(*) FROM global_brand_themes`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || result.Rows[0][0] != int64(1) {
+		t.Fatalf("global theme deleted: %v %v", result.Rows, err)
+	}
+}
+
+func TestDeleteGoauthyWithOnlyFavicon(t *testing.T) {
+	s, ctx := testStore(t)
+	in := newClient(false)
+	in.ID = "goauthy"
+	c, err := s.CreateWithGuard(ctx, in, auth())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "goauthy-favicon-only", SQL: `INSERT INTO client_logos VALUES('goauthy','favicon','image/webp',?,1)`, Args: []any{[]byte{1}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteWithGuard(ctx, c.ID, c.Revision, auth()); err != nil {
+		t.Fatalf("favicon-only delete: %v", err)
+	}
+}

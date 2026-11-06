@@ -330,6 +330,8 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 	}
 	globalCSS := add("GET", "/auth/v1/theme/global.css", "Read shared theme styles", nil, nil, nil)
 	globalCSS.Responses.Status(200).Value.Content = openapi3.Content{"text/css": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}}
+	elysCSS := add("GET", "/auth/v1/elysdui.css", "Read shared elysdui styles", nil, nil, nil)
+	elysCSS.Responses.Status(200).Value.Content = openapi3.Content{"text/css": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}}
 	themePublic := add("GET", "/auth/v1/theme/{client_id}/{timestamp}", "Read public theme CSS", nil, nil, nil)
 	themePublic.Description = "Returns the requested client theme, then the stored global GoAuthy theme, then built-in defaults. Timestamp is a signed 64-bit cache-busting value."
 	themePublic.Responses.Status(200).Value.Content = openapi3.Content{"text/css": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}}
@@ -341,6 +343,91 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 	add("POST", "/auth/v1/theme/{client_id}", "Read theme configuration (Clients:read)", nil, theme, read).Description = "A missing client-specific theme returns built-in defaults, without using the stored global override."
 	add("PUT", "/auth/v1/theme/{client_id}", "Replace theme (Clients:update)", theme, nil, write).Description = "Requires an existing client and matching client_id in path and payload. Returns an empty 200 response with Clear-Site-Data cache directive."
 	add("DELETE", "/auth/v1/theme/{client_id}", "Delete theme (Clients:delete)", nil, nil, write).Description = "Deletes the stored override; missing overrides also return an empty 200 response with Clear-Site-Data cache directive."
+	// Common branding has separate storage and never selects an OAuth client.
+	commonTheme := obj(nil, theme.Required...)
+	commonTheme.Properties = make(openapi3.Schemas)
+	for name, property := range theme.Properties {
+		commonTheme.Properties[name] = property
+	}
+	commonTheme.WithProperty("client_id", openapi3.NewStringSchema().WithEnum("goauthy"))
+	copySchema := obj(map[string]*openapi3.Schema{
+		"title": openapi3.NewStringSchema().WithMaxLength(120), "description": openapi3.NewStringSchema().WithMaxLength(500), "button": openapi3.NewStringSchema().WithMaxLength(60),
+	})
+	commonTheme.WithProperty("login", obj(map[string]*openapi3.Schema{
+		"copy":           obj(map[string]*openapi3.Schema{"en": copySchema, "ko": copySchema}),
+		"logo_alignment": openapi3.NewStringSchema().WithEnum("", "start", "center"),
+		"card_width":     {OneOf: openapi3.SchemaRefs{{Value: openapi3.NewIntegerSchema().WithEnum(0)}, {Value: openapi3.NewIntegerSchema().WithMin(320).WithMax(640)}}},
+	}).WithNullable())
+	statuses := func(op *openapi3.Operation, codes ...int) {
+		for code := range op.Responses.Map() {
+			op.Responses.Delete(code)
+		}
+		for _, code := range codes {
+			op.AddResponse(code, openapi3.NewResponse().WithDescription(http.StatusText(code)))
+		}
+	}
+	header := func(op *openapi3.Operation, name, description string) {
+		response := op.Responses.Status(200).Value
+		if response.Headers == nil {
+			response.Headers = openapi3.Headers{}
+		}
+		response.Headers[name] = &openapi3.HeaderRef{Value: &openapi3.Header{Description: description, Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}}
+	}
+	commonRead := add("POST", "/auth/v1/branding/theme", "Read common theme (Clients:read)", nil, commonTheme, read)
+	commonRead.Description = "Browser administrator or Clients:read API key. Returns the common theme or built-in defaults; client_id is goauthy but does not identify an OAuth client."
+	statuses(commonRead, 200, 401, 403, 503)
+	commonRead.Responses.Status(200).Value.WithJSONSchema(commonTheme)
+	for _, method := range []string{"PUT", "DELETE"} {
+		var body *openapi3.Schema
+		if method == "PUT" {
+			body = commonTheme
+		}
+		op := add(method, "/auth/v1/branding/theme", "Manage common theme", body, nil, write)
+		op.Description = "Browser administrator with CSRF or Clients:" + map[string]string{"PUT": "update", "DELETE": "delete"}[method] + " API key. Empty 200 with Clear-Site-Data: cache. Operates only on common branding; does not delete or rewrite legacy client data. PUT requires client_id goauthy and replaces the complete theme; request JSON is limited to 1 MiB."
+		statuses(op, 200, 400, 401, 403, 503)
+		header(op, "Clear-Site-Data", "Cache invalidation directive: \"cache\".")
+	}
+	commonCSS := add("GET", "/auth/v1/branding/theme/{timestamp}", "Read public common theme CSS", nil, nil, nil)
+	statuses(commonCSS, 200, 400, 503)
+	commonCSS.Description = "Public common-theme CSS with built-in fallback; timestamp must parse as signed int64. Supports br/gzip negotiation, including Vary: Accept-Encoding. No OAuth client lookup."
+	commonCSS.Parameters[0].Value.Schema = &openapi3.SchemaRef{Value: openapi3.NewInt64Schema()}
+	commonCSS.Responses.Status(200).Value.Content = openapi3.Content{"text/css": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}}}
+	header(commonCSS, "Cache-Control", "max-age=31104000, public")
+	header(commonCSS, "Vary", "Accept-Encoding")
+	commonLogo := add("GET", "/auth/v1/branding/logo", "Read public common logo", nil, nil, nil)
+	statuses(commonLogo, 200, 400, 404, 503)
+	commonLogo.Description = "Public small raster or SVG common logo; missing logo returns 404. Optional signed int64 updated query value enables public cache headers."
+	commonLogo.AddParameter(openapi3.NewQueryParameter("updated").WithSchema(openapi3.NewInt64Schema()))
+	commonLogo.Responses.Status(200).Value.Content = logo.Responses.Status(200).Value.Content
+	header(commonLogo, "Cache-Control", "Only when updated is supplied: max-age=31104000, stale-while-revalidate=2592000, public")
+	header(commonLogo, "Content-Security-Policy", "connect-src 'none'; script-src 'none'; frame-ancestors 'none'; object-src 'none';")
+	commonLogoPut := add("PUT", "/auth/v1/branding/logo", "Replace common logo (Clients:update)", nil, nil, write)
+	statuses(commonLogoPut, 200, 400, 401, 403, 503)
+	commonLogoPut.RequestBody = logoPut.RequestBody
+	commonLogoPut.Description = "Browser administrator with CSRF or Clients:update API key. First multipart field accepts PNG/JPEG or sanitized SVG; known Content-Length and maximum 10 MiB required. Replaces only common nonfavicon logo resolutions. Empty 200 with Clear-Site-Data: cache."
+	header(commonLogoPut, "Clear-Site-Data", "Cache invalidation directive: \"cache\".")
+	commonLogoDelete := add("DELETE", "/auth/v1/branding/logo", "Delete common logo (Clients:update)", nil, nil, write)
+	statuses(commonLogoDelete, 200, 401, 403, 503)
+	commonLogoDelete.Description = "Browser administrator with CSRF or Clients:update API key. Empty 200, including when no common logo exists; client logos and favicons are preserved."
+	legacyStatusSchema := obj(map[string]*openapi3.Schema{"resolved": openapi3.NewBoolSchema(), "legacy_theme": openapi3.NewBoolSchema(), "legacy_logo": openapi3.NewBoolSchema(), "global_theme": openapi3.NewBoolSchema(), "global_logo": openapi3.NewBoolSchema()}, "resolved", "legacy_theme", "legacy_logo", "global_theme", "global_logo")
+	legacyStatus := add("GET", "/auth/v1/branding/legacy", "Inspect legacy branding state (Clients:read)", nil, legacyStatusSchema, read)
+	statuses(legacyStatus, 200, 401, 403, 503)
+	legacyStatus.Responses.Status(200).Value.WithJSONSchema(legacyStatusSchema)
+	legacyTheme := add("GET", "/auth/v1/branding/legacy/theme", "Inspect legacy theme (Clients:read)", nil, commonTheme, read)
+	statuses(legacyTheme, 200, 401, 403, 503)
+	legacyTheme.Responses.Status(200).Value.WithJSONSchema(commonTheme)
+	legacyTheme.Description = "Returns the original goauthy client theme, or built-in defaults when absent; inspect status first. Does not decide ownership or use common overrides."
+	legacyLogo := add("GET", "/auth/v1/branding/legacy/logo", "Inspect legacy logo (Clients:update)", nil, nil, write)
+	statuses(legacyLogo, 200, 401, 403, 404, 503)
+	legacyLogo.Description = "Clients:update API key or browser administrator with CSRF (including GET). Returns original goauthy small raster/SVG logo, 404 if absent. No global fallback."
+	legacyLogo.Responses.Status(200).Value.Content = logo.Responses.Status(200).Value.Content
+	header(legacyLogo, "Content-Security-Policy", "connect-src 'none'; script-src 'none'; frame-ancestors 'none'; object-src 'none';")
+	for _, op := range []*openapi3.Operation{legacyStatus, legacyTheme, legacyLogo} {
+		header(op, "Cache-Control", "no-store")
+	}
+	resolve := add("POST", "/auth/v1/branding/legacy/resolve", "Resolve legacy branding ownership (Clients:update)", obj(map[string]*openapi3.Schema{"confirm_client_ownership": openapi3.NewBoolSchema().WithEnum(true), "copy_theme": openapi3.NewBoolSchema(), "copy_logo": openapi3.NewBoolSchema()}, "confirm_client_ownership", "copy_theme", "copy_logo"), nil, write)
+	statuses(resolve, 204, 400, 401, 403, 503)
+	resolve.Description = "Browser administrator with CSRF or Clients:update API key. Strict JSON, maximum 1024 bytes; all three fields required and non-null. Confirm client ownership explicitly. Selected legacy goauthy theme/logo are copied without deleting original rows; favicons are excluded. Destination conflicts or repeated resolution fail atomically with 503. Both copy flags may be false. This one-time decision permits future client edits/deletion. Inspect legacy/common state after an error or lost response before retrying."
 	if features.Blacklist {
 		ip := obj(map[string]*openapi3.Schema{"ip": s, "exp": openapi3.NewInt64Schema()}, "ip", "exp")
 		ip.Description = "Canonical IP/CIDR and absolute Unix expiry seconds, which must be in the future."

@@ -814,7 +814,7 @@ func run() (err error) {
 	}
 	adminUI.SetIssuer(issuer)
 	commonBrand := func(ctx context.Context) (branding.Brand, error) {
-		return themeStore.Brand(ctx, clientLogoStore, branding.GlobalBrandID)
+		return themeStore.Brand(ctx, clientLogoStore, "")
 	}
 	adminUI.SetBrandResolver(commonBrand)
 	adminUI.SetCSRFTokenProvider(adminCSRFTokenProvider(issuer))
@@ -1040,7 +1040,13 @@ func run() (err error) {
 	}
 	loginHandler.SetThemeURLResolver(themeStore.StylesheetURL)
 	loginHandler.SetLoginBrandingResolver(func(ctx context.Context, id string) (login.LoginBranding, error) {
-		theme, err := themeStore.GetFallback(ctx, id)
+		var theme branding.Theme
+		var err error
+		if id == "" {
+			theme, err = themeStore.GetGlobal(ctx)
+		} else {
+			theme, err = themeStore.GetFallback(ctx, id)
+		}
 		if err != nil {
 			return login.LoginBranding{}, err
 		}
@@ -1420,11 +1426,23 @@ func run() (err error) {
 	handler.HandleFunc("GET /auth/v1/clients/{id}/login-restriction", rbacHandler.LoginRestriction)
 	handler.HandleFunc("PUT /auth/v1/clients/{id}/login-restriction", rbacHandler.LoginRestriction)
 	handler.Handle("GET /auth/v1/theme/global.css", branding.GlobalCSSHandler())
+	handler.Handle("GET /auth/v1/elysdui.css", login.UIStylesheet())
 	handler.Handle("GET /auth/v1/branding/{name}", branding.BrandAssetHandler())
 	if err := ui.BindAssets(handler); err != nil {
 		return fmt.Errorf("configure UI assets: %w", err)
 	}
 	handler.HandleFunc("GET /auth/v1/theme/{client_id}/{timestamp}", themeHandler.Theme)
+	handler.HandleFunc("GET /auth/v1/branding/theme/{timestamp}", themeHandler.GlobalTheme)
+	handler.HandleFunc("POST /auth/v1/branding/theme", themeHandler.GlobalTheme)
+	handler.HandleFunc("PUT /auth/v1/branding/theme", themeHandler.GlobalTheme)
+	handler.HandleFunc("DELETE /auth/v1/branding/theme", themeHandler.GlobalTheme)
+	handler.HandleFunc("POST /auth/v1/branding/legacy/resolve", themeHandler.ResolveLegacy)
+	handler.HandleFunc("GET /auth/v1/branding/legacy", themeHandler.LegacyStatus)
+	handler.HandleFunc("GET /auth/v1/branding/legacy/theme", themeHandler.LegacyTheme)
+	handler.HandleFunc("GET /auth/v1/branding/legacy/logo", clientLogoHandler.LegacyLogo)
+	handler.HandleFunc("GET /auth/v1/branding/logo", clientLogoHandler.GlobalLogo)
+	handler.HandleFunc("PUT /auth/v1/branding/logo", clientLogoHandler.GlobalLogo)
+	handler.HandleFunc("DELETE /auth/v1/branding/logo", clientLogoHandler.GlobalLogo)
 	handler.HandleFunc("POST /auth/v1/theme/{client_id}", themeHandler.Theme)
 	handler.HandleFunc("PUT /auth/v1/theme/{client_id}", themeHandler.Theme)
 	handler.HandleFunc("DELETE /auth/v1/theme/{client_id}", themeHandler.Theme)

@@ -21,7 +21,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/identity"
@@ -197,9 +196,6 @@ func (h *Handler) SetThemeURLResolver(resolver func(context.Context, string) (st
 func (h *Handler) resolveThemeURL(ctx context.Context, clientID string) (string, error) {
 	if h.themeURLResolver == nil {
 		return "", nil
-	}
-	if clientID == "" {
-		clientID = branding.GlobalBrandID
 	}
 	return h.themeURLResolver(ctx, clientID)
 }
@@ -554,7 +550,7 @@ func (h *Handler) renderAuthenticationPage(w http.ResponseWriter, r *http.Reques
 	if h.loginBrandingResolver != nil {
 		brandID := request.ClientID
 		if pageData.Action != issuerPath+"/auth/login" {
-			brandID = branding.GlobalBrandID
+			brandID = ""
 		}
 		brand, err := h.loginBrandingResolver(r.Context(), brandID)
 		if err != nil {
@@ -841,7 +837,7 @@ func (h *Handler) fedCMGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	themeURL, err := h.resolveThemeURL(r.Context(), branding.GlobalBrandID)
+	themeURL, err := h.resolveThemeURL(r.Context(), "")
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
@@ -849,7 +845,7 @@ func (h *Handler) fedCMGet(w http.ResponseWriter, r *http.Request) {
 	messages := i18n.MessagesFor(i18n.UILanguageFromRequest(r))
 	localizedHTMLHeaders(w, messages.Language)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	brand, err := h.resolveBranding(r.Context(), branding.GlobalBrandID)
+	brand, err := h.resolveBranding(r.Context(), "")
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
@@ -945,7 +941,7 @@ func (h *Handler) fedCMPost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) writeFedCMSuccess(w http.ResponseWriter, r *http.Request) {
-	themeURL, err := h.resolveThemeURL(r.Context(), branding.GlobalBrandID)
+	themeURL, err := h.resolveThemeURL(r.Context(), "")
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
@@ -953,7 +949,7 @@ func (h *Handler) writeFedCMSuccess(w http.ResponseWriter, r *http.Request) {
 	messages := i18n.MessagesFor(i18n.UILanguageFromRequest(r))
 	localizedHTMLHeaders(w, messages.Language)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	brand, err := h.resolveBranding(r.Context(), branding.GlobalBrandID)
+	brand, err := h.resolveBranding(r.Context(), "")
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return
@@ -1224,7 +1220,7 @@ func (h *Handler) renderServiceLoginFailure(w http.ResponseWriter, r *http.Reque
 	}
 	brandID := target.policy.ClientID
 	if isAccountLogin {
-		brandID = branding.GlobalBrandID
+		brandID = ""
 	}
 	theme, err := h.resolveThemeURL(r.Context(), brandID)
 	if err != nil {

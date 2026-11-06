@@ -58,25 +58,52 @@ func (h *ThemeHandler) Theme(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
-		h.get(w, r, clientID)
+		h.get(w, r, clientID, false)
 	case http.MethodPost:
-		h.post(w, r, clientID)
+		h.post(w, r, clientID, false)
 	case http.MethodPut:
-		h.put(w, r, clientID)
+		h.put(w, r, clientID, false)
 	case http.MethodDelete:
-		h.delete(w, r, clientID)
+		h.delete(w, r, clientID, false)
 	default:
 		w.Header().Set("Allow", "GET, HEAD, POST, PUT, DELETE")
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
 
-func (h *ThemeHandler) get(w http.ResponseWriter, r *http.Request, clientID string) {
+// GlobalTheme handles the common theme independently of every client ID.
+func (h *ThemeHandler) GlobalTheme(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.store == nil {
+		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		h.get(w, r, GlobalBrandID, true)
+	case http.MethodPost:
+		h.post(w, r, GlobalBrandID, true)
+	case http.MethodPut:
+		h.put(w, r, GlobalBrandID, true)
+	case http.MethodDelete:
+		h.delete(w, r, GlobalBrandID, true)
+	default:
+		w.Header().Set("Allow", "GET, HEAD, POST, PUT, DELETE")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func (h *ThemeHandler) get(w http.ResponseWriter, r *http.Request, clientID string, global bool) {
 	if !validThemeTimestamp(r.PathValue("timestamp")) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	theme, err := h.store.GetFallback(r.Context(), clientID)
+	var theme Theme
+	var err error
+	if global {
+		theme, err = h.store.GetGlobal(r.Context())
+	} else {
+		theme, err = h.store.GetFallback(r.Context(), clientID)
+	}
 	if err != nil {
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 		return
@@ -105,17 +132,23 @@ func (h *ThemeHandler) get(w http.ResponseWriter, r *http.Request, clientID stri
 	_, _ = w.Write(body)
 }
 
-func (h *ThemeHandler) post(w http.ResponseWriter, r *http.Request, clientID string) {
+func (h *ThemeHandler) post(w http.ResponseWriter, r *http.Request, clientID string, global bool) {
 	if _, ok := h.authorize(w, r, apikey.Read); !ok {
 		return
 	}
-	if clientID != GlobalBrandID {
+	if !global {
 		if err := h.clientExists(r.Context(), clientID); err != nil {
 			h.themeMutationError(w, err)
 			return
 		}
 	}
-	theme, err := h.store.GetDefault(r.Context(), clientID)
+	var theme Theme
+	var err error
+	if global {
+		theme, err = h.store.GetGlobal(r.Context())
+	} else {
+		theme, err = h.store.GetDefault(r.Context(), clientID)
+	}
 	if err != nil {
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 		return
@@ -123,7 +156,7 @@ func (h *ThemeHandler) post(w http.ResponseWriter, r *http.Request, clientID str
 	writeThemeJSON(w, theme)
 }
 
-func (h *ThemeHandler) put(w http.ResponseWriter, r *http.Request, clientID string) {
+func (h *ThemeHandler) put(w http.ResponseWriter, r *http.Request, clientID string, global bool) {
 	principal, ok := h.authorize(w, r, apikey.Update)
 	if !ok {
 		return
@@ -133,13 +166,20 @@ func (h *ThemeHandler) put(w http.ResponseWriter, r *http.Request, clientID stri
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	if clientID != GlobalBrandID {
+	if !global {
 		if err := h.clientExists(r.Context(), clientID); err != nil {
 			h.themeMutationError(w, err)
 			return
 		}
 	}
-	if err := h.store.PutAuthorized(r.Context(), theme, h.apiKeys, principal); err != nil {
+	if global {
+		err = h.store.PutGlobalAuthorized(r.Context(), theme, h.apiKeys, principal)
+	} else if r.Header.Get("If-None-Match") == "*" {
+		err = h.store.PutIfAbsentAuthorized(r.Context(), theme, h.apiKeys, principal)
+	} else {
+		err = h.store.PutAuthorized(r.Context(), theme, h.apiKeys, principal)
+	}
+	if err != nil {
 		h.themeMutationError(w, err)
 		return
 	}
@@ -147,18 +187,24 @@ func (h *ThemeHandler) put(w http.ResponseWriter, r *http.Request, clientID stri
 	w.WriteHeader(http.StatusOK)
 }
 
-func (h *ThemeHandler) delete(w http.ResponseWriter, r *http.Request, clientID string) {
+func (h *ThemeHandler) delete(w http.ResponseWriter, r *http.Request, clientID string, global bool) {
 	principal, ok := h.authorize(w, r, apikey.Delete)
 	if !ok {
 		return
 	}
-	if clientID != GlobalBrandID {
+	if !global {
 		if err := h.clientExists(r.Context(), clientID); err != nil {
 			h.themeMutationError(w, err)
 			return
 		}
 	}
-	if err := h.store.DeleteAuthorized(r.Context(), clientID, h.apiKeys, principal); err != nil {
+	var err error
+	if global {
+		err = h.store.DeleteGlobalAuthorized(r.Context(), h.apiKeys, principal)
+	} else {
+		err = h.store.DeleteAuthorized(r.Context(), clientID, h.apiKeys, principal)
+	}
+	if err != nil {
 		h.themeMutationError(w, err)
 		return
 	}
@@ -201,6 +247,8 @@ func (h *ThemeHandler) themeMutationError(w http.ResponseWriter, err error) {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 	case errors.Is(err, ErrInvalidTheme):
 		http.Error(w, "Bad Request", http.StatusBadRequest)
+	case errors.Is(err, ErrThemeConflict):
+		http.Error(w, "Theme changed; reload before saving", http.StatusPreconditionFailed)
 	case errors.Is(err, clients.ErrNotFound):
 		http.Error(w, "Not Found", http.StatusNotFound)
 	default:

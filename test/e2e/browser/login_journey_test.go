@@ -335,7 +335,7 @@ func seedLoginJourneyTheme(t *testing.T, issuer, username, password, clientID, r
 	}
 	global := branding.DefaultTheme(branding.GlobalBrandID)
 	global.BrandName = "Login Journey Brand"
-	putThemeUI(t, client, issuer, rbacMutationHeaders(csrf), branding.GlobalBrandID, global)
+	putThemeUI(t, client, issuer, rbacMutationHeaders(csrf), "", global)
 	theme := branding.DefaultTheme(clientID)
 	theme.BorderRadius = "19px"
 	putThemeUI(t, client, issuer, rbacMutationHeaders(csrf), clientID, theme)

@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/recovery"
@@ -52,7 +53,8 @@ func TestLoginLocationObserverRevokeFlowAndBrowserIdentity(t *testing.T) {
 		}
 		theme := branding.DefaultTheme(branding.GlobalBrandID)
 		theme.BorderRadius = "13px"
-		if err := themes.Put(ctx, theme); err != nil {
+		keys, _ := apikey.NewStore(db)
+		if err := themes.PutGlobalAuthorized(ctx, theme, keys, nil); err != nil {
 			t.Fatal(err)
 		}
 

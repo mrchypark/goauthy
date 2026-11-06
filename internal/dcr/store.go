@@ -1000,6 +1000,7 @@ func (s *Store) DeleteRegistration(ctx context.Context, clientID, registrationTo
 	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID: requestID,
 		Statements: []rhiza.SQLStatement{
+			{SQL: `SELECT client_id FROM dynamic_oauth_clients WHERE client_id = ? AND registration_token_digest = ? AND (client_id!='goauthy' OR EXISTS(SELECT 1 FROM branding_legacy_resolution WHERE singleton=1) OR (NOT EXISTS(SELECT 1 FROM client_themes WHERE client_id=dynamic_oauth_clients.client_id) AND NOT EXISTS(SELECT 1 FROM client_logos WHERE client_id=dynamic_oauth_clients.client_id AND res!='favicon')))`, Args: []any{clientID, digest}, WantRows: true, ExpectedReturnedRows: &one},
 			{SQL: `DELETE FROM oauth_refresh_tokens WHERE access_signature IN (` + accessSignatures + `)`, Args: clientArgs},
 			{SQL: `DELETE FROM oauth_token_requests WHERE signature IN (` + accessSignatures + `)`, Args: clientArgs},
 			{SQL: `DELETE FROM oauth_access_tokens WHERE client_id = ? AND ` + authorized, Args: clientArgs},

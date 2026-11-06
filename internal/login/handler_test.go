@@ -676,7 +676,7 @@ func TestLoginPolicyBlocksWithoutConsumingInteraction(t *testing.T) {
 	blocked.RemoteAddr = ip + ":1234"
 	response := httptest.NewRecorder()
 	h.Login(response, blocked)
-	if response.Code != http.StatusTooManyRequests || response.Header().Get("Retry-After") == "" || strings.Contains(response.Body.String(), "alice") {
+	if response.Code != http.StatusTooManyRequests || response.Header().Get("Retry-After") == "" || response.Header().Get("Content-Type") == "text/html; charset=utf-8" || response.Body.String() != "Too Many Requests\n" || strings.Contains(response.Body.String(), "alice") {
 		t.Fatalf("blocked status=%d headers=%v body=%q", response.Code, response.Header(), response.Body.String())
 	}
 	htmlBlocked := postLogin(init, interaction, "alice", "correct password")
@@ -1575,6 +1575,11 @@ func testHandlerWithManagedClients(t *testing.T, forceMFA bool) (*Handler, *rhiz
 }
 
 func testHandlerWithDBAndManaged(t testing.TB, forceMFA, managed bool) (*Handler, *rhiza.DB) {
+	h, db, _ := testHandlerWithDBAndManagedDirectory(t, forceMFA, managed)
+	return h, db
+}
+
+func testHandlerWithDBAndManagedDirectory(t testing.TB, forceMFA, managed bool) (*Handler, *rhiza.DB, string) {
 	t.Helper()
 	ctx := context.Background()
 	directory := t.TempDir()
@@ -1651,7 +1656,7 @@ func testHandlerWithDBAndManaged(t testing.TB, forceMFA, managed bool) (*Handler
 	// Existing login behavior tests exercise policy state but do not sleep.
 	h.wait = func(context.Context, time.Duration) error { return nil }
 	h.deadline = func(http.ResponseWriter, time.Time) error { return nil }
-	return h, db
+	return h, db, directory
 }
 
 func testOIDCKeyring(t testing.TB) *oidc.Keyring {

@@ -31,7 +31,8 @@ func TestThemeStoreFallbackAndCrossStoreUpdates(t *testing.T) {
 	}
 	global := DefaultTheme(GlobalBrandID)
 	global.BorderRadius = "8px"
-	if err := first.Put(ctx, global); err != nil {
+	keys, _ := apikey.NewStore(db)
+	if err := first.PutGlobalAuthorized(ctx, global, keys, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err = second.GetFallback(ctx, "client-a")
@@ -73,7 +74,7 @@ func TestThemeStoreFallbackAndCrossStoreUpdates(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, global) {
 		t.Fatalf("delete did not reveal global theme: %v", err)
 	}
-	if err := first.Delete(ctx, GlobalBrandID); err != nil {
+	if err := first.DeleteGlobalAuthorized(ctx, keys, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err = second.GetFallback(ctx, "client-a")
@@ -178,14 +179,15 @@ func TestThemeStylesheetURLTracksEffectiveFallback(t *testing.T) {
 	}
 	global := DefaultTheme(GlobalBrandID)
 	global.BorderRadius = "19px"
-	if err := store.Put(ctx, global); err != nil {
+	keys, _ := apikey.NewStore(db)
+	if err := store.PutGlobalAuthorized(ctx, global, keys, nil); err != nil {
 		t.Fatal(err)
 	}
 	second, err := store.StylesheetURL(ctx, clientID)
 	if err != nil || first == second {
 		t.Fatalf("global update kept stale CSS URL: %v", err)
 	}
-	if err := store.Delete(ctx, GlobalBrandID); err != nil {
+	if err := store.DeleteGlobalAuthorized(ctx, keys, nil); err != nil {
 		t.Fatal(err)
 	}
 	third, err := store.StylesheetURL(ctx, clientID)
