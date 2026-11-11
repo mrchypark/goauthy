@@ -377,6 +377,7 @@ func run() (err error) {
 	var recoveryService *recovery.Service
 	var loginLocationSender *recovery.SMTPSender
 	var emailOutbox *recovery.EmailOutbox
+	var emailOutboxWake chan struct{}
 	captchaVerifier := captcha.NewVerifier(os.Getenv)
 	if recoveryEnabled {
 		sender, senderErr := smtpSenderFromEnv(os.Getenv)
@@ -384,7 +385,8 @@ func run() (err error) {
 			return senderErr
 		}
 		var outboxErr error
-		emailOutbox, outboxErr = recovery.NewEmailOutbox(db, recovery.SMTPSendFunc(sender), recovery.WithEnvelopeKeyring(keyring))
+		emailOutboxWake = make(chan struct{}, 1)
+		emailOutbox, outboxErr = recovery.NewEmailOutbox(db, recovery.SMTPSendFunc(sender), recovery.WithEnvelopeKeyring(keyring), recovery.WithWake(emailOutboxWake))
 		if outboxErr != nil {
 			return fmt.Errorf("configure email outbox: %w", outboxErr)
 		}
@@ -553,7 +555,7 @@ func run() (err error) {
 			}
 		}()
 	}
-	housekeepingJobs := buildHousekeepingJobs(db, recoveryService, loginPolicyStore, keyring, emailOutbox, passkeyConfig)
+	housekeepingJobs := buildHousekeepingJobs(db, recoveryService, loginPolicyStore, keyring, emailOutbox, emailOutboxWake, passkeyConfig)
 	if scheduler := housekeeping.New(housekeepingJobs, housekeepingErrorHandler); len(housekeepingJobs) > 0 {
 		workers.Add(1)
 		go func() {

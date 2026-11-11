@@ -70,11 +70,17 @@ func WithEnvelopeKeyring(keyring OutboxKeyring) EmailOutboxOption {
 	return func(o *EmailOutbox) { o.keyring = keyring }
 }
 
+// WithWake notifies the owning housekeeping job after a durable enqueue.
+func WithWake(wake chan struct{}) EmailOutboxOption {
+	return func(o *EmailOutbox) { o.wake = wake }
+}
+
 type EmailOutbox struct {
 	DB      *rhiza.DB
 	Now     func() time.Time
 	sendFn  func(ctx context.Context, recipient, subject, textBody, htmlBody string) error
 	keyring OutboxKeyring
+	wake    chan struct{}
 }
 
 func NewEmailOutbox(db *rhiza.DB, sendFn func(ctx context.Context, recipient, subject, textBody, htmlBody string) error, options ...EmailOutboxOption) (*EmailOutbox, error) {
@@ -123,7 +129,16 @@ func (o *EmailOutbox) Enqueue(ctx context.Context, recipient, mailType, subject,
 		SQL:       `INSERT OR IGNORE INTO email_outbox (id, recipient, mail_type, subject, body_html, body_text, status, attempts, last_error, created_at_unix_ms, updated_at_unix_ms, next_retry_at_unix_ms) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, '', ?, ?, ?)`,
 		Args:      []any{id, recipient, mailType, subject, sealedHTML, sealedText, now.UnixMilli(), now.UnixMilli(), now.UnixMilli()},
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	if o.wake != nil {
+		select {
+		case o.wake <- struct{}{}:
+		default: // A pending wake already guarantees a follow-up run.
+		}
+	}
+	return nil
 }
 
 func (o *EmailOutbox) Step(ctx context.Context) error {
