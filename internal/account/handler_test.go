@@ -1630,16 +1630,7 @@ func testPasswordHandler(t *testing.T) (*Handler, *browser.Store, *identity.Stor
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	statements := append(browser.SchemaStatements(), identity.SchemaStatements()...)
-	statements = append(statements, rhiza.SQLStatement{SQL: `CREATE TABLE IF NOT EXISTS identity_external_links (
-		provider_id TEXT NOT NULL,
-		external_key TEXT NOT NULL,
-		local_subject TEXT NOT NULL,
-		linked_at_unix_ms INTEGER NOT NULL,
-		PRIMARY KEY (provider_id, external_key),
-		UNIQUE (local_subject, provider_id)
-	) STRICT`})
-	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "account-test-schema", Statements: statements}); err != nil {
+	if err := storage.Migrate(ctx, db); err != nil {
 		t.Fatal(err)
 	}
 	rules := testRules()

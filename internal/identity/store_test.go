@@ -1666,8 +1666,7 @@ func testStoreWithPolicies(t testing.TB, hasher *credential.Hasher, rules creden
 	t.Helper()
 	directory := t.TempDir()
 	if err := copyDirTree(identityMigratedTemplate(t, "identity-test", func(db *rhiza.DB) error {
-		_, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "identity-test-schema", Statements: SchemaStatements()})
-		return err
+		return storage.Migrate(context.Background(), db)
 	}), directory); err != nil {
 		t.Fatal(err)
 	}

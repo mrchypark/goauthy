@@ -853,7 +853,7 @@ func (h *Handler) PutSelfPassword(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, "invalid password change request")
 			return
 		}
-		err = h.identity.ChangePassword(r.Context(), session.Subject, current, next)
+		err = h.identity.ChangePasswordWithSession(r.Context(), session.Subject, session.ID, current, next)
 	} else {
 		err = h.identity.SetPasswordWithWebAuthnProof(r.Context(), session.Subject, session.ID, *payload.MFACode, next)
 	}
