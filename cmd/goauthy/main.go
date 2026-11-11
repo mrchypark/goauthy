@@ -58,7 +58,6 @@ import (
 	"github.com/mrchypark/goauthy/internal/recovery"
 	"github.com/mrchypark/goauthy/internal/saas"
 	"github.com/mrchypark/goauthy/internal/securefile"
-	"github.com/mrchypark/goauthy/internal/security"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/goauthy/internal/tlsconfig"
 	"github.com/mrchypark/goauthy/internal/tracing"
@@ -2768,7 +2767,12 @@ func newHandler(db *rhiza.DB) *http.ServeMux {
 // secureTransportHeaders emits HSTS only for direct TLS or deployment ingress
 // that explicitly forwards the canonical HTTPS scheme.
 func secureTransportHeaders(next http.Handler) http.Handler {
-	return security.Middleware(security.Config{HSTS: security.DefaultConfig().HSTS})(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https") {
+			w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func newHandlerWithReadiness(db *rhiza.DB, readiness func(bool), validators ...func(context.Context) error) *http.ServeMux {
