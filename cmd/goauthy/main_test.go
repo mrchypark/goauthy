@@ -789,6 +789,9 @@ func TestLoadPasskeyCookieKeyRequiresPrivateRegularFile(t *testing.T) {
 	if err := os.WriteFile(groupReadablePath, bytes.Repeat([]byte{7}, 32), 0o640); err != nil {
 		t.Fatal(err)
 	}
+	if key, err := loadPasskeyCookieKey(groupReadablePath); err != nil || !bytes.Equal(key, bytes.Repeat([]byte{7}, 32)) {
+		t.Fatalf("group-readable key=%d bytes err=%v", len(key), err)
+	}
 	otherReadablePath := filepath.Join(directory, "other-readable")
 	if err := os.WriteFile(otherReadablePath, bytes.Repeat([]byte{7}, 32), 0o604); err != nil {
 		t.Fatal(err)
@@ -797,7 +800,7 @@ func TestLoadPasskeyCookieKeyRequiresPrivateRegularFile(t *testing.T) {
 	if err := os.Symlink(validPath, symlinkPath); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{directory, shortPath, oversizePath, groupReadablePath, otherReadablePath, symlinkPath} {
+	for _, path := range []string{directory, shortPath, oversizePath, otherReadablePath, symlinkPath} {
 		if _, err := loadPasskeyCookieKey(path); err == nil {
 			t.Fatalf("accepted unsafe passkey key file %q", path)
 		}

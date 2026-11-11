@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ory/fosite"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -2144,35 +2143,7 @@ func passkeyConfigFromEnv(getenv func(string) string) (*passkey.Config, error) {
 // rejects symlinks; comparing it with the opened descriptor also fails closed
 // if the pathname is replaced between inspection and open.
 func loadPasskeyCookieKey(path string) ([]byte, error) {
-	pathInfo, err := os.Lstat(path)
-	if err != nil {
-		return nil, fmt.Errorf("inspect passkey key file: %w", err)
-	}
-	if !pathInfo.Mode().IsRegular() {
-		return nil, errors.New("passkey key file must be a regular file")
-	}
-	if pathInfo.Mode().Perm()&0o077 != 0 {
-		return nil, errors.New("passkey key file must be owner-only")
-	}
-	if pathInfo.Size() != 32 {
-		return nil, errors.New("passkey key must be exactly 32 bytes")
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open passkey key file: %w", err)
-	}
-	defer f.Close()
-	fileInfo, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat passkey key file: %w", err)
-	}
-	if !fileInfo.Mode().IsRegular() || !os.SameFile(pathInfo, fileInfo) {
-		return nil, errors.New("passkey key file changed during open")
-	}
-	if fileInfo.Mode().Perm()&0o077 != 0 {
-		return nil, errors.New("passkey key file must be owner-only")
-	}
-	key, err := io.ReadAll(io.LimitReader(f, 33))
+	key, err := securefile.Read(path, 32)
 	if err != nil {
 		return nil, fmt.Errorf("read passkey key file: %w", err)
 	}

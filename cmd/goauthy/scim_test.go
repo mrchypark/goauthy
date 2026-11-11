@@ -242,8 +242,8 @@ func TestLoadSCIMTokenTrimsExactlyOneLineEndingAndRejectsUnsafeValues(t *testing
 	if err := os.Chmod(path, 0o440); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadSCIMToken(path); err == nil {
-		t.Fatal("accepted group-readable token")
+	if got, err := loadSCIMToken(path); err != nil || got != "token" {
+		t.Fatalf("rejected group-readable token: token=%q err=%v", got, err)
 	}
 	if err := os.Chmod(path, 0o400); err != nil {
 		t.Fatal(err)
