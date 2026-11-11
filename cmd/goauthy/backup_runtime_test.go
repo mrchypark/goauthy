@@ -49,12 +49,10 @@ func (b *slowArtifactBucket) Get(ctx context.Context, name string) (io.ReadClose
 	return b.Bucket.Get(ctx, name)
 }
 
-// TestScheduledBackupRuntimeStartupVerifiesArtifactWithinOperationBudget covers a
-// catalog below capacity with fast metadata and a healthy artifact that takes
-// longer than the fixed 30s startup deadline to read. Recoverability verification
-// must still run, but on the configured backup-operation budget, so startup stays
-// supported.
-func TestScheduledBackupRuntimeStartupVerifiesArtifactWithinOperationBudget(t *testing.T) {
+// TestScheduledBackupWorkerVerifiesArtifactWithinOperationBudget covers a catalog
+// below capacity with a healthy artifact whose complete read exceeds the short
+// store-open deadline. Worker verification uses the configured operation budget.
+func TestScheduledBackupWorkerVerifiesArtifactWithinOperationBudget(t *testing.T) {
 	for _, policy := range []backup.RetentionPolicy{backup.RetainLatest, backup.ExpireAll} {
 		t.Run(string(policy), func(t *testing.T) {
 			ctx := context.Background()
@@ -92,7 +90,7 @@ func TestScheduledBackupRuntimeStartupVerifiesArtifactWithinOperationBudget(t *t
 				t.Fatalf("backup validation failed: %v", err)
 			}
 			if slow.reads == 0 {
-				t.Fatal("startup skipped artifact verification")
+				t.Fatal("worker skipped artifact verification")
 			}
 			if entries, err := backup.ListCompleted(ctx, bucket, prefix, []ed25519.PublicKey{public}, 1); err != nil || len(entries) != 1 {
 				t.Fatalf("entries=%v err=%v", entries, err)
