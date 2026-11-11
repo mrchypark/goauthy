@@ -10,8 +10,9 @@ import (
 )
 
 // ErrInsecure is returned before reading a path that is not a regular,
-// owner-only file or that changes between inspection and open.
-var ErrInsecure = errors.New("sensitive file must be a regular, owner-only file and not a symlink")
+// owner/group-readable file without group write or execute permission, or that
+// changes between inspection and open.
+var ErrInsecure = errors.New("sensitive file must be regular and have no group write/execute or other permissions")
 
 // Read returns at most maxBytes from path. The pathname and opened descriptor
 // must identify the same regular file; this rejects symlinks and replacement
@@ -50,5 +51,11 @@ func Read(path string, maxBytes int64) ([]byte, error) {
 }
 
 func secureInfo(info os.FileInfo) bool {
-	return info != nil && info.Mode().IsRegular() && info.Mode().Perm()&0o077 == 0
+	// Kubernetes secret projections are commonly 0440 through fsGroup. Keep
+	// group read support while rejecting group mutation and all other access.
+	if info == nil {
+		return false
+	}
+	perm := info.Mode().Perm()
+	return info.Mode().IsRegular() && perm&0o400 != 0 && perm&0o030 == 0 && perm&0o007 == 0
 }

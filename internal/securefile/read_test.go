@@ -16,7 +16,19 @@ func TestReadRequiresOwnerOnlyRegularNonSymlink(t *testing.T) {
 	if got, err := Read(secure, 64); err != nil || string(got) != "secret" {
 		t.Fatalf("secure read=%q err=%v", got, err)
 	}
-	for _, mode := range []os.FileMode{0o640, 0o604, 0o660} {
+	for _, mode := range []os.FileMode{0o440, 0o640} {
+		path := filepath.Join(dir, mode.String())
+		if err := os.WriteFile(path, []byte("secret"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := Read(path, 64); err != nil || string(got) != "secret" {
+			t.Fatalf("mode=%#o read=%q err=%v", mode, got, err)
+		}
+	}
+	for _, mode := range []os.FileMode{0o604, 0o660, 0o644, 0o000} {
 		path := filepath.Join(dir, mode.String())
 		if err := os.WriteFile(path, []byte("secret"), 0o600); err != nil {
 			t.Fatal(err)
