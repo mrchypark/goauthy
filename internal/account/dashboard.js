@@ -19,7 +19,8 @@
   const basePath = () => { const path = window.location.pathname; const marker = path.lastIndexOf('/account'); return marker < 0 ? '' : path.slice(0, marker); };
   const endpoint = (path) => `${basePath()}${path}`;
   const request = (url, options = {}) => {
-    const mutation = Boolean(options.method && !['GET', 'HEAD', 'OPTIONS'].includes(String(options.method).toUpperCase()));
+    const challenge = /\/(?:mfa_token|webauthn\/(?:auth\/(?:start|finish)|register\/start))$/.test(String(url).replace(/[?#].*$/, ''));
+    const mutation = Boolean(options.method && !['GET', 'HEAD', 'OPTIONS'].includes(String(options.method).toUpperCase())) && !challenge;
     const unknownOutcome = () => {
       state.mutationUnknown = true;
       const error = new Error(t('Request outcome is unknown. Check the current state before retrying.'));
@@ -37,7 +38,7 @@
         let body = null;
         try { body = await response.json?.(); } catch (_) { /* retain the generic status message */ }
         const wrongCurrentPassword = response.status === 401 && body?.error_code === 'invalid_current_password';
-        const unknownMutationOutcome = response.status === 503 && body?.error_code === 'mutation_outcome_unknown';
+        const unknownMutationOutcome = mutation && response.status === 503 && body?.error_code === 'mutation_outcome_unknown';
         const ambiguousMutation = mutation && response.status >= 500;
         if (unknownMutationOutcome || ambiguousMutation) state.mutationUnknown = true;
         const message = wrongCurrentPassword

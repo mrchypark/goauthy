@@ -194,4 +194,11 @@ func TestCommonBrandingAndLegacyContracts(t *testing.T) {
 	if put.Parameters.GetByInAndName("header", "If-Match") == nil || put.Responses.Status(412) == nil || put.Responses.Status(428) == nil {
 		t.Fatal("common theme update must require If-Match and document 412/428")
 	}
+	deletion := doc.Paths.Value("/auth/v1/branding/theme").Delete
+	if deletion.Parameters.GetByInAndName("header", "If-Match") == nil || deletion.Responses.Status(412) == nil || deletion.Responses.Status(428) == nil {
+		t.Fatal("common theme reset must require If-Match and document 412/428")
+	}
+	if doc.Paths.Value("/auth/v1/clients/{id}/favicon").Delete.Responses.Status(200).Value.Headers["Clear-Site-Data"] == nil {
+		t.Fatal("client favicon delete must document cache invalidation")
+	}
 }

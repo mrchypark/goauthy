@@ -199,6 +199,7 @@ func TestCommonThemeETagIfMatchAndClientCreateOnly(t *testing.T) {
 	if response.Code != http.StatusOK || response.Header().Get("Clear-Site-Data") != `"cache"` || response.Header().Get("ETag") == "" || response.Header().Get("ETag") == etag {
 		t.Fatalf("accepted If-Match status=%d headers=%v", response.Code, response.Header())
 	}
+	savedETag := response.Header().Get("ETag")
 	got, err := store.GetGlobal(ctx)
 	if err != nil || got.BrandName != theme.BrandName {
 		t.Fatalf("common theme not saved: %#v err=%v", got, err)
@@ -210,6 +211,28 @@ func TestCommonThemeETagIfMatchAndClientCreateOnly(t *testing.T) {
 	handler.GlobalTheme(stale, staleRequest)
 	if stale.Code != http.StatusPreconditionFailed {
 		t.Fatalf("superseded If-Match status=%d", stale.Code)
+	}
+	missingDelete := httptest.NewRecorder()
+	handler.GlobalTheme(missingDelete, httptest.NewRequest(http.MethodDelete, "/auth/v1/branding/theme", nil))
+	if missingDelete.Code != http.StatusPreconditionRequired {
+		t.Fatalf("missing delete If-Match status=%d", missingDelete.Code)
+	}
+	staleDelete := httptest.NewRequest(http.MethodDelete, "/auth/v1/branding/theme", nil)
+	staleDelete.Header.Set("If-Match", etag)
+	staleDeleted := httptest.NewRecorder()
+	handler.GlobalTheme(staleDeleted, staleDelete)
+	if staleDeleted.Code != http.StatusPreconditionFailed {
+		t.Fatalf("stale delete If-Match status=%d", staleDeleted.Code)
+	}
+	if got, err := store.GetGlobal(ctx); err != nil || got.BrandName != theme.BrandName {
+		t.Fatalf("stale reset changed common theme: %#v err=%v", got, err)
+	}
+	acceptedDelete := httptest.NewRequest(http.MethodDelete, "/auth/v1/branding/theme", nil)
+	acceptedDelete.Header.Set("If-Match", savedETag)
+	deleted := httptest.NewRecorder()
+	handler.GlobalTheme(deleted, acceptedDelete)
+	if deleted.Code != http.StatusOK || deleted.Header().Get("Clear-Site-Data") != `"cache"` {
+		t.Fatalf("accepted delete status=%d headers=%v", deleted.Code, deleted.Header())
 	}
 
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "theme-create-client", SQL: `INSERT INTO managed_oauth_clients(id,generation,revision,enabled,metadata_json) VALUES('client-b','test',1,0,'{}')`}); err != nil {

@@ -320,5 +320,19 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
     context.fetch = async () => ({ ok: false, status, json: async () => ({ error_code: errorCode }) });
     await assert.rejects(context.accountDashboard.connectionDeps.request('/account/test'), (error) => error.status === status && error.message === message);
   }
+  for (const path of [
+    '/auth/v1/users/user%2F1/mfa_token',
+    '/auth/v1/users/user%2F1/webauthn/auth/start',
+    '/auth/v1/users/user%2F1/webauthn/auth/finish',
+    '/auth/v1/users/user%2F1/webauthn/register/start',
+  ]) {
+    context.accountDashboard.state.mutationUnknown = false;
+    let attempts = 0;
+    context.fetch = async () => { attempts++; throw new Error('offline'); };
+    await assert.rejects(context.accountDashboard.connectionDeps.request(path, { method: 'POST' }), (error) => error.message === 'offline' && !error.unknownOutcome);
+    assert.equal(context.accountDashboard.state.mutationUnknown, false, path + ' is a retryable challenge request');
+    await assert.rejects(context.accountDashboard.connectionDeps.request(path, { method: 'POST' }), (error) => error.message === 'offline');
+    assert.equal(attempts, 2, path + ' remains retryable after transport failure');
+  }
   console.log('dashboard UI checks passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

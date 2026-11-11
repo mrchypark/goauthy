@@ -68,9 +68,9 @@ Common API routes are `/auth/v1/branding/theme` (POST to read, PUT, DELETE),
 `/auth/v1/branding/logo` (GET, PUT, DELETE). The existing client routes remain
 client-scoped, including when a client ID is `goauthy`.
 
-The common-theme POST returns a strong `ETag`. Every common-theme PUT must send
-that value in `If-Match`; a missing precondition returns `428`, while a stale or
-concurrent value returns `412` without changing the saved theme. Reload the
+The common-theme POST returns a strong `ETag`. Every common-theme PUT and DELETE
+must send that value in `If-Match`; a missing precondition returns `428`, while a
+stale or concurrent value returns `412` without changing the saved theme. Reload the
 common theme before retrying so edits are based on the current representation.
 Client-theme creation continues to use `If-None-Match: *`, so an absent client
 override can be created once without overwriting a concurrent writer. Common

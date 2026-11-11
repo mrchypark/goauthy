@@ -211,6 +211,15 @@ func (h *ThemeHandler) delete(w http.ResponseWriter, r *http.Request, clientID s
 	if !ok {
 		return
 	}
+	var ifMatch string
+	if global {
+		values := r.Header.Values("If-Match")
+		if len(values) != 1 || strings.TrimSpace(values[0]) == "" {
+			http.Error(w, "If-Match theme revision required", http.StatusPreconditionRequired)
+			return
+		}
+		ifMatch = strings.TrimSpace(values[0])
+	}
 	if !global {
 		if err := h.clientExists(r.Context(), clientID); err != nil {
 			h.themeMutationError(w, err)
@@ -219,7 +228,7 @@ func (h *ThemeHandler) delete(w http.ResponseWriter, r *http.Request, clientID s
 	}
 	var err error
 	if global {
-		err = h.store.DeleteGlobalAuthorized(r.Context(), h.apiKeys, principal)
+		err = h.store.DeleteGlobalIfMatchAuthorized(r.Context(), h.apiKeys, principal, ifMatch)
 	} else {
 		err = h.store.DeleteAuthorized(r.Context(), clientID, h.apiKeys, principal)
 	}

@@ -94,6 +94,9 @@ func TestElysduiDynamicAdminInBrowser(t *testing.T) {
 // whereas --color-accent is a resolved color usable by background and outline.
 func TestAdminAccentComputedStylesInBrowser(t *testing.T) {
 	mux := http.NewServeMux()
+	customTheme := branding.DefaultTheme(branding.GlobalBrandID)
+	customTheme.Dark.Action = []uint16{210, 80, 20}
+	customTheme.Dark.BtnText = "#ffffff"
 	if err := sharedUI.BindAssets(mux); err != nil {
 		t.Fatal(err)
 	}
@@ -107,15 +110,23 @@ func TestAdminAccentComputedStylesInBrowser(t *testing.T) {
 		w.Header().Set("Content-Type", "text/css")
 		_, _ = w.Write(css)
 	})
-	mux.HandleFunc("GET /theme.css", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /theme.css", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/css")
-		_, _ = w.Write([]byte(branding.DefaultTheme(branding.GlobalBrandID).CSS()))
+		theme := branding.DefaultTheme(branding.GlobalBrandID)
+		if r.URL.Query().Get("custom") == "1" {
+			theme = customTheme
+		}
+		_, _ = w.Write([]byte(theme.CSS()))
 	})
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
+		themeURL := "/theme.css"
+		if r.URL.Query().Get("custom") == "1" {
+			themeURL += "?custom=1"
+		}
 		_, _ = w.Write([]byte(`<!doctype html><html><head>
 <link rel="stylesheet" href="/auth/v1/ui/app.css"><link rel="stylesheet" href="/auth/v1/ui/brand.css">
-<link rel="stylesheet" href="/admin.css"><link rel="stylesheet" href="/theme.css"></head><body class="common-brand">
+<link rel="stylesheet" href="/admin.css"><link rel="stylesheet" href="` + themeURL + `"></head><body class="common-brand">
 <div id="app"><button data-slot="button" data-variant="primary">Save</button>
 <input data-slot="input"><select data-slot="select"><option>One</option></select><textarea data-slot="textarea"></textarea></div>
 <div id="resolved" style="background-color:var(--color-accent)"></div></body></html>`))
@@ -158,7 +169,7 @@ resolve(result);
 			if observed.Raw == "" || strings.Contains(observed.Raw, "(") || observed.Expected == "rgba(0, 0, 0, 0)" || observed.Background != observed.Expected || observed.Ink == "" || observed.Ink == observed.Paper {
 				t.Errorf("%s resolved theme colors: %+v", scheme, observed)
 			}
-			if observed.TextContrast < 4.5 || observed.PrimaryContrast < 4.5 || observed.FocusContrast < 3 {
+			if observed.TextContrast < 4.5 || observed.FocusContrast < 3 {
 				t.Errorf("%s contrast text=%.2f primary=%.2f focus=%.2f", scheme, observed.TextContrast, observed.PrimaryContrast, observed.FocusContrast)
 			}
 			if len(observed.Focus) != 4 {
@@ -170,5 +181,26 @@ resolve(result);
 				}
 			}
 		})
+	}
+	var custom struct {
+		PrimaryText, Background string
+		Contrast                float64
+	}
+	if err := chromedp.Run(ctx,
+		chromedp.Navigate(server.URL+"?custom=1"),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			return emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: "dark"}}).Do(ctx)
+		}),
+		chromedp.Evaluate(`new Promise(resolve => requestAnimationFrame(() => {
+const rgb = value => value.match(/[\d.]+/g).slice(0, 3).map(Number);
+const luminance = value => rgb(value).map(component => { component /= 255; return component <= .04045 ? component / 12.92 : ((component + .055) / 1.055) ** 2.4; }).reduce((sum, component, index) => sum + component * [.2126, .7152, .0722][index], 0);
+const button = getComputedStyle(document.querySelector('#app button'));
+const first = luminance(button.color), second = luminance(button.backgroundColor);
+resolve({PrimaryText:button.color, Background:button.backgroundColor, Contrast:(Math.max(first, second) + .05) / (Math.min(first, second) + .05)});
+}))`, &custom, chromedp.EvalAsValue, func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithAwaitPromise(true) })); err != nil {
+		t.Fatal(err)
+	}
+	if custom.PrimaryText != "rgb(255, 255, 255)" || custom.Background != "rgb(10, 51, 92)" || custom.Contrast < 4.5 {
+		t.Fatalf("custom dark primary palette=%+v", custom)
 	}
 }

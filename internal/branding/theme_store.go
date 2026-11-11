@@ -278,14 +278,25 @@ func (s *ThemeStore) putAuthorized(ctx context.Context, theme Theme, keys *apike
 }
 
 func (s *ThemeStore) DeleteAuthorized(ctx context.Context, clientID string, keys *apikey.Store, principal *apikey.Principal) error {
-	return s.deleteAuthorized(ctx, clientID, keys, principal, false)
+	return s.deleteAuthorized(ctx, clientID, keys, principal, false, nil)
 }
 
 func (s *ThemeStore) DeleteGlobalAuthorized(ctx context.Context, keys *apikey.Store, principal *apikey.Principal) error {
-	return s.deleteAuthorized(ctx, GlobalBrandID, keys, principal, true)
+	return s.deleteAuthorized(ctx, GlobalBrandID, keys, principal, true, nil)
 }
 
-func (s *ThemeStore) deleteAuthorized(ctx context.Context, clientID string, keys *apikey.Store, principal *apikey.Principal, global bool) error {
+func (s *ThemeStore) DeleteGlobalIfMatchAuthorized(ctx context.Context, keys *apikey.Store, principal *apikey.Principal, ifMatch string) error {
+	state, err := s.globalState(ctx)
+	if err != nil {
+		return err
+	}
+	if ifMatch != state.etag {
+		return ErrThemeConflict
+	}
+	return s.deleteAuthorized(ctx, GlobalBrandID, keys, principal, true, &state)
+}
+
+func (s *ThemeStore) deleteAuthorized(ctx context.Context, clientID string, keys *apikey.Store, principal *apikey.Principal, global bool, expected *globalThemeState) error {
 	if keys == nil {
 		return apikey.ErrForbidden
 	}
@@ -297,6 +308,14 @@ func (s *ThemeStore) deleteAuthorized(ctx context.Context, clientID string, keys
 	table := "client_themes"
 	if global {
 		table, exists, existsArgs = "global_brand_themes", "1", nil
+	}
+	if expected != nil {
+		if expected.present {
+			exists += ` AND EXISTS(SELECT 1 FROM global_brand_themes WHERE client_id=? AND version=? AND updated_at_unix_ms=? AND document_json=?)`
+			existsArgs = append(existsArgs, GlobalBrandID, expected.version, expected.updated, expected.document)
+		} else {
+			exists += ` AND NOT EXISTS(SELECT 1 FROM global_brand_themes)`
+		}
 	}
 	statements := []rhiza.SQLStatement{{SQL: `UPDATE api_key_mutation_guards SET request_id=request_id WHERE request_id=? AND ` + exists + ` AND ` + apikey.GuardExistsSQL(), Args: append([]any{id}, append(existsArgs, id)...)}, {SQL: `DELETE FROM ` + table + ` WHERE client_id=? AND ` + exists + ` AND ` + apikey.GuardExistsSQL(), Args: append([]any{clientID}, append(existsArgs, id)...)}}
 	if !global && clientID == GlobalBrandID {
@@ -310,6 +329,9 @@ func (s *ThemeStore) deleteAuthorized(ctx context.Context, clientID string, keys
 		return apikey.ErrForbidden
 	}
 	if response.RowsAffected < 3 {
+		if expected != nil {
+			return ErrThemeConflict
+		}
 		return clients.ErrNotFound
 	}
 	return nil

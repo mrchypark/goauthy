@@ -229,7 +229,8 @@ async function clientTheme(id, common = false) {
     status.className = 'theme-status';
     status.textContent = t('Resetting theme…');
     try {
-      await api(endpoint, {method: 'DELETE'});
+      if (common && !commonEtag) throw new Error(t('Reload the common theme before resetting.'));
+      await api(endpoint, {method: 'DELETE', ...(common ? {headers: {'If-Match': commonEtag}} : {})});
       await loadTheme();
       by('theme-reset-review').hidden = true;
       status.className = 'theme-status success';

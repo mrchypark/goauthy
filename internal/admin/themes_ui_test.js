@@ -330,6 +330,8 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
   assert.ok(common.calls.some(call => call.path === '/auth/v1/branding/theme' && call.opts.method === 'PUT'));
   assert.equal(common.calls.find(call => call.path === '/auth/v1/branding/theme' && call.opts.method === 'PUT').opts.headers['If-Match'], '"sha256:common"');
   await common.node('theme-reset-confirm').onclick();
+  const resetTheme = common.calls.filter(call => call.path === '/auth/v1/branding/theme' && call.opts.method === 'DELETE').at(-1);
+  assert.equal(resetTheme.opts.headers['If-Match'], '"sha256:common"', 'common theme reset carries the read ETag');
   assert.equal(common.saved, null);
   assert.equal(common.node('theme-status').textContent, 'Common theme reset to defaults.');
   assert.equal(common.previewNodes.get('theme-sample-title').textContent, 'Sign in');

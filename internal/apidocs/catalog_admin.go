@@ -310,7 +310,9 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 	iconPut := add("PUT", "/auth/v1/clients/{id}/favicon", "Replace client favicon (Clients:update)", nil, nil, write)
 	iconPut.Description = "First multipart field accepts PNG/JPEG normalized to 32px WebP or sanitized SVG. Maximum request size 10 MiB. No ETag precondition is required."
 	iconPut.RequestBody = &openapi3.RequestBodyRef{Value: openapi3.NewRequestBody().WithRequired(true).WithSchema(obj(map[string]*openapi3.Schema{"file": openapi3.NewStringSchema().WithFormat("binary")}, "file"), []string{"multipart/form-data"})}
-	add("DELETE", "/auth/v1/clients/{id}/favicon", "Delete client favicon (Clients:update)", nil, nil, write)
+	faviconDelete := add("DELETE", "/auth/v1/clients/{id}/favicon", "Delete client favicon (Clients:update)", nil, nil, write)
+	faviconDelete.Description = "Deletes the exact client favicon and returns Clear-Site-Data: cache. No logo or global fallback is deleted."
+	faviconDelete.Responses.Status(200).Value.Headers = openapi3.Headers{"Clear-Site-Data": {Value: &openapi3.Header{Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}, Description: "Cache invalidation directive: \"cache\"."}}}
 	hsl := openapi3.NewArraySchema().WithMinItems(3).WithMaxItems(3).WithItems(openapi3.NewIntegerSchema().WithMin(0).WithMax(360))
 	hsl.Description = "HSL tuple: hue 0–360, saturation and lightness 0–100."
 	cssValue := openapi3.NewStringSchema().WithMinLength(1)
@@ -387,17 +389,10 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 			body = commonTheme
 		}
 		op := add(method, "/auth/v1/branding/theme", "Manage common theme", body, nil, write)
-		op.Description = "Browser administrator with CSRF or Clients:" + map[string]string{"PUT": "update", "DELETE": "delete"}[method] + " API key. Empty 200 with Clear-Site-Data: cache. Operates only on common branding; does not delete or rewrite legacy client data. PUT requires client_id goauthy and a strong If-Match ETag from POST; a missing precondition is 428 and a stale or concurrent edit is 412. Request JSON is limited to 1 MiB."
+		op.Description = "Browser administrator with CSRF or Clients:" + map[string]string{"PUT": "update", "DELETE": "delete"}[method] + " API key. Empty 200 with Clear-Site-Data: cache. Operates only on common branding; does not delete or rewrite legacy client data. PUT and DELETE require the strong If-Match ETag from POST; a missing precondition is 428 and a stale or concurrent edit or reset is 412. PUT requires client_id goauthy and request JSON is limited to 1 MiB."
 		statuses(op, 200, 400, 401, 403, 412, 428, 503)
 		header(op, "Clear-Site-Data", "Cache invalidation directive: \"cache\".")
-		if method == "PUT" {
-			response := op.Responses.Status(200).Value
-			if response.Headers == nil {
-				response.Headers = openapi3.Headers{}
-			}
-			response.Headers["ETag"] = &openapi3.HeaderRef{Value: &openapi3.Header{Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}, Description: "Strong quoted revision of the saved common theme."}}
-			op.AddParameter(openapi3.NewHeaderParameter("If-Match").WithRequired(true).WithSchema(openapi3.NewStringSchema().WithPattern(`^"sha256:[0-9a-f]{64}"$`)))
-		}
+		op.AddParameter(openapi3.NewHeaderParameter("If-Match").WithRequired(true).WithSchema(openapi3.NewStringSchema().WithPattern(`^"sha256:[0-9a-f]{64}"$`)))
 	}
 	commonCSS := add("GET", "/auth/v1/branding/theme/{timestamp}", "Read public common theme CSS", nil, nil, nil)
 	statuses(commonCSS, 200, 400, 503)
