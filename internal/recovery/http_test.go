@@ -68,6 +68,59 @@ func TestRequestResetSenderFailureAndCrossSite(t *testing.T) {
 	}
 }
 
+func TestRequestResetKnownAndUnknownDoNotWaitForSMTP(t *testing.T) {
+	t.Parallel()
+	service, sender := testService(t, "subject-1", "alice")
+	if err := service.BindEmail(context.Background(), "subject-1", "alice@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	outbox, err := NewEmailOutbox(service.db, func(context.Context, string, string, string, string) error { return nil }, WithEnvelopeKeyring(loginRevokeTestKeyring(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbox.Now = service.now
+	service.outbox = outbox
+	block := make(chan struct{})
+	sender.block = block
+	defer close(block)
+
+	request := func(email, peer string) *httptest.ResponseRecorder {
+		t.Helper()
+		challenge, err := service.pow.Issue(context.Background(), service.powDifficulty, service.powTTL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof := solveProof(t, challenge)
+		r := httptest.NewRequest(http.MethodPost, "/auth/v1/users/request_reset", strings.NewReader(`{"email":"`+email+`","pow":"`+proof+`"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.RemoteAddr = peer
+		w := httptest.NewRecorder()
+		done := make(chan *httptest.ResponseRecorder, 1)
+		go func() {
+			service.RequestReset(w, r)
+			done <- w
+		}()
+		select {
+		case response := <-done:
+			return response
+		case <-time.After(time.Second):
+			t.Fatal("reset request waited for synchronous SMTP")
+			return nil
+		}
+	}
+	known := request("alice@example.test", "192.0.2.70:1000")
+	unknown := request("nobody@example.test", "192.0.2.71:1000")
+	if known.Code != http.StatusOK || unknown.Code != http.StatusOK || known.Body.Len() != 0 || unknown.Body.Len() != 0 {
+		t.Fatalf("known=%d/%q unknown=%d/%q", known.Code, known.Body.String(), unknown.Code, unknown.Body.String())
+	}
+	if messages := sender.messages(); len(messages) != 0 {
+		t.Fatalf("reset request performed synchronous SMTP: %+v", messages)
+	}
+	if rows := outboxRowCount(t, outbox); rows != 1 {
+		t.Fatalf("outbox rows=%d want one known-account delivery", rows)
+	}
+}
+
 func TestProofOfWorkAndRequestResetProofBoundary(t *testing.T) {
 	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
@@ -566,12 +619,16 @@ type fakeSender struct {
 	already  []string
 	changed  []EmailChangeMessage
 	err      error
+	block    <-chan struct{}
 }
 
 func (s *fakeSender) SendPasswordReset(_ context.Context, message Message) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.items = append(s.items, message)
+	s.mu.Unlock()
+	if s.block != nil {
+		<-s.block
+	}
 	return s.err
 }
 func (s *fakeSender) SendPasswordNew(_ context.Context, message Message) error {

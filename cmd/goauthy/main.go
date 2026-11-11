@@ -405,6 +405,7 @@ func run() (err error) {
 			return fmt.Errorf("configure password proof of work: %w", powErr)
 		}
 		var options []recovery.ServiceOption
+		options = append(options, recovery.WithEmailOutbox(emailOutbox))
 		if openRegistration.Enabled {
 			bootstrapRedirect := env("GOAUTHY_BOOTSTRAP_REDIRECT_URI", "http://localhost:5555/callback")
 			options = append(options, recovery.WithOpenRegistration(openRegistration, passwordNewExpiry, func(ctx context.Context, uri string) (bool, error) {
