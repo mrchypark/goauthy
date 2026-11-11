@@ -83,6 +83,8 @@ test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-0917") | .spec.template.spec.containers[0].env[] | select(.name == "GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER") | .value' "$render")" = gcs
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-0917") | .spec.template.spec.containers[0].env[] | select(.name == "GOAUTHY_RHIZA_PEER_ADDR") | .value' "$render")" = ":8444"
 test "$(yq -r "$ha3 | .spec.template.spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution | length" "$render")" = 1
+test "$(yq -r "$ha3 | .spec.template.spec.terminationGracePeriodSeconds" "$render")" = 60
+test "$(yq -r "$ha3 | (.spec.template.spec.containers[0].startupProbe.periodSeconds * .spec.template.spec.containers[0].startupProbe.failureThreshold)" "$render")" = 600
 
 # Verify peer container port
 if ! yq -e 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-0917") | .spec.template.spec.containers[0].ports[] | select(.name == "peer" and .containerPort == 8444 and .protocol == "UDP")' "$render" >/dev/null; then

@@ -276,10 +276,21 @@ complete destination settings, without inheriting explicit source credentials.
 `GOAUTHY_BACKUP_OBJECT_STORE_PREFIX` is rejected; use the catalog variable.
 Without these settings, the source bucket is also the catalog bucket. Independent
 DR requires a destination whose failure/lifecycle boundary meets your deployment.
-Startup checks the catalog with the configured trust bundle (default: current
-signer's public key); it does not prove PUT permission. Untrusted existing
-receipts fail closed. Keep keys independently recoverable outside disposable
-GoAuthy storage and use the overlap procedure above when changing signers.
+The backup worker checks the catalog with the configured trust bundle (default:
+current signer's public key); it does not prove PUT permission. Untrusted
+existing receipts remain unavailable instead of being removed. Keep keys
+independently recoverable outside disposable GoAuthy storage and use the overlap
+procedure above when changing signers.
+
+Remote backup setup and catalog verification run in the backup worker. A
+transient source, destination or keeper outage therefore logs
+`scheduled backup degraded` without preventing the identity service from
+starting. Configuration and key-file errors still fail startup, and each due
+slot retries remote setup before declaring a backup attempt failed. The work
+directory is cleaned of backup scratch entries at startup; remote artifact files
+without a trusted completion receipt are removed only after the longest
+configured attempt plus a settlement window, and catalog or attribute errors
+suppress the entire sweep.
 
 For server-scheduled jobs, a successful `Create` is followed by the configured
 catalog-retention pass; the standalone operator's `create` command does not

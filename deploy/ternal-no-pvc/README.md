@@ -4,7 +4,10 @@ These isolated GoAuthy profiles are for Ternal only. They do not alter
 `deploy/k8s` or `deploy/standalone`, deploy MinIO, create a PVC, or share the
 default GoAuthy namespace, Secret, Rhiza cluster ID, or object-store prefix.
 
-`deploy/ternal-no-pvc` is the three-voter HA profile. Its `standalone`
+`deploy/ternal-no-pvc` is the three-voter HA profile. Voters require distinct
+hostname anti-affinity, so the HA overlay needs at least three schedulable
+nodes; it has a 10-minute startup probe and 60-second termination grace period.
+Its `standalone`
 subdirectory is a one-member overlay: it removes every peer/member/admin-token
 setting and peer port, while retaining the external S3 before-ack path and the
 required object-store guard. Both use `emptyDir` for `/var/lib/goauthy`; the
@@ -72,14 +75,17 @@ only its dedicated Workload Identity principal through the metadata service.
 It remains `automountServiceAccountToken: false`; do not add a service-account
 JSON key, `GOOGLE_APPLICATION_CREDENTIALS`, or a static cloud credential. The
 bucket's `goauthy/` prefix must remain exclusive to this provider instance.
-Actual metadata-service and GCS egress reachability still require IED runtime
-validation before activation.
+The GCS HA policy permits DNS, the Workload Identity metadata endpoints, and
+public TCP 443 for GCS/OAuth while excluding RFC1918 and link-local ranges from
+the public rule. This dependency on CNI NetworkPolicy enforcement still requires
+IED runtime validation before activation.
 
 ## GCS HA profile
 
 `deploy/ternal-no-pvc/gcs-ha` is the three-voter HA profile for native GCS.
 It reuses the base HA overlay (3 replicas, peer port 8444, PDB minAvailable
-2) and replaces S3 object-store config with
+2, required hostname anti-affinity, a 10-minute startup probe budget and a
+60-second termination grace period), and replaces S3 object-store config with
 `GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER=gcs`,
 `object-store-bucket`, and `object-store-prefix` from the ConfigMap.
 

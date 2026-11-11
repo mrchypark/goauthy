@@ -20,15 +20,14 @@ spec:
     spec:
       serviceAccountName: goauthy
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
       affinity:
         podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchLabels:
-                    app.kubernetes.io/name: goauthy
-                topologyKey: kubernetes.io/hostname
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: goauthy
+              topologyKey: kubernetes.io/hostname
       securityContext:
         fsGroup: 65532
         seccompProfile:
@@ -208,8 +207,8 @@ spec:
             httpGet:
               path: /livez
               port: http
-            periodSeconds: 2
-            failureThreshold: 30
+            periodSeconds: 10
+            failureThreshold: 60
           livenessProbe:
             httpGet:
               path: /livez

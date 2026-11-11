@@ -23,6 +23,7 @@ spec:
     spec:
       serviceAccountName: ternal-goauthy
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
       securityContext:
         fsGroup: 65532
         seccompProfile:
@@ -144,8 +145,8 @@ spec:
             httpGet:
               path: /livez
               port: http
-            periodSeconds: 2
-            failureThreshold: 30
+            periodSeconds: 10
+            failureThreshold: 60
           livenessProbe:
             httpGet:
               path: /livez
