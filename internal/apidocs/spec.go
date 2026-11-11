@@ -13,9 +13,6 @@ import (
 	"github.com/mrchypark/goauthy/internal/oidc"
 )
 
-// BuildVersion is set from the release build for images without VCS metadata.
-var BuildVersion string
-
 // Features mirrors runtime route switches, not hypothetical upstream capabilities.
 type Features struct {
 	DCR, Passkeys, Recovery, OpenRegistration, Blacklist, WebID, FedCM, Upstream bool
@@ -80,9 +77,6 @@ func Document(issuer string, features Features) ([]byte, error) {
 }
 
 func runtimeVersion() string {
-	if version := strings.TrimSpace(BuildVersion); version != "" {
-		return version
-	}
 	info, ok := debug.ReadBuildInfo()
 	return versionFromBuildInfo(info, ok)
 }
@@ -129,20 +123,6 @@ func describeErrorResponses(doc *openapi3.T) {
 					"text/plain":       {Schema: text},
 					"application/json": {Schema: structured},
 				}
-			}
-		}
-	}
-	for _, path := range []string{"/account/login", "/auth/login", "/oidc/device/login", "/account/connection-login"} {
-		item := doc.Paths.Value(path)
-		if item == nil {
-			continue
-		}
-		for _, operation := range item.Operations() {
-			for _, response := range operation.Responses.Map() {
-				if response == nil || response.Value == nil || len(response.Value.Content) == 0 {
-					continue
-				}
-				response.Value.Content["text/html"] = &openapi3.MediaType{Schema: text}
 			}
 		}
 	}

@@ -75,7 +75,7 @@ func DefaultTheme(clientID string) Theme {
 			TextHigh:  []uint16{200, 15, 25},
 			Bg:        []uint16{34, 25, 97},
 			BgHigh:    []uint16{34, 20, 90},
-			Action:    []uint16{34, 100, 34},
+			Action:    []uint16{34, 100, 40},
 			Accent:    []uint16{265, 100, 53},
 			Error:     []uint16{15, 100, 37},
 			BtnText:   "white",

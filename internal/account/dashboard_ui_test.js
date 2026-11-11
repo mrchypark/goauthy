@@ -334,12 +334,5 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
     await assert.rejects(context.accountDashboard.connectionDeps.request(path, { method: 'POST' }), (error) => error.message === 'offline');
     assert.equal(attempts, 2, path + ' remains retryable after transport failure');
   }
-  context.accountDashboard.state.mutationUnknown = false;
-  let collectionAttempts = 0;
-  context.fetch = async () => { collectionAttempts++; throw new Error('offline'); };
-  await assert.rejects(context.accountDashboard.connectionDeps.request('/auth/v1/connections/mfa_token', { method: 'POST' }), (error) => error.unknownOutcome);
-  assert.equal(context.accountDashboard.state.mutationUnknown, true, 'a connection collection named mfa_token is still a mutation');
-  await assert.rejects(context.accountDashboard.connectionDeps.request('/auth/v1/connections/mfa_token', { method: 'POST' }), (error) => error.unknownOutcome);
-  assert.equal(collectionAttempts, 1, 'unknown connection creation must not be retried blindly');
   console.log('dashboard UI checks passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

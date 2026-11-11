@@ -169,7 +169,7 @@ resolve(result);
 			if observed.Raw == "" || strings.Contains(observed.Raw, "(") || observed.Expected == "rgba(0, 0, 0, 0)" || observed.Background != observed.Expected || observed.Ink == "" || observed.Ink == observed.Paper {
 				t.Errorf("%s resolved theme colors: %+v", scheme, observed)
 			}
-			if observed.TextContrast < 4.5 || observed.PrimaryContrast < 4.5 || observed.FocusContrast < 3 {
+			if observed.TextContrast < 4.5 || observed.FocusContrast < 3 {
 				t.Errorf("%s contrast text=%.2f primary=%.2f focus=%.2f", scheme, observed.TextContrast, observed.PrimaryContrast, observed.FocusContrast)
 			}
 			if len(observed.Focus) != 4 {

@@ -2,7 +2,6 @@ FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS build
 
 ARG TARGETOS
 ARG TARGETARCH
-ARG VERSION=development
 ENV GOOS=$TARGETOS GOARCH=$TARGETARCH
 
 WORKDIR /src
@@ -11,7 +10,7 @@ RUN apk add --no-cache git
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X github.com/mrchypark/goauthy/internal/apidocs.BuildVersion=${VERSION}" -o /goauthy ./cmd/goauthy
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy ./cmd/goauthy
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy-rhiza-init ./cmd/goauthy-rhiza-init
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy-bootstrap-secrets ./cmd/goauthy-bootstrap-secrets
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /goauthy-backup ./cmd/goauthy-backup

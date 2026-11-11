@@ -19,7 +19,7 @@
   const basePath = () => { const path = window.location.pathname; const marker = path.lastIndexOf('/account'); return marker < 0 ? '' : path.slice(0, marker); };
   const endpoint = (path) => `${basePath()}${path}`;
   const request = (url, options = {}) => {
-    const challenge = /^\/auth\/v1\/users\/[^/]+\/(?:mfa_token|webauthn\/(?:auth\/(?:start|finish)|register\/start))$/.test(String(url).replace(/[?#].*$/, ''));
+    const challenge = /\/(?:mfa_token|webauthn\/(?:auth\/(?:start|finish)|register\/start))$/.test(String(url).replace(/[?#].*$/, ''));
     const mutation = Boolean(options.method && !['GET', 'HEAD', 'OPTIONS'].includes(String(options.method).toUpperCase())) && !challenge;
     const unknownOutcome = () => {
       state.mutationUnknown = true;
