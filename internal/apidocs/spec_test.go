@@ -2,6 +2,7 @@ package apidocs
 
 import (
 	"bytes"
+	"net/http"
 	"runtime/debug"
 	"strconv"
 	"testing"
@@ -49,6 +50,8 @@ func TestDocumentValidDeterministicAndDeploymentSpecific(t *testing.T) {
 }
 
 func TestOpenAPIVersionUsesBuildIdentity(t *testing.T) {
+	previous := BuildVersion
+	defer func() { BuildVersion = previous }()
 	for _, tc := range []struct {
 		name string
 		info *debug.BuildInfo
@@ -65,6 +68,27 @@ func TestOpenAPIVersionUsesBuildIdentity(t *testing.T) {
 				t.Fatalf("version=%q want=%q", got, tc.want)
 			}
 		})
+	}
+	BuildVersion = "0.3.12"
+	if got := runtimeVersion(); got != "0.3.12" {
+		t.Fatalf("runtime version=%q want release build version", got)
+	}
+}
+
+func TestLoginErrorsDocumentHTML(t *testing.T) {
+	data, err := Document("https://id.example.test", Features{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := openapi3.NewLoader().LoadFromData(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/account/login", "/auth/login"} {
+		response := doc.Paths.Value(path).Post.Responses.Status(http.StatusUnauthorized)
+		if response.Value.Content["text/html"] == nil {
+			t.Fatalf("%s missing HTML error media type", path)
+		}
 	}
 }
 
