@@ -53,6 +53,7 @@ func (s *Service) RequestReset(w http.ResponseWriter, r *http.Request) {
 		forbidden(w)
 		return
 	}
+	deadline := s.resetDeadline()
 	ip, ok := requestPeerIP(r)
 	if !ok {
 		unavailable(w)
@@ -64,10 +65,13 @@ func (s *Service) RequestReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !allowed {
+		s.waitForResetFloor(r.Context(), deadline)
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	if err := s.issue(r.Context(), email); err != nil {
+	err = s.issue(r.Context(), email)
+	s.waitForResetFloor(r.Context(), deadline)
+	if err != nil {
 		unavailable(w)
 		return
 	}

@@ -70,7 +70,7 @@ func TestRequestResetSenderFailureAndCrossSite(t *testing.T) {
 	}
 }
 
-func TestRequestResetKnownAndUnknownDoNotWaitForSMTP(t *testing.T) {
+func TestRequestResetKnownAndUnknownUseCommonFloorWithoutSMTP(t *testing.T) {
 	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
 	if err := service.BindEmail(context.Background(), "subject-1", "alice@example.test"); err != nil {
@@ -82,11 +82,17 @@ func TestRequestResetKnownAndUnknownDoNotWaitForSMTP(t *testing.T) {
 	}
 	outbox.Now = service.now
 	service.outbox = outbox
+	floor := 150 * time.Millisecond
+	service.resetFloor = floor
 	block := make(chan struct{})
 	sender.block = block
 	defer close(block)
 
-	request := func(email, peer string) *httptest.ResponseRecorder {
+	type result struct {
+		response *httptest.ResponseRecorder
+		elapsed  time.Duration
+	}
+	request := func(email, peer string) result {
 		t.Helper()
 		challenge, err := service.pow.Issue(context.Background(), service.powDifficulty, service.powTTL)
 		if err != nil {
@@ -98,23 +104,29 @@ func TestRequestResetKnownAndUnknownDoNotWaitForSMTP(t *testing.T) {
 		r.RemoteAddr = peer
 		r = r.WithContext(browser.ContextWithPeerIP(r.Context(), remoteAddrIP(peer)))
 		w := httptest.NewRecorder()
-		done := make(chan *httptest.ResponseRecorder, 1)
+		done := make(chan result, 1)
+		started := time.Now()
 		go func() {
 			service.RequestReset(w, r)
-			done <- w
+			done <- result{response: w, elapsed: time.Since(started)}
 		}()
+		timer := time.NewTimer(15 * time.Second)
+		defer timer.Stop()
 		select {
-		case response := <-done:
-			return response
-		case <-time.After(time.Second):
-			t.Fatal("reset request waited for synchronous SMTP")
-			return nil
+		case got := <-done:
+			return got
+		case <-timer.C:
+			t.Fatal("reset request did not return")
+			return result{}
 		}
 	}
 	known := request("alice@example.test", "192.0.2.70:1000")
 	unknown := request("nobody@example.test", "192.0.2.71:1000")
-	if known.Code != http.StatusOK || unknown.Code != http.StatusOK || known.Body.Len() != 0 || unknown.Body.Len() != 0 {
-		t.Fatalf("known=%d/%q unknown=%d/%q", known.Code, known.Body.String(), unknown.Code, unknown.Body.String())
+	if known.response.Code != http.StatusOK || unknown.response.Code != http.StatusOK || known.response.Body.Len() != 0 || unknown.response.Body.Len() != 0 {
+		t.Fatalf("known=%d/%q unknown=%d/%q", known.response.Code, known.response.Body.String(), unknown.response.Code, unknown.response.Body.String())
+	}
+	if known.elapsed < floor || unknown.elapsed < floor {
+		t.Fatalf("known=%s unknown=%s floor=%s", known.elapsed, unknown.elapsed, floor)
 	}
 	if messages := sender.messages(); len(messages) != 0 {
 		t.Fatalf("reset request performed synchronous SMTP: %+v", messages)

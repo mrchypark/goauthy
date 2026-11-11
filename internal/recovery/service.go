@@ -21,7 +21,10 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-const passwordResetLifetime = 30 * time.Minute
+const (
+	passwordResetLifetime      = 30 * time.Minute
+	passwordResetResponseFloor = 250 * time.Millisecond
+)
 
 var (
 	ErrInvalidEmail = errors.New("invalid recovery email")
@@ -57,6 +60,7 @@ type Service struct {
 	captcha       captcha.Verifier
 	passkeys      *passkey.Service
 	outbox        *EmailOutbox
+	resetFloor    time.Duration
 }
 
 type openRegistration struct {
@@ -117,7 +121,7 @@ func NewService(db *rhiza.DB, identities *identity.Store, sender Sender, issuer 
 	if err := rules.Validate(); err != nil {
 		return nil, err
 	}
-	service := &Service{db: db, identity: identities, sender: sender, issuer: issuer, rules: rules, policy: policy, pow: pow, powDifficulty: powDifficulty, powTTL: powTTL, now: time.Now}
+	service := &Service{db: db, identity: identities, sender: sender, issuer: issuer, rules: rules, policy: policy, pow: pow, powDifficulty: powDifficulty, powTTL: powTTL, now: time.Now, resetFloor: passwordResetResponseFloor}
 	for _, option := range options {
 		if option == nil {
 			return nil, ErrRegistrationConfig
@@ -286,6 +290,26 @@ func (s *Service) dummyPasswordResetWork(email string) {
 	id := outboxRequestID(email, "password reset", s.now())
 	_, _, _ = s.outbox.sealPayload(id, "html", html)
 	_, _, _ = s.outbox.sealPayload(id, "text", text)
+}
+
+func (s *Service) resetDeadline() time.Time {
+	if s.outbox == nil || s.resetFloor <= 0 {
+		return time.Time{}
+	}
+	return time.Now().Add(s.resetFloor)
+}
+
+func (s *Service) waitForResetFloor(ctx context.Context, deadline time.Time) {
+	remaining := time.Until(deadline)
+	if deadline.IsZero() || remaining <= 0 {
+		return
+	}
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
 }
 
 func (s *Service) resetURL(subject, token string) string {
