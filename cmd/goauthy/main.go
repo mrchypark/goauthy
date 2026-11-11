@@ -57,6 +57,8 @@ import (
 	"github.com/mrchypark/goauthy/internal/rbac"
 	"github.com/mrchypark/goauthy/internal/recovery"
 	"github.com/mrchypark/goauthy/internal/saas"
+	"github.com/mrchypark/goauthy/internal/securefile"
+	"github.com/mrchypark/goauthy/internal/security"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/goauthy/internal/tlsconfig"
 	"github.com/mrchypark/goauthy/internal/tracing"
@@ -1494,6 +1496,7 @@ func run() (err error) {
 	}
 	appHandler = tracing.Middleware(appHandler)
 	appHandler = admissionBypass(appHandler, handler)
+	appHandler = secureTransportHeaders(appHandler)
 	var metricsErrCh chan error
 	metricsAddr, metricsAddrErr := metricsListenAddrFromEnv(os.Getenv)
 	if metricsAddrErr != nil {
@@ -1733,7 +1736,7 @@ func bootstrapUser(ctx context.Context, store *identity.Store, getenv func(strin
 	if path == "" {
 		return nil
 	}
-	encoded, err := os.ReadFile(path)
+	encoded, err := securefile.Read(path, 1<<20)
 	if err != nil {
 		return fmt.Errorf("read bootstrap user password credential: %w", err)
 	}
@@ -2070,7 +2073,7 @@ func loadPasswordResetKey(getenv func(string) string) ([]byte, error) {
 	if path == "" {
 		return nil, errors.New("GOAUTHY_PASSWORD_RESET_KEY_FILE is required when password recovery is enabled")
 	}
-	key, err := os.ReadFile(path)
+	key, err := securefile.Read(path, 32)
 	if err != nil {
 		return nil, fmt.Errorf("read password reset key: %w", err)
 	}
@@ -2736,17 +2739,9 @@ func loadMetricsToken(getenv func(string) string) (string, error) {
 	if path == "" {
 		return "", errors.New("GOAUTHY_METRICS_LISTEN_ADDR requires GOAUTHY_METRICS_TOKEN_FILE")
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open metrics token: %w", err)
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, maxMetricsTokenFileSize+1))
+	data, err := securefile.Read(path, maxMetricsTokenFileSize)
 	if err != nil {
 		return "", fmt.Errorf("read metrics token: %w", err)
-	}
-	if len(data) > maxMetricsTokenFileSize {
-		return "", fmt.Errorf("metrics token file exceeds %d bytes", maxMetricsTokenFileSize)
 	}
 	token := strings.TrimSuffix(string(data), "\r\n")
 	token = strings.TrimSuffix(token, "\n")
@@ -2768,6 +2763,12 @@ func closeRhizaAfterStartupComplete(db *rhiza.DB, startupComplete bool, current 
 
 func newHandler(db *rhiza.DB) *http.ServeMux {
 	return newHandlerWithReadiness(db, nil)
+}
+
+// secureTransportHeaders emits HSTS only for direct TLS or deployment ingress
+// that explicitly forwards the canonical HTTPS scheme.
+func secureTransportHeaders(next http.Handler) http.Handler {
+	return security.Middleware(security.Config{HSTS: security.DefaultConfig().HSTS})(next)
 }
 
 func newHandlerWithReadiness(db *rhiza.DB, readiness func(bool), validators ...func(context.Context) error) *http.ServeMux {

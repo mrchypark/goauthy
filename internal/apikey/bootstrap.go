@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/securefile"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -204,24 +205,9 @@ func readBootstrapFile(path string) ([]byte, error) {
 	if path == "" {
 		return nil, nil
 	}
-	f, err := os.Open(path)
+	content, err := securefile.Read(path, maxBootstrapFileBytes)
 	if err != nil {
 		return nil, fmt.Errorf("read API-key bootstrap file: %w", err)
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat API-key bootstrap file: %w", err)
-	}
-	if info.IsDir() {
-		return nil, errors.New("API-key bootstrap path is a directory")
-	}
-	content, err := io.ReadAll(io.LimitReader(f, maxBootstrapFileBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read API-key bootstrap file: %w", err)
-	}
-	if len(content) > maxBootstrapFileBytes {
-		return nil, errors.New("API-key bootstrap file is too large")
 	}
 	return content, nil
 }

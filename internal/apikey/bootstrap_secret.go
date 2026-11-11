@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/securefile"
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
@@ -220,7 +221,7 @@ func loadBootstrapMasterKeys(dir string) (map[string][]byte, error) {
 		if !bootstrapMasterKeyID.MatchString(id) {
 			return nil, fmt.Errorf("invalid API-key bootstrap master key ID %q", id)
 		}
-		encoded, err := os.ReadFile(filepath.Join(dir, id))
+		encoded, err := securefile.Read(filepath.Join(dir, id), 1<<20)
 		if err != nil {
 			return nil, fmt.Errorf("read API-key bootstrap master key %q: %w", id, err)
 		}

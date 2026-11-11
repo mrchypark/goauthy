@@ -616,6 +616,28 @@ func TestDirectTLSRequiresHTTPSIssuer(t *testing.T) {
 	}
 }
 
+func TestSecureTransportHeadersEmitHSTSForProductionHTTPS(t *testing.T) {
+	t.Parallel()
+	for name, request := range map[string]*http.Request{
+		"direct TLS":      httptest.NewRequest(http.MethodGet, "https://id.example.test/", nil),
+		"forwarded HTTPS": httptest.NewRequest(http.MethodGet, "http://id.example.test/", nil),
+	} {
+		if name == "forwarded HTTPS" {
+			request.Header.Set("X-Forwarded-Proto", "https")
+		}
+		response := httptest.NewRecorder()
+		secureTransportHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })).ServeHTTP(response, request)
+		if got := response.Header().Get("Strict-Transport-Security"); got != "max-age=63072000; includeSubDomains; preload" {
+			t.Fatalf("%s HSTS=%q", name, got)
+		}
+	}
+	plain := httptest.NewRecorder()
+	secureTransportHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })).ServeHTTP(plain, httptest.NewRequest(http.MethodGet, "http://id.example.test/", nil))
+	if got := plain.Header().Get("Strict-Transport-Security"); got != "" {
+		t.Fatalf("plain HTTP HSTS=%q", got)
+	}
+}
+
 func TestSigningKeyRotationPeriod(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
