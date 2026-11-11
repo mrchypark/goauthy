@@ -245,6 +245,7 @@ require_line 'HA replicas' '  replicas: 3' "$goauthy_statefulset"
 }
 require_data_empty_dir "$goauthy_statefulset"
 require_env_value GOAUTHY_RHIZA_PROFILE cluster "$goauthy_statefulset"
+require_env_value GOAUTHY_RHIZA_STARTUP_TIMEOUT 10m "$goauthy_statefulset"
 require_env_value GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE '"true"' "$goauthy_statefulset"
 require_env_field GOAUTHY_NODE_ID metadata.name "$goauthy_statefulset"
 require_peer_container_port "$goauthy_statefulset"

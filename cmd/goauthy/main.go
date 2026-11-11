@@ -225,14 +225,8 @@ func run() (err error) {
 		}
 		errCh <- server.Serve(listener)
 	}()
-	startupCtx, cancelStartup := context.WithTimeout(ctx, 30*time.Second)
-	defer cancelStartup()
-	for !db.Ready() {
-		select {
-		case <-startupCtx.Done():
-			return fmt.Errorf("wait for rhiza readiness: %w", startupCtx.Err())
-		case <-time.After(100 * time.Millisecond):
-		}
+	if err := waitForRhizaReady(ctx, appConfig.RhizaStartupTimeout, db.Ready); err != nil {
+		return err
 	}
 	if err := storage.Migrate(ctx, db); err != nil {
 		return err

@@ -56,6 +56,7 @@ type applicationConfig struct {
 	WebIDEnabled               bool
 	Notifications              notificationsConfig
 	Rhiza                      rhiza.Config
+	RhizaStartupTimeout        time.Duration
 }
 
 func loadApplicationConfig(getenv func(string) string) (applicationConfig, error) {
@@ -116,6 +117,9 @@ func loadApplicationConfig(getenv func(string) string) (applicationConfig, error
 	}
 	if c.Rhiza, err = storage.RhizaConfigFromEnv(getenv); err != nil {
 		return applicationConfig{}, fmt.Errorf("configure rhiza: %w", err)
+	}
+	if c.RhizaStartupTimeout, err = rhizaStartupTimeoutFromEnv(getenv); err != nil {
+		return applicationConfig{}, err
 	}
 	if err := validateRuntimeConfig(getenv, c); err != nil {
 		return applicationConfig{}, err

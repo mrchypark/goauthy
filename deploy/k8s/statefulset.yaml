@@ -90,6 +90,8 @@ spec:
               value: goauthy-e2e
             - name: GOAUTHY_RHIZA_PROFILE
               value: cluster
+            - name: GOAUTHY_RHIZA_STARTUP_TIMEOUT
+              value: 10m
             - name: GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE
               value: "true"
             - name: GOAUTHY_NODE_ID

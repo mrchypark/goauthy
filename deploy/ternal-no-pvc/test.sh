@@ -25,6 +25,7 @@ test "$(yq -r "$statefulset | .spec.replicas" "$render")" = 3
 test "$(yq -r "$statefulset | (.spec.volumeClaimTemplates | length)" "$render")" = 0
 test "$(yq -r "$statefulset | .spec.template.spec.volumes[] | select(.name == \"data\") | has(\"emptyDir\")" "$render")" = true
 test "$(yq -r "$statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_PROFILE\") | .value" "$render")" = cluster
+test "$(yq -r "$statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_STARTUP_TIMEOUT\") | .value" "$render")" = 10m
 test "$(yq -r "$statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE\") | .value" "$render")" = true
 test "$(yq -r "$statefulset | .spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem" "$render")" = true
 test "$(yq -r "$statefulset | .spec.template.spec.automountServiceAccountToken" "$render")" = false
