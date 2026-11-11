@@ -129,6 +129,54 @@ func TestPasswordChangeArtifactRevocationIsAtomic(t *testing.T) {
 	assertCount(t, store, `SELECT COUNT(*) FROM oauth_access_tokens WHERE signature='access-direct'`, 1)
 }
 
+func TestPasswordChangeGuardRaceCannotRevokeDirectSubjectState(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := testResetStore(t, testRules(1))
+	seedDeterministicRandom(store)
+	bootstrapPassword(t, store, "subject-1", "alice", []byte("CurrentPassword1"))
+	sessions, err := browser.NewStore(store.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expires := time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC)
+	current, err := sessions.CreateSession(ctx, "subject-1", "pwd", expires, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := sessions.CreateSession(ctx, "subject-1", "mfa", expires, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedPasswordChangeArtifacts(t, store, current.ID, other.ID, "subject-1")
+	traced := false
+	store.now = func() time.Time {
+		if !traced {
+			traced = true
+			if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "password-change-guard-race", SQL: `UPDATE identity_users SET password_generation=password_generation+1 WHERE subject=?`, Args: []any{"subject-1"}}); err != nil {
+				t.Errorf("open password generation race: %v", err)
+			}
+		}
+		return time.UnixMilli(4_000)
+	}
+	if err := store.ChangePasswordWithSession(ctx, "subject-1", current.ID, []byte("CurrentPassword1"), []byte("ChangedPassword2")); !errors.Is(err, ErrPasswordChangeConflict) {
+		t.Fatalf("password change error=%v want conflict", err)
+	}
+	if !traced {
+		t.Fatal("password generation race was not exercised")
+	}
+	for name, token := range map[string]string{"current": current.Token, "other": other.Token} {
+		if _, err := sessions.LoadSession(ctx, token); err != nil {
+			t.Fatalf("%s session revoked by failed guard: %v", name, err)
+		}
+	}
+	assertCount(t, store, `SELECT COUNT(*) FROM oauth_access_tokens WHERE signature IN ('access-direct','access-delegated')`, 2)
+	assertCount(t, store, `SELECT COUNT(*) FROM oauth_token_requests WHERE signature IN ('access-direct','access-delegated')`, 2)
+	assertCount(t, store, `SELECT COUNT(*) FROM oauth_refresh_tokens WHERE signature IN ('refresh-one','refresh-delegated') AND active=1`, 2)
+	assertCount(t, store, `SELECT COUNT(*) FROM oauth_authorize_codes WHERE invalidated=0 AND json_extract(request_json,'$.subject')='subject-1'`, 2)
+	assertCount(t, store, `SELECT COUNT(*) FROM oauth_device_grants WHERE state='approved'`, 1)
+}
+
 func seedPasswordChangeArtifacts(t *testing.T, store *Store, currentSession, otherSession, subject string) {
 	t.Helper()
 	if _, err := storage.Execute(context.Background(), store.db, rhiza.ExecuteRequest{RequestID: "password-change-artifacts", Statements: []rhiza.SQLStatement{

@@ -46,8 +46,8 @@ func passwordRevocationStatements(subject, eventID, keepSessionID string, now ti
 		guarded(`UPDATE oauth_authorize_codes SET invalidated=1 WHERE invalidated=0 AND json_extract(request_json,'$.subject')=?`, subject),
 		guarded(`DELETE FROM oauth_pkce_requests WHERE signature IN (SELECT signature FROM oauth_authorize_codes WHERE json_extract(request_json,'$.subject')=?)`, subject),
 		guarded(`UPDATE oauth_refresh_tokens SET active=0 WHERE active=1 AND (json_extract(request_json,'$.subject')=? OR request_id IN (SELECT signature FROM oauth_token_requests WHERE json_extract(request_json,'$.subject')=? OR `+delegatedActorPredicate+`))`, subject, subject, subject),
-		guarded(`DELETE FROM oauth_access_tokens WHERE signature IN (SELECT signature FROM oauth_token_requests WHERE json_extract(request_json,'$.subject')=? OR `+delegatedActorPredicate+`)`, subject, subject),
-		guarded(`DELETE FROM oauth_token_requests WHERE json_extract(request_json,'$.subject')=? OR `+delegatedActorPredicate, subject, subject),
+		guarded(`DELETE FROM oauth_access_tokens WHERE signature IN (SELECT signature FROM oauth_token_requests WHERE (json_extract(request_json,'$.subject')=? OR `+delegatedActorPredicate+`))`, subject, subject),
+		guarded(`DELETE FROM oauth_token_requests WHERE (json_extract(request_json,'$.subject')=? OR `+delegatedActorPredicate+`)`, subject, subject),
 		guarded(`UPDATE oauth_device_grants SET state='denied',claim_token_digest=NULL,claim_until_unix_ms=NULL WHERE subject=? AND state IN ('pending','approved')`, subject),
 		guarded(`DELETE FROM oidc_session_clients WHERE sid IN (SELECT token_digest FROM browser_sessions WHERE `+sessionFilter+`)`, sessionArgs...),
 	}
