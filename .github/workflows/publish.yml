@@ -86,9 +86,13 @@ jobs:
               exit 1
             fi
             tags="$tags,$IMAGE:$RELEASE_TAG"
+            goauthy_version="${RELEASE_TAG#v}"
+          else
+            goauthy_version="sha-${sha:0:12}"
           fi
           echo "tags=$tags" >> "$GITHUB_OUTPUT"
           echo "version=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "goauthy_version=$goauthy_version" >> "$GITHUB_OUTPUT"
 
       - name: Verify CI succeeded for source SHA
         env:
@@ -120,6 +124,8 @@ jobs:
           load: true
           platforms: linux/amd64
           tags: ${{ steps.source.outputs.tags }}
+          build-args: |
+            GOAUTHY_VERSION=${{ steps.source.outputs.goauthy_version }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ steps.source.outputs.sha }}

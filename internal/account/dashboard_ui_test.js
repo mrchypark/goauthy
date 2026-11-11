@@ -334,5 +334,9 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
     await assert.rejects(context.accountDashboard.connectionDeps.request(path, { method: 'POST' }), (error) => error.message === 'offline');
     assert.equal(attempts, 2, path + ' remains retryable after transport failure');
   }
+  context.accountDashboard.state.mutationUnknown = false;
+  context.fetch = async () => { throw new Error('offline'); };
+  await assert.rejects(context.accountDashboard.connectionDeps.request('/auth/v1/account/connections/mfa_token', { method: 'POST' }), (error) => error.unknownOutcome === true);
+  assert.equal(context.accountDashboard.state.mutationUnknown, true, 'a collection named mfa_token is still a mutation');
   console.log('dashboard UI checks passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

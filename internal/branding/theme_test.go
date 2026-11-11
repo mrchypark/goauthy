@@ -15,7 +15,7 @@ func TestDefaultThemeAndCSS(t *testing.T) {
 	if theme.BorderRadius != "5px" || len(theme.Light.Text) != 3 || theme.Light.Text[0] != 200 || theme.Dark.Text[0] != 34 {
 		t.Fatalf("unexpected defaults: %#v", theme)
 	}
-	wantEmail := "--text:200 5 37;--text-high:200 15 25;--bg:34 25 97;--bg-high:34 20 90;--action:34 100 34;--accent:265 100 53;--error:15 100 37;--btn-text:white;--theme-sun:hsla(var(--action) / .7);--theme-moon:hsla(var(--accent) / .85);--border-radius:5px;"
+	wantEmail := "--text:200 5 37;--text-high:200 15 25;--bg:34 25 97;--bg-high:34 20 90;--action:34 100 40;--accent:265 100 53;--error:15 100 37;--btn-text:#10231b;--theme-sun:hsla(var(--action) / .7);--theme-moon:hsla(var(--accent) / .85);--border-radius:5px;"
 	if got := theme.EmailCSS(); got != wantEmail {
 		t.Fatalf("EmailCSS()=%q want %q", got, wantEmail)
 	}

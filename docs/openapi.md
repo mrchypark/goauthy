@@ -41,7 +41,8 @@ Fosite는 OAuth 프로토콜을 제공하지만 관리·계정 API 문서를 생
 문서는 Rauthy에 있지만 아직 포팅하지 않은 기능을 지원한다고 광고하지 않는다.
 DCR·passkey·recovery·registration·blacklist·WebID·FedCM·upstream의 선택적 경로는
 실제 서버 설정과 연결한다. 표준 loader는 로컬 참조만 해석하고 startup 시 명세를
-검증한다. 명세는 실행 중인 빌드의 모듈/VCS 버전을 `info.version`에 반영한다.
+검증한다. 명세는 컨테이너 릴리스 빌드의 `GOAUTHY_VERSION` 또는 일반 Go 빌드의
+모듈/VCS 정보를 `info.version`에 반영한다.
 모든 4xx/5xx 응답은 표준 `text/plain` 오류 또는 `{error, error_code,
 error_description, error_uri}` 형식의 `application/json` 오류 중 하나로 schema를
 제공하며, 개별 응답에 이미 정의된 schema는 덮어쓰지 않는다.

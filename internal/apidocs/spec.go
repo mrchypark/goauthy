@@ -78,10 +78,20 @@ func Document(issuer string, features Features) ([]byte, error) {
 
 func runtimeVersion() string {
 	info, ok := debug.ReadBuildInfo()
-	return versionFromBuildInfo(info, ok)
+	return versionFromBuildInfoWithInjected(buildVersion, info, ok)
 }
 
 func versionFromBuildInfo(info *debug.BuildInfo, ok bool) string {
+	return versionFromBuildInfoWithInjected("", info, ok)
+}
+
+// buildVersion is set by release and container builds through -ldflags.
+var buildVersion string
+
+func versionFromBuildInfoWithInjected(injected string, info *debug.BuildInfo, ok bool) string {
+	if version := strings.TrimPrefix(strings.TrimSpace(injected), "v"); version != "" {
+		return version
+	}
 	if !ok || info == nil {
 		return "development"
 	}

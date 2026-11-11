@@ -18,9 +18,16 @@
   };
   const basePath = () => { const path = window.location.pathname; const marker = path.lastIndexOf('/account'); return marker < 0 ? '' : path.slice(0, marker); };
   const endpoint = (path) => `${basePath()}${path}`;
+  const nonMutatingPosts = [
+    /^\/auth\/v1\/users\/[^/]+\/mfa_token$/,
+    /^\/auth\/v1\/users\/[^/]+\/webauthn\/auth\/start$/,
+    /^\/auth\/v1\/users\/[^/]+\/webauthn\/auth\/finish$/,
+    /^\/auth\/v1\/users\/[^/]+\/webauthn\/register\/start$/,
+  ];
   const request = (url, options = {}) => {
-    const challenge = /\/(?:mfa_token|webauthn\/(?:auth\/(?:start|finish)|register\/start))$/.test(String(url).replace(/[?#].*$/, ''));
-    const mutation = Boolean(options.method && !['GET', 'HEAD', 'OPTIONS'].includes(String(options.method).toUpperCase())) && !challenge;
+    const method = String(options.method || 'GET').toUpperCase();
+    const path = String(url).replace(/[?#].*$/, '');
+    const mutation = !['GET', 'HEAD', 'OPTIONS'].includes(method) && !(method === 'POST' && nonMutatingPosts.some(pattern => pattern.test(path)));
     const unknownOutcome = () => {
       state.mutationUnknown = true;
       const error = new Error(t('Request outcome is unknown. Check the current state before retrying.'));

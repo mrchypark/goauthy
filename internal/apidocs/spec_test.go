@@ -50,18 +50,20 @@ func TestDocumentValidDeterministicAndDeploymentSpecific(t *testing.T) {
 
 func TestOpenAPIVersionUsesBuildIdentity(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		info *debug.BuildInfo
-		ok   bool
-		want string
+		name     string
+		injected string
+		info     *debug.BuildInfo
+		ok       bool
+		want     string
 	}{
-		{"module version", &debug.BuildInfo{Main: debug.Module{Version: "v1.2.3"}}, true, "1.2.3"},
-		{"vcs revision", &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}, Settings: []debug.BuildSetting{{Key: "vcs.revision", Value: "0123456789abcdef"}}}, true, "devel+0123456789ab"},
-		{"dirty revision", &debug.BuildInfo{Settings: []debug.BuildSetting{{Key: "vcs.revision", Value: "short"}, {Key: "vcs.modified", Value: "true"}}}, true, "devel+short-dirty"},
-		{"unknown", nil, false, "development"},
+		{name: "injected release", injected: "v1.4.0", ok: true, want: "1.4.0"},
+		{name: "module version", info: &debug.BuildInfo{Main: debug.Module{Version: "v1.2.3"}}, ok: true, want: "1.2.3"},
+		{name: "vcs revision", info: &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}, Settings: []debug.BuildSetting{{Key: "vcs.revision", Value: "0123456789abcdef"}}}, ok: true, want: "devel+0123456789ab"},
+		{name: "dirty revision", info: &debug.BuildInfo{Settings: []debug.BuildSetting{{Key: "vcs.revision", Value: "short"}, {Key: "vcs.modified", Value: "true"}}}, ok: true, want: "devel+short-dirty"},
+		{name: "unknown", ok: false, want: "development"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := versionFromBuildInfo(tc.info, tc.ok); got != tc.want {
+			if got := versionFromBuildInfoWithInjected(tc.injected, tc.info, tc.ok); got != tc.want {
 				t.Fatalf("version=%q want=%q", got, tc.want)
 			}
 		})
@@ -93,6 +95,24 @@ func TestEveryErrorResponseHasSchema(t *testing.T) {
 					}
 				}
 			}
+		}
+	}
+}
+
+func TestAccountLoginDocumentsRetryableHTMLErrors(t *testing.T) {
+	data, err := Document("https://id.example.test", Features{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := openapi3.NewLoader().LoadFromData(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	login := doc.Paths.Value("/account/login").Post
+	for _, status := range []int{401, 429} {
+		response := login.Responses.Status(status)
+		if response == nil || response.Value.Content.Get("text/html") == nil {
+			t.Fatalf("account login %d must document its retryable HTML response", status)
 		}
 	}
 }
