@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -44,6 +45,7 @@ func TestOpenRegistrationPersistsLocale(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Accept-Language", "fr") // Cookie must take precedence.
 		r.RemoteAddr = "192.0.2.102:1234"
+		r = r.WithContext(browser.ContextWithPeerIP(r.Context(), "192.0.2.102"))
 		r.AddCookie(&http.Cookie{Name: "locale", Value: locale})
 		response := httptest.NewRecorder()
 		s.RegisterOpen(response, r)
@@ -77,6 +79,7 @@ func TestOpenRegistrationPersistsLocale(t *testing.T) {
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Accept-Language", "zh-Hans")
 	r.RemoteAddr = "192.0.2.104:1234"
+	r = r.WithContext(browser.ContextWithPeerIP(r.Context(), "192.0.2.104"))
 	response := httptest.NewRecorder()
 	s.RegisterOpen(response, r)
 	if response.Code != http.StatusNoContent || len(sender.new) != 2 || sender.new[1].Language != "zhhans" {

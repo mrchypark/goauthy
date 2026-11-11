@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/netip"
 	"strings"
 	"unicode/utf8"
 
@@ -13,7 +14,6 @@ import (
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/identity"
-	"github.com/mrchypark/goauthy/internal/loginpolicy"
 	"github.com/mrchypark/goauthy/internal/passkey"
 )
 
@@ -53,7 +53,7 @@ func (s *Service) RequestReset(w http.ResponseWriter, r *http.Request) {
 		forbidden(w)
 		return
 	}
-	ip, ok := loginpolicy.PeerIP(r.RemoteAddr)
+	ip, ok := requestPeerIP(r)
 	if !ok {
 		unavailable(w)
 		return
@@ -88,7 +88,7 @@ func (s *Service) ProofOfWork(w http.ResponseWriter, r *http.Request) {
 		unavailable(w)
 		return
 	}
-	ip, ok := loginpolicy.PeerIP(r.RemoteAddr)
+	ip, ok := requestPeerIP(r)
 	if !ok {
 		unavailable(w)
 		return
@@ -166,14 +166,10 @@ func (s *Service) PutReset(w http.ResponseWriter, r *http.Request) {
 	}
 	next := []byte(payload.Password)
 	defer clear(next)
-	ip := browser.PeerIPFromContext(r.Context())
-	if ip == "" {
-		var ok bool
-		ip, ok = loginpolicy.PeerIP(r.RemoteAddr)
-		if !ok {
-			unavailable(w)
-			return
-		}
+	ip, ok := requestPeerIP(r)
+	if !ok {
+		unavailable(w)
+		return
 	}
 	redirect, err := s.identity.ResetPassword(r.Context(), r.PathValue("subject"), payload.MagicLinkID, cookie.Value, r.Header.Get("X-Pwd-CSRF-Token"), next, ip)
 	if err != nil {
@@ -222,7 +218,12 @@ func (s *Service) RegisterOpen(w http.ResponseWriter, r *http.Request) {
 		badRegistration(w)
 		return
 	}
-	if err := validateCaptcha(r.Context(), s.captcha, request.CaptchaResponse, r.RemoteAddr); err != nil {
+	ip, ok := requestPeerIP(r)
+	if !ok {
+		unavailable(w)
+		return
+	}
+	if err := validateCaptcha(r.Context(), s.captcha, request.CaptchaResponse, ip); err != nil {
 		badRegistration(w)
 		return
 	}
@@ -255,11 +256,6 @@ func (s *Service) RegisterOpen(w http.ResponseWriter, r *http.Request) {
 	if _, err := config.ValidateRequest(request); err != nil {
 		// The PoW has already been consumed; never reveal redirect/client state.
 		badRegistration(w)
-		return
-	}
-	ip, ok := loginpolicy.PeerIP(r.RemoteAddr)
-	if !ok {
-		unavailable(w)
 		return
 	}
 	allowed, err := s.policy.AllowOpenRegistration(r.Context(), ip, s.now().UTC())
@@ -377,6 +373,15 @@ func bounded(value string, maxRunes int) bool {
 func crossSite(r *http.Request) bool {
 	return strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site")
 }
+
+func requestPeerIP(r *http.Request) (string, bool) {
+	ip := browser.PeerIPFromContext(r.Context())
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return "", false
+	}
+	return addr.String(), true
+}
 func securityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
@@ -452,7 +457,12 @@ func (s *Service) RegisterPasskeyStart(w http.ResponseWriter, r *http.Request) {
 		badRegistration(w)
 		return
 	}
-	if err := validateCaptcha(r.Context(), s.captcha, request.CaptchaResponse, r.RemoteAddr); err != nil {
+	ip, ok := requestPeerIP(r)
+	if !ok {
+		unavailable(w)
+		return
+	}
+	if err := validateCaptcha(r.Context(), s.captcha, request.CaptchaResponse, ip); err != nil {
 		badRegistration(w)
 		return
 	}
@@ -490,11 +500,6 @@ func (s *Service) RegisterPasskeyStart(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := config.ValidateRequest(regRequest); err != nil {
 		badRegistration(w)
-		return
-	}
-	ip, ok := loginpolicy.PeerIP(r.RemoteAddr)
-	if !ok {
-		unavailable(w)
 		return
 	}
 	allowed, err := s.policy.AllowOpenRegistration(r.Context(), ip, s.now().UTC())
