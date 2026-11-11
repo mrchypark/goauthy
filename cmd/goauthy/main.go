@@ -732,7 +732,7 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
-	browserAdmin := browserAdministrator(rbacStore, browserStore, identityStore, issuer)
+	browserAdmin := browserAdministrator(rbacStore, browserStore, identityStore, issuer, bootstrapForceMFA)
 	kvStore, err := kv.NewStore(db, keyring)
 	if err != nil {
 		return fmt.Errorf("configure KV store: %w", err)
@@ -830,6 +830,7 @@ func run() (err error) {
 	if err := rbacHandler.SetUserValuesPolicy(userValuesPolicy); err != nil {
 		return fmt.Errorf("configure user values policy: %w", err)
 	}
+	rbacHandler.ConfigureAdminForceMFA(bootstrapForceMFA)
 	if err := rbacHandler.BindClients(managedClients); err != nil {
 		return fmt.Errorf("configure managed clients: %w", err)
 	}
@@ -945,6 +946,7 @@ func run() (err error) {
 	if err != nil {
 		return fmt.Errorf("configure claims handler: %w", err)
 	}
+	claimsHandler.ConfigureAdminForceMFA(bootstrapForceMFA)
 	rewrapWorker.attachPasskey(passkeyService)
 	retirementWorker, err := newMasterKeyRetirementWorker(db, keyring, issuer, rhizaConfig.NodeID, bootID, passkeyService)
 	if err != nil {
@@ -1832,7 +1834,7 @@ func dcrScopePolicy(getenv func(string) string) (dcr.ScopePolicy, error) {
 	return policy, nil
 }
 
-func browserAdministrator(rbacStore *rbac.Store, browserStore *browser.Store, identityStore *identity.Store, issuer string) func(http.ResponseWriter, *http.Request, bool) bool {
+func browserAdministrator(rbacStore *rbac.Store, browserStore *browser.Store, identityStore *identity.Store, issuer string, forceMFA bool) func(http.ResponseWriter, *http.Request, bool) bool {
 	return func(w http.ResponseWriter, r *http.Request, mutation bool) bool {
 		if r.URL.RawQuery != "" || apikey.HasAuthorization(r) || strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site") {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -1858,7 +1860,7 @@ func browserAdministrator(rbacStore *rbac.Store, browserStore *browser.Store, id
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return false
 		}
-		if !admin || mutation && browser.ValidateCSRFToken(cookie.Value, r.Header.Get("X-CSRF-Token")) != nil {
+		if !admin || forceMFA && session.AuthenticationMethod != "mfa" || mutation && browser.ValidateCSRFToken(cookie.Value, r.Header.Get("X-CSRF-Token")) != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			return false
 		}
