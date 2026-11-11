@@ -50,11 +50,12 @@ in injected-clock tests, not in a race against a ten-second browser deadline.
 
 The Kind profiles apply `deploy/k8s/passkey-cookie-key-patch.yaml` after adding
 the selected `passkey-key` Secret item. Kubernetes `fsGroup` makes projected
-secrets group-readable, which the cookie-key loader deliberately rejects.
+secrets group-readable. The cookie-key loader accepts owner or group read while
+rejecting group write/execute and every other-user permission.
 The non-root init container reads only the selected item and copies it to a
 memory-backed volume as UID 65532 with mode `0400`; the application mounts it
-read-only at `/run/passkey/passkey-key`. The loader's regular-file, owner-only,
-32-byte and same-file checks remain intact. Secret changes require pod
+read-only at `/run/passkey/passkey-key`. The loader's regular-file, restricted
+permission, 32-byte and same-file checks remain intact. Secret changes require pod
 replacement to refresh this copy; automatic CookieKey rotation is not implied.
 
 Whole passkey/admin parity remains incomplete; see
