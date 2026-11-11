@@ -72,13 +72,6 @@ func addAccountOperations(doc *openapi3.T, features Features) error {
 	api := map[string][]string{"apiKey": {}}
 	add("/account/login", "get", "accountLoginPage", "Sign in to the current account; fixed account continuation", 200)
 	add("/account/login", "post", "accountLoginSubmit", "Authenticate with the session-bound account interaction and CSRF token", 303, secure)
-	loginSubmit := doc.Paths.Value("/account/login").Post
-	for _, status := range []int{http.StatusUnauthorized, http.StatusTooManyRequests} {
-		loginSubmit.AddResponse(status, openapi3.NewResponse().WithDescription(statusText(status)).WithContent(openapi3.Content{
-			"text/html": {Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}},
-		}))
-	}
-	loginSubmit.Description = "A valid session-bound interaction and text/html Accept can receive a retryable HTML error page for invalid credentials (401) or login throttling (429). Invalid CSRF or interaction returns a non-HTML rejection."
 	add("/account/password", "get", "getPassword", "Get password policy and CSRF token", 200, secure)
 	for _, page := range []struct{ path, id, media string }{
 		{"/account", "accountDashboard", "text/html"},

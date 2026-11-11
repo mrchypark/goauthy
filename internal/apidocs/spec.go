@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -60,6 +61,7 @@ func Document(issuer string, features Features) ([]byte, error) {
 		return nil, fmt.Errorf("build API contract: %w", err)
 	}
 	describeErrorResponses(doc)
+	describeLoginHTMLResponses(doc)
 	encoded, err := json.Marshal(doc)
 	if err != nil {
 		return nil, err
@@ -134,6 +136,26 @@ func describeErrorResponses(doc *openapi3.T) {
 					"application/json": {Schema: structured},
 				}
 			}
+		}
+	}
+}
+
+func describeLoginHTMLResponses(doc *openapi3.T) {
+	text := &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}
+	for _, path := range []string{"/account/login", "/auth/login"} {
+		item := doc.Paths.Value(path)
+		if item == nil || item.Post == nil {
+			continue
+		}
+		for _, status := range []int{http.StatusUnauthorized, http.StatusTooManyRequests} {
+			response := item.Post.Responses.Status(status)
+			if response == nil || response.Value == nil {
+				continue
+			}
+			if response.Value.Content == nil {
+				response.Value.Content = openapi3.Content{}
+			}
+			response.Value.Content["text/html"] = &openapi3.MediaType{Schema: text}
 		}
 	}
 }

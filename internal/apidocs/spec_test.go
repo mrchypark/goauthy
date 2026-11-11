@@ -111,7 +111,7 @@ func TestAccountLoginDocumentsRetryableHTMLErrors(t *testing.T) {
 	login := doc.Paths.Value("/account/login").Post
 	for _, status := range []int{401, 429} {
 		response := login.Responses.Status(status)
-		if response == nil || response.Value.Content.Get("text/html") == nil {
+		if response == nil || response.Value.Content["text/html"] == nil {
 			t.Fatalf("account login %d must document its retryable HTML response", status)
 		}
 	}
