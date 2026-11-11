@@ -300,7 +300,9 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 	logoPut := add("PUT", "/auth/v1/clients/{id}/logo", "Replace client logo (Clients:update)", nil, nil, write)
 	logoPut.Description = "Processes the first multipart field as PNG, JPEG or SVG; the request is limited to 10 MiB. Atomically replaces logo resolutions while preserving favicon."
 	logoPut.RequestBody = &openapi3.RequestBodyRef{Value: openapi3.NewRequestBody().WithRequired(true).WithSchema(obj(map[string]*openapi3.Schema{"file": openapi3.NewStringSchema().WithFormat("binary")}, "file"), []string{"multipart/form-data"})}
-	add("DELETE", "/auth/v1/clients/{id}/logo", "Delete client logo (Clients:update)", nil, nil, write).Description = "Deletes nonfavicon logo resolutions and preserves the separately managed favicon."
+	clientLogoDelete := add("DELETE", "/auth/v1/clients/{id}/logo", "Delete client logo (Clients:update)", nil, nil, write)
+	clientLogoDelete.Description = "Deletes nonfavicon logo resolutions, preserves the separately managed favicon, and returns Clear-Site-Data: cache."
+	clientLogoDelete.Responses.Status(200).Value.Headers = openapi3.Headers{"Clear-Site-Data": {Value: &openapi3.Header{Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}, Description: "Cache invalidation directive: \"cache\"."}}}
 	icon := add("GET", "/auth/v1/clients/{id}/favicon", "Read client favicon", nil, nil, nil)
 	icon.Description = "Exact client favicon lookup with no global fallback. An updated query value enables public cache headers; legacy PNG/ICO assets remain readable after migration."
 	icon.AddParameter(openapi3.NewQueryParameter("updated").WithSchema(openapi3.NewInt64Schema()))
@@ -377,15 +379,25 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 	commonRead.Description = "Browser administrator or Clients:read API key. Returns the common theme or built-in defaults; client_id is goauthy but does not identify an OAuth client."
 	statuses(commonRead, 200, 401, 403, 503)
 	commonRead.Responses.Status(200).Value.WithJSONSchema(commonTheme)
+	header(commonRead, "ETag", "Strong quoted SHA-256 of the current common theme representation.")
+	header(commonRead, "Cache-Control", "no-store")
 	for _, method := range []string{"PUT", "DELETE"} {
 		var body *openapi3.Schema
 		if method == "PUT" {
 			body = commonTheme
 		}
 		op := add(method, "/auth/v1/branding/theme", "Manage common theme", body, nil, write)
-		op.Description = "Browser administrator with CSRF or Clients:" + map[string]string{"PUT": "update", "DELETE": "delete"}[method] + " API key. Empty 200 with Clear-Site-Data: cache. Operates only on common branding; does not delete or rewrite legacy client data. PUT requires client_id goauthy and replaces the complete theme; request JSON is limited to 1 MiB."
-		statuses(op, 200, 400, 401, 403, 503)
+		op.Description = "Browser administrator with CSRF or Clients:" + map[string]string{"PUT": "update", "DELETE": "delete"}[method] + " API key. Empty 200 with Clear-Site-Data: cache. Operates only on common branding; does not delete or rewrite legacy client data. PUT requires client_id goauthy and a strong If-Match ETag from POST; a missing precondition is 428 and a stale or concurrent edit is 412. Request JSON is limited to 1 MiB."
+		statuses(op, 200, 400, 401, 403, 412, 428, 503)
 		header(op, "Clear-Site-Data", "Cache invalidation directive: \"cache\".")
+		if method == "PUT" {
+			response := op.Responses.Status(200).Value
+			if response.Headers == nil {
+				response.Headers = openapi3.Headers{}
+			}
+			response.Headers["ETag"] = &openapi3.HeaderRef{Value: &openapi3.Header{Schema: &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}, Description: "Strong quoted revision of the saved common theme."}}
+			op.AddParameter(openapi3.NewHeaderParameter("If-Match").WithRequired(true).WithSchema(openapi3.NewStringSchema().WithPattern(`^"sha256:[0-9a-f]{64}"$`)))
+		}
 	}
 	commonCSS := add("GET", "/auth/v1/branding/theme/{timestamp}", "Read public common theme CSS", nil, nil, nil)
 	statuses(commonCSS, 200, 400, 503)
@@ -408,7 +420,8 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 	header(commonLogoPut, "Clear-Site-Data", "Cache invalidation directive: \"cache\".")
 	commonLogoDelete := add("DELETE", "/auth/v1/branding/logo", "Delete common logo (Clients:update)", nil, nil, write)
 	statuses(commonLogoDelete, 200, 401, 403, 503)
-	commonLogoDelete.Description = "Browser administrator with CSRF or Clients:update API key. Empty 200, including when no common logo exists; client logos and favicons are preserved."
+	commonLogoDelete.Description = "Browser administrator with CSRF or Clients:update API key. Empty 200 with Clear-Site-Data: cache, including when no common logo exists; client logos and favicons are preserved."
+	header(commonLogoDelete, "Clear-Site-Data", "Cache invalidation directive: \"cache\".")
 	legacyStatusSchema := obj(map[string]*openapi3.Schema{"resolved": openapi3.NewBoolSchema(), "legacy_theme": openapi3.NewBoolSchema(), "legacy_logo": openapi3.NewBoolSchema(), "global_theme": openapi3.NewBoolSchema(), "global_logo": openapi3.NewBoolSchema()}, "resolved", "legacy_theme", "legacy_logo", "global_theme", "global_logo")
 	legacyStatus := add("GET", "/auth/v1/branding/legacy", "Inspect legacy branding state (Clients:read)", nil, legacyStatusSchema, read)
 	statuses(legacyStatus, 200, 401, 403, 503)

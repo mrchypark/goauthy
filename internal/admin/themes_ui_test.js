@@ -79,7 +79,7 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
       if (path === '/auth/v1/branding/legacy') return clone(legacyStatus || {resolved: true, legacy_theme: !!saved});
       if (opts.method === 'POST') {
         if (failNextPost) { failNextPost = false; throw Error('read unavailable'); }
-        if (path === '/auth/v1/branding/theme') return clone(saved?.client_id === 'goauthy' ? saved : globalTheme);
+        if (path === '/auth/v1/branding/theme') { const value = clone(saved?.client_id === 'goauthy' ? saved : globalTheme); Object.defineProperty(value, '_headers', {value: {get: name => name === 'ETag' ? '"sha256:common"' : null}}); return value; }
         return clone(saved || globalTheme);
       }
       if (opts.method === 'PUT') {
@@ -328,6 +328,7 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
   assert.match(common.node('theme-fields').innerHTML, /GoAuthy ID &quot;&lt;operator&gt;&quot;/);
   assert.doesNotMatch(common.node('theme-fields').innerHTML, /"<operator>"/);
   assert.ok(common.calls.some(call => call.path === '/auth/v1/branding/theme' && call.opts.method === 'PUT'));
+  assert.equal(common.calls.find(call => call.path === '/auth/v1/branding/theme' && call.opts.method === 'PUT').opts.headers['If-Match'], '"sha256:common"');
   await common.node('theme-reset-confirm').onclick();
   assert.equal(common.saved, null);
   assert.equal(common.node('theme-status').textContent, 'Common theme reset to defaults.');

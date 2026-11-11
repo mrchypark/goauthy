@@ -8,17 +8,6 @@ capacity targets or a production SLO.
 
 ## 구현 상태
 
-### Standalone in-memory cache package
-
-`internal/cache` contains a sharded TTL/LRU cache implementation, tests, and
-microbenchmarks. Production Go packages do not import it. It is not wired into
-authentication, browser sessions, identities, profiles, RBAC, or API-key
-lookups. No production hot path currently receives cache hits from this
-package.
-
-The TTL and capacity values previously listed for session, user, profile,
-principal, and API-key caches were not implemented and have been removed.
-
 ### Argon2 admission policy
 
 The default maximum concurrency is 4. Admission can wait up to 250 ms for the

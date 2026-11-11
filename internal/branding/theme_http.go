@@ -153,6 +153,13 @@ func (h *ThemeHandler) post(w http.ResponseWriter, r *http.Request, clientID str
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	etag, err := themeETag(theme)
+	if err != nil {
+		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("ETag", etag)
 	writeThemeJSON(w, theme)
 }
 
@@ -160,6 +167,15 @@ func (h *ThemeHandler) put(w http.ResponseWriter, r *http.Request, clientID stri
 	principal, ok := h.authorize(w, r, apikey.Update)
 	if !ok {
 		return
+	}
+	var ifMatch string
+	if global {
+		values := r.Header.Values("If-Match")
+		if len(values) != 1 || strings.TrimSpace(values[0]) == "" {
+			http.Error(w, "If-Match theme revision required", http.StatusPreconditionRequired)
+			return
+		}
+		ifMatch = strings.TrimSpace(values[0])
 	}
 	theme, err := decodeTheme(w, r)
 	if err != nil || theme.ClientID != clientID {
@@ -173,7 +189,7 @@ func (h *ThemeHandler) put(w http.ResponseWriter, r *http.Request, clientID stri
 		}
 	}
 	if global {
-		err = h.store.PutGlobalAuthorized(r.Context(), theme, h.apiKeys, principal)
+		err = h.store.PutGlobalIfMatchAuthorized(r.Context(), theme, h.apiKeys, principal, ifMatch)
 	} else if r.Header.Get("If-None-Match") == "*" {
 		err = h.store.PutIfAbsentAuthorized(r.Context(), theme, h.apiKeys, principal)
 	} else {
@@ -182,6 +198,9 @@ func (h *ThemeHandler) put(w http.ResponseWriter, r *http.Request, clientID stri
 	if err != nil {
 		h.themeMutationError(w, err)
 		return
+	}
+	if etag, err := themeETag(theme); err == nil {
+		w.Header().Set("ETag", etag)
 	}
 	w.Header().Set("Clear-Site-Data", `"cache"`)
 	w.WriteHeader(http.StatusOK)

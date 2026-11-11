@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime/debug"
+	"strconv"
+	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/mrchypark/goauthy/internal/browser"
@@ -30,6 +33,12 @@ func Document(issuer string, features Features) ([]byte, error) {
 	}
 	components := openapi3.NewComponents()
 	components.Schemas = openapi3.Schemas{}
+	components.Schemas["Error"] = &openapi3.SchemaRef{Value: openapi3.NewObjectSchema().WithProperties(map[string]*openapi3.Schema{
+		"error":             openapi3.NewStringSchema(),
+		"error_code":        openapi3.NewStringSchema(),
+		"error_description": openapi3.NewStringSchema(),
+		"error_uri":         openapi3.NewStringSchema(),
+	})}
 	components.SecuritySchemes = openapi3.SecuritySchemes{
 		"browserSession": {Value: &openapi3.SecurityScheme{Type: "apiKey", In: "cookie", Name: cookieName, Description: "Authenticated, active browser session. Administrative operations also require the goauthy_admin role; Init sessions are not sufficient."}},
 		"csrfToken":      {Value: &openapi3.SecurityScheme{Type: "apiKey", In: "header", Name: "X-CSRF-Token", Description: "Session-bound CSRF token; required together with the browser session for the documented mutations."}},
@@ -38,7 +47,7 @@ func Document(issuer string, features Features) ([]byte, error) {
 		"kvBearer":       {Value: &openapi3.SecurityScheme{Type: "http", Scheme: "bearer", Description: "Namespace-scoped KV access credential in the form <id>$<secret>; not an OAuth access token."}},
 	}
 	doc := &openapi3.T{
-		OpenAPI: "3.0.3", Info: &openapi3.Info{Title: "GoAuthy API", Version: "development",
+		OpenAPI: "3.0.3", Info: &openapi3.Info{Title: "GoAuthy API", Version: runtimeVersion(),
 			Description: "GoAuthy deployment API. Optional routes appear only when configured. Swagger UI is read-only; browser CSRF and role requirements still apply."},
 		Servers: openapi3.Servers{{URL: issuer}}, Paths: openapi3.NewPaths(), Components: &components,
 	}
@@ -50,6 +59,7 @@ func Document(issuer string, features Features) ([]byte, error) {
 	if err := addAuthCollectionOperations(doc); err != nil {
 		return nil, fmt.Errorf("build API contract: %w", err)
 	}
+	describeErrorResponses(doc)
 	encoded, err := json.Marshal(doc)
 	if err != nil {
 		return nil, err
@@ -64,4 +74,56 @@ func Document(issuer string, features Features) ([]byte, error) {
 		return nil, fmt.Errorf("validate API contract: %w", err)
 	}
 	return encoded, nil
+}
+
+func runtimeVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	return versionFromBuildInfo(info, ok)
+}
+
+func versionFromBuildInfo(info *debug.BuildInfo, ok bool) string {
+	if !ok || info == nil {
+		return "development"
+	}
+	if version := strings.TrimPrefix(strings.TrimSpace(info.Main.Version), "v"); version != "" && version != "(devel)" {
+		return version
+	}
+	revision, modified := "", false
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = setting.Value
+		case "vcs.modified":
+			modified = setting.Value == "true"
+		}
+	}
+	if revision != "" {
+		if len(revision) > 12 {
+			revision = revision[:12]
+		}
+		if modified {
+			revision += "-dirty"
+		}
+		return "devel+" + revision
+	}
+	return "development"
+}
+
+func describeErrorResponses(doc *openapi3.T) {
+	text := &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}
+	structured := &openapi3.SchemaRef{Ref: "#/components/schemas/Error"}
+	for _, item := range doc.Paths.Map() {
+		for _, operation := range item.Operations() {
+			for code, response := range operation.Responses.Map() {
+				status, err := strconv.Atoi(code)
+				if err != nil || status < 400 || response == nil || response.Value == nil || len(response.Value.Content) != 0 {
+					continue
+				}
+				response.Value.Content = openapi3.Content{
+					"text/plain":       {Schema: text},
+					"application/json": {Schema: structured},
+				}
+			}
+		}
+	}
 }

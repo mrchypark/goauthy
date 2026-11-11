@@ -127,6 +127,34 @@ func TestClientLogoHandlerAPIKeyMutationsPreserveFavicon(t *testing.T) {
 	}
 }
 
+func TestCommonLogoDeleteInvalidatesBrowserCache(t *testing.T) {
+	t.Parallel()
+	ctx, db := clientFaviconDB(t)
+	store, err := NewClientLogoStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := apikey.NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceGlobalAuthorized(ctx, []LogoAsset{{Resolution: "small", ContentType: "image/webp", Data: []byte("common-logo")}}, keys, nil); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewClientLogoHandler(store, keys, func(http.ResponseWriter, *http.Request, bool) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.GlobalLogo(response, httptest.NewRequest(http.MethodDelete, "/auth/v1/branding/logo", nil))
+	if response.Code != http.StatusOK || response.Header().Get("Clear-Site-Data") != `"cache"` {
+		t.Fatalf("common logo DELETE status=%d headers=%v", response.Code, response.Header())
+	}
+	if _, err := store.GetGlobal(ctx); !errors.Is(err, ErrLogoNotFound) {
+		t.Fatalf("common logo still present: %v", err)
+	}
+}
+
 func TestClientLogoHandlerRejectsUnauthorizedRevokedAndMalformedMutation(t *testing.T) {
 	t.Parallel()
 	ctx, db := clientFaviconDB(t)

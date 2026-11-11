@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/andybalholm/brotli"
@@ -148,6 +149,91 @@ func TestThemeHandlerBrowserAdminReadAndGuardedMutations(t *testing.T) {
 	}
 	if len(mutationCalls) != 3 || mutationCalls[0] || !mutationCalls[1] || !mutationCalls[2] {
 		t.Fatalf("browser authorization mutation flags=%v", mutationCalls)
+	}
+}
+
+func TestCommonThemeETagIfMatchAndClientCreateOnly(t *testing.T) {
+	t.Parallel()
+	ctx, db := clientFaviconDB(t)
+	store, err := NewThemeStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := apikey.NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewThemeHandler(store, keys, func(http.ResponseWriter, *http.Request, bool) bool { return true }, func(context.Context, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	read := httptest.NewRecorder()
+	handler.GlobalTheme(read, httptest.NewRequest(http.MethodPost, "/auth/v1/branding/theme", nil))
+	etag := read.Header().Get("ETag")
+	if read.Code != http.StatusOK || !strings.HasPrefix(etag, `"sha256:`) || !strings.HasSuffix(etag, `"`) || read.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("common theme read status=%d headers=%v", read.Code, read.Header())
+	}
+
+	theme := DefaultTheme(GlobalBrandID)
+	theme.BrandName = "First writer"
+	body, _ := json.Marshal(theme)
+	missing := httptest.NewRecorder()
+	handler.GlobalTheme(missing, httptest.NewRequest(http.MethodPut, "/auth/v1/branding/theme", bytes.NewReader(body)))
+	if missing.Code != http.StatusPreconditionRequired {
+		t.Fatalf("missing If-Match status=%d", missing.Code)
+	}
+	staleRequest := httptest.NewRequest(http.MethodPut, "/auth/v1/branding/theme", bytes.NewReader(body))
+	staleRequest.Header.Set("Content-Type", "application/json")
+	staleRequest.Header.Set("If-Match", `"sha256:stale"`)
+	stale := httptest.NewRecorder()
+	handler.GlobalTheme(stale, staleRequest)
+	if stale.Code != http.StatusPreconditionFailed {
+		t.Fatalf("stale If-Match status=%d", stale.Code)
+	}
+	accepted := httptest.NewRequest(http.MethodPut, "/auth/v1/branding/theme", bytes.NewReader(body))
+	accepted.Header.Set("Content-Type", "application/json")
+	accepted.Header.Set("If-Match", etag)
+	response := httptest.NewRecorder()
+	handler.GlobalTheme(response, accepted)
+	if response.Code != http.StatusOK || response.Header().Get("Clear-Site-Data") != `"cache"` || response.Header().Get("ETag") == "" || response.Header().Get("ETag") == etag {
+		t.Fatalf("accepted If-Match status=%d headers=%v", response.Code, response.Header())
+	}
+	got, err := store.GetGlobal(ctx)
+	if err != nil || got.BrandName != theme.BrandName {
+		t.Fatalf("common theme not saved: %#v err=%v", got, err)
+	}
+	staleRequest = httptest.NewRequest(http.MethodPut, "/auth/v1/branding/theme", bytes.NewReader(body))
+	staleRequest.Header.Set("Content-Type", "application/json")
+	staleRequest.Header.Set("If-Match", etag)
+	stale = httptest.NewRecorder()
+	handler.GlobalTheme(stale, staleRequest)
+	if stale.Code != http.StatusPreconditionFailed {
+		t.Fatalf("superseded If-Match status=%d", stale.Code)
+	}
+
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "theme-create-client", SQL: `INSERT INTO managed_oauth_clients(id,generation,revision,enabled,metadata_json) VALUES('client-b','test',1,0,'{}')`}); err != nil {
+		t.Fatal(err)
+	}
+	clientTheme := DefaultTheme("client-b")
+	clientBody, _ := json.Marshal(clientTheme)
+	create := httptest.NewRequest(http.MethodPut, "/auth/v1/theme/client-b", bytes.NewReader(clientBody))
+	create.Header.Set("Content-Type", "application/json")
+	create.Header.Set("If-None-Match", "*")
+	create.SetPathValue("client_id", "client-b")
+	created := httptest.NewRecorder()
+	handler.Theme(created, create)
+	if created.Code != http.StatusOK {
+		t.Fatalf("client create-only PUT status=%d", created.Code)
+	}
+	create = httptest.NewRequest(http.MethodPut, "/auth/v1/theme/client-b", bytes.NewReader(clientBody))
+	create.Header.Set("Content-Type", "application/json")
+	create.Header.Set("If-None-Match", "*")
+	create.SetPathValue("client_id", "client-b")
+	created = httptest.NewRecorder()
+	handler.Theme(created, create)
+	if created.Code != http.StatusPreconditionFailed {
+		t.Fatalf("client create-only conflict status=%d", created.Code)
 	}
 }
 
