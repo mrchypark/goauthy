@@ -17,6 +17,7 @@ vm.runInNewContext(source, ctx);
   assert.equal(calls[0].path, '/auth/v1/sessions?session_state=Auth&page_size=20');
   assert.match(source, /min="1" max="65535"/);
   assert.match(node('app').innerHTML, /Requested page size; the server applies its paging threshold and returns smaller result sets in full/);
+  assert.match(node('app').innerHTML, /id="session-status" role="status" aria-live="polite"/);
   assert.match(node('session-table').innerHTML, /&lt;subject&gt;/);
   assert.match(node('session-table').innerHTML, /data-revoke-session="sid\/1"/);
   assert.match(node('session-paging').innerHTML, /Next page/);

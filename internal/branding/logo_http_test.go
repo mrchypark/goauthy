@@ -115,8 +115,8 @@ func TestClientLogoHandlerAPIKeyMutationsPreserveFavicon(t *testing.T) {
 	deleteRequest := clientLogoRequest(http.MethodDelete, "/auth/v1/clients/client-a/logo", nil, "client-a")
 	deleteRequest.Header.Set("Authorization", "API-Key "+token)
 	handler.Logo(delete, deleteRequest)
-	if delete.Code != http.StatusOK {
-		t.Fatalf("API-key DELETE status=%d", delete.Code)
+	if delete.Code != http.StatusOK || delete.Header().Get("Clear-Site-Data") != `"cache"` {
+		t.Fatalf("API-key DELETE status=%d headers=%v", delete.Code, delete.Header())
 	}
 	if _, err := store.Find(ctx, "client-a", "small"); !errors.Is(err, ErrLogoNotFound) {
 		t.Fatalf("deleted logo err=%v", err)
