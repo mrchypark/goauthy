@@ -88,6 +88,9 @@ func TestScheduledBackupRuntimeStartupVerifiesArtifactWithinOperationBudget(t *t
 				t.Fatalf("startup rejected a healthy catalog: %v", err)
 			}
 			defer runtime.Close()
+			if err := runtime.ensureReady(ctx); err != nil {
+				t.Fatalf("backup validation failed: %v", err)
+			}
 			if slow.reads == 0 {
 				t.Fatal("startup skipped artifact verification")
 			}
@@ -95,6 +98,40 @@ func TestScheduledBackupRuntimeStartupVerifiesArtifactWithinOperationBudget(t *t
 				t.Fatalf("entries=%v err=%v", entries, err)
 			}
 		})
+	}
+}
+
+func TestScheduledBackupRemoteOutageStartsDegradedAndRecovers(t *testing.T) {
+	work := filepath.Join(t.TempDir(), "work")
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bucket := objstore.NewInMemBucket()
+	defer bucket.Close()
+	available := false
+	openBackupObjectStore = func(context.Context, rhiza.Config) (objstore.Bucket, error) {
+		if !available {
+			return nil, errors.New("destination unavailable")
+		}
+		return bucket, nil
+	}
+	t.Cleanup(func() { openBackupObjectStore = storage.OpenObjectStore })
+	runtime, err := newScheduledBackupRuntime(t.Context(), &scheduledBackupConfig{
+		work: work, catalog: "catalog/cluster-a", keepDays: 30, maxEntries: 4096,
+		timeout: time.Minute, lease: time.Second, retentionPolicy: backup.RetainLatest,
+		signer: private, trustKeys: []ed25519.PublicKey{public},
+	})
+	if err != nil {
+		t.Fatalf("optional backup outage blocked startup: %v", err)
+	}
+	defer runtime.Close()
+	if err := runtime.ensureReady(t.Context()); err == nil || !runtime.degraded {
+		t.Fatalf("outage err=%v degraded=%t", err, runtime.degraded)
+	}
+	available = true
+	if err := runtime.ensureReady(t.Context()); err != nil || runtime.degraded {
+		t.Fatalf("recovery err=%v degraded=%t", err, runtime.degraded)
 	}
 }
 
