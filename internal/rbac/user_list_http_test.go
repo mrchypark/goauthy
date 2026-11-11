@@ -82,6 +82,64 @@ func TestUserListHTTPPaginationAndWire(t *testing.T) {
 	}
 }
 
+func TestUserListHTTPDelegatedAdminScopedPaginationAndCount(t *testing.T) {
+	t.Parallel()
+	h, store, _, _ := membershipHTTPFixture(t)
+	ctx := context.Background()
+	insertActive(t, store.db, "grouped")
+	insertActive(t, store.db, "outside")
+	other, err := store.CreateGroup(ctx, "admin", "other/x", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	role, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/*", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "user-list-scoped-seed", Statements: []rhiza.SQLStatement{
+		{SQL: `INSERT INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) VALUES('member',?,0)`, Args: []any{role.ID}},
+		{SQL: `INSERT INTO rbac_user_groups(subject,group_id,granted_at_unix_ms) SELECT subject,id,0 FROM (SELECT 'member' subject UNION ALL SELECT 'grouped') CROSS JOIN rbac_groups WHERE name='team/a'`},
+		{SQL: `INSERT INTO rbac_user_groups(subject,group_id,granted_at_unix_ms) VALUES('outside',?,0)`, Args: []any{other.ID}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	issued, err := h.browser.CreateSession(ctx, "member", "pwd", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie, err := browser.SessionCookie(h.issuer, issued.Token, issued.ExpiresAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.SetUserListThreshold(1); err != nil {
+		t.Fatal(err)
+	}
+	request := func(query string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, "/auth/v1/users"+query, nil)
+		r.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		h.Users(w, r)
+		return w
+	}
+	seen := map[string]bool{}
+	first := request("?page_size=1")
+	if first.Code != http.StatusPartialContent || first.Header().Get("X-User-Count") != "2" || first.Header().Get("X-Page-Count") != "2" || first.Header().Get("X-Continuation-Token") == "" {
+		t.Fatalf("first status=%d headers=%v", first.Code, first.Header())
+	}
+	for _, w := range []*httptest.ResponseRecorder{first, request("?page_size=1&continuation_token=" + url.QueryEscape(first.Header().Get("X-Continuation-Token")))} {
+		var users []UserResponseSimple
+		if err := json.Unmarshal(w.Body.Bytes(), &users); err != nil {
+			t.Fatal(err)
+		}
+		for _, user := range users {
+			seen[user.ID] = true
+		}
+	}
+	if len(seen) != 2 || !seen["member"] || !seen["grouped"] || seen["outside"] || seen["admin"] {
+		t.Fatalf("delegated users=%v", seen)
+	}
+}
+
 func TestUserListHTTPRechecksAuthorityAfterPreflight(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []string{"role", "disabled", "session", "key", "grant", "delegated"} {
@@ -106,7 +164,10 @@ func TestUserListHTTPRechecksAuthorityAfterPreflight(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "user-list-delegated", SQL: `INSERT INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) VALUES ('member',?,0)`, Args: []any{role.ID}}); err != nil {
+				if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "user-list-delegated", Statements: []rhiza.SQLStatement{
+					{SQL: `INSERT INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) VALUES ('member',?,0)`, Args: []any{role.ID}},
+					{SQL: `INSERT INTO rbac_user_groups(subject,group_id,granted_at_unix_ms) SELECT 'member',id,0 FROM rbac_groups WHERE name='team/a'`},
+				}}); err != nil {
 					t.Fatal(err)
 				}
 				session, err := h.browser.CreateSession(ctx, "member", "pwd", time.Now().Add(time.Hour), "")
@@ -128,7 +189,11 @@ func TestUserListHTTPRechecksAuthorityAfterPreflight(t *testing.T) {
 				h.Users(w, r)
 				return w
 			}
-			if w := request(); w.Code != 200 || w.Header().Get("X-User-Count") != "2" {
+			wantCount := "2"
+			if kind == "delegated" {
+				wantCount = "1"
+			}
+			if w := request(); w.Code != 200 || w.Header().Get("X-User-Count") != wantCount {
 				t.Fatalf("preflight status=%d", w.Code)
 			}
 			called := false

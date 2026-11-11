@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -84,44 +85,68 @@ func TestSessionsHandlerBrowserAdminAndDeniedUser(t *testing.T) {
 	}
 }
 
-func TestSessionsHandlerDelegatedAdminSeesAllSessions(t *testing.T) {
+func TestSessionsHandlerDelegatedAdminScopedPaginationAndCount(t *testing.T) {
 	t.Parallel()
 	h, store, _, _ := membershipHTTPFixture(t)
 	ctx := context.Background()
+	insertActive(t, store.db, "grouped")
+	insertActive(t, store.db, "outside")
+	other, err := store.CreateGroup(ctx, "admin", "other/x", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	role, err := store.CreateRole(ctx, "admin", "goauthy_admin:team/*", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "session-delegated-role", SQL: `INSERT INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) VALUES('member',?,0)`, Args: []any{role.ID}}); err != nil {
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{RequestID: "session-delegated-scope", Statements: []rhiza.SQLStatement{
+		{SQL: `INSERT INTO rbac_user_roles(subject,role_id,granted_at_unix_ms) VALUES('member',?,0)`, Args: []any{role.ID}},
+		{SQL: `INSERT INTO rbac_user_groups(subject,group_id,granted_at_unix_ms) SELECT subject,id,0 FROM (SELECT 'member' subject UNION ALL SELECT 'grouped') CROSS JOIN rbac_groups WHERE name='team/a'`},
+		{SQL: `INSERT INTO rbac_user_groups(subject,group_id,granted_at_unix_ms) VALUES('outside',?,0)`, Args: []any{other.ID}},
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	member, err := h.browser.CreateSession(ctx, "member", "pwd", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC), "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	for i, subject := range []string{"grouped", "outside"} {
+		if _, err := h.browser.CreateSession(ctx, subject, "pwd", time.Date(2100, 1, 1, 0, i, 0, 0, time.UTC), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
 	cookie, err := browser.SessionCookie(h.issuer, member.Token, member.ExpiresAt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := httptest.NewRequest(http.MethodGet, "/auth/v1/sessions", nil)
-	r.AddCookie(cookie)
-	w := httptest.NewRecorder()
-	h.Sessions(w, r)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", w.Code, w.Body)
-	}
-	var payload []Session
-	if err := json.NewDecoder(w.Body).Decode(&payload); err != nil {
+	if err := h.SetUserListThreshold(1); err != nil {
 		t.Fatal(err)
 	}
-	foundAdmin := false
-	for _, item := range payload {
-		if item.UserID != nil && *item.UserID == "admin" {
-			foundAdmin = true
+	request := func(query string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, "/auth/v1/sessions"+query, nil)
+		r.AddCookie(cookie)
+		w := httptest.NewRecorder()
+		h.Sessions(w, r)
+		return w
+	}
+	first := request("?page_size=1")
+	if first.Code != http.StatusPartialContent || first.Header().Get("X-Page-Count") != "2" || first.Header().Get("X-Page-Size") != "1" || first.Header().Get("X-Continuation-Token") == "" {
+		t.Fatalf("first status=%d headers=%v", first.Code, first.Header())
+	}
+	seen := map[string]bool{}
+	for _, w := range []*httptest.ResponseRecorder{first, request("?page_size=1&continuation_token=" + url.QueryEscape(first.Header().Get("X-Continuation-Token")))} {
+		var payload []Session
+		if err := json.NewDecoder(w.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range payload {
+			if item.UserID != nil {
+				seen[*item.UserID] = true
+			}
 		}
 	}
-	if !foundAdmin {
-		t.Fatalf("delegated payload omitted admin session: %#v", payload)
+	if len(seen) != 2 || !seen["member"] || !seen["grouped"] || seen["outside"] || seen["admin"] {
+		t.Fatalf("delegated sessions=%v", seen)
 	}
 }
 

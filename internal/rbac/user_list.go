@@ -42,6 +42,10 @@ type userListCursor struct {
 }
 
 func (s *Store) listUsers(ctx context.Context, guard string, args []any, options UserListOptions, threshold uint16) (userListResult, error) {
+	return s.listUsersScoped(ctx, guard, args, "1=1", nil, options, threshold)
+}
+
+func (s *Store) listUsersScoped(ctx context.Context, guard string, args []any, scope string, scopeArgs []any, options UserListOptions, threshold uint16) (userListResult, error) {
 	if s == nil || s.db == nil || ctx == nil || strings.TrimSpace(guard) == "" || threshold < 1 {
 		return userListResult{}, ErrInvalid
 	}
@@ -65,7 +69,10 @@ func (s *Store) listUsers(ctx context.Context, guard string, args []any, options
 		order = "DESC"
 	}
 	pageWhere := "(SELECT count FROM total) < ?"
-	queryArgs := append([]any{}, args...)
+	if strings.TrimSpace(scope) == "" {
+		return userListResult{}, ErrInvalid
+	}
+	queryArgs := append(append([]any{}, args...), scopeArgs...)
 	queryArgs = append(queryArgs, int64(threshold))
 	if cursor != nil {
 		if options.Backwards {
@@ -89,6 +96,7 @@ allusers AS (
  LEFT JOIN identity_user_profiles p ON p.subject=u.subject
  LEFT JOIN identity_recovery_emails r ON r.subject=u.subject
  CROSS JOIN authorized
+ WHERE ` + scope + `
 ), total AS (SELECT COUNT(*) AS count FROM allusers),
 page AS (
  SELECT allusers.* FROM allusers CROSS JOIN total

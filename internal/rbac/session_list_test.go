@@ -22,7 +22,7 @@ func TestListSessionsStatesNullableAndGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	items, count, _, err := store.listSessions(ctx, "1=1", nil, SessionListOptions{}, 1)
-	if err != nil || count != 1 || len(items) != 2 {
+	if err != nil || count != 2 || len(items) != 2 {
 		t.Fatalf("items=%#v count=%d err=%v", items, count, err)
 	}
 	got := map[string]Session{}
