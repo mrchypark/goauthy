@@ -82,7 +82,7 @@ func (s *Store) listSessionsScoped(ctx context.Context, guard string, args []any
 	if o.Backwards {
 		order = "ASC"
 	}
-	qargs = append(qargs, int64(threshold), int64(pageSize), int64(threshold), int64(o.Offset))
+	qargs = append(qargs, int64(threshold), int64(pageSize)+1, int64(threshold), int64(o.Offset))
 	query := `WITH authorized AS (SELECT 1 ok WHERE (` + guard + `)),
 allsessions AS (
  SELECT b.token_digest id, NULLIF(b.subject,'') user_id,
@@ -139,7 +139,12 @@ SELECT * FROM combined ORDER BY exp DESC,id DESC`
 		out = append(out, Session{ID: id, UserID: uid, IsMFA: mfa == 1, State: state, Exp: exp, LastSeen: last, RemoteIP: ip})
 	}
 	var token string
-	if count >= int64(threshold) && len(out) > 0 {
+	if len(out) > int(pageSize) {
+		if o.Backwards {
+			out = out[1:]
+		} else {
+			out = out[:pageSize]
+		}
 		i := len(out) - 1
 		if o.Backwards {
 			i = 0

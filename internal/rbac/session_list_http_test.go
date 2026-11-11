@@ -36,17 +36,35 @@ func TestSessionsHandlerAPIKeyPaginationHeaders(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	r := httptest.NewRequest(http.MethodGet, "/auth/v1/sessions?page_size=1", nil)
-	r.Header.Set("Authorization", "API-Key "+token)
-	w := httptest.NewRecorder()
-	h.Sessions(w, r)
-	res := w.Result()
-	var payload []Session
-	if json.NewDecoder(res.Body).Decode(&payload) != nil || len(payload) != 1 {
-		t.Fatalf("payload=%#v", payload)
+	seen := map[string]bool{}
+	cursor := ""
+	for page := range 3 {
+		query := "?page_size=1"
+		if cursor != "" {
+			query += "&continuation_token=" + url.QueryEscape(cursor)
+		}
+		r := httptest.NewRequest(http.MethodGet, "/auth/v1/sessions"+query, nil)
+		r.Header.Set("Authorization", "API-Key "+token)
+		w := httptest.NewRecorder()
+		h.Sessions(w, r)
+		res := w.Result()
+		var payload []Session
+		if json.NewDecoder(res.Body).Decode(&payload) != nil || len(payload) != 1 {
+			t.Fatalf("page=%d payload=%#v", page, payload)
+		}
+		if res.StatusCode != http.StatusPartialContent || res.Header.Get("X-Page-Size") != "1" || res.Header.Get("X-Page-Count") == "" || res.Header.Get("X-User-Count") != "" {
+			t.Fatalf("page=%d status=%d headers=%v body=%s", page, res.StatusCode, res.Header, w.Body)
+		}
+		if payload[0].ID != "" {
+			seen[payload[0].ID] = true
+		}
+		cursor = res.Header.Get("X-Continuation-Token")
+		if (page < 2) != (cursor != "") {
+			t.Fatalf("page=%d token=%q", page, cursor)
+		}
 	}
-	if res.StatusCode != http.StatusPartialContent || res.Header.Get("X-Page-Size") != "1" || res.Header.Get("X-Page-Count") == "" || res.Header.Get("X-Continuation-Token") == "" || res.Header.Get("X-User-Count") != "" {
-		t.Fatalf("status=%d headers=%v body=%s", res.StatusCode, res.Header, w.Body)
+	if len(seen) != 3 {
+		t.Fatalf("unique sessions=%d", len(seen))
 	}
 }
 
