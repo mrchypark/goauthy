@@ -6,6 +6,18 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
+// delegatedActorPredicate matches a subject in extra.act(.act)*.sub at any
+// depth. json_tree exposes each field below its parent path; adding the key
+// reconstructs the full path, and removing every repeated .act segment proves
+// the path consists only of that actor chain.
+const delegatedActorPredicate = `EXISTS (
+	SELECT 1 FROM json_tree(request_json) AS actor
+	WHERE actor.type = 'text' AND actor.key = 'sub' AND actor.value = ?
+	  AND substr((actor.path || '.sub'), 1, 11) = '$.extra.act'
+	  AND substr((actor.path || '.sub'), -4) = '.sub'
+	  AND replace(substr((actor.path || '.sub'), 12, length(actor.path || '.sub') - 15), '.act', '') = ''
+)`
+
 // passwordRevocationStatements invalidates credentials issued from browser
 // sessions and every OAuth artifact for subject. A non-empty keepSessionID is
 // the explicit self-service policy: the browser session that proved the
@@ -33,9 +45,9 @@ func passwordRevocationStatements(subject, eventID, keepSessionID string, now ti
 		guarded(`UPDATE browser_sessions SET revoked_at_unix_ms=COALESCE(revoked_at_unix_ms,?) WHERE `+sessionFilter, append([]any{nowMS}, sessionArgs...)...),
 		guarded(`UPDATE oauth_authorize_codes SET invalidated=1 WHERE invalidated=0 AND json_extract(request_json,'$.subject')=?`, subject),
 		guarded(`DELETE FROM oauth_pkce_requests WHERE signature IN (SELECT signature FROM oauth_authorize_codes WHERE json_extract(request_json,'$.subject')=?)`, subject),
-		guarded(`UPDATE oauth_refresh_tokens SET active=0 WHERE active=1 AND json_extract(request_json,'$.subject')=?`, subject),
-		guarded(`DELETE FROM oauth_access_tokens WHERE signature IN (SELECT signature FROM oauth_token_requests WHERE json_extract(request_json,'$.subject')=? OR json_extract(request_json,'$.extra.act.sub')=?)`, subject, subject),
-		guarded(`DELETE FROM oauth_token_requests WHERE json_extract(request_json,'$.subject')=? OR json_extract(request_json,'$.extra.act.sub')=?`, subject, subject),
+		guarded(`UPDATE oauth_refresh_tokens SET active=0 WHERE active=1 AND (json_extract(request_json,'$.subject')=? OR request_id IN (SELECT signature FROM oauth_token_requests WHERE json_extract(request_json,'$.subject')=? OR `+delegatedActorPredicate+`))`, subject, subject, subject),
+		guarded(`DELETE FROM oauth_access_tokens WHERE signature IN (SELECT signature FROM oauth_token_requests WHERE json_extract(request_json,'$.subject')=? OR `+delegatedActorPredicate+`)`, subject, subject),
+		guarded(`DELETE FROM oauth_token_requests WHERE json_extract(request_json,'$.subject')=? OR `+delegatedActorPredicate, subject, subject),
 		guarded(`UPDATE oauth_device_grants SET state='denied',claim_token_digest=NULL,claim_until_unix_ms=NULL WHERE subject=? AND state IN ('pending','approved')`, subject),
 		guarded(`DELETE FROM oidc_session_clients WHERE sid IN (SELECT token_digest FROM browser_sessions WHERE `+sessionFilter+`)`, sessionArgs...),
 	}

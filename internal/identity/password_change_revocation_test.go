@@ -58,6 +58,7 @@ func TestSelfPasswordChangeRevokesOtherSessionsAndOAuthState(t *testing.T) {
 	assertCount(t, store, `SELECT COUNT(*) FROM oauth_access_tokens WHERE signature IN ('access-direct','access-delegated')`, 0)
 	assertCount(t, store, `SELECT COUNT(*) FROM oauth_token_requests WHERE signature IN ('access-direct','access-delegated')`, 0)
 	assertCount(t, store, `SELECT COUNT(*) FROM oauth_refresh_tokens WHERE active=0 AND json_extract(request_json,'$.subject')='subject-1'`, 1)
+	assertCount(t, store, `SELECT COUNT(*) FROM oauth_refresh_tokens WHERE signature='refresh-delegated' AND active=0`, 1)
 	assertCount(t, store, `SELECT COUNT(*) FROM oauth_device_grants WHERE state='denied' AND subject='subject-1'`, 1)
 	assertCount(t, store, `SELECT COUNT(*) FROM oauth_access_tokens WHERE signature='access-unrelated'`, 1)
 }
@@ -95,6 +96,7 @@ func TestAdminPasswordChangeRevokesAllSubjectSessions(t *testing.T) {
 	assertCount(t, store, `SELECT COUNT(*) FROM oauth_authorize_codes WHERE invalidated=1`, 2)
 	assertCount(t, store, `SELECT COUNT(*) FROM oauth_access_tokens WHERE signature IN ('access-direct','access-delegated')`, 0)
 	assertCount(t, store, `SELECT COUNT(*) FROM oauth_device_grants WHERE state='denied'`, 1)
+	assertCount(t, store, `SELECT COUNT(*) FROM oauth_refresh_tokens WHERE signature='refresh-delegated' AND active=0`, 1)
 }
 
 func TestPasswordChangeArtifactRevocationIsAtomic(t *testing.T) {
@@ -134,8 +136,8 @@ func seedPasswordChangeArtifacts(t *testing.T, store *Store, currentSession, oth
 		{SQL: `INSERT INTO oauth_authorize_codes (signature,request_json,expires_at_unix_ms) VALUES (?,?,?),(?,?,?),(?,?,?)`, Args: []any{"code-one", `{"subject":"` + subject + `"}`, int64(999999), "code-two", `{"subject":"` + subject + `"}`, int64(999999), "code-unrelated", `{"subject":"subject-2"}`, int64(999999)}},
 		{SQL: `INSERT INTO oauth_pkce_requests (signature,request_json,expires_at_unix_ms) VALUES (?,?,?),(?,?,?),(?,?,?)`, Args: []any{"code-one", `{}`, int64(999999), "code-two", `{}`, int64(999999), "code-unrelated", `{}`, int64(999999)}},
 		{SQL: `INSERT INTO oauth_access_tokens (signature,request_id,client_id,requested_at_unix_ms,expires_at_unix_ms,requested_scopes,granted_scopes,requested_audience,granted_audience) VALUES (?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?)`, Args: []any{"access-direct", "access-direct", "client", int64(1), int64(999999), "[]", "[]", "[]", "[]", "access-delegated", "access-delegated", "client", int64(1), int64(999999), "[]", "[]", "[]", "[]", "access-unrelated", "access-unrelated", "client", int64(1), int64(999999), "[]", "[]", "[]", "[]"}},
-		{SQL: `INSERT INTO oauth_token_requests (signature,request_json) VALUES (?,?),(?,?),(?,?)`, Args: []any{"access-direct", `{"subject":"` + subject + `"}`, "access-delegated", `{"subject":"delegator","extra":{"act":{"sub":"` + subject + `"}}}`, "access-unrelated", `{"subject":"subject-2"}`}},
-		{SQL: `INSERT INTO oauth_refresh_tokens (signature,access_signature,request_id,request_json,expires_at_unix_ms) VALUES (?,?,?,?,?)`, Args: []any{"refresh-one", "access-direct", "access-direct", `{"subject":"` + subject + `"}`, int64(999999)}},
+		{SQL: `INSERT INTO oauth_token_requests (signature,request_json) VALUES (?,?),(?,?),(?,?)`, Args: []any{"access-direct", `{"subject":"` + subject + `"}`, "access-delegated", `{"subject":"delegator","extra":{"act":{"sub":"outer","act":{"sub":"` + subject + `"}}}}`, "access-unrelated", `{"subject":"subject-2"}`}},
+		{SQL: `INSERT INTO oauth_refresh_tokens (signature,access_signature,request_id,request_json,expires_at_unix_ms) VALUES (?,?,?,?,?),(?,?,?,?,?)`, Args: []any{"refresh-one", "access-direct", "access-direct", `{"subject":"` + subject + `"}`, int64(999999), "refresh-delegated", "access-delegated", "access-delegated", `{"subject":"delegator","extra":{"act":{"sub":"outer","act":{"sub":"` + subject + `"}}}}`, int64(999999)}},
 		{SQL: `INSERT INTO oauth_device_grants (device_code_digest,user_code_digest,client_id,scopes_json,subject,state,expires_at_unix_ms,interval_seconds,next_poll_at_unix_ms,created_at_unix_ms) VALUES (?,?,?,?,?,'approved',?,?,?,?)`, Args: []any{"device-one", "user-one", "client", "[]", subject, int64(999999), int64(5), int64(1), int64(1)}},
 	}}); err != nil {
 		t.Fatal(err)

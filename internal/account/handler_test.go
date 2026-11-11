@@ -1119,6 +1119,21 @@ func TestPasskeyAdminAndAPIKeyBoundaries(t *testing.T) {
 	if _, err := storage.Execute(context.Background(), db, rhiza.ExecuteRequest{RequestID: "account-admin-reset-target", SQL: `INSERT INTO identity_webauthn_credentials (credential_id,subject,name,credential_json,sign_count,user_verified,registered_at_unix_ms,last_used_at_unix_ms) VALUES (?,?,?,?,?,?,?,?)`, Args: []any{"credential-target", "subject-2", "final-uv", "opaque", int64(0), int64(1), int64(0), int64(0)}}); err != nil {
 		t.Fatal(err)
 	}
+	h.ConfigureAdminForceMFA(true)
+	listTarget := passkeyBrowserRequest(cookie, csrf, "subject-2", http.MethodGet, nil)
+	response = httptest.NewRecorder()
+	h.ListPasskeys(response, listTarget)
+	if response.Code != http.StatusNotAcceptable {
+		t.Fatalf("forced-MFA cross-user list status=%d want=406", response.Code)
+	}
+	forcedDelete := passkeyBrowserRequest(cookie, csrf, "subject-2", http.MethodDelete, nil)
+	forcedDelete.SetPathValue("name", "final-uv")
+	response = httptest.NewRecorder()
+	h.DeletePasskey(response, forcedDelete)
+	if response.Code != http.StatusNotAcceptable || tableCount(t, db, `SELECT COUNT(*) FROM identity_webauthn_credentials WHERE credential_id='credential-target'`) != 1 {
+		t.Fatalf("forced-MFA cross-user reset status=%d credentials=%d", response.Code, tableCount(t, db, `SELECT COUNT(*) FROM identity_webauthn_credentials WHERE credential_id='credential-target'`))
+	}
+	h.ConfigureAdminForceMFA(false)
 	missingCSRF := passkeyBrowserRequest(cookie, "", "subject-2", http.MethodDelete, nil)
 	missingCSRF.SetPathValue("name", "final-uv")
 	response = httptest.NewRecorder()
