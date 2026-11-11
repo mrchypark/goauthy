@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"sync"
-	"time"
 )
 
 // requestDrain lets shutdown keep storage alive until canceled handlers have
@@ -39,7 +38,7 @@ func (d *requestDrain) runLifecycle(ctx context.Context, server, metrics *http.S
 	d.cancel()
 	_ = server.Close()
 	closeOutbound()
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), requestCleanupTimeout)
 	defer cancel()
 	select {
 	case <-drained:

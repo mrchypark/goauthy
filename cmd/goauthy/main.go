@@ -470,7 +470,7 @@ func run() (err error) {
 		return err
 	}
 	defer func() {
-		if err := backups.Close(); err != nil {
+		if err := closeWithin(backups.Close, backupShutdownTimeout); err != nil {
 			slog.Error("backup object-store client shutdown failed")
 		}
 	}()
@@ -567,8 +567,9 @@ func run() (err error) {
 		}()
 	}
 	defer func() {
-		cancelWorker()
-		workers.Wait()
+		if !cancelAndWait(cancelWorker, &workers, workerShutdownTimeout) {
+			slog.Error("background workers exceeded shutdown budget")
+		}
 	}()
 	// GA-CONFIG-001: the preflight already loaded and validated both deployment
 	// secrets, so startup serves those values instead of re-reading the files
@@ -2661,7 +2662,7 @@ func shutdownServer(s *http.Server) error {
 	if s == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
 	defer cancel()
 	return s.Shutdown(ctx)
 }
@@ -2759,7 +2760,7 @@ func closeRhizaAfterStartupComplete(db *rhiza.DB, startupComplete bool, current 
 	if !startupComplete || db == nil {
 		return current
 	}
-	return errors.Join(current, db.Close())
+	return errors.Join(current, closeWithin(db.Close, rhizaShutdownTimeout))
 }
 
 func newHandler(db *rhiza.DB) *http.ServeMux {
