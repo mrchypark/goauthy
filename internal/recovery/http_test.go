@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/loginpolicy"
@@ -68,6 +70,72 @@ func TestRequestResetSenderFailureAndCrossSite(t *testing.T) {
 	}
 }
 
+func TestRequestResetKnownAndUnknownUseCommonFloorWithoutSMTP(t *testing.T) {
+	t.Parallel()
+	service, sender := testService(t, "subject-1", "alice")
+	if err := service.BindEmail(context.Background(), "subject-1", "alice@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	outbox, err := NewEmailOutbox(service.db, func(context.Context, string, string, string, string) error { return nil }, WithEnvelopeKeyring(loginRevokeTestKeyring(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbox.Now = service.now
+	service.outbox = outbox
+	floor := 150 * time.Millisecond
+	service.resetFloor = floor
+	block := make(chan struct{})
+	sender.block = block
+	defer close(block)
+
+	type result struct {
+		response *httptest.ResponseRecorder
+		elapsed  time.Duration
+	}
+	request := func(email, peer string) result {
+		t.Helper()
+		challenge, err := service.pow.Issue(context.Background(), service.powDifficulty, service.powTTL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof := solveProof(t, challenge)
+		r := httptest.NewRequest(http.MethodPost, "/auth/v1/users/request_reset", strings.NewReader(`{"email":"`+email+`","pow":"`+proof+`"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.RemoteAddr = peer
+		r = r.WithContext(browser.ContextWithPeerIP(r.Context(), remoteAddrIP(peer)))
+		w := httptest.NewRecorder()
+		done := make(chan result, 1)
+		started := time.Now()
+		go func() {
+			service.RequestReset(w, r)
+			done <- result{response: w, elapsed: time.Since(started)}
+		}()
+		timer := time.NewTimer(15 * time.Second)
+		defer timer.Stop()
+		select {
+		case got := <-done:
+			return got
+		case <-timer.C:
+			t.Fatal("reset request did not return")
+			return result{}
+		}
+	}
+	known := request("alice@example.test", "192.0.2.70:1000")
+	unknown := request("nobody@example.test", "192.0.2.71:1000")
+	if known.response.Code != http.StatusOK || unknown.response.Code != http.StatusOK || known.response.Body.Len() != 0 || unknown.response.Body.Len() != 0 {
+		t.Fatalf("known=%d/%q unknown=%d/%q", known.response.Code, known.response.Body.String(), unknown.response.Code, unknown.response.Body.String())
+	}
+	if known.elapsed < floor || unknown.elapsed < floor {
+		t.Fatalf("known=%s unknown=%s floor=%s", known.elapsed, unknown.elapsed, floor)
+	}
+	if messages := sender.messages(); len(messages) != 0 {
+		t.Fatalf("reset request performed synchronous SMTP: %+v", messages)
+	}
+	if rows := outboxRowCount(t, outbox); rows != 1 {
+		t.Fatalf("outbox rows=%d want one known-account delivery", rows)
+	}
+}
+
 func TestProofOfWorkAndRequestResetProofBoundary(t *testing.T) {
 	t.Parallel()
 	service, sender := testService(t, "subject-1", "alice")
@@ -75,7 +143,9 @@ func TestProofOfWorkAndRequestResetProofBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	challengeResponse := httptest.NewRecorder()
-	service.ProofOfWork(challengeResponse, httptest.NewRequest(http.MethodPost, "/auth/v1/pow", nil))
+	powRequest := httptest.NewRequest(http.MethodPost, "/auth/v1/pow", nil)
+	powRequest = powRequest.WithContext(browser.ContextWithPeerIP(powRequest.Context(), "192.0.2.50"))
+	service.ProofOfWork(challengeResponse, powRequest)
 	challenge := challengeResponse.Body.String()
 	if challengeResponse.Code != http.StatusOK || challenge == "" || challengeResponse.Header().Get("Access-Control-Allow-Origin") != "*" || challengeResponse.Header().Get("Cache-Control") != "no-store" || challengeResponse.Header().Get("Content-Security-Policy") == "" {
 		t.Fatalf("pow response=%d headers=%#v body=%q", challengeResponse.Code, challengeResponse.Header(), challenge)
@@ -124,45 +194,94 @@ func TestProofOfWorkAndRequestResetProofBoundary(t *testing.T) {
 	}
 }
 
-func TestProofOfWorkHTTPAdmissionUsesDirectPeer(t *testing.T) {
+func TestProofOfWorkHTTPAdmissionUsesMiddlewarePeer(t *testing.T) {
 	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	if _, err := NewService(service.db, service.identity, service.sender, service.issuer, service.rules, service.policy, service.pow, service.powDifficulty, MaxProofTTL+time.Second); err == nil {
 		t.Fatal("accepted excessive PoW TTL")
 	}
-	for i := 0; i < proofIssueLimit; i++ {
-		request := httptest.NewRequest(http.MethodPost, "/auth/v1/pow", nil)
-		request.RemoteAddr = "192.0.2.90:" + strconv.Itoa(1000+i)
-		request.Header.Add("Forwarded", "for=bad")
-		request.Header.Add("Forwarded", "for=198.51.100.99")
+	request := func(peer, raw string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodPost, "/auth/v1/pow", nil)
+		r.RemoteAddr = raw
+		r.Header.Add("Forwarded", "for=bad")
+		r.Header.Add("Forwarded", "for=198.51.100.99")
+		if peer != "" {
+			r = r.WithContext(browser.ContextWithPeerIP(r.Context(), peer))
+		}
 		response := httptest.NewRecorder()
-		service.ProofOfWork(response, request)
+		service.ProofOfWork(response, r)
+		return response
+	}
+	for i := 0; i < proofIssueLimit; i++ {
+		response := request("198.51.100.99", "192.0.2.90:"+strconv.Itoa(1000+i))
 		if response.Code != http.StatusOK {
 			t.Fatalf("issue %d status=%d", i, response.Code)
 		}
 	}
-	limited := httptest.NewRequest(http.MethodPost, "/auth/v1/pow", nil)
-	limited.RemoteAddr = "192.0.2.90:2000"
-	limited.Header.Set("X-Forwarded-For", "198.51.100.99")
-	limitedResponse := httptest.NewRecorder()
-	service.ProofOfWork(limitedResponse, limited)
+	limitedResponse := request("198.51.100.99", "192.0.2.90:2000")
 	if limitedResponse.Code != http.StatusTooManyRequests {
 		t.Fatalf("limited status=%d", limitedResponse.Code)
 	}
-	neighbor := httptest.NewRequest(http.MethodPost, "/auth/v1/pow", nil)
-	neighbor.RemoteAddr = "192.0.2.91:2000"
-	neighbor.Header.Set("X-Forwarded-For", "not-an-ip")
-	neighborResponse := httptest.NewRecorder()
-	service.ProofOfWork(neighborResponse, neighbor)
+	neighborResponse := request("198.51.100.100", "192.0.2.90:2000")
 	if neighborResponse.Code != http.StatusOK {
 		t.Fatalf("neighbor status=%d", neighborResponse.Code)
 	}
-	malformed := httptest.NewRequest(http.MethodPost, "/auth/v1/pow", nil)
-	malformed.RemoteAddr = "not-a-peer"
-	malformedResponse := httptest.NewRecorder()
-	service.ProofOfWork(malformedResponse, malformed)
-	if malformedResponse.Code != http.StatusServiceUnavailable {
-		t.Fatalf("malformed peer status=%d", malformedResponse.Code)
+	missingResponse := request("", "192.0.2.90:2000")
+	if missingResponse.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing middleware peer status=%d", missingResponse.Code)
+	}
+}
+
+func TestRequestResetAdmissionUsesMiddlewarePeer(t *testing.T) {
+	t.Parallel()
+	service, sender := testService(t, "subject-1", "alice")
+	if err := service.BindEmail(context.Background(), "subject-1", "alice@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	request := func(peer string, raw int) *httptest.ResponseRecorder {
+		t.Helper()
+		challenge, err := service.pow.Issue(context.Background(), service.powDifficulty, service.powTTL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest(http.MethodPost, "/auth/v1/users/request_reset", strings.NewReader(`{"email":"alice@example.test","pow":"`+solveProof(t, challenge)+`"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.RemoteAddr = "192.0.2." + strconv.Itoa(raw) + ":1234"
+		r = r.WithContext(browser.ContextWithPeerIP(r.Context(), peer))
+		w := httptest.NewRecorder()
+		service.RequestReset(w, r)
+		return w
+	}
+	for i := range loginpolicy.PasswordResetAttemptLimit {
+		if response := request("198.51.100.80", 200+i); response.Code != http.StatusOK {
+			t.Fatalf("attempt %d status=%d", i, response.Code)
+		}
+	}
+	if got := len(sender.messages()); got != loginpolicy.PasswordResetAttemptLimit {
+		t.Fatalf("reset messages=%d", got)
+	}
+	if response := request("198.51.100.80", 220); response.Code != http.StatusOK || len(sender.messages()) != loginpolicy.PasswordResetAttemptLimit {
+		t.Fatalf("raw peer bypassed limiter: status=%d messages=%d", response.Code, len(sender.messages()))
+	}
+	if response := request("198.51.100.81", 200); response.Code != http.StatusOK || len(sender.messages()) != loginpolicy.PasswordResetAttemptLimit+1 {
+		t.Fatalf("distinct context peer status=%d messages=%d", response.Code, len(sender.messages()))
+	}
+}
+
+func TestRegisterOpenCaptchaUsesMiddlewarePeer(t *testing.T) {
+	t.Parallel()
+	service, _ := testService(t, "subject-1", "alice")
+	enableOpenRegistration(t, service, ExactRedirectURIs(nil))
+	verifier := &recordingCaptchaVerifier{}
+	service.SetCaptchaVerifier(verifier)
+	r := httptest.NewRequest(http.MethodPost, "/auth/v1/users/register", strings.NewReader(`{"email":"registration@example.test","given_name":"Register","pow":"unused","captcha_response":"token"}`))
+	r.Header.Set("Content-Type", "application/json")
+	r.RemoteAddr = "192.0.2.210:1234"
+	r = r.WithContext(browser.ContextWithPeerIP(r.Context(), "198.51.100.90"))
+	w := httptest.NewRecorder()
+	service.RegisterOpen(w, r)
+	if w.Code != http.StatusBadRequest || verifier.remoteIP != "198.51.100.90" {
+		t.Fatalf("status=%d captcha peer=%q", w.Code, verifier.remoteIP)
 	}
 }
 
@@ -465,6 +584,7 @@ func openRegistrationRequest(t *testing.T, service *Service, body, remote string
 	request := httptest.NewRequest(http.MethodPost, "/auth/v1/users/register", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.RemoteAddr = remote
+	request = request.WithContext(browser.ContextWithPeerIP(request.Context(), remoteAddrIP(remote)))
 	response := httptest.NewRecorder()
 	service.RegisterOpen(response, request)
 	return response
@@ -533,6 +653,7 @@ func resetRequestWithProof(t *testing.T, service *Service, email, remote, site, 
 	request := httptest.NewRequest(http.MethodPost, "/auth/v1/users/request_reset", strings.NewReader(`{"email":"`+email+`","pow":"`+proof+`"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.RemoteAddr = remote
+	request = request.WithContext(browser.ContextWithPeerIP(request.Context(), remoteAddrIP(remote)))
 	if site != "" {
 		request.Header.Set("Sec-Fetch-Site", site)
 	}
@@ -550,6 +671,7 @@ func putResetRequest(t *testing.T, service *Service, subject string, payload put
 	request := httptest.NewRequest(http.MethodPut, "/auth/v1/users/"+subject+"/reset", bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.SetPathValue("subject", subject)
+	request = request.WithContext(browser.ContextWithPeerIP(request.Context(), "192.0.2.80"))
 	if cookie != nil {
 		request.AddCookie(cookie)
 	}
@@ -559,6 +681,13 @@ func putResetRequest(t *testing.T, service *Service, subject string, payload put
 	return response
 }
 
+func remoteAddrIP(remote string) string {
+	if host, _, err := net.SplitHostPort(remote); err == nil {
+		return host
+	}
+	return remote
+}
+
 type fakeSender struct {
 	mu       sync.Mutex
 	items    []Message
@@ -566,12 +695,24 @@ type fakeSender struct {
 	already  []string
 	changed  []EmailChangeMessage
 	err      error
+	block    <-chan struct{}
+}
+
+type recordingCaptchaVerifier struct{ remoteIP string }
+
+func (*recordingCaptchaVerifier) SiteKey() string { return "site-key" }
+func (v *recordingCaptchaVerifier) Verify(_ context.Context, _, remoteIP string) (bool, error) {
+	v.remoteIP = remoteIP
+	return false, nil
 }
 
 func (s *fakeSender) SendPasswordReset(_ context.Context, message Message) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.items = append(s.items, message)
+	s.mu.Unlock()
+	if s.block != nil {
+		<-s.block
+	}
 	return s.err
 }
 func (s *fakeSender) SendPasswordNew(_ context.Context, message Message) error {

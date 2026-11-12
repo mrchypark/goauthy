@@ -23,6 +23,7 @@ spec:
     spec:
       serviceAccountName: ternal-goauthy
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
       securityContext:
         fsGroup: 65532
         seccompProfile:
@@ -69,6 +70,8 @@ spec:
               value: /tmp
             - name: GOAUTHY_RHIZA_PROFILE
               value: cluster
+            - name: GOAUTHY_RHIZA_STARTUP_TIMEOUT
+              value: 10m
             - name: GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE
               value: "true"
             - name: GOAUTHY_RHIZA_PEER_ADDR
@@ -144,8 +147,8 @@ spec:
             httpGet:
               path: /livez
               port: http
-            periodSeconds: 2
-            failureThreshold: 30
+            periodSeconds: 10
+            failureThreshold: 60
           livenessProbe:
             httpGet:
               path: /livez

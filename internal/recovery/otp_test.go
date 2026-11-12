@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -274,6 +275,83 @@ func TestGenerateOTPSimultaneousIssuanceStaysWithinLimit(t *testing.T) {
 	}
 	if got := otpScalar(t, db, `SELECT count FROM identity_email_otp_rate_limits WHERE subject_digest=?`, challengeDigest("subject-1")); got != otpRateLimit {
 		t.Fatalf("window count = %d, want %d", got, otpRateLimit)
+	}
+}
+
+func TestOTPVerificationFailureCapIsAtomicAcrossPeers(t *testing.T) {
+	t.Parallel()
+	db := testOTPDatabase(t)
+	service, err := NewOTPService(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+	service.now = func() time.Time { return now }
+	service.generateCode = func() (string, error) { return "123456", nil }
+	handler := NewOTPHandler(service, nil, true, nil)
+	verify := func(subject, code string, peer int) int {
+		r := httptest.NewRequest(http.MethodPost, "/auth/v1/users/otp/verify", strings.NewReader(`{"subject":"`+subject+`","code":"`+code+`"}`))
+		r.Header.Set("Content-Type", "application/json")
+		r.RemoteAddr = "198.51.100." + strconv.Itoa(peer+1) + ":1234"
+		w := httptest.NewRecorder()
+		handler.Verify(w, r)
+		return w.Code
+	}
+
+	for i := range otpMaxFailures {
+		if code := verify("subject-lock", "654321", i); code != http.StatusUnauthorized {
+			t.Fatalf("failure %d status=%d", i, code)
+		}
+	}
+	digest := challengeDigest("subject-lock")
+	if got := otpScalar(t, db, `SELECT locked_until_unix_ms FROM identity_email_otp_verification_limits WHERE subject_digest=?`, digest); got <= now.UnixMilli() {
+		t.Fatalf("lock deadline=%d now=%d", got, now.UnixMilli())
+	}
+	if got := otpScalar(t, db, `SELECT COUNT(*) FROM identity_email_otp WHERE subject='subject-lock'`); got != 0 {
+		t.Fatalf("live codes after lock=%d", got)
+	}
+	if code := verify("subject-lock", "123456", 20); code != http.StatusUnauthorized {
+		t.Fatalf("correct code during lock status=%d", code)
+	}
+	if _, err := service.GenerateOTP(t.Context(), "subject-lock"); !errors.Is(err, ErrOTPRateLimited) {
+		t.Fatalf("issuance during lock=%v", err)
+	}
+	now = now.Add(otpFailureTTL)
+	if code, err := service.GenerateOTP(t.Context(), "subject-lock"); err != nil || code != "123456" {
+		t.Fatalf("post-lock issuance=(%q,%v)", code, err)
+	}
+	if code := verify("subject-lock", "123456", 21); code != http.StatusOK {
+		t.Fatalf("post-lock verification status=%d", code)
+	}
+
+	if _, err := service.GenerateOTP(t.Context(), "subject-race"); err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan int, otpMaxFailures*3)
+	var group sync.WaitGroup
+	for i := range otpMaxFailures * 3 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			results <- verify("subject-race", "654321", i+30)
+		}()
+	}
+	close(start)
+	group.Wait()
+	close(results)
+	for code := range results {
+		if code != http.StatusUnauthorized {
+			t.Fatalf("concurrent failure status=%d", code)
+		}
+	}
+	raceDigest := challengeDigest("subject-race")
+	if got := otpScalar(t, db, `SELECT failed_attempts FROM identity_email_otp_verification_limits WHERE subject_digest=?`, raceDigest); got != otpMaxFailures {
+		t.Fatalf("concurrent failures=%d want=%d", got, otpMaxFailures)
+	}
+	if got := otpScalar(t, db, `SELECT COUNT(*) FROM identity_email_otp WHERE subject='subject-race'`); got != 0 {
+		t.Fatalf("concurrent live codes after lock=%d", got)
 	}
 }
 

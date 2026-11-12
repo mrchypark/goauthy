@@ -64,7 +64,12 @@ type Handler struct {
 	connectionUseResource       string
 	connectionUseAuthorizer     func(*http.Request) (string, string, func() (string, []any), error)
 	connectionHandoffAuthorizer func(*http.Request) (string, string, func() (string, []any), error)
+	adminForceMFA               bool
 }
+
+// ConfigureAdminForceMFA applies the deployment policy to every browser-admin
+// API request. API keys remain unaffected because they have their own scope.
+func (h *Handler) ConfigureAdminForceMFA(enabled bool) { h.adminForceMFA = enabled }
 
 func (h *Handler) BindConnectionUseResource(resource string) error {
 	if h == nil {
@@ -460,6 +465,10 @@ func (h *Handler) actorFor(w http.ResponseWriter, r *http.Request, mutation, all
 		admin = delegated
 	}
 	if !admin {
+		h.genericUnauthorized(w)
+		return "", false
+	}
+	if h.adminForceMFA && session.AuthenticationMethod != "mfa" {
 		h.genericUnauthorized(w)
 		return "", false
 	}

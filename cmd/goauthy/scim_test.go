@@ -243,7 +243,13 @@ func TestLoadSCIMTokenTrimsExactlyOneLineEndingAndRejectsUnsafeValues(t *testing
 		t.Fatal(err)
 	}
 	if got, err := loadSCIMToken(path); err != nil || got != "token" {
-		t.Fatalf("rejected operator/group-readable token: token=%q err=%v", got, err)
+		t.Fatalf("rejected group-readable token: token=%q err=%v", got, err)
+	}
+	if err := os.Chmod(path, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := loadSCIMToken(path); err != nil || got != "token" {
+		t.Fatalf("rejected owner-readable token: token=%q err=%v", got, err)
 	}
 	if _, err := loadSCIMToken(filepath.Dir(path)); err == nil {
 		t.Fatal("accepted token directory")

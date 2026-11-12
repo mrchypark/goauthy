@@ -25,10 +25,15 @@ test "$(yq -r "$statefulset | .spec.replicas" "$render")" = 3
 test "$(yq -r "$statefulset | (.spec.volumeClaimTemplates | length)" "$render")" = 0
 test "$(yq -r "$statefulset | .spec.template.spec.volumes[] | select(.name == \"data\") | has(\"emptyDir\")" "$render")" = true
 test "$(yq -r "$statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_PROFILE\") | .value" "$render")" = cluster
+test "$(yq -r "$statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_STARTUP_TIMEOUT\") | .value" "$render")" = 10m
 test "$(yq -r "$statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE\") | .value" "$render")" = true
 test "$(yq -r "$statefulset | .spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem" "$render")" = true
 test "$(yq -r "$statefulset | .spec.template.spec.automountServiceAccountToken" "$render")" = false
 test "$(yq -r 'select(.kind == "PodDisruptionBudget" and .metadata.name == "ternal-goauthy") | .spec.minAvailable' "$render")" = 2
+test "$(yq -r "$statefulset | .spec.template.spec.terminationGracePeriodSeconds" "$render")" = 60
+test "$(yq -r "$statefulset | .spec.template.spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution | length" "$render")" = 1
+test "$(yq -r "$statefulset | (.spec.template.spec.affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution | length)" "$render")" = 0
+test "$(yq -r "$statefulset | (.spec.template.spec.containers[0].startupProbe.periodSeconds * .spec.template.spec.containers[0].startupProbe.failureThreshold)" "$render")" = 600
 
 for key in issuer s3-endpoint s3-bucket s3-prefix s3-region bootstrap-client-id bootstrap-redirect-uri bootstrap-username; do
 	test "$(yq -r "$statefulset | .spec.template.spec.containers[0].env[] | select(.valueFrom.configMapKeyRef.key == \"$key\") | .valueFrom.configMapKeyRef.name" "$render")" = ternal-goauthy-config
@@ -113,4 +118,12 @@ else
 	exit 1
 fi
 test "$(yq -r 'select(.kind == "PodDisruptionBudget" and .metadata.name == "ternal-goauthy") | .spec.minAvailable' "$gcs_ha_render")" = 2
+test "$(yq -r "$gcs_ha_statefulset | .spec.template.spec.terminationGracePeriodSeconds" "$gcs_ha_render")" = 60
+test "$(yq -r "$gcs_ha_statefulset | (.spec.template.spec.containers[0].startupProbe.periodSeconds * .spec.template.spec.containers[0].startupProbe.failureThreshold)" "$gcs_ha_render")" = 600
+gcs_ha_policy='select(.kind == "NetworkPolicy" and .metadata.name == "ternal-goauthy-gcs-ha")'
+test "$(yq -r "$gcs_ha_policy | .spec.egress[] | select(.ports[]?.port == 80) | .to[0].ipBlock.cidr" "$gcs_ha_render")" = 169.254.169.254/32
+test "$(yq -r "$gcs_ha_policy | .spec.egress[] | select(.ports[]?.port == 988) | .to[0].ipBlock.cidr" "$gcs_ha_render")" = 169.254.169.252/32
+test "$(yq -r "$gcs_ha_policy | .spec.egress[] | select(.ports[]?.port == 443) | .to[0].ipBlock.cidr" "$gcs_ha_render")" = 0.0.0.0/0
+test "$(yq -r "$gcs_ha_policy | .spec.egress[] | select(.ports[]?.port == 443) | (.to[0].ipBlock.except | length)" "$gcs_ha_render")" = 4
+test "$(yq -r "$gcs_ha_policy | .spec.egress[] | select(.ports[]?.port == 8444) | .to[0].podSelector.matchLabels.\"app.kubernetes.io/name\"" "$gcs_ha_render")" = goauthy
 echo "ternal no-PVC manifest checks passed"

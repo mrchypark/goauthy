@@ -168,6 +168,7 @@ func TestRunConfigCommandRejectsInvalidRuntimeConfiguration(t *testing.T) {
 		{name: "browser id mode", env: map[string]string{"GOAUTHY_BROWSER_ID_COOKIE_MODE": "loose"}, wantErr: "GOAUTHY_BROWSER_ID_COOKIE_MODE"},
 		{name: "subject prefix", env: map[string]string{"GOAUTHY_EMAIL_SUB_PREFIX": "bad\nprefix"}, wantErr: "GOAUTHY_EMAIL_SUB_PREFIX"},
 		{name: "session idle timeout", env: map[string]string{"GOAUTHY_BROWSER_SESSION_IDLE_TIMEOUT": "1s"}, wantErr: "GOAUTHY_BROWSER_SESSION_IDLE_TIMEOUT"},
+		{name: "rhiza startup timeout", env: map[string]string{"GOAUTHY_RHIZA_STARTUP_TIMEOUT": "500ms"}, wantErr: "GOAUTHY_RHIZA_STARTUP_TIMEOUT"},
 		{name: "backchannel exceptions", env: map[string]string{"GOAUTHY_BOOTSTRAP_BACKCHANNEL_ALLOW_HTTP": "true"}, wantErr: "GOAUTHY_BOOTSTRAP_BACKCHANNEL_LOGOUT_URI"},
 		{name: "trusted proxies", env: map[string]string{"GOAUTHY_TRUSTED_PROXIES": "not-a-cidr"}, wantErr: "GOAUTHY_TRUSTED_PROXIES"},
 		{name: "geoblock policy", env: map[string]string{"GOAUTHY_GEOBLOCK_ENABLED": "true"}, wantErr: "GOAUTHY_GEOBLOCK_TYPE"},

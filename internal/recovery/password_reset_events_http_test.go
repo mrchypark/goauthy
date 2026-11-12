@@ -99,11 +99,15 @@ func TestPutResetPasswordEventUsesResolvedPeerIP(t *testing.T) {
 	}
 }
 
-func TestPutResetPasswordEventFallsBackToRemotePeer(t *testing.T) {
+func TestPutResetPasswordEventRequiresMiddlewarePeer(t *testing.T) {
 	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	token, cookie, csrf := resetHTTPChallenge(t, service)
 	response := putResetHTTP(t, service, token, cookie, csrf, "198.51.100.8:1234", "")
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing context status=%d body=%q", response.Code, response.Body.String())
+	}
+	response = putResetHTTP(t, service, token, cookie, csrf, "192.0.2.8:1234", "198.51.100.8")
 	if response.Code != http.StatusAccepted {
 		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
 	}
@@ -117,7 +121,7 @@ func TestPutResetInvalidPeerLeavesResetUnconsumed(t *testing.T) {
 	t.Parallel()
 	service, _ := testService(t, "subject-1", "alice")
 	token, cookie, challengeCSRF := resetHTTPChallenge(t, service)
-	response := putResetHTTP(t, service, token, cookie, challengeCSRF, "not-an-ip", "")
+	response := putResetHTTP(t, service, token, cookie, challengeCSRF, "198.51.100.9:1234", "not-an-ip")
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("invalid peer status=%d body=%q", response.Code, response.Body.String())
 	}
@@ -126,7 +130,7 @@ func TestPutResetInvalidPeerLeavesResetUnconsumed(t *testing.T) {
 	}
 	// The source-IP rejection occurs before ResetPassword, so the valid proof
 	// remains usable and proves that neither the token nor password was changed.
-	response = putResetHTTP(t, service, token, cookie, challengeCSRF, "198.51.100.9:1234", "")
+	response = putResetHTTP(t, service, token, cookie, challengeCSRF, "192.0.2.9:1234", "198.51.100.9")
 	if response.Code != http.StatusAccepted {
 		t.Fatalf("proof after invalid peer status=%d body=%q", response.Code, response.Body.String())
 	}

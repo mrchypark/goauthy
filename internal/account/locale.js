@@ -41,6 +41,7 @@
   });
   Object.assign(i18n.messages, {
     'The current password is incorrect. Check it and try again.': '현재 비밀번호가 올바르지 않습니다. 확인한 뒤 다시 시도하세요.',
-    'Password change outcome is unknown. Check the current state before retrying.': '비밀번호 변경 결과를 확인할 수 없습니다. 현재 상태를 확인한 뒤 다시 시도하세요.'
+    'Password change outcome is unknown. Check the current state before retrying.': '비밀번호 변경 결과를 확인할 수 없습니다. 현재 상태를 확인한 뒤 다시 시도하세요.',
+    'Request outcome is unknown. Check the current state before retrying.': '요청 결과를 확인할 수 없습니다. 현재 상태를 확인한 뒤 다시 시도하세요.'
   });
 })();

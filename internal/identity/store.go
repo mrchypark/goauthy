@@ -1094,8 +1094,23 @@ func (s *Store) bestEffortRehash(ctx context.Context, subject, oldPHC string, pa
 
 // ChangePassword validates the current password before applying the configured
 // creation rules. It stores the old PHC and swaps to the new one in one Rhiza
-// transaction, so concurrent changes have exactly one winner.
+// transaction, so concurrent changes have exactly one winner. This entry point
+// has no authenticated browser session to preserve, so it revokes every session.
 func (s *Store) ChangePassword(ctx context.Context, subject string, current, next []byte) error {
+	return s.changePassword(ctx, subject, "", current, next)
+}
+
+// ChangePasswordWithSession keeps the session that proved a self-service
+// password change active and revokes every other session and OAuth artifact in
+// the same transaction.
+func (s *Store) ChangePasswordWithSession(ctx context.Context, subject, keepSessionID string, current, next []byte) error {
+	if !validDigest(keepSessionID) {
+		return ErrInvalidCredentials
+	}
+	return s.changePassword(ctx, subject, keepSessionID, current, next)
+}
+
+func (s *Store) changePassword(ctx context.Context, subject, keepSessionID string, current, next []byte) error {
 	if err := validateSubject(subject); err != nil {
 		return err
 	}
@@ -1139,8 +1154,13 @@ func (s *Store) ChangePassword(ctx context.Context, subject string, current, nex
 		}
 		minimumChanges = 2
 	}
+	operationID := mutationID("password-change", subject, record.passwordPHC, newPHC, strconv.FormatInt(record.generation, 10))
+	newGeneration := record.generation + 1
+	revocationGuard := `subject = ? AND password_phc = ? AND password_generation = ? AND password_changed_at_unix_ms = ? AND disabled = 0`
+	revocationArgs := []any{subject, newPHC, newGeneration, now.UnixMilli()}
+	statements = append(statements, passwordRevocationStatements(subject, operationID, keepSessionID, now, revocationGuard, revocationArgs)...)
 	response, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
-		RequestID:  mutationID("password-change", subject, record.passwordPHC, newPHC, strconv.FormatInt(record.generation, 10)),
+		RequestID:  operationID,
 		Statements: statements,
 	})
 	if err != nil {
@@ -1356,17 +1376,7 @@ func (s *Store) ResetPassword(ctx context.Context, subject, raw, cookie, csrf st
 		statements = append(statements, rhiza.SQLStatement{SQL: `INSERT INTO identity_password_history (subject,generation,password_phc,changed_at_unix_ms) SELECT ?,?,?,? WHERE EXISTS (SELECT 1 FROM identity_users WHERE ` + guard + `) AND EXISTS (SELECT 1 FROM identity_password_reset_tokens WHERE token_digest = ? AND consumed_attempt = ?)`, Args: append(append([]any{subject, record.generation, record.passwordPHC, record.changedAt}, guardArgs...), digest, attempt)})
 		minimum++
 	}
-	statements = append(statements,
-		rhiza.SQLStatement{SQL: `INSERT OR IGNORE INTO oidc_backchannel_deliveries (event_id,client_id,sid,logout_uri,allow_private,allow_http,attempts,next_attempt_at_unix_ms,created_at_unix_ms) SELECT ? || '/' || sid,client_id,sid,logout_uri,allow_private,allow_http,0,?,? FROM oidc_session_clients WHERE logout_uri <> '' AND sid IN (SELECT token_digest FROM browser_sessions WHERE subject = ?) AND EXISTS (SELECT 1 FROM identity_users WHERE ` + guard + `)`, Args: append([]any{event, now.UnixMilli(), now.UnixMilli(), subject}, guardArgs...)},
-		rhiza.SQLStatement{SQL: `UPDATE browser_sessions SET revoked_at_unix_ms = COALESCE(revoked_at_unix_ms,?) WHERE subject = ? AND revoked_at_unix_ms IS NULL AND EXISTS (SELECT 1 FROM identity_users WHERE ` + guard + `)`, Args: append([]any{now.UnixMilli(), subject}, guardArgs...)},
-		rhiza.SQLStatement{SQL: `UPDATE oauth_authorize_codes SET invalidated = 1 WHERE invalidated = 0 AND json_extract(request_json,'$.subject') = ? AND EXISTS (SELECT 1 FROM identity_users WHERE ` + guard + `)`, Args: append([]any{subject}, guardArgs...)},
-		rhiza.SQLStatement{SQL: `UPDATE oauth_refresh_tokens SET active = 0 WHERE active = 1 AND json_extract(request_json,'$.subject') = ? AND EXISTS (SELECT 1 FROM identity_users WHERE ` + guard + `)`, Args: append([]any{subject}, guardArgs...)},
-		rhiza.SQLStatement{SQL: `DELETE FROM oauth_pkce_requests WHERE signature IN (SELECT signature FROM oauth_authorize_codes WHERE json_extract(request_json,'$.subject') = ?) AND EXISTS (SELECT 1 FROM identity_users WHERE ` + guard + `)`, Args: append([]any{subject}, guardArgs...)},
-		rhiza.SQLStatement{SQL: `DELETE FROM oauth_access_tokens WHERE signature IN (SELECT signature FROM oauth_token_requests WHERE json_extract(request_json,'$.subject') = ?) AND EXISTS (SELECT 1 FROM identity_users WHERE ` + guard + `)`, Args: append([]any{subject}, guardArgs...)},
-		rhiza.SQLStatement{SQL: `DELETE FROM oauth_token_requests WHERE json_extract(request_json,'$.subject') = ? AND EXISTS (SELECT 1 FROM identity_users WHERE ` + guard + `)`, Args: append([]any{subject}, guardArgs...)},
-		rhiza.SQLStatement{SQL: `UPDATE oauth_device_grants SET state = 'denied',claim_token_digest = NULL,claim_until_unix_ms = NULL WHERE subject = ? AND state IN ('pending','approved') AND EXISTS (SELECT 1 FROM identity_users WHERE ` + guard + `)`, Args: append([]any{subject}, guardArgs...)},
-		rhiza.SQLStatement{SQL: `DELETE FROM oidc_session_clients WHERE sid IN (SELECT token_digest FROM browser_sessions WHERE subject = ?) AND EXISTS (SELECT 1 FROM identity_users WHERE ` + guard + `)`, Args: append([]any{subject}, guardArgs...)},
-	)
+	statements = append(statements, passwordRevocationStatements(subject, event, "", now, guard, guardArgs)...)
 	if older > 0 {
 		keepFrom := record.generation - int64(older)
 		statements = append(statements, rhiza.SQLStatement{SQL: `DELETE FROM identity_password_history WHERE subject = ? AND generation <= ? AND EXISTS (SELECT 1 FROM identity_users WHERE ` + guard + `)`, Args: append([]any{subject, keepFrom}, guardArgs...)})
@@ -1537,7 +1547,11 @@ func (s *Store) SetPasswordWithWebAuthnProof(ctx context.Context, subject, sessi
 		{SQL: `DELETE FROM identity_mfa_mod_token_factors WHERE token_digest IN (SELECT token_digest FROM identity_mfa_mod_tokens WHERE subject=?) AND EXISTS (SELECT 1 FROM identity_users WHERE ` + userGuard + `) AND EXISTS (SELECT 1 FROM identity_authentication_modes WHERE subject=? AND mode='password' AND generation=?)`, Args: append([]any{subject}, append(guardArgs, subject, newModeGeneration)...)},
 		{SQL: `DELETE FROM identity_mfa_mod_tokens WHERE subject=? AND EXISTS (SELECT 1 FROM identity_users WHERE ` + userGuard + `) AND EXISTS (SELECT 1 FROM identity_authentication_modes WHERE subject=? AND mode='password' AND generation=?)`, Args: append([]any{subject}, append(guardArgs, subject, newModeGeneration)...)},
 	}
-	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: mutationID("passkey-to-password", subject, sessionDigest, proofDigest, attempt), Statements: statements})
+	operationID := mutationID("passkey-to-password", subject, sessionDigest, proofDigest, attempt)
+	revocationGuard := userGuard + ` AND EXISTS (SELECT 1 FROM identity_authentication_modes WHERE subject=? AND mode='password' AND generation=?)`
+	revocationArgs := append(append([]any(nil), guardArgs...), subject, newModeGeneration)
+	statements = append(statements, passwordRevocationStatements(subject, operationID, sessionDigest, now, revocationGuard, revocationArgs)...)
+	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: operationID, Statements: statements})
 	if err != nil {
 		return err
 	}
@@ -1604,7 +1618,11 @@ func (s *Store) SetPasswordAdmin(ctx context.Context, subject string, next []byt
 		{SQL: `DELETE FROM identity_mfa_mod_token_factors WHERE token_digest IN (SELECT token_digest FROM identity_mfa_mod_tokens WHERE subject=?) AND EXISTS (SELECT 1 FROM identity_users WHERE ` + userGuard + `) AND EXISTS (SELECT 1 FROM identity_authentication_modes WHERE subject=? AND mode='password' AND generation=?)`, Args: append([]any{subject}, append(guardArgs, subject, newModeGeneration)...)},
 		{SQL: `DELETE FROM identity_mfa_mod_tokens WHERE subject=? AND EXISTS (SELECT 1 FROM identity_users WHERE ` + userGuard + `) AND EXISTS (SELECT 1 FROM identity_authentication_modes WHERE subject=? AND mode='password' AND generation=?)`, Args: append([]any{subject}, append(guardArgs, subject, newModeGeneration)...)},
 	}
-	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: mutationID("passkey-to-password-admin", subject, strconv.FormatInt(record.generation, 10), strconv.FormatInt(modeGeneration, 10)), Statements: statements})
+	operationID := mutationID("passkey-to-password-admin", subject, strconv.FormatInt(record.generation, 10), strconv.FormatInt(modeGeneration, 10))
+	revocationGuard := userGuard + ` AND EXISTS (SELECT 1 FROM identity_authentication_modes WHERE subject=? AND mode='password' AND generation=?)`
+	revocationArgs := append(append([]any(nil), guardArgs...), subject, newModeGeneration)
+	statements = append(statements, passwordRevocationStatements(subject, operationID, "", now, revocationGuard, revocationArgs)...)
+	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: operationID, Statements: statements})
 	if err != nil {
 		return err
 	}

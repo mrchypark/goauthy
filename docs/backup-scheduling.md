@@ -167,6 +167,15 @@ completes. `executed` reports callback entry, not remote publication success.
 A crash/ambiguous error between remote publication and marker commit can still
 produce a duplicate on retry; this is not an exactly-once protocol.
 
+Server startup validates backup key files and the catalog namespace locally,
+then moves remote store opening, catalog verification and orphan cleanup into
+the backup worker. A transient outage marks the worker degraded and is retried
+at the next due slot; it does not block identity startup. Invalid local
+configuration remains a startup error. Cleanup removes only known scratch names
+and remote valid-ID artifacts older than the maximum attempt window that have no
+authenticated completion receipt; a catalog or attribute failure cancels the
+sweep before deletion.
+
 Real standalone Rhiza checks cover successful replay/older-slot suppression,
 failure followed by retry, concurrent newer-marker preservation, cancellation,
 corruption/future-state rejection, and reopen persistence. Focused race and vet

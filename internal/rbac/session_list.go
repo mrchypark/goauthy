@@ -34,7 +34,14 @@ type sessionCursor struct {
 }
 
 func (s *Store) listSessions(ctx context.Context, guard string, args []any, o SessionListOptions, threshold uint16) ([]Session, int64, string, error) {
+	return s.listSessionsScoped(ctx, guard, args, "1=1", nil, o, threshold)
+}
+
+func (s *Store) listSessionsScoped(ctx context.Context, guard string, args []any, scope string, scopeArgs []any, o SessionListOptions, threshold uint16) ([]Session, int64, string, error) {
 	if s == nil || s.db == nil || ctx == nil || strings.TrimSpace(guard) == "" || threshold == 0 {
+		return nil, 0, "", ErrInvalid
+	}
+	if strings.TrimSpace(scope) == "" {
 		return nil, 0, "", ErrInvalid
 	}
 	if o.State == "" {
@@ -61,8 +68,8 @@ func (s *Store) listSessions(ctx context.Context, guard string, args []any, o Se
 		}
 	}
 	where := "state=?"
-	qargs := append([]any{}, args...)
-	qargs = append(qargs, o.State)
+	qargs := append(append([]any{}, args...), scopeArgs...)
+	qargs = append(qargs, o.State, o.State)
 	if c != nil {
 		op := "<"
 		if o.Backwards {
@@ -75,7 +82,7 @@ func (s *Store) listSessions(ctx context.Context, guard string, args []any, o Se
 	if o.Backwards {
 		order = "ASC"
 	}
-	qargs = append(qargs, int64(threshold), int64(pageSize), int64(threshold), int64(o.Offset))
+	qargs = append(qargs, int64(threshold), int64(pageSize)+1, int64(threshold), int64(o.Offset))
 	query := `WITH authorized AS (SELECT 1 ok WHERE (` + guard + `)),
 allsessions AS (
  SELECT b.token_digest id, NULLIF(b.subject,'') user_id,
@@ -84,8 +91,8 @@ allsessions AS (
  WHEN b.subject='' AND b.auth_method='' THEN 'Init'
  WHEN b.auth_method IN ('pwd','webauthn','mfa','external') THEN 'Auth' ELSE 'Unknown' END state,
  b.expires_at_unix_ms/1000 exp, b.last_seen_at_unix_ms/1000 last_seen, NULLIF(b.peer_ip,'') remote_ip
- FROM browser_sessions b CROSS JOIN authorized
-), total AS (SELECT COUNT(*) count FROM identity_users CROSS JOIN authorized),
+ FROM browser_sessions b CROSS JOIN authorized WHERE ` + scope + `
+), total AS (SELECT COUNT(*) count FROM allsessions WHERE state=?),
 page AS (
  SELECT * FROM allsessions WHERE ` + where + ` ORDER BY exp ` + order + `, id ` + order + `
  LIMIT CASE WHEN (SELECT count FROM total) < ? THEN -1 ELSE ? END
@@ -132,7 +139,12 @@ SELECT * FROM combined ORDER BY exp DESC,id DESC`
 		out = append(out, Session{ID: id, UserID: uid, IsMFA: mfa == 1, State: state, Exp: exp, LastSeen: last, RemoteIP: ip})
 	}
 	var token string
-	if count >= int64(threshold) && len(out) > 0 {
+	if len(out) > int(pageSize) {
+		if o.Backwards {
+			out = out[1:]
+		} else {
+			out = out[:pageSize]
+		}
 		i := len(out) - 1
 		if o.Backwards {
 			i = 0

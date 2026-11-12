@@ -223,6 +223,11 @@ if fetchSite == "cross-site" {
 
 ### 기본 보안 헤더
 
+GoAuthy는 직접 TLS를 제공하거나, 신뢰한 ingress가 `X-Forwarded-Proto: https`를
+전달할 때 아래 HSTS 헤더를 응답에 포함합니다. TLS를 ingress에서 종료하면서 이
+헤더를 전달하지 않거나 제거하는 배포에서는 ingress가 동일한 HSTS 정책을 직접
+응답해야 합니다. `GOAUTHY_HSTS_ENABLED` 환경 변수는 없습니다.
+
 ```http
 Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
 Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'
@@ -374,9 +379,6 @@ GOAUTHY_SESSION_IDLE_TIMEOUT=30m
 
 # Rate Limiting
 GOAUTHY_RATE_LIMIT_ENABLED=true
-
-# 보안 헤더
-GOAUTHY_HSTS_ENABLED=true
 
 # Geo-blocking (선택)
 GOAUTHY_GEOBLOCK_ENABLED=true

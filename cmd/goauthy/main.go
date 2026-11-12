@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ory/fosite"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -57,6 +56,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/rbac"
 	"github.com/mrchypark/goauthy/internal/recovery"
 	"github.com/mrchypark/goauthy/internal/saas"
+	"github.com/mrchypark/goauthy/internal/securefile"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/goauthy/internal/tlsconfig"
 	"github.com/mrchypark/goauthy/internal/tracing"
@@ -224,14 +224,8 @@ func run() (err error) {
 		}
 		errCh <- server.Serve(listener)
 	}()
-	startupCtx, cancelStartup := context.WithTimeout(ctx, 30*time.Second)
-	defer cancelStartup()
-	for !db.Ready() {
-		select {
-		case <-startupCtx.Done():
-			return fmt.Errorf("wait for rhiza readiness: %w", startupCtx.Err())
-		case <-time.After(100 * time.Millisecond):
-		}
+	if err := waitForRhizaReady(ctx, appConfig.RhizaStartupTimeout, db.Ready); err != nil {
+		return err
 	}
 	if err := storage.Migrate(ctx, db); err != nil {
 		return err
@@ -383,6 +377,7 @@ func run() (err error) {
 	var recoveryService *recovery.Service
 	var loginLocationSender *recovery.SMTPSender
 	var emailOutbox *recovery.EmailOutbox
+	var emailOutboxWake chan struct{}
 	captchaVerifier := captcha.NewVerifier(os.Getenv)
 	if recoveryEnabled {
 		sender, senderErr := smtpSenderFromEnv(os.Getenv)
@@ -390,7 +385,8 @@ func run() (err error) {
 			return senderErr
 		}
 		var outboxErr error
-		emailOutbox, outboxErr = recovery.NewEmailOutbox(db, recovery.SMTPSendFunc(sender), recovery.WithEnvelopeKeyring(keyring))
+		emailOutboxWake = make(chan struct{}, 1)
+		emailOutbox, outboxErr = recovery.NewEmailOutbox(db, recovery.SMTPSendFunc(sender), recovery.WithEnvelopeKeyring(keyring), recovery.WithWake(emailOutboxWake))
 		if outboxErr != nil {
 			return fmt.Errorf("configure email outbox: %w", outboxErr)
 		}
@@ -405,6 +401,7 @@ func run() (err error) {
 			return fmt.Errorf("configure password proof of work: %w", powErr)
 		}
 		var options []recovery.ServiceOption
+		options = append(options, recovery.WithEmailOutbox(emailOutbox))
 		if openRegistration.Enabled {
 			bootstrapRedirect := env("GOAUTHY_BOOTSTRAP_REDIRECT_URI", "http://localhost:5555/callback")
 			options = append(options, recovery.WithOpenRegistration(openRegistration, passwordNewExpiry, func(ctx context.Context, uri string) (bool, error) {
@@ -470,7 +467,7 @@ func run() (err error) {
 		return err
 	}
 	defer func() {
-		if err := backups.Close(); err != nil {
+		if err := closeWithin(backups.Close, backupShutdownTimeout); err != nil {
 			slog.Error("backup object-store client shutdown failed")
 		}
 	}()
@@ -558,7 +555,7 @@ func run() (err error) {
 			}
 		}()
 	}
-	housekeepingJobs := buildHousekeepingJobs(db, recoveryService, loginPolicyStore, keyring, emailOutbox, passkeyConfig)
+	housekeepingJobs := buildHousekeepingJobs(db, recoveryService, loginPolicyStore, keyring, emailOutbox, emailOutboxWake, passkeyConfig)
 	if scheduler := housekeeping.New(housekeepingJobs, housekeepingErrorHandler); len(housekeepingJobs) > 0 {
 		workers.Add(1)
 		go func() {
@@ -567,8 +564,9 @@ func run() (err error) {
 		}()
 	}
 	defer func() {
-		cancelWorker()
-		workers.Wait()
+		if !cancelAndWait(cancelWorker, &workers, workerShutdownTimeout) {
+			slog.Error("background workers exceeded shutdown budget")
+		}
 	}()
 	// GA-CONFIG-001: the preflight already loaded and validated both deployment
 	// secrets, so startup serves those values instead of re-reading the files
@@ -730,7 +728,7 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
-	browserAdmin := browserAdministrator(rbacStore, browserStore, identityStore, issuer)
+	browserAdmin := browserAdministrator(rbacStore, browserStore, identityStore, issuer, bootstrapForceMFA)
 	kvStore, err := kv.NewStore(db, keyring)
 	if err != nil {
 		return fmt.Errorf("configure KV store: %w", err)
@@ -828,6 +826,7 @@ func run() (err error) {
 	if err := rbacHandler.SetUserValuesPolicy(userValuesPolicy); err != nil {
 		return fmt.Errorf("configure user values policy: %w", err)
 	}
+	rbacHandler.ConfigureAdminForceMFA(bootstrapForceMFA)
 	if err := rbacHandler.BindClients(managedClients); err != nil {
 		return fmt.Errorf("configure managed clients: %w", err)
 	}
@@ -943,6 +942,7 @@ func run() (err error) {
 	if err != nil {
 		return fmt.Errorf("configure claims handler: %w", err)
 	}
+	claimsHandler.ConfigureAdminForceMFA(bootstrapForceMFA)
 	rewrapWorker.attachPasskey(passkeyService)
 	retirementWorker, err := newMasterKeyRetirementWorker(db, keyring, issuer, rhizaConfig.NodeID, bootID, passkeyService)
 	if err != nil {
@@ -1490,6 +1490,7 @@ func run() (err error) {
 	}
 	appHandler = tracing.Middleware(appHandler)
 	appHandler = admissionBypass(appHandler, handler)
+	appHandler = secureTransportHeaders(appHandler)
 	var metricsErrCh chan error
 	metricsAddr, metricsAddrErr := metricsListenAddrFromEnv(os.Getenv)
 	if metricsAddrErr != nil {
@@ -1729,7 +1730,7 @@ func bootstrapUser(ctx context.Context, store *identity.Store, getenv func(strin
 	if path == "" {
 		return nil
 	}
-	encoded, err := os.ReadFile(path)
+	encoded, err := securefile.Read(path, 1<<20)
 	if err != nil {
 		return fmt.Errorf("read bootstrap user password credential: %w", err)
 	}
@@ -1830,7 +1831,7 @@ func dcrScopePolicy(getenv func(string) string) (dcr.ScopePolicy, error) {
 	return policy, nil
 }
 
-func browserAdministrator(rbacStore *rbac.Store, browserStore *browser.Store, identityStore *identity.Store, issuer string) func(http.ResponseWriter, *http.Request, bool) bool {
+func browserAdministrator(rbacStore *rbac.Store, browserStore *browser.Store, identityStore *identity.Store, issuer string, forceMFA bool) func(http.ResponseWriter, *http.Request, bool) bool {
 	return func(w http.ResponseWriter, r *http.Request, mutation bool) bool {
 		if r.URL.RawQuery != "" || apikey.HasAuthorization(r) || strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site") {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -1856,7 +1857,7 @@ func browserAdministrator(rbacStore *rbac.Store, browserStore *browser.Store, id
 			w.WriteHeader(http.StatusServiceUnavailable)
 			return false
 		}
-		if !admin || mutation && browser.ValidateCSRFToken(cookie.Value, r.Header.Get("X-CSRF-Token")) != nil {
+		if !admin || forceMFA && session.AuthenticationMethod != "mfa" || mutation && browser.ValidateCSRFToken(cookie.Value, r.Header.Get("X-CSRF-Token")) != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			return false
 		}
@@ -2066,7 +2067,7 @@ func loadPasswordResetKey(getenv func(string) string) ([]byte, error) {
 	if path == "" {
 		return nil, errors.New("GOAUTHY_PASSWORD_RESET_KEY_FILE is required when password recovery is enabled")
 	}
-	key, err := os.ReadFile(path)
+	key, err := securefile.Read(path, 32)
 	if err != nil {
 		return nil, fmt.Errorf("read password reset key: %w", err)
 	}
@@ -2144,35 +2145,7 @@ func passkeyConfigFromEnv(getenv func(string) string) (*passkey.Config, error) {
 // rejects symlinks; comparing it with the opened descriptor also fails closed
 // if the pathname is replaced between inspection and open.
 func loadPasskeyCookieKey(path string) ([]byte, error) {
-	pathInfo, err := os.Lstat(path)
-	if err != nil {
-		return nil, fmt.Errorf("inspect passkey key file: %w", err)
-	}
-	if !pathInfo.Mode().IsRegular() {
-		return nil, errors.New("passkey key file must be a regular file")
-	}
-	if pathInfo.Mode().Perm()&0o077 != 0 {
-		return nil, errors.New("passkey key file must be owner-only")
-	}
-	if pathInfo.Size() != 32 {
-		return nil, errors.New("passkey key must be exactly 32 bytes")
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open passkey key file: %w", err)
-	}
-	defer f.Close()
-	fileInfo, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat passkey key file: %w", err)
-	}
-	if !fileInfo.Mode().IsRegular() || !os.SameFile(pathInfo, fileInfo) {
-		return nil, errors.New("passkey key file changed during open")
-	}
-	if fileInfo.Mode().Perm()&0o077 != 0 {
-		return nil, errors.New("passkey key file must be owner-only")
-	}
-	key, err := io.ReadAll(io.LimitReader(f, 33))
+	key, err := securefile.Read(path, 32)
 	if err != nil {
 		return nil, fmt.Errorf("read passkey key file: %w", err)
 	}
@@ -2661,7 +2634,7 @@ func shutdownServer(s *http.Server) error {
 	if s == nil {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
 	defer cancel()
 	return s.Shutdown(ctx)
 }
@@ -2732,17 +2705,9 @@ func loadMetricsToken(getenv func(string) string) (string, error) {
 	if path == "" {
 		return "", errors.New("GOAUTHY_METRICS_LISTEN_ADDR requires GOAUTHY_METRICS_TOKEN_FILE")
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open metrics token: %w", err)
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, maxMetricsTokenFileSize+1))
+	data, err := securefile.Read(path, maxMetricsTokenFileSize)
 	if err != nil {
 		return "", fmt.Errorf("read metrics token: %w", err)
-	}
-	if len(data) > maxMetricsTokenFileSize {
-		return "", fmt.Errorf("metrics token file exceeds %d bytes", maxMetricsTokenFileSize)
 	}
 	token := strings.TrimSuffix(string(data), "\r\n")
 	token = strings.TrimSuffix(token, "\n")
@@ -2759,11 +2724,22 @@ func closeRhizaAfterStartupComplete(db *rhiza.DB, startupComplete bool, current 
 	if !startupComplete || db == nil {
 		return current
 	}
-	return errors.Join(current, db.Close())
+	return errors.Join(current, closeWithin(db.Close, rhizaShutdownTimeout))
 }
 
 func newHandler(db *rhiza.DB) *http.ServeMux {
 	return newHandlerWithReadiness(db, nil)
+}
+
+// secureTransportHeaders emits HSTS only for direct TLS or deployment ingress
+// that explicitly forwards the canonical HTTPS scheme.
+func secureTransportHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https") {
+			w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func newHandlerWithReadiness(db *rhiza.DB, readiness func(bool), validators ...func(context.Context) error) *http.ServeMux {

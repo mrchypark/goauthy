@@ -68,7 +68,7 @@ func TestLegacyBrandingUsesRealBrowserAdminAndCSRF(t *testing.T) {
 	member, memberCSRF := makeSession("legacy-member")
 	themes, _ := branding.NewThemeStore(db)
 	keys, _ := apikey.NewStore(db)
-	handler, err := branding.NewThemeHandler(themes, keys, browserAdministrator(roles, sessions, identities, issuer), func(context.Context, string) error { return nil })
+	handler, err := branding.NewThemeHandler(themes, keys, browserAdministrator(roles, sessions, identities, issuer, false), func(context.Context, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
+	"github.com/mrchypark/goauthy/internal/securefile"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -183,7 +184,7 @@ func LoadKeyring(directory, activeID string) (*Keyring, error) {
 		if !validKeyID(name) {
 			return nil, fmt.Errorf("invalid master key ID %q", name)
 		}
-		encoded, err := os.ReadFile(filepath.Join(directory, name))
+		encoded, err := securefile.Read(filepath.Join(directory, name), 1<<20)
 		if err != nil {
 			return nil, fmt.Errorf("read master key %q: %w", name, err)
 		}

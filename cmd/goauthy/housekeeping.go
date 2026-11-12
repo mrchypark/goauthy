@@ -27,6 +27,7 @@ func buildHousekeepingJobs(
 	loginpolicyStore *loginpolicy.Store,
 	keyring *oidc.Keyring,
 	emailOutbox *recovery.EmailOutbox,
+	emailOutboxWake <-chan struct{},
 	passkeyConfig *passkey.Config,
 ) []housekeeping.Job {
 	var jobs []housekeeping.Job
@@ -65,6 +66,7 @@ func buildHousekeepingJobs(
 		jobs = append(jobs, housekeeping.Job{
 			Name:     "email-outbox",
 			Interval: time.Minute,
+			Wake:     emailOutboxWake,
 			Step: func(ctx context.Context) error {
 				return emailOutbox.Step(ctx)
 			},

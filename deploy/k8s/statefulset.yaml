@@ -20,15 +20,14 @@ spec:
     spec:
       serviceAccountName: goauthy
       automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
       affinity:
         podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchLabels:
-                    app.kubernetes.io/name: goauthy
-                topologyKey: kubernetes.io/hostname
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: goauthy
+              topologyKey: kubernetes.io/hostname
       securityContext:
         fsGroup: 65532
         seccompProfile:
@@ -91,6 +90,8 @@ spec:
               value: goauthy-e2e
             - name: GOAUTHY_RHIZA_PROFILE
               value: cluster
+            - name: GOAUTHY_RHIZA_STARTUP_TIMEOUT
+              value: 10m
             - name: GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE
               value: "true"
             - name: GOAUTHY_NODE_ID
@@ -208,8 +209,8 @@ spec:
             httpGet:
               path: /livez
               port: http
-            periodSeconds: 2
-            failureThreshold: 30
+            periodSeconds: 10
+            failureThreshold: 60
           livenessProbe:
             httpGet:
               path: /livez

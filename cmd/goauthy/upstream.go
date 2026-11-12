@@ -20,6 +20,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/login"
 	"github.com/mrchypark/goauthy/internal/oauth"
+	"github.com/mrchypark/goauthy/internal/securefile"
 	"github.com/mrchypark/goauthy/internal/upstreamprovider"
 	"github.com/mrchypark/rhiza"
 )
@@ -377,17 +378,9 @@ func validUpstreamCallback(raw, issuer, id string) bool {
 }
 
 func loadUpstreamClientSecret(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open upstream client secret: %w", err)
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, maxUpstreamClientSecretFileSize+1))
+	data, err := securefile.Read(path, maxUpstreamClientSecretFileSize)
 	if err != nil {
 		return "", fmt.Errorf("read upstream client secret: %w", err)
-	}
-	if len(data) > maxUpstreamClientSecretFileSize {
-		return "", errors.New("upstream client secret file exceeds 4096 bytes")
 	}
 	secret := strings.TrimSuffix(string(data), "\r\n")
 	if secret == string(data) {

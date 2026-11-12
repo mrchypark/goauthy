@@ -1296,6 +1296,13 @@ func (s *Store) managedGroups(ctx context.Context, actor string) (func(string) b
 	}, nil
 }
 
+// delegatedListSubjectScope limits browser list reads to subjects carrying at
+// least one group covered by the delegated administrator's role prefix.
+func delegatedListSubjectScope(subjectSQL string) string {
+	return `EXISTS (SELECT 1 FROM rbac_user_groups tm JOIN rbac_groups g ON g.id=tm.group_id
+		WHERE tm.subject=` + subjectSQL + ` AND ` + userUpdateGroupScope("g.name") + `)`
+}
+
 func delegatedAdminTarget(roles []Entity) bool {
 	for _, role := range roles {
 		if role.Name == AdminRole || strings.HasPrefix(role.Name, AdminRole+":") {

@@ -7,7 +7,7 @@ async function clientTheme(id, common = false) {
   const colorFields = ['text', 'text_high', 'bg', 'bg_high', 'action', 'accent', 'error'];
   const colorLabels = {text: 'Text', text_high: 'Strong text', bg: 'Background', bg_high: 'Raised background', action: 'Action', accent: 'Accent', error: 'Error'};
   const invalidPreviewMessage = t('The preview omits invalid CSS values; your input is kept for server validation.');
-  let theme = null, mode = 'light', inherited = false, pending = false, commonName = 'GoAuthy', createOnly = false;
+  let theme = null, mode = 'light', inherited = false, pending = false, commonName = 'GoAuthy', createOnly = false, commonEtag = '';
 
   shell(t(common ? 'Common brand' : 'Client login theme'), t(common ? 'Brand the central account and administration pages. Apps inherit these settings unless they have an override.' : 'Customize the sign-in logo, text, layout, and appearance for this OAuth client.'),
     `<p><a class="button secondary" href="${common ? '/auth/v1/admin/dashboard' : '/auth/v1/admin/clients'}">${h(common ? 'Back to dashboard' : 'Back to clients')}</a></p><div class="theme-workspace"><section class="panel theme-editor"><p id="theme-notice" class="hint theme-notice" role="status"></p><div id="theme-status" class="theme-status" role="status"></div><div class="theme-mode" role="group" aria-label="${h('Preview mode')}"><button type="button" data-theme-mode="light" aria-pressed="true">${h('Light')}</button><button type="button" data-theme-mode="dark" aria-pressed="false">${h('Dark')}</button></div><div id="theme-fields"></div><div class="theme-actions actions"><button id="theme-save" type="button">${h('Save theme')}</button><button id="theme-reload" class="button secondary" type="button">${h('Reload saved')}</button><button id="theme-reset" class="button secondary" type="button">${h('Reset to inherited theme')}</button></div><div id="theme-reset-review" hidden><p class="warning">${h('Remove this client theme and inherit the global theme?')}</p><div class="actions"><button id="theme-reset-confirm" type="button">${h('Confirm reset')}</button><button id="theme-reset-cancel" type="button" class="button secondary">${h('Cancel')}</button></div></div><section class="theme-logo"><h3>${h(common ? 'Common logo' : 'Client logo')}</h3><p class="hint">${h('Logo changes save immediately and are separate from theme settings.')}</p><img id="theme-logo-image" alt="${h(common ? 'Current common logo' : 'Current client logo')}" hidden><label>${h('Upload logo (PNG, JPEG, or SVG; up to 10 MiB)')}<input id="theme-logo-upload" type="file" accept="image/png,image/jpeg,image/svg+xml"></label><button id="theme-logo-delete" type="button" class="button secondary">${h('Remove client logo')}</button><div id="theme-logo-remove-review" hidden><p class="warning">${h(common ? 'Remove this common logo?' : 'Remove this client logo?')}</p><div class="actions"><button id="theme-logo-remove-confirm" type="button">${h('Confirm removal')}</button><button id="theme-logo-remove-cancel" type="button" class="button secondary">${h('Cancel')}</button></div></div><div id="theme-logo-status" class="theme-status" role="status"></div></section></section><section class="theme-preview" aria-label="${h('Sign-in preview sample')}"><h2>${h('Preview')}</h2><p class="hint">${h('Sample only. It does not submit credentials or represent the full sign-in flow.')}</p><iframe id="theme-preview-frame" class="theme-preview-frame" title="${h('Client theme preview')}" sandbox="allow-same-origin"></iframe></section></div>`);
@@ -51,6 +51,7 @@ async function clientTheme(id, common = false) {
   };
   const requestTheme = async global => {
     const result = await api(global ? '/auth/v1/branding/theme' : endpoint, {method: 'POST'});
+    if (global) commonEtag = result?._headers?.get?.('ETag')?.trim() || '';
     return result;
   };
   const loadTheme = async () => {
@@ -197,9 +198,12 @@ async function clientTheme(id, common = false) {
     status.textContent = t('Saving…');
     try {
       const payload = {...theme}; if (!Object.keys(payload.login.copy.en).length && !Object.keys(payload.login.copy.ko).length && !payload.login.logo_alignment && !payload.login.card_width) delete payload.login;
-      await api(endpoint, {method: 'PUT', responseType: 'empty', ...(createOnly ? {headers: {'If-None-Match': '*'}} : {}), body: JSON.stringify({...payload, client_id: clientID})});
+      const headers = createOnly ? {'If-None-Match': '*'} : common ? {'If-Match': commonEtag} : {};
+      if (common && !commonEtag) throw new Error(t('Reload the common theme before saving.'));
+      await api(endpoint, {method: 'PUT', responseType: 'empty', headers, body: JSON.stringify({...payload, client_id: clientID})});
       createOnly = false;
       inherited = false;
+      if (common) await loadTheme();
       updateNotice();
       status.className = 'theme-status success';
       status.textContent = t('Theme saved.');
@@ -225,7 +229,8 @@ async function clientTheme(id, common = false) {
     status.className = 'theme-status';
     status.textContent = t('Resetting theme…');
     try {
-      await api(endpoint, {method: 'DELETE'});
+      if (common && !commonEtag) throw new Error(t('Reload the common theme before resetting.'));
+      await api(endpoint, {method: 'DELETE', ...(common ? {headers: {'If-Match': commonEtag}} : {})});
       await loadTheme();
       by('theme-reset-review').hidden = true;
       status.className = 'theme-status success';

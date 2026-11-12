@@ -39,6 +39,7 @@ func (h *Handler) Sessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	guard, args := "", []any(nil)
+	scope, scopeArgs := "1=1", []any(nil)
 	if key != nil {
 		guard, args = h.store.apiKeys.AuthorizationGuard(*key, "Sessions", apikey.Read)
 	} else {
@@ -57,8 +58,10 @@ func (h *Handler) Sessions(w http.ResponseWriter, r *http.Request) {
 		g, a := h.browser.SessionAuthorizationGuard(ss, p)
 		guard = "(" + adminGuard() + " OR " + delegatedAdminGuard() + ") AND " + g
 		args = append([]any{actor, actor}, a...)
+		scope = "(" + adminGuard() + " OR " + delegatedListSubjectScope("b.subject") + ")"
+		scopeArgs = []any{actor, actor}
 	}
-	items, count, token, err := h.store.listSessions(r.Context(), guard, args, o, h.userListThreshold)
+	items, count, token, err := h.store.listSessionsScoped(r.Context(), guard, args, scope, scopeArgs, o, h.userListThreshold)
 	if err != nil {
 		h.writeStoreError(w, err)
 		return

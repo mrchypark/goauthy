@@ -142,6 +142,7 @@ func (h *ClientLogoHandler) delete(w http.ResponseWriter, r *http.Request, id st
 		h.logoMutationError(w, err)
 		return
 	}
+	w.Header().Set("Clear-Site-Data", `"cache"`)
 	w.WriteHeader(http.StatusOK)
 }
 

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -22,6 +21,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/passkey"
 	"github.com/mrchypark/goauthy/internal/recovery"
+	"github.com/mrchypark/goauthy/internal/securefile"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/goauthy/internal/tlsconfig"
 	"github.com/mrchypark/rhiza"
@@ -56,6 +56,7 @@ type applicationConfig struct {
 	WebIDEnabled               bool
 	Notifications              notificationsConfig
 	Rhiza                      rhiza.Config
+	RhizaStartupTimeout        time.Duration
 }
 
 func loadApplicationConfig(getenv func(string) string) (applicationConfig, error) {
@@ -116,6 +117,9 @@ func loadApplicationConfig(getenv func(string) string) (applicationConfig, error
 	}
 	if c.Rhiza, err = storage.RhizaConfigFromEnv(getenv); err != nil {
 		return applicationConfig{}, fmt.Errorf("configure rhiza: %w", err)
+	}
+	if c.RhizaStartupTimeout, err = rhizaStartupTimeoutFromEnv(getenv); err != nil {
+		return applicationConfig{}, err
 	}
 	if err := validateRuntimeConfig(getenv, c); err != nil {
 		return applicationConfig{}, err
@@ -226,7 +230,7 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 		}
 	}
 	if path := getenv("GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE"); path != "" {
-		encoded, err := os.ReadFile(path)
+		encoded, err := securefile.Read(path, 1<<20)
 		if err != nil {
 			return fmt.Errorf("read bootstrap user password credential: %w", err)
 		}

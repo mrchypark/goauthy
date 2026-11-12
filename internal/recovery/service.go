@@ -21,7 +21,10 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-const passwordResetLifetime = 30 * time.Minute
+const (
+	passwordResetLifetime      = 30 * time.Minute
+	passwordResetResponseFloor = 250 * time.Millisecond
+)
 
 var (
 	ErrInvalidEmail = errors.New("invalid recovery email")
@@ -56,6 +59,8 @@ type Service struct {
 	registration  *openRegistration
 	captcha       captcha.Verifier
 	passkeys      *passkey.Service
+	outbox        *EmailOutbox
+	resetFloor    time.Duration
 }
 
 type openRegistration struct {
@@ -93,6 +98,18 @@ func WithOpenRegistration(config RegistrationConfig, ttl time.Duration, validate
 	}
 }
 
+// WithEmailOutbox keeps password-reset delivery off the request path. The
+// synchronous Sender remains available for callers that do not configure it.
+func WithEmailOutbox(outbox *EmailOutbox) ServiceOption {
+	return func(s *Service) error {
+		if outbox == nil {
+			return errors.New("email outbox required")
+		}
+		s.outbox = outbox
+		return nil
+	}
+}
+
 func NewService(db *rhiza.DB, identities *identity.Store, sender Sender, issuer string, rules credential.Rules, policy *loginpolicy.Store, pow *ProofOfWork, powDifficulty uint8, powTTL time.Duration, options ...ServiceOption) (*Service, error) {
 	if db == nil || identities == nil || sender == nil || policy == nil || pow == nil || powDifficulty < 10 || powDifficulty > 98 || powTTL < time.Second || powTTL > MaxProofTTL {
 		return nil, errors.New("recovery service requires database, identity, sender, policy, and proof of work")
@@ -104,7 +121,7 @@ func NewService(db *rhiza.DB, identities *identity.Store, sender Sender, issuer 
 	if err := rules.Validate(); err != nil {
 		return nil, err
 	}
-	service := &Service{db: db, identity: identities, sender: sender, issuer: issuer, rules: rules, policy: policy, pow: pow, powDifficulty: powDifficulty, powTTL: powTTL, now: time.Now}
+	service := &Service{db: db, identity: identities, sender: sender, issuer: issuer, rules: rules, policy: policy, pow: pow, powDifficulty: powDifficulty, powTTL: powTTL, now: time.Now, resetFloor: passwordResetResponseFloor}
 	for _, option := range options {
 		if option == nil {
 			return nil, ErrRegistrationConfig
@@ -166,6 +183,7 @@ func (s *Service) issue(ctx context.Context, email string) error {
 		return err
 	}
 	if len(result.Rows) == 0 {
+		s.dummyPasswordResetWork(email)
 		return nil
 	}
 	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
@@ -221,10 +239,77 @@ func (s *Service) issueFor(ctx context.Context, subject, email string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.sender.SendPasswordReset(ctx, Message{To: email, Language: lang, ResetURL: s.resetURL(subject, token), ExpiresAt: expires}); err != nil && s.OnError != nil {
+	message := Message{To: email, Language: lang, ResetURL: s.resetURL(subject, token), ExpiresAt: expires}
+	if s.outbox != nil {
+		if err := s.enqueuePasswordReset(ctx, message); err != nil && s.OnError != nil {
+			s.OnError(err)
+		}
+		return nil
+	}
+	if err := s.sender.SendPasswordReset(ctx, message); err != nil && s.OnError != nil {
 		s.OnError(err)
 	}
 	return nil
+}
+
+func (s *Service) passwordResetTemplate(language string) EmailTemplate {
+	if sender, ok := s.sender.(*SMTPSender); ok {
+		if template, err := sender.template(language, "reset"); err == nil {
+			return template
+		}
+	}
+	return defaultEmailTemplates().PasswordReset(language)
+}
+
+func (s *Service) enqueuePasswordReset(ctx context.Context, message Message) error {
+	template := s.passwordResetTemplate(message.Language)
+	body := passwordMessageData{EmailTemplate: template, ResetURL: message.ResetURL, ExpiresAt: message.ExpiresAt.UTC().Format(time.RFC3339)}
+	text, err := renderPasswordText(body)
+	if err != nil {
+		return err
+	}
+	html, err := renderPasswordHTML(body)
+	if err != nil {
+		return err
+	}
+	return s.outbox.Enqueue(ctx, message.To, "password reset", template.Subject, html, text)
+}
+
+func (s *Service) dummyPasswordResetWork(email string) {
+	if s.outbox == nil {
+		return
+	}
+	message := Message{To: email, ResetURL: s.issuer + "/auth/v1/users/reset/unavailable", ExpiresAt: s.now().UTC().Add(passwordResetLifetime)}
+	template := s.passwordResetTemplate("en")
+	body := passwordMessageData{EmailTemplate: template, ResetURL: message.ResetURL, ExpiresAt: message.ExpiresAt.Format(time.RFC3339)}
+	text, textErr := renderPasswordText(body)
+	html, htmlErr := renderPasswordHTML(body)
+	if textErr != nil || htmlErr != nil {
+		return
+	}
+	id := outboxRequestID(email, "password reset", s.now())
+	_, _, _ = s.outbox.sealPayload(id, "html", html)
+	_, _, _ = s.outbox.sealPayload(id, "text", text)
+}
+
+func (s *Service) resetDeadline() time.Time {
+	if s.outbox == nil || s.resetFloor <= 0 {
+		return time.Time{}
+	}
+	return time.Now().Add(s.resetFloor)
+}
+
+func (s *Service) waitForResetFloor(ctx context.Context, deadline time.Time) {
+	remaining := time.Until(deadline)
+	if deadline.IsZero() || remaining <= 0 {
+		return
+	}
+	timer := time.NewTimer(remaining)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
 }
 
 func (s *Service) resetURL(subject, token string) string {

@@ -748,6 +748,10 @@ func (h *Handler) passkeyPrincipal(w http.ResponseWriter, r *http.Request, metho
 			forbidden(w)
 			return "", browser.Session{}, "", nil, false
 		}
+		if h.adminForceMFA && session.AuthenticationMethod != "mfa" {
+			w.WriteHeader(http.StatusNotAcceptable)
+			return "", browser.Session{}, "", nil, false
+		}
 	}
 	if method != http.MethodGet && browser.ValidateCSRFToken(raw, r.Header.Get("X-CSRF-Token")) != nil {
 		forbidden(w)
@@ -853,7 +857,7 @@ func (h *Handler) PutSelfPassword(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, "invalid password change request")
 			return
 		}
-		err = h.identity.ChangePassword(r.Context(), session.Subject, current, next)
+		err = h.identity.ChangePasswordWithSession(r.Context(), session.Subject, session.ID, current, next)
 	} else {
 		err = h.identity.SetPasswordWithWebAuthnProof(r.Context(), session.Subject, session.ID, *payload.MFACode, next)
 	}

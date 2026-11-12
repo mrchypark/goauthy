@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const t = globalThis.GoAuthyI18n?.t || ((s, values) => String(s).replace(/\{(\w+)\}/g, (_, key) => values?.[key] ?? `{${key}}`));
-  const state = { account: null, csrf: '', attributes: [], attributeValues: {}, attributesLoaded: false, passkeys: [], passkeysLoaded: false, passkeyBusy: false, actionBusy: false, selfDeleteAllowed: false };
+  const state = { account: null, csrf: '', attributes: [], attributeValues: {}, attributesLoaded: false, passkeys: [], passkeysLoaded: false, passkeyBusy: false, actionBusy: false, selfDeleteAllowed: false, mutationUnknown: false };
   const $ = (selector) => document.querySelector(selector);
   const status = (id, message, error) => {
     const el = document.getElementById(id);
@@ -18,24 +18,49 @@
   };
   const basePath = () => { const path = window.location.pathname; const marker = path.lastIndexOf('/account'); return marker < 0 ? '' : path.slice(0, marker); };
   const endpoint = (path) => `${basePath()}${path}`;
+  const nonMutatingPosts = [
+    /^\/auth\/v1\/users\/[^/]+\/mfa_token$/,
+    /^\/auth\/v1\/users\/[^/]+\/webauthn\/auth\/start$/,
+    /^\/auth\/v1\/users\/[^/]+\/webauthn\/auth\/finish$/,
+    /^\/auth\/v1\/users\/[^/]+\/webauthn\/register\/start$/,
+  ];
   const request = (url, options = {}) => {
+    const method = String(options.method || 'GET').toUpperCase();
+    const path = String(url).replace(/[?#].*$/, '');
+    const mutation = !['GET', 'HEAD', 'OPTIONS'].includes(method) && !(method === 'POST' && nonMutatingPosts.some(pattern => pattern.test(path)));
+    const unknownOutcome = () => {
+      state.mutationUnknown = true;
+      const error = new Error(t('Request outcome is unknown. Check the current state before retrying.'));
+      error.code = 'mutation_outcome_unknown';
+      error.unknownOutcome = true;
+      return error;
+    };
+    if (mutation && state.mutationUnknown) return Promise.reject(unknownOutcome());
     globalThis.GoAuthyI18n?.setBusy?.(true);
-    return fetch(endpoint(url), Object.assign({ credentials: 'same-origin' }, options)).then(async (response) => {
+    return fetch(endpoint(url), Object.assign({ credentials: 'same-origin' }, options)).catch((error) => {
+      if (mutation) throw unknownOutcome();
+      throw error;
+    }).then(async (response) => {
       if (!response.ok) {
         let body = null;
         try { body = await response.json?.(); } catch (_) { /* retain the generic status message */ }
         const wrongCurrentPassword = response.status === 401 && body?.error_code === 'invalid_current_password';
-        const unknownMutationOutcome = response.status === 503 && body?.error_code === 'mutation_outcome_unknown';
+        const unknownMutationOutcome = mutation && response.status === 503 && body?.error_code === 'mutation_outcome_unknown';
+        const ambiguousMutation = mutation && response.status >= 500;
+        if (unknownMutationOutcome || ambiguousMutation) state.mutationUnknown = true;
         const message = wrongCurrentPassword
           ? t('The current password is incorrect. Check it and try again.')
           : unknownMutationOutcome
             ? t('Password change outcome is unknown. Check the current state before retrying.')
+            : ambiguousMutation
+              ? t('Request outcome is unknown. Check the current state before retrying.')
             : response.status === 401 || response.status === 403
               ? t('Your session has expired. Sign in again.')
               : t('Request failed ({status}).', { status: response.status });
         const error = new Error(message);
         error.status = response.status;
         if (body?.error_code) error.code = body.error_code;
+        if (unknownMutationOutcome || ambiguousMutation) error.unknownOutcome = true;
         throw error;
       }
       return response;
@@ -50,7 +75,7 @@
     formBusy.add(form);
     if (button) button.disabled = true;
     try { await action(); }
-    finally { formBusy.delete(form); if (button) button.disabled = wasDisabled; }
+    finally { formBusy.delete(form); if (button) button.disabled = wasDisabled || state.mutationUnknown; }
   }
   const subjectPath = () => `/auth/v1/users/${encodeURIComponent(state.account.subject)}`;
   const webauthnAvailable = (operation) => Boolean(globalThis.navigator && navigator.credentials && navigator.credentials[operation] && globalThis.PublicKeyCredential && typeof globalThis.PublicKeyCredential[`parse${operation === 'create' ? 'Creation' : 'Request'}OptionsFromJSON`] === 'function');
@@ -71,12 +96,12 @@
     $('#password-restore-section').hidden = hasLocalPassword || !hasRegisteredPasskey;
   }
 
-  async function convertPasswordless() { if (state.actionBusy || state.passkeyBusy || !state.passkeysLoaded || !state.account || !state.account.features.passkey_conversion) return; if (!globalThis.confirm || !globalThis.confirm(t('Turn off password sign-in for this account?'))) return; state.actionBusy = true; $('#passwordless-convert').disabled = true; try { await request(`${subjectPath()}/self/convert_passkey`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf } }); await refreshAccount(); status('passwordless-status', t('Password sign-in disabled.')); } catch (error) { status('passwordless-status', error.message, true); $('#passwordless-convert').disabled = false; } finally { state.actionBusy = false; displayProfile(state.account); setPasskeyBusy(false); } }
+  async function convertPasswordless() { if (state.actionBusy || state.passkeyBusy || !state.passkeysLoaded || !state.account || !state.account.features.passkey_conversion) return; if (!globalThis.confirm || !globalThis.confirm(t('Turn off password sign-in for this account?'))) return; state.actionBusy = true; $('#passwordless-convert').disabled = true; try { await request(`${subjectPath()}/self/convert_passkey`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf } }); await refreshAccount(); status('passwordless-status', t('Password sign-in disabled.')); } catch (error) { status('passwordless-status', error.message, true); $('#passwordless-convert').disabled = state.mutationUnknown; } finally { state.actionBusy = false; displayProfile(state.account); setPasskeyBusy(false); } }
 
-  async function restorePassword(event) { event.preventDefault(); if (state.actionBusy || state.passkeyBusy || !state.account || state.account.features?.password !== false) return; let next = $('#password-restore-new').value; const confirmNext = $('#password-restore-confirm').value; if (!next || next !== confirmNext) { status('password-restore-status', t('Passwords do not match.'), true); return; } if (!webauthnAvailable('get')) { status('password-restore-status', t('Passkeys are unavailable in this browser.'), true); return; } state.actionBusy = true; $('#password-restore-submit').disabled = true; let proof = ''; try { const start = await jsonRequest(`${subjectPath()}/webauthn/auth/start`, 'POST', { purpose: 'PasswordNew' }).then((r) => r.json()); const assertion = await navigator.credentials.get({ publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(start.rcr.publicKey) }); if (!assertion) throw new Error(t('Passkey authorization cancelled.')); if (typeof assertion.toJSON !== 'function') throw new Error(t('This browser cannot serialize passkey credentials.')); const finish = await jsonRequest(`${subjectPath()}/webauthn/auth/finish`, 'POST', { code: start.code, data: assertion.toJSON() }).then((r) => r.json()); proof = finish.code; await jsonRequest(`${subjectPath()}/self`, 'PUT', { mfa_code: proof, password_new: next }); await refreshAccount(); status('password-restore-status', t('Password sign-in restored.')); } catch (error) { status('password-restore-status', error.message, true); } finally { proof = ''; next = ''; $('#password-restore-new').value = ''; $('#password-restore-confirm').value = ''; $('#password-restore-submit').disabled = false; state.actionBusy = false; setPasskeyBusy(false); } }
+  async function restorePassword(event) { event.preventDefault(); if (state.actionBusy || state.passkeyBusy || !state.account || state.account.features?.password !== false) return; let next = $('#password-restore-new').value; const confirmNext = $('#password-restore-confirm').value; if (!next || next !== confirmNext) { status('password-restore-status', t('Passwords do not match.'), true); return; } if (!webauthnAvailable('get')) { status('password-restore-status', t('Passkeys are unavailable in this browser.'), true); return; } state.actionBusy = true; $('#password-restore-submit').disabled = true; let proof = ''; try { const start = await jsonRequest(`${subjectPath()}/webauthn/auth/start`, 'POST', { purpose: 'PasswordNew' }).then((r) => r.json()); const assertion = await navigator.credentials.get({ publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(start.rcr.publicKey) }); if (!assertion) throw new Error(t('Passkey authorization cancelled.')); if (typeof assertion.toJSON !== 'function') throw new Error(t('This browser cannot serialize passkey credentials.')); const finish = await jsonRequest(`${subjectPath()}/webauthn/auth/finish`, 'POST', { code: start.code, data: assertion.toJSON() }).then((r) => r.json()); proof = finish.code; await jsonRequest(`${subjectPath()}/self`, 'PUT', { mfa_code: proof, password_new: next }); await refreshAccount(); status('password-restore-status', t('Password sign-in restored.')); } catch (error) { status('password-restore-status', error.message, true); } finally { proof = ''; next = ''; $('#password-restore-new').value = ''; $('#password-restore-confirm').value = ''; $('#password-restore-submit').disabled = state.mutationUnknown; state.actionBusy = false; setPasskeyBusy(false); } }
 
   async function checkSelfDelete() { state.selfDeleteAllowed = false; try { const response = await request(`${subjectPath()}/self/delete`); state.selfDeleteAllowed = response.status === 202; $('#self-delete-section').hidden = !state.selfDeleteAllowed; $('#self-delete-button').disabled = !state.selfDeleteAllowed || !$('#self-delete-confirm').value || $('#self-delete-confirm').value !== state.account.email; } catch (error) { $('#self-delete-section').hidden = error.status === 406; $('#self-delete-button').disabled = true; status('self-delete-status', error.message, true); } }
-  async function deleteAccount() { if (state.actionBusy || state.passkeyBusy || !state.selfDeleteAllowed || !state.account || !state.account.email || $('#self-delete-confirm').value !== state.account.email) return; if (!globalThis.confirm || !globalThis.confirm(t('Delete your account permanently?'))) return; state.actionBusy = true; $('#self-delete-button').disabled = true; try { const response = await request(`${subjectPath()}/self/delete`, { method: 'DELETE', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf }, body: '' }); if (response.status !== 204) throw new Error(t('Account deletion was not completed ({status}).', { status: response.status }).replace('{status}', response.status)); document.querySelector('main').textContent = ''; const done = document.createElement('h1'); done.id = 'account-deleted'; done.textContent = t('Account deleted'); document.querySelector('main').append(done); state.account = null; state.csrf = ''; state.selfDeleteAllowed = false; } catch (error) { status('self-delete-status', error.message, true); $('#self-delete-button').disabled = false; state.actionBusy = false; } }
+  async function deleteAccount() { if (state.actionBusy || state.passkeyBusy || !state.selfDeleteAllowed || !state.account || !state.account.email || $('#self-delete-confirm').value !== state.account.email) return; if (!globalThis.confirm || !globalThis.confirm(t('Delete your account permanently?'))) return; state.actionBusy = true; $('#self-delete-button').disabled = true; try { const response = await request(`${subjectPath()}/self/delete`, { method: 'DELETE', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': state.csrf }, body: '' }); if (response.status !== 204) throw new Error(t('Account deletion was not completed ({status}).', { status: response.status }).replace('{status}', response.status)); document.querySelector('main').textContent = ''; const done = document.createElement('h1'); done.id = 'account-deleted'; done.textContent = t('Account deleted'); document.querySelector('main').append(done); state.account = null; state.csrf = ''; state.selfDeleteAllowed = false; } catch (error) { status('self-delete-status', error.message, true); $('#self-delete-button').disabled = state.mutationUnknown; state.actionBusy = false; } }
 
   function renderAttributes(items) {
     state.attributesLoaded = true;
@@ -97,8 +122,8 @@
     state.passkeys.forEach((item) => { const row = document.createElement('div'); row.className = 'passkey-row'; const name = document.createElement('span'); name.textContent = item.name; const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'secondary'; remove.dataset.passkeyDelete = item.name; remove.textContent = t('Remove'); remove.addEventListener('click', () => deletePasskey(item.name, remove)); row.append(name, remove); list.append(row); });
   }
 
-  function setPasskeyBusy(busy) { state.passkeyBusy = busy; updateConversionControl(); const disabled = busy || !state.passkeysLoaded || state.actionBusy; $('#passkey-add').disabled = disabled; $('#passkey-name').disabled = disabled; $('#passkey-current-password').disabled = disabled; $('#passkeys-list').querySelectorAll('button').forEach((button) => { button.disabled = disabled; }); if (busy) status('passkey-status', t('Waiting for passkey verification…')); }
-  function updateConversionControl() { $('#passwordless-convert').disabled = state.actionBusy || state.passkeyBusy || !state.passkeysLoaded || !state.account?.features?.passkey_conversion || !state.passkeys.length; }
+  function setPasskeyBusy(busy) { state.passkeyBusy = busy; updateConversionControl(); const disabled = busy || state.mutationUnknown || !state.passkeysLoaded || state.actionBusy; $('#passkey-add').disabled = disabled; $('#passkey-name').disabled = disabled; $('#passkey-current-password').disabled = disabled; $('#passkeys-list').querySelectorAll('button').forEach((button) => { button.disabled = disabled; }); if (busy) status('passkey-status', t('Waiting for passkey verification…')); }
+  function updateConversionControl() { $('#passwordless-convert').disabled = state.mutationUnknown || state.actionBusy || state.passkeyBusy || !state.passkeysLoaded || !state.account?.features?.passkey_conversion || !state.passkeys.length; }
   async function modificationToken() {
     let secret = '';
     try {
@@ -131,6 +156,7 @@
   }
 
   async function load() {
+    state.mutationUnknown = false;
     state.attributesLoaded = false;
     $('#attributes-form button').disabled = true;
     try {
@@ -175,7 +201,7 @@
     });
   }
 
-  $('#username-form').addEventListener('submit', submitUsername); $('#password-form').addEventListener('submit', submitPassword); $('#attributes-form').addEventListener('submit', submitAttributes); $('#passkey-form').addEventListener('submit', addPasskey); $('#passwordless-convert').addEventListener('click', convertPasswordless); $('#password-restore-form').addEventListener('submit', restorePassword); $('#self-delete-button').addEventListener('click', deleteAccount); $('#self-delete-confirm').addEventListener('input', () => { $('#self-delete-button').disabled = !state.selfDeleteAllowed || state.actionBusy || !state.account || $('#self-delete-confirm').value !== state.account.email; });
+  $('#username-form').addEventListener('submit', submitUsername); $('#password-form').addEventListener('submit', submitPassword); $('#attributes-form').addEventListener('submit', submitAttributes); $('#passkey-form').addEventListener('submit', addPasskey); $('#passwordless-convert').addEventListener('click', convertPasswordless); $('#password-restore-form').addEventListener('submit', restorePassword); $('#self-delete-button').addEventListener('click', deleteAccount); $('#self-delete-confirm').addEventListener('input', () => { $('#self-delete-button').disabled = state.mutationUnknown || !state.selfDeleteAllowed || state.actionBusy || !state.account || $('#self-delete-confirm').value !== state.account.email; });
   globalThis.accountDashboard = { displayProfile, renderAttributes, renderPasskeys, submitUsername, submitPassword, submitAttributes, addPasskey, deletePasskey, loadPasskeys, convertPasswordless, restorePassword, checkSelfDelete, deleteAccount, load, syncNavigation, state, connectionDeps: { request, jsonRequest, endpoint, status } };
   globalThis.accountDashboard.ready = load();
 })();
