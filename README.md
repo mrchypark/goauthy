@@ -17,19 +17,19 @@ GoAuthy-specific external-connection and credential-delegation capabilities. Rau
 is a compatibility ledger rather than the sole product roadmap. Earlier documentation
 cited the official Rhiza `v0.19.0` release (commit
 [`abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8`](https://github.com/mrchypark/rhiza/commit/abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8)).
-The current Rhiza integration candidate is official `v0.23.0`,
-resolving to upstream commit [`f050d6e30f57718736c8c4fdb5edef777183bc05`](https://github.com/mrchypark/rhiza/commit/f050d6e30f57718736c8c4fdb5edef777183bc05).
+The current Rhiza integration candidate is official `v0.24.0`,
+resolving to upstream commit [`e9cefbbb260d2f62b2a47971de3f091720b42a68`](https://github.com/mrchypark/rhiza/commit/e9cefbbb260d2f62b2a47971de3f091720b42a68).
 Its bounded verification targets single-node Local object-store recovery without
 an operator. Historical provider receipts do not qualify the new SDK, managed
 HA, Kubernetes, or production-cloud operation; see the
-[current verification contract](docs/no-pvc-dr.md#current-v0230-integration).
+[current verification contract](docs/no-pvc-dr.md#current-v0240-integration).
 GoAuthy pins its
 Fosite fork at `github.com/mrchypark/fosite v0.49.0-goauthy.1` for the security
 correction and minimum compatibility changes only; it is not a feature fork.
 The policy is to return to upstream only after the fix is published upstream
 and qualified for GoAuthy. This pin does not establish a passing latest security
 scan; see the [dependency and release qualification limits](docs/no-pvc-dr.md#historical-v0212-qualification-and-release-gates).
-This release requires Go 1.27.3; the root Docker build uses the same minimum.
+This release requires Go 1.27.4; the root Docker build uses the same minimum.
 Rhiza v0.21 removes the archive-statistics API. GoAuthy's protected
 `/metrics/archive/v1` compatibility response keeps schema version 1 and its fixed
 stage names, with `available: false` and `null` count/duration values. Those nulls
@@ -220,7 +220,7 @@ issuer-path/browser parity remains pending.
 
 ## Rhiza production profiles
 
-The current integration candidate pins Rhiza `v0.23.0`. Verification targets
+The current integration candidate pins Rhiza `v0.24.0`. Verification targets
 `standalone-local`; existing runtime modes are not all requalified by this pin.
 `standalone` is the
 production single-node topology: one embedded member and no peer inputs.
@@ -258,7 +258,7 @@ Standalone and exact-three HA have identical application semantics; HA pods
 must use matching SCIM provider configuration, including stable IDs and policies.
 The startup path still skips `db.Close()` until initialization succeeds. This
 guard was added for a checkpoint-corruption hazard confirmed on Rhiza v0.10.0;
-its behavior on v0.23.0 remains unverified. Local recovery tests do not
+its behavior on v0.24.0 remains unverified. Local recovery tests do not
 qualify this startup guard. Normal post-start shutdown closes the database as usual.
 
 Bootstrap authentication is password-only for the initial administrator by
