@@ -49,7 +49,7 @@ jobs:
         run: sh scripts/test-object-store-contract.sh
 
       # Synthetic filesystem archive proof; does not qualify app init on clouds.
-      - name: Local archive v0.21.2 to v0.23.0 compatibility
+      - name: Local archive v0.21.2 to v0.24.0 compatibility
         timeout-minutes: 20
         run: sh scripts/test-rhiza-local-upgrade.sh
 

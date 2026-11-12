@@ -1,6 +1,6 @@
 module github.com/mrchypark/goauthy
 
-go 1.27.3
+go 1.27.4
 
 require (
 	cloud.google.com/go/storage v1.56.0
@@ -19,7 +19,7 @@ require (
 	github.com/minio/minio-go/v7 v7.0.95
 	github.com/mrchypark/ely-htmx v0.1.0
 	github.com/mrchypark/elysdui v0.2.0
-	github.com/mrchypark/rhiza v0.23.0
+	github.com/mrchypark/rhiza v0.24.0
 	github.com/ory/fosite v0.49.0
 	github.com/oschwald/maxminddb-golang v1.13.1
 	github.com/pb33f/jsonpath v0.8.2
@@ -125,7 +125,7 @@ require (
 	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
-	github.com/mrchypark/latticedb-go v0.11.3 // indirect
+	github.com/mrchypark/latticedb-go v0.13.0 // indirect
 	github.com/ncruces/go-sqlite3 v0.35.3 // indirect
 	github.com/ncruces/go-sqlite3-wasm/v3 v3.2.35304 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect

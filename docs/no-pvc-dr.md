@@ -10,16 +10,16 @@ automatic migration path. In Kubernetes, each uses a disposable `DataDir`
 are separate recovery inputs. A local-directory copy is not the default DR
 mechanism.
 
-GoAuthy's current integration candidate is Rhiza v0.23.0 at source
-[`f050d6e30f57718736c8c4fdb5edef777183bc05`](https://github.com/mrchypark/rhiza/commit/f050d6e30f57718736c8c4fdb5edef777183bc05),
-requiring Go 1.27.3 or newer. This integration targets single-node Local recovery,
+GoAuthy's current integration candidate is Rhiza v0.24.0 at source
+[`e9cefbbb260d2f62b2a47971de3f091720b42a68`](https://github.com/mrchypark/rhiza/commit/e9cefbbb260d2f62b2a47971de3f091720b42a68),
+requiring Go 1.27.4 or newer. This integration targets single-node Local recovery,
 without an operator. It does not qualify managed HA or change the legacy profile
-defaults. The [tagged application-owned init guide](https://github.com/mrchypark/rhiza/blob/v0.23.0/docs/local-init-container-recovery.md)
+defaults. The [tagged application-owned init guide](https://github.com/mrchypark/rhiza/blob/v0.24.0/docs/local-init-container-recovery.md)
 retains the shared-DataDir `Open`/`Close` contract below.
 
 The earlier Rhiza v0.21.2 integration used source
 [`8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd`](https://github.com/mrchypark/rhiza/commit/8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd),
-requiring Go 1.27.3 or newer. Its Local maintenance-release fix reconciles an
+requiring Go 1.27.4 or newer. Its Local maintenance-release fix reconciles an
 upload error only when stable remote readback proves the exact expected free
 control at a changed object version. Work errors, cancellation, held controls,
 and uncertainty remain errors; the fix does not clear an orphaned held token
@@ -93,12 +93,12 @@ retained snapshots. Existing `Local: false` profiles keep periodic GC disabled.
 The v0.21.0 Local archive format has no automatic migration from older formats
 and does not convert a three-voter HA installation into Local mode.
 
-## Current v0.23.0 integration
+## Current v0.24.0 integration
 
 The public Go SDK zip resolves to source
-`f050d6e30f57718736c8c4fdb5edef777183bc05`, with module checksum
-`h1:RFLhLytoi2Q84MD4WkA9Z8T7wvUp7LPj4nxIMFBSaNw=` and go.mod checksum
-`h1:Cmof+NGVUgCu4+HTenSu2h5SKW88w5KxBV1S9eJNevM=`.
+`e9cefbbb260d2f62b2a47971de3f091720b42a68`, with module checksum
+`h1:Z7sW9W5CI1OtjCfpeeYHGv8gTP9+jSiaSZ4WnG4R2LQ=` and go.mod checksum
+`h1:1pZZ6wJXdVuPBeyCGhF1JZ7JT4Q74D3Mt0CflQ3DIro=`.
 GoAuthy consumes this Go SDK and builds its own init binary; Rust archives and
 operator images are not required.
 
@@ -112,7 +112,7 @@ scripts/test-rhiza-local-upgrade.sh --race
 ```
 
 The upgrade script builds GoAuthy's existing synthetic init tests with a
-v0.21.2 producer and the v0.23.0 SDK consumer, checking their build metadata.
+v0.21.2 producer and the v0.24.0 SDK consumer, checking their build metadata.
 It separately exercises retained-directory upgrade and complete DataDir loss,
 a nonempty snapshot plus an acknowledged tail without producer Close, unchanged
 binding, original receipt replay without duplicate rows, a new write and a
