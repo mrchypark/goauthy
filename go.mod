@@ -20,6 +20,7 @@ require (
 	github.com/mrchypark/ely-htmx v0.1.0
 	github.com/mrchypark/elysdui v0.2.0
 	github.com/mrchypark/rhiza v0.24.0
+	github.com/ncruces/go-sqlite3 v0.35.3
 	github.com/ory/fosite v0.49.0
 	github.com/oschwald/maxminddb-golang v1.13.1
 	github.com/pb33f/jsonpath v0.8.2
@@ -29,13 +30,14 @@ require (
 	github.com/swaggo/files/v2 v2.0.2
 	github.com/thanos-io/objstore v0.0.0-20260817070452-e42d91c337ee
 	github.com/wneessen/go-mail v0.7.1
-	go.opentelemetry.io/otel v1.46.0
+	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.46.0
-	go.opentelemetry.io/otel/sdk v1.46.0
-	go.opentelemetry.io/otel/trace v1.46.0
+	go.opentelemetry.io/otel/sdk v1.47.0
+	go.opentelemetry.io/otel/trace v1.47.0
 	go.yaml.in/yaml/v4 v4.0.0-rc.4
 	golang.org/x/crypto v0.57.0
 	golang.org/x/image v0.45.0
+	golang.org/x/mod v0.41.0
 	golang.org/x/net v0.60.0
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.23.0
@@ -126,7 +128,6 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
 	github.com/mrchypark/latticedb-go v0.13.0 // indirect
-	github.com/ncruces/go-sqlite3 v0.35.3 // indirect
 	github.com/ncruces/go-sqlite3-wasm/v3 v3.2.35304 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/oasdiff/yaml v0.1.1 // indirect
@@ -171,11 +172,11 @@ require (
 	go.opentelemetry.io/otel/exporters/jaeger v1.17.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.46.0 // indirect
 	go.opentelemetry.io/otel/exporters/zipkin v1.45.0 // indirect
-	go.opentelemetry.io/otel/metric v1.46.0 // indirect
-	go.opentelemetry.io/otel/sdk/metric v1.46.0 // indirect
+	go.opentelemetry.io/otel/log v1.47.0 // indirect
+	go.opentelemetry.io/otel/metric v1.47.0 // indirect
+	go.opentelemetry.io/otel/sdk/metric v1.47.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
