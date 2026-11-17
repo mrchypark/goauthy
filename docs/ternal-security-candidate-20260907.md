@@ -2,7 +2,7 @@
 
 Status: linux/amd64 build, focused auth/mail regressions and exact-image scan
 passed. Consumer operational validation is reported below; this is not full
-release qualification. No registry publication, IED mutation or session change
+release qualification. No registry publication, GKE mutation or session change
 by this task.
 
 ## Scope and provenance
@@ -57,7 +57,7 @@ copying the binary; extraction is not runtime qualification.
 - [x] Fresh exact-image security scan with scanner and database identity; review
   remaining findings, including previously reported GO-2026-5932.
 - [x] Consumer task reports replacement-candidate runtime and real RP flow
-  qualification; root has not independently repeated the IED checks.
+  qualification; root has not independently repeated the GKE checks.
 
 The Ternal task reported the original candidate's High vulnerability gate failed.
 Its original scan JSON was not retained; a fresh exact-digest scan is being
@@ -101,12 +101,12 @@ dependency or build-tag changes. No global scanner suppression was added.
 ## Consumer-task operational report
 
 Ternal task `019facaf-6a23-7680-b498-b389c8d8a456` subsequently reported publication
-of this exact index as `ghcr.io/mrchypark/ternal:goauthy-ied-security-a32cd84ceb4f`.
+of this exact index as `ghcr.io/mrchypark/ternal:goauthy-gke-security-a32cd84ceb4f`.
 Its isolated GCS-prefix old-image → candidate → emptyDir cold replay preserved
 token introspection and JWKS kid continuity. No old-schema version was asserted.
 The task reported fixture cleanup, an image-only replacement of its existing
 provider with config/Secret/storage unchanged, Ready 2/2 and zero restarts,
 then real Chrome RP administrator-session/login/logout success. These are
-consumer-task reports, not root-run IED checks or a new independently committed
+consumer-task reports, not root-run GKE checks or a new independently committed
 GoAuthy release. Root did not publish, deploy or alter user sessions. The local
 source remains frozen schema79; schema80 development remains separate.
