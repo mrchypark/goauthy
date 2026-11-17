@@ -1,10 +1,34 @@
 # IED GCS qualification harness
 
+## Overview
+
 Bounded, live qualification for the latest candidate image against GCS with
 HA3 (3-member cluster) and standalone1 (single-member). This harness owns
-scripts/e2e-ied-gcs-candidate.sh and deploy/ied-qualification/ only.
-It does not modify deploy/ternal-no-pvc, production secrets, or any existing
+`scripts/e2e-ied-gcs-candidate.sh` and `deploy/ied-qualification/` only.
+It does not modify `deploy/ternal-no-pvc`, production secrets, or any existing
 workload.
+
+## Interface
+
+- `base/` — Kubernetes manifests (`configmap.yaml`, `networkpolicy.yaml`, `pdb.yaml`, `service-ha3.yaml`, `service-standalone1.yaml`, `statefulset-ha3.yaml`, `statefulset-standalone1.yaml`) in namespace `ternal-auth` using SA `ternal-goauthy`.
+- `test.sh` — Offline manifest validation script using `kustomize`, `yq`, `awk`, and optional `python3` PyYAML strict duplicate-key checks.
+- Environment variables in manifests: `GOAUTHY_RHIZA_PROFILE` (`cluster` for HA3, `standalone` for standalone1), `GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE=true`, `GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER=gcs`, `GOAUTHY_RHIZA_PEER_ADDR=:8444` (HA3 only), `GOAUTHY_BOOTSTRAP_USER_PASSWORD_PHC_FILE=/run/secrets/bootstrap-user-password-phc` (standalone1).
+
+## Invariants
+
+- Both `goauthy-qual-0917` (HA3, 3 replicas) and `goauthy-qual-s1-0917` (standalone1, 1 replica) must pin the exact same `@sha256:` digest image.
+- No `volumeClaimTemplates`, `PersistentVolumeClaim`, `Job`, `versity`, `CHANGEME`, or `TODO` placeholders; `data` volume uses `emptyDir`.
+- `app.kubernetes.io/part-of` must be `goauthy-qual-0917` (HA3) or `goauthy-qual-s1-0917` (standalone1) — never `ternal`.
+- Native GCS only: no `GOAUTHY_RHIZA_OBJECT_STORE_ENDPOINT`, `_REGION`, `_ACCESS_KEY`, or `_SECRET_KEY`; standalone1 must not declare `peer` port or `GOAUTHY_RHIZA_PEER_ADDR`/`_MEMBERS`/`_ADMIN_TOKEN`.
+
+## Side Effects
+
+- `test.sh` creates a temporary file via `mktemp` (cleaned on `EXIT`) and does not contact any cluster.
+- Running `scripts/e2e-ied-gcs-candidate.sh` creates and cleans up qualification resources in `ternal-auth` and writes to the configured GCS prefixes.
+
+## Verification
+
+- Run: `./deploy/ied-qualification/test.sh`
 
 ## Candidate image
 

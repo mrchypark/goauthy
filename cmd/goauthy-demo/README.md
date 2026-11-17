@@ -1,6 +1,35 @@
 # Two local apps sharing one GoAuthy ID
 
-`goauthy-demo` is a small local relying party. Run it twice with separate confidential managed clients and cookie names to demonstrate signing in to both apps with one GoAuthy account.
+## Overview
+`goauthy-demo` is a small local relying party (`[main.go:main]`). Run it twice with separate confidential managed clients and cookie names to demonstrate signing in to both apps with one GoAuthy account.
+
+## Interface
+- CLI flags (`[main.go:main]`):
+  - `-name`: App display name (default `"GoAuthy Demo A"`)
+  - `-listen`: Loopback `ip:port` listener (default `"127.0.0.1:18081"`)
+  - `-issuer`: Local HTTP GoAuthy issuer origin (default `"http://localhost:18080"`)
+  - `-client-id`: Managed client ID (default `"goauthy-demo-a"`)
+  - `-client-secret-file`: Path to owner-only regular file containing the client secret (required)
+  - `-force-login`: Send `prompt=login` on authorization requests (default `false`)
+- HTTP routes (`[main.go:demo.handler]`):
+  - `GET /`, `GET /login`, `GET /callback`, `POST /logout`, `GET /healthz`.
+
+## Invariants
+- Listener must bind a loopback IP with a non-zero port; issuer must be a local HTTP origin (`localhost` or loopback IP) `[main.go:validateConfig]`.
+- `-client-secret-file` must be a regular file with no group/other permissions (`0077` unset) and size 1..4096 bytes `[main.go:run]`.
+- Every HTTP request must match the configured `localhost:<port>` `Host` header `[main.go:demo.handler]`.
+- Pending login transactions (`[main.go:pendingLogin]`) and sessions (`[main.go:accountSession]`) are capped at `1024` entries each `[main.go:demo.login]`, `[main.go:demo.callback]`.
+- Callback validates `state`, constant-time cookie binding, single-use consumption, S256 PKCE, `oidc.VerifyIDToken`, constant-time `nonce`, and `at_hash` `[main.go:demo.takePending]`, `[main.go:demo.verify]`.
+- `POST /logout` requires an exact `Origin` header matching `http://localhost:<port>` `[main.go:demo.logout]`.
+
+## Side Effects
+- Reads `-client-secret-file` from disk at startup `[main.go:run]`.
+- Binds a loopback TCP HTTP server and handles `SIGINT`/`SIGTERM` for graceful shutdown `[main.go:run]`.
+- Issues outbound HTTP requests to `<issuer>/oidc/token` and `<issuer>/oidc/jwks.json` `[main.go:demo.callback]`.
+- Mutates mutex-protected in-memory `pending` and `sessions` maps and sets `HttpOnly`, `SameSite=Lax` cookies `[main.go:demo.cookie]`.
+
+## Verification
+- Run: `go test ./...`
 
 The bundle enables `-force-login` only for Demo A. Each A sign-in sends OIDC `prompt=login` so GoAuthy displays its login page, including after app logout. Demo B keeps the default mode and reuses the GoAuthy session for SSO. This changes only the authorization request; app logout still leaves the provider and the other app signed in. The flag defaults to false and does not depend on the client ID.
 

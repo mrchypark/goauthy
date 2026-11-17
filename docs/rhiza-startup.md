@@ -1,11 +1,11 @@
 # Rhiza startup close guard
 
-The current integration candidate uses official Rhiza `v0.23.0`,
+The current integration candidate uses official Rhiza `v0.24.0`,
 resolving to upstream commit
-[`f050d6e30f57718736c8c4fdb5edef777183bc05`](https://github.com/mrchypark/rhiza/commit/f050d6e30f57718736c8c4fdb5edef777183bc05).
+[`e9cefbbb260d2f62b2a47971de3f091720b42a68`](https://github.com/mrchypark/rhiza/commit/e9cefbbb260d2f62b2a47971de3f091720b42a68).
 The bounded integration scope is single-node `standalone-local` object-store
 recovery without an operator; it does not qualify managed HA. See the
-[verification scope and reproduction commands](no-pvc-dr.md#current-v0230-integration).
+[verification scope and reproduction commands](no-pvc-dr.md#current-v0240-integration).
 The earlier v0.21.2 release reconciled a lost Local maintenance-release acknowledgement only
 after stable readback proves the exact expected free control at a changed
 object version. Work errors and cancellation remain errors; this does not
@@ -17,7 +17,7 @@ Older documentation cited the official Rhiza `v0.19.0` release (commit
 [`abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8`](https://github.com/mrchypark/rhiza/commit/abb87a0336cba8fee3fd1d9e5a0bf797de5b25b8),
 [release tag](https://github.com/mrchypark/rhiza/releases/tag/v0.19.0)); that citation
 and the related v0.19.1 pseudo-version describe an earlier build.
-This build uses `github.com/mrchypark/latticedb-go v0.11.3` with a fresh `DataDir`,
+This build uses `github.com/mrchypark/latticedb-go v0.13.0` with a fresh `DataDir`,
 unused cluster ID, and unused object-store namespace. Existing-data migration is
 out of scope and unsupported.
 Rhiza's SQL execution policy changes from 4 to 7; earlier materializers,
@@ -37,7 +37,7 @@ initialization has succeeded and the server lifecycle is about to begin. This
 guard addresses a checkpoint-corruption hazard confirmed on Rhiza v0.10.0 when
 a database was closed during startup, even if `DB.Ready()` became true
 transiently before a later migration, quorum, or configuration failure. The
-hazard's status on Rhiza v0.23.0 has not been runtime-verified. Local
+hazard's status on Rhiza v0.24.0 has not been runtime-verified. Local
 recovery tests do not establish startup-close safety. Retain the
 guard until the upgraded startup path is checked. After startup, graceful
 shutdown still closes the database.

@@ -1,5 +1,7 @@
 # Upstream OIDC back-channel logout
 
+> **Current status:** Back-channel logout is **Preview** in [capabilities.md](capabilities.md); outgoing/incoming subsets are implemented, while broader multi-client/Kubernetes qualification remains open (see [status.md](status.md)).
+
 상태: **배포 검증 미완료**. 토큰 검증, 로그인 시 공유 세션 연결, HTTP 수신과
 원자적 철회/outbox 연결을 구현했다. Kubernetes 배포 E2E 증거는 아직 없다.
 
@@ -41,8 +43,7 @@ logout claim 정책은 별도로 구현해야 한다. 공유 세션 철회는 �
 2.422초 PASS. 검증기는 실제 RSA 서명과 HTTP JWKS 서버를 사용한다. 이는 배포된
 로그아웃 경로의 E2E가 아니다. `go vet ./internal/upstreamprovider` PASS.
 
-전체 `internal/upstreamprovider` 패키지 26.775초 PASS:
-`/tmp/goauthy-incoming-logout-provider-20260908.log`.
+전체 `internal/upstreamprovider` 패키지 26.775초 PASS (상세 검증 이력은 [status.md](status.md) 참조).
 
 후속 보안 검사: 다른 RSA 키로 같은 kid를 사용한 토큰, unsigned/malformed/과대
 입력, 비어 있는 audience, 잘못된 maxAge, 만료 정각, maxAge+1ns,
@@ -85,11 +86,10 @@ E2E와 schema83 혼합 버전 배포/복원은 미검증이다.
 - schema83 집중 migration 1.859초 PASS: 새 테이블·인덱스와 재실행 시 행 보존.
   별도 전체 storage 실행은 관찰 도구의 출력 핸들이 유실되어 결과 미확인이다.
   이 실행을 전체 PASS 근거로 사용하지 않는다.
-- login 전체 107.845초 PASS: `/tmp/goauthy-upstream-binding-login.log`.
+- `internal/login` 전체 107.845초 PASS.
 - RBAC 삭제 집중 race 36.194초, identity 삭제 집중 race 7.384초 PASS:
-  `/tmp/goauthy-upstream-binding-rbac-race.log`, `/tmp/goauthy-upstream-binding-identity-race.log`.
   대상만 삭제하고 권한 거부·늦은 SQL 실패 시 연결도 보존한다.
-- 변경한 패키지 vet와 CGO=0 서버 build PASS. 산출물 `/tmp/goauthy-upstream-binding`.
+- 변경한 패키지 `go vet`와 `CGO_ENABLED=0` 서버 build PASS.
 
 기존 v82 배포 기록을 v83 검증으로 바꾸지 않는다. 신규 로그아웃 수신 기능의 완료
 체크는 실제 세션 철회/fan-out과 standalone·Kubernetes E2E가 통과한 뒤에만 가능하다.
@@ -127,27 +127,21 @@ transaction 순서에 따라 처리되며, 같은 token 재전송은 이미 처�
 
 schema84 최종 검증 기록:
 
-- Store·migration 집중 OAuth 4.981초/storage 2.681초, Store race 18.757초 PASS:
-  `/tmp/goauthy-upstream-logout-store-final-20260908.log`,
-  `/tmp/goauthy-upstream-logout-store-final-race-20260908.log`.
-- 최종 검증기·HTTP 경계 race 2.361초 PASS:
-  `/tmp/goauthy-upstream-logout-final-validation.log`.
+- Store·migration 집중 OAuth 4.981초/storage 2.681초, Store race 18.757초 PASS.
+- 최종 검증기·HTTP 경계 race 2.361초 PASS.
 - 실제 upstream 서명 JWT HTTP 수신부터 Rhiza 철회와 downstream Worker.Step/RP
   수신 JWT의 Ed25519 서명·issuer·audience·SID·events·JTI 검증까지 통과했다.
-  정상 2.342초/race 10.631초 PASS:
-  `/tmp/goauthy-upstream-logout-http-integration.log`,
-  `/tmp/goauthy-upstream-logout-http-integration-race.log`.
+  정상 2.342초/race 10.631초 PASS.
   로컬 RP endpoint의 private/HTTP 예외는 테스트에만 명시적으로 허용했다.
-- OpenAPI 전체 2.250초, cmd upstream/OpenAPI 0.945초 PASS:
-  `/tmp/goauthy-upstream-logout-apidocs.log`, `/tmp/goauthy-upstream-logout-command.log`.
-  최종 관련 패키지 vet PASS.
+- OpenAPI 전체 2.250초, cmd upstream/OpenAPI 0.945초 PASS.
+  최종 관련 패키지 `go vet` PASS.
 
 이 HTTP 통합 검사는 실제 네트워크와 DB/worker를 사용하지만 서버 프로세스 배포나
 3-peer Kubernetes E2E를 대체하지 않는다. HA replay·quorum·rolling-upgrade,
 백업복원과 전체 기능 parity 체크는 열린 상태다.
 
-최종 provider 전체 31.987초 PASS (`/tmp/goauthy-upstream-logout-provider-final.log`),
-CGO=0 build PASS (`/tmp/goauthy-upstream-logout`). Kind 사전 검사 재확인은
+최종 provider 전체 31.987초 PASS,
+`CGO_ENABLED=0` build PASS. Kind 사전 검사 재확인은
 여유 공간 7,388,856 KiB < 12,582,912 KiB로 실패했다. 조건을 낮추지 않았다.
 
 
@@ -155,7 +149,7 @@ CGO=0 build PASS (`/tmp/goauthy-upstream-logout`). Kind 사전 검사 재확인�
 정상 Close/Open한 뒤 readiness와 철회/receipt 보존을 검사한다. 재시작 후 새로
 만든 동일 upstream 세션 연결은 이전 토큰 replay로 철회되지 않고 outbox도 하나다.
 같은 JTI의 다른 토큰과 만료 정각 replay는 거절한다. 집중 race 7.238초와 OAuth
-vet PASS (`/tmp/goauthy-upstream-logout-restart-race.log`). 이 증거는 정상 재시작이며
+`go vet` PASS. 이 증거는 정상 재시작이며
 프로세스 강제 종료·HA failover·복원 테스트를 대체하지 않는다.
 
 
@@ -163,8 +157,7 @@ vet PASS (`/tmp/goauthy-upstream-logout-restart-race.log`). 이 증거는 정상
 동시에 제출한다. receipt의 실제 승자만 성공하고, 패자의 세션은 유지되며,
 receipt/outbox가 각각 한 행임을 검증했다. 특정 스케줄 순서에 의존하지 않는다.
 `TestUpstreamLogoutConcurrentReplayAndConflictingJTI` 집중 race 7.123초 및 OAuth
-vet PASS (`/tmp/goauthy-upstream-logout-concurrency-race.log`). 단일 Rhiza 인스턴스의
+`go vet` PASS. 단일 Rhiza 인스턴스의
 동시 호출 검증이며 여러 K8s peer의 failover 검증으로 해석하지 않는다.
 
-후속 schema84 storage 전체 재검증은 93.889초 PASS:
-`/tmp/goauthy-schema84-storage-full.log`. 이전 출력 유실 실행과 구분되는 새 검증이다.
+후속 schema84 storage 전체 재검증은 93.889초 PASS (이전 출력 유실 실행과 구분되는 새 검증이며, 상세 이력은 [status.md](status.md) 참조).

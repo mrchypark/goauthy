@@ -1,366 +1,107 @@
-# Connection use grants — partial implementation
+# Connection Use Grants (`docs/connection-use-grants.md`)
 
-Owner browser session is required; POST/DELETE also require the existing CSRF
-header. These routes do not accept consumer Bearer tokens and never return secrets.
+## Problem Statement & Goals
 
-Base: `/auth/v1/account/connections/{collection_id}/{connection_id}/grants`
+GoAuthy allows connection owners to store third-party SaaS credentials (API keys or OAuth 2.0 tokens) inside named **auth collections** (`collection` → `connection` → `provider` in `internal/authcollection` and `internal/saas`). External consumer applications (such as **Backoffice** or **Conductor** BFFs and execution workers) need scoped, revocable, owner-consented access to those credentials without receiving long-lived refresh tokens or admin-level session authority.
 
-| Request | Contract |
+- **Goals**:
+  - Enable owners to grant, list, and revoke consumer access per `(owner, collection_id, connection_id)` via browser-authenticated endpoints, binding grants to `connection_generation`, `consumer_generation`, `provider_revision`, and (for API keys) `connector_digest`.
+  - Support two consumer access modes: **`proxy`** (server-side fixed `GET` operation invocation with scalar JSON projection for registered API-key providers) and **`credential_delivery`** (delivering the raw API key or OAuth2 `access_token` to confidential human-delegated consumers).
+  - Enforce fail-closed OAuth2 token refresh (`POST .../refresh`) and linearizable Rhiza authority/version rechecks before every outbound call or credential export.
+- **Non-Goals**:
+  - `proxy` mode for OAuth2 connections (OAuth2 grants support `credential_delivery` only).
+  - Per-operation OAuth2 scope attenuation (all upstream granted scopes are delivered; `purpose` is descriptive only).
+  - Background refresh scheduling, automatic upstream RFC 7009 revocation, or recalling already-delivered plaintext credentials.
+
+Related contracts: [one-use handoffs](connection-use-handoffs.md), [external credential consumer contract](external-credential-consumer-contract.md), [capability matrix](capabilities.md), [execution ledger](status.md), [`internal/saas/README.md`](../internal/saas/README.md), and [`internal/rbac/README.md`](../internal/rbac/README.md).
+
+---
+
+## Alternatives Considered
+
+| Option | Decision | Trade-off / Rejection Rationale |
+| --- | --- | --- |
+| **Self-contained attenuated capability JWTs** | Rejected | Cannot synchronously fence against mid-flight `connection_generation`, `provider_revision`, or owner revocation without a linearizable Rhiza SQL guard (`AuthorizeUseGrant`). |
+| **Background refresh daemon** | Rejected | Risks silent refresh-token consumption races across HA pods; explicit consumer/owner refresh with a durable pre-send `refresh_claim` keeps refresh ownership deterministic. |
+| **OAuth2 `proxy` mode** | Deferred | Arbitrary upstream HTTP methods/paths require a general-purpose HTTP policy proxy; currently `proxy` is limited to fixed `GET` scalar-JSON API-key operations. |
+
+---
+
+## Proposed Architecture
+
+### 1. Participants, Collections & Generation Fencing
+
+- **Collection & Connection**: An `authcollection` defines user-owned connection slots; each `connection` holds an encrypted API key or OAuth2 credential under a configured `provider` (`internal/saas`).
+- **Actors**: **Owner** (browser-authenticated user owning the connection), **Managed / Execution Consumer** (confidential OAuth client holding a human-delegated Bearer token with `goauthy.connections.use` and `GOAUTHY_CONNECTIONS_RESOURCE` audience, obtained via Authorization Code + PKCE), and **Handoff Requester** (application initiating a [one-use handoff](connection-use-handoffs.md)).
+- **Generation & Revision Bindings**:
+  - `connection_generation`: Incremented/replaced when the owner revokes and reconnects a connection; invalidates all existing grants on that connection.
+  - `consumer_generation`: Current consumer client generation bound at grant creation.
+  - `provider_revision`: Incremented on provider config updates; invalidates grants whose bound `provider_revision` or `connector_digest` no longer matches.
+  - `credential_version`: Incremented on API-key rotation or OAuth2 refresh.
+
+### 2. Shared Consumer Bearer Security Contract
+
+All consumer Bearer endpoints (`/auth/v1/connection-grants/{grant_id}/*`) enforce:
+- Confidential human-delegated Bearer token (`Authorization: Bearer ...`) with scope `goauthy.connections.use`, `GOAUTHY_CONNECTIONS_RESOURCE` audience, and non-expired grant/authority verified in **Rhiza** (`*rhiza.DB`).
+- HTTPS-only (unless explicitly allowed in local test configs), no query parameters, no cookies, and rejection of `Origin` and `Sec-Fetch-*` Fetch Metadata headers.
+
+### 3. Owner Grant Management (`/auth/v1/account/connections/{collection_id}/{connection_id}/grants`)
+
+Requires an owner browser session; `POST` and `DELETE` also require the session-bound CSRF header (`X-CSRF-Token`).
+
+| Endpoint | Behavior & Constraints |
 | --- | --- |
-| POST base | Strict JSON `consumer_client_id`, `mode`, `purpose`, `expires_at_unix_ms`; optional non-null boolean `allow_refresh` (default `false`); 201 metadata with ETag |
-| GET base | Empty body; 200 metadata array, at most 256 entries |
-| DELETE base `/{grant_id}` | Empty body and quoted `If-Match` revision; 204; missing revision 428, stale revision 409 |
+| `GET .../grants` | Lists up to `256` grants (`ORDER BY expires_at_unix_ms DESC, id LIMIT 256`). |
+| `POST .../grants` | Creates a grant (`consumer_client_id`, `mode`: `proxy` \| `credential_delivery`, `purpose`, `expires_in_seconds`, optional `allow_refresh`, `connector_digest`, and `credential_version` for OAuth2). Caps active grants at `32` per connection; `allow_refresh` applies only to OAuth2 `credential_delivery`. |
+| `DELETE .../grants/{grant_id}` | Revokes the grant locally in Rhiza (`404` if missing). |
+| `GET /auth/v1/connections/{collection_id}/{connection_id}/grants/{grant_id}` | Owner-side Bearer status check (e.g., for Backoffice BFF verifying consent targeting Conductor) via one linearizable Rhiza query (`404` on unknown/cross-owner/mismatched grant). |
 
-Modes are `proxy` and `credential_delivery`. Proxy grants can now authorize the
-registered API-key invocation route below. Separate credential-delivery consent
-can authorize the registered API-key or OAuth access-token retrieval route below.
-Purpose is descriptive, not an enforceable operation policy.
-Expiry must be future and at most 30 days; at most 32 active grants per connection.
-Creation requires configured `GOAUTHY_CONNECTIONS_RESOURCE` (otherwise 503), an
-active managed consumer with that exact audience and `goauthy.connections.use`.
-Credential-delivery consent additionally requires a confidential consumer. `allow_refresh`
-is an explicit user-approved OAuth2 `credential_delivery` capability; it is false by
-default and has no effect for API-key or proxy grants. Legacy omitted values remain false.
+### 4. API-Key Connector & Proxy Invocation (`proxy` Mode)
 
-POST also accepts optional `connector_digest`, the API-key settings digest reviewed
-by the owner. When supplied it must match the currently authenticated API-key
-binding (malformed/null or OAuth use: 400; valid but mismatched: 409). Existing
-provider revision and credential-version commit guards still apply. Omission
-preserves the existing API contract; it does not imply that a review took place.
+- **Connector inspection & key setup**: Owners/admins inspect connector definitions via `GET /auth/v1/account/connections/{collection_id}/{connection_id}/api-key/connector` and store keys via `PUT /auth/v1/account/connections/{collection_id}/{connection_id}/api-key` (supported for registered providers and empty-provider legacy keys; `connector_digest` is computed from canonicalized provider operation metadata).
+- **`POST /auth/v1/connection-grants/{grant_id}/invoke`**: Requires `mode=proxy` and a `connector_digest`-bound grant (`operation` id). Revalidates authority, grant, `provider_revision`, `connector_digest`, and `credential_version` via `AuthorizeUseGrant` SQL guard before and after dispatching the registered `GET` request through `restrictedTransport` (no redirects, scalar JSON projection).
 
-Storage binds owner, connection generation, consumer generation, provider revision
-and authenticated connector digest. Internal `AuthorizeUseGrant` requires current
-authority and returns a SQL guard for subsequent guarded work. Token version is a
-per-use snapshot: refresh preserves consent but invalidates an old in-flight guard.
-Reconnection, revoked consent, expiry or changed policy prevents subsequent use.
-Revocation does not recall plaintext credentials already delivered elsewhere.
-Provider client secrets and refresh tokens are not exported by these routes.
+### 5. Credential Delivery (`credential_delivery` Mode)
 
-`POST /auth/v1/connection-grants/{grant_id}/refresh` is a strict, server-only
-HTTPS operation for a confidential human consumer whose grant explicitly has
-`allow_refresh=true`. It accepts only `{"credential_version": <positive int64>}`
-and returns public OAuth2 status (`provider_id`, `account_id`, `scopes`, `version`,
-`connected`, `state`). Cookies, Origin, Fetch Metadata, query parameters, CSRF,
-If-Match, machine authentication and DPoP are rejected. The provider is called at
-most once under grant/client/authority guards; stale versions make no upstream
-call, and uncertain outcomes fail closed. Consumers can inspect current public
-OAuth2 metadata with `GET /auth/v1/connection-grants/{grant_id}/credential-status`
-using the same confidential human Bearer authorization, exact resource audience
-and current consent. This no-store, bodyless, read-only endpoint performs no
-upstream call, permits expired access-token status inspection, and returns 404 for
-API-key/proxy or stale authority/grants. A concurrent state/version change during
-the final snapshot recheck can also return 404; this alone does not prove permanent
-revocation. Fail the current operation closed without cached-credential fallback
-or automatic refresh retry. A `ready` status with the current version
-may be explicitly refreshed only when consent has `allow_refresh=true`; otherwise
-it is delivery-only. `refreshing` means bounded observation without exchanging again, while
-`uncertain` or `revoked` requires owner reconnect/recovery. Consumers must not
-guess versions, retry exchanges blindly, or substitute an owner cookie. Delivery
-never refreshes automatically and no scheduler exists.
+- **`POST /auth/v1/connection-grants/{grant_id}/credential`**:
+  - **API-key (`kind=api_key`)**: Returns decrypted key material, `credential_version`, `provider_revision`, and `connector_digest`. Consumers must inject keys only against approved provider destinations, disable HTTP redirects, and avoid logging secrets.
+  - **OAuth2 (`kind=oauth2`)**: Returns decrypted `access_token`, `token_type`, `expires_at_unix_ms`, `scope` (all upstream granted scopes), `credential_version`, `connection_generation`, and `provider_revision` (no `refresh_token` or destination URL is exported).
 
-Refresh has a durable pre-send boundary. The local `refreshing` claim must return
-committed before the provider request starts. If claiming returns an error,
-including an unknown Rhiza commit outcome, this attempt sends no provider request;
-the claim may nevertheless have committed, so the caller must inspect status and
-follow interrupted-refresh recovery rather than retrying the same version. Once
-the provider HTTP request begins, any transport error, lost response, or local
-completion-write error is treated as uncertain: GoAuthy does not replay the
-refresh token. If the uncertainty marker itself cannot be confirmed, the durable
-row remains fail-closed as `refreshing`.
+### 6. Explicit OAuth2 Refresh & Interrupted Recovery
 
-For registered API-key invocation, current grant, caller authority, connection,
-credential and provider state are read before dispatch. The restricted transport
-also checks the provider's enabled flag and revision immediately before admitting
-the HTTP operation. A disable or revision change visible at that check prevents
-the request. The check and the subsequent network write cannot be one atomic
-operation: a change after the check may race with sending, and the service cannot
-promise that an admitted request has not reached the provider. Local provider
-updates retire old pooled connections for subsequent work; they do not recall an
-active request. Postflight checks stop returning a result when current authority,
-credential or provider state changed. Network failures and lost responses do not
-trigger automatic replay, because the provider may have processed the operation.
-Callers need a separate provider-level idempotency contract before retrying such
-an operation. `TestSaaSPoolMutationNeverReplays` and
-`TestSaaSPoolProviderReadErrorFailsClosed` cover transport retry and fail-closed
-provider-read behavior; `TestRefreshOAuth2InFlightFences` covers provider revision
-change during OAuth refresh.
+- **Owner refresh**: `POST /auth/v1/account/connections/{collection_id}/{connection_id}/oauth2/refresh` (takes `{"version": ...}`).
+- **Consumer refresh**: `POST /auth/v1/connection-grants/{grant_id}/refresh` (requires `allow_refresh=true` on OAuth2 `credential_delivery`, takes `{"credential_version": ...}`).
+- **State machine (`ready` → `refreshing` → `ready` | `uncertain` | `revoked`)**:
+  1. `ClaimRefresh` durably records a pre-send `refresh_claim` (`state: "refreshing"`) in Rhiza before any outbound token-endpoint call.
+  2. Single-attempt upstream refresh runs without automatic retries.
+  3. On local commit/transport ambiguity (`MarkRefreshUncertain`), the connection enters `uncertain`; on success, `CompleteRefresh` advances `credential_version` and returns `ready`.
+  4. `GET /auth/v1/connection-grants/{grant_id}/credential-status` (handler implemented in `internal/rbac/connection_credential_status_http.go`; top-level router wiring tracked in [docs/status.md](status.md)) reports `state` and `connected` without `claim_started_at`. Consumers observing `refreshing` may poll conservatively (for example every 5s up to 1m); `refreshing` or `uncertain` failures require the owner to revoke the connection version, reconnect/re-authorize at the provider, and issue fresh consumer consent.
 
-### Interrupted refresh recovery
+---
 
-Consumers should stop the current model/API operation while `refreshing`. For
-the same grant and credential version, poll the read-only status at most once
-every five seconds for up to one minute from the first observation. This is an
-operational waiting budget, not a server lease, proof of worker death, or permission
-to retry the provider exchange. Keep that deadline across retries of the caller's
-operation; do not start another minute on every poll. If the caller loses its
-observation history, require recovery rather than extending waiting indefinitely.
+## Risks & Mitigations
 
-If status remains `refreshing` at the deadline, stop polling and report owner
-recovery required. `uncertain` can take this path immediately. A failed status
-request or 404 means authority/state could not be confirmed: fail closed and
-re-establish authorization, without interpreting that response as a stale claim.
-Record only grant/connection identifiers, credential version, first-observed and
-last-observed times, state, and request correlation identifiers in access-controlled
-operational records. Do not collect credentials, cookies, authorization headers,
-or provider response bodies. These timestamps measure observation age; the public
-status does not expose a claim start time.
+1. **`ListUseGrants` `LIMIT 256` truncation without active filtering**:
+   - *Risk*: `internal/saas/use_grant.go` queries `LIMIT 256` ordered by `expires_at_unix_ms DESC, id` without filtering `revoked=0` or expired rows and has no pagination/GC. 256 revoked grants with long expirations can hide newly created shorter-lived active grants from `GET .../grants`.
+   - *Mitigation*: Track as a code fix to filter active grants (`revoked=0 AND expires_at_unix_ms > now`) or add keyset pagination and expired-grant pruning.
+2. **Sticky `refreshing` / `uncertain` DoS & multi-consumer blast radius**:
+   - *Risk*: A crash or timeout between `ClaimRefresh` and `CompleteRefresh` leaves the connection wedged until manual owner revoke + reconnect, which bumps `connection_generation` and invalidates *all* consumers' grants on that connection. `credential-status` lacks server-side rate limiting and `claim_started_at`.
+   - *Mitigation*: Enforce client-side polling caps and document owner revoke/reconnect recovery.
+3. **OAuth2 full-scope delivery & lack of upstream revocation**:
+   - *Risk*: `credential_delivery` exports all upstream-granted scopes (`purpose` is descriptive only), cannot revoke delivered tokens upstream, and relies on consumers to enforce destination allowlists and disable HTTP redirects.
+   - *Mitigation*: Restrict `credential_delivery` to trusted confidential consumers and prefer `proxy` mode for API-key integrations.
+4. **Optional `connector_digest` / `credential_version` on direct `POST .../grants`**:
+   - *Risk*: Omitting `connector_digest` or `credential_version` on the direct owner `POST` route preserves API compatibility without recording a review commitment (unlike [one-use handoffs](connection-use-handoffs.md)).
+   - *Mitigation*: Prefer the handoff approval flow for interactive user consent and supply explicit digests/versions in automated clients.
+5. **Runtime allocation note**:
+   - `validUseCredential` (`internal/saas/use_grant.go`) constructs `NewAPIKeyConnector` (including `restrictedTransport`) during `AuthorizeUseGrant` digest checks; extract a pure digest helper when optimizing hot paths.
 
-The owner reviews current connection status, explicitly revokes its current
-version, prepares reconnect, completes provider authorization, and grants fresh
-consumer consent. Re-read status on a version conflict instead of guessing the
-next version. Reconnect changes generation, so old consent and a late worker's
-completion cannot authorize or overwrite the new credential. Local revoke does
-not revoke provider-side tokens or cancel requests already sent; if that is needed,
-the owner also revokes access through the provider's controls.
+---
 
-Never clear `refresh_claim`, reset a row to `ready`, expire the claim on a timer,
-or replay the old refresh token. The process may have died after the provider
-consumed it. A claim intentionally remains fail-closed until explicit recovery.
-The deterministic `TestAbandonedRefreshClaimRequiresOwnerRecovery` abandons a
-durable claim, advances a replacement worker's clock by a day, and verifies no
-second exchange, owner recovery, and fencing of late completion/uncertainty writes.
-It simulates the durable boundary; it is not a process-kill or HA qualification.
+## Verification
 
-## Verification and remaining integration
+```sh
+go test ./internal/saas ./internal/rbac ./internal/oauth
+```
 
-Focused real-Rhiza tests cover owner CRUD, strict parsing, stale revision, wrong
-consumer, expiry, OAuth refresh and policy fences, plus schema-v76 replay.
-They are not full consumer E2E evidence.
-
-`GOAUTHY_E2E_TLS=1 GOAUTHY_E2E_USE_GRANTS=1 sh scripts/e2e-open-registration-standalone.sh`
-now passes actual HTTPS standalone/restart acceptance; see status.md for logs.
-The previously failing API-key provider binding is implemented in schema v77.
-
-API-key collections accept `provider_ids: []` for legacy storage or exactly one
-registered enabled API-key provider. An owner reviews
-`GET .../api-key/connector` (id, digest, header, prefix, allowed operations) and sends
-`{"api_key":"<key>","version":0,"connector_digest":"<reviewed digest>"}` to PUT
-`.../api-key`. Rotation uses the current version and the reviewed digest. A digest
-is public configuration integrity metadata, not a secret or an authorization token.
-Unknown/null/duplicate fields remain invalid; a stale digest or version is rejected.
-Empty-provider legacy keys remain usable for storage management but cannot obtain
-use grants unless explicitly connector-bound by trusted internal code.
-
-The `/account` API-key editor now displays provider settings and requires explicit
-review before sending the digest. It clears keys on save/failure/cancel/navigation;
-this is key-custody confirmation, not consumer usage consent. Registered-key
-Chromium standalone/restart coverage is recorded in status.md.
-
-Historical API-key panel milestone (superseded by the OAuth milestones in
-[STATUS.md](STATUS.md)): the native `/account` service-access panel connected owner grant list/revoke
-and explicit proxy creation for registered API-key connections. It displays the
-provider's operation settings and asks for the administrator-supplied consumer
-client ID, purpose and expiry. A separate unchecked confirmation authorizes the
-displayed operations; changing input resets it. Creation submits the reviewed
-digest. Other connection types currently support list/revoke in this panel only.
-It is not a consumer handoff or an automatic return flow. Stored metadata does not
-prove that current execution policy will allow a later call.
-
-Current: OAuth approval creation UI/handoff and explicitly consented consumer
-refresh are implemented and standalone browser-tested. Actual consumer OAuth
-integration and full E2E remain open; credential-status is implemented while
-application wiring remains.
-Registered API-key proxy handoff and Bearer status verification are available.
-
-## Confidential-consumer API-key delivery
-
-Registered `Authorization` supports exact prefixes `""`, `"Bearer "` and
-`"Token "`; `X-API-Key` requires `""`. Empty means the raw API key, not a missing
-credential. Prefix is part of the reviewed digest, so changing authentication
-format requires new binding/consent. Arbitrary prefixes and control characters
-remain invalid. This concerns outbound SaaS authentication, not GoAuthy's inbound
-human Bearer authorization.
-
-`POST /auth/v1/connection-grants/{grant_id}/credential` accepts an empty body
-(not `{}`) and one human Bearer token with `goauthy.connections.use` and the exact
-connections resource audience. The token's managed consumer must be confidential.
-Cookie, Origin, Sec-Fetch-Site, query (including bare `?`), If-Match and CSRF
-headers are rejected. This endpoint requires an HTTPS issuer.
-
-An explicit `credential_delivery` grant is required; proxy consent cannot export.
-For registered API-key connections, response fields are `kind`
-(`api_key`), `api_key`, `grant_id`, `provider_id`, `connection_generation`,
-`credential_version`, `connector_digest`, `header`, `prefix` and
-`consent_expires_at_unix_ms`. This API-key variant returns no OAuth token.
-Neither variant returns provider client secrets or refresh tokens.
-Responses are no-store/no-referrer; consumers must
-disable authorization-header and response-body logging and keep the key out of
-browser state, URLs, telemetry and normal collection records.
-
-Current owner, consumer, grant, expiry, generation, provider and credential
-version are rechecked after decryption. Revocation/expiry blocks future retrieval;
-it cannot recall an already delivered key or shorten the provider's key lifetime.
-The recipient can use the raw key outside the proxy's operation/projection limits:
-the digest identifies reviewed settings, not an enforceable SDK restriction.
-Provider-side revocation is needed to invalidate a previously delivered key.
-The separate delivery handoff now displays a raw-key warning and explicit delivery
-confirmation. Do not relabel proxy consent or stored consent as SDK readiness.
-
-### Consumer integration contract
-
-Registered OAuth connections use the same bodyless endpoint with `kind=oauth2`.
-Its exact fields are `kind`, `access_token`, `token_type` (`Bearer`), `grant_id`,
-`provider_id`, `connection_generation`, `credential_version`, `account_id`,
-`scopes`, `token_expires_at_unix_ms`, and `consent_expires_at_unix_ms`.
-It requires its own confidential consumer's current `credential_delivery` grant;
-an API-key adapter must not infer OAuth support from the shared endpoint.
-The OAuth variant carries no API-key connector digest or destination. Its
-provider/account/scopes and trusted destination mapping must be checked by the
-consumer. All upstream granted scopes are delivered, not a per-operation subset.
-The token's known future expiry is checked again immediately before return.
-Unknown/expired tokens fail closed; retrieval does not refresh or call upstream.
-Consent expiry stops retrieval but cannot shorten the upstream token's validity.
-Refresh completion must preserve the exact stored account ID (including whether
-it is empty). A changed account is a reconnect/new-generation operation, not a
-token rotation under old consent. A mismatch after exchange leaves the refresh
-uncertain and unusable, without silently installing or retrying the new token.
-The explicit registered-provider refresh adapter now additionally looks up the
-new token's upstream identity before committing. This local invariant also guards
-other internal refresh callers. Subsequent OAuth-specific HTML approval/handoff
-and public browser E2E now pass (see [STATUS.md](STATUS.md)); full consumer-app
-OAuth E2E remains open. Raw-key approval is not a substitute for OAuth approval.
-
-Owners can explicitly refresh with browser session + CSRF using
-`POST /auth/v1/account/connections/{collection_id}/{connection_id}/oauth2/refresh`
-and strict JSON `{"version": <current positive int64>}`. An HTTPS issuer is
-required; no Bearer/API-key authentication, query or If-Match is accepted.
-The endpoint returns the same metadata-only status as OAuth status GET, never
-access/refresh tokens. It is not a background scheduler or consumer auto-refresh.
-One durable claim permits one refresh exchange, followed by a new-token identity
-lookup. The exact account must match and scopes cannot exceed the stored scope
-set. Omitted refresh tokens retain the old value; known refresh expiry is carried
-conservatively. Unknown access-token expiry remains zero and cannot be exported
-through the credential-delivery endpoint. An ambiguous exchange/commit or failed
-post-exchange verification leaves the connection unusable, without retrying the
-possibly consumed refresh token. Inspect owner status and revoke/reconnect;
-do not interpret a 503 as permission to reuse cached credentials.
-
-- Acquire a human token for the execution consumer's own confidential OAuth
-  client using authorization code + PKCE and server-side client authentication.
-  Register the exact connections resource audience and required scopes first;
-  pass `resource` at authorization. Service/client-credentials tokens and another
-  application's user token are not substitutes. A handoff requester can be a
-  different client, but retrieval must use the grant's execution client. For
-  queued jobs, expired/revoked authority stops execution; reacquire authorization,
-  not a token synthesized from job metadata. Offline/refresh support must be
-  explicitly configured and verified by that consumer, not assumed by this API.
-- Treat grant ID, provider ID and `connection_generation` as opaque strings,
-  never local numeric revisions or upstream account IDs. `credential_version`
-  is a positive signed int64 local to the connection; use a lossless JSON integer
-  decoder. Key rotation increments this version without replacing logical
-  consent. Reconnection replaces the generation and invalidates the old grant.
-  Provider configuration revisions invalidate old grants/digests. A local adapter
-  decides explicitly whether a new credential version is acceptable; it must
-  never silently accept changed generation/provider/digest/consumer/mode.
-- Register an operator-reviewed mapping from GoAuthy provider to the SDK's fixed
-  endpoint, header and prefix. Do not infer this mapping from equal ID strings or
-  let delivery metadata select an arbitrary URL/header. The handoff `review`
-  includes the authenticated connector settings for the requester to bind into
-  its own trusted server-side snapshot; normal users do not need provider-admin
-  privileges. An execution service must receive this binding via trusted internal
-  configuration, not unsigned browser callback values. Delivery itself contains
-  no destination or upstream account identity. Disable redirects when injecting
-  keys into provider calls.
-- Compare digest strings exactly. The current server digest is SHA-256,
-  base64url without padding, over the v1 `saas-api-key-connector` canonical JSON:
-  provider ID, canonical header, exact prefix, operations sorted by ID with fixed
-  GET method and exact URL, response fields sorted by name/type. It is not a
-  general JSON canonicalization standard. Consumers should store the server's
-  authenticated digest and not reimplement its serialization. No cross-version
-  digest stability is promised; changes require new reviewed binding/consent.
-- Retrieval errors: 400 invalid request (fix it); 401 invalid/currently
-  unauthorized human token (reauthorize); 404 unavailable matching grant/binding
-  (stop); 409 conflicting/changed current state (review again); 503 unavailable
-  configuration/store (no key usable). The shared error catalog reserves 502,
-  but this API-key path makes no upstream call. Network/5xx failures do not
-  authorize cached-key fallback. Retrieving a key again does not repeat a provider
-  operation, but there is no automatic retry contract: keep provider-operation
-  retries separate and require their own idempotency rules.
-- The API-key response has ten fields and `kind=api_key`; OAuth has the eleven
-  fields above and `kind=oauth2`. Ignore unknown additive
-  metadata only after validating all required fields and supported kind; do not
-  infer new credential kinds or privileges. Breaking field/semantic changes need
-  an explicit contract revision; no generic SDK wire version is currently exposed.
-  Keys/tokens stay in execution-service memory, not job payloads, DB records,
-  browser state, callbacks or logs. Fetch under current authority for each use.
-
-## Consumer invocation (2026-09-07)
-
-`POST /auth/v1/connection-grants/{grant_id}/invoke` accepts only JSON
-`{"operation":"account"}` (8 KiB maximum). Operation IDs match
-`^[a-z0-9][a-z0-9_-]{0,63}$`. The consumer supplies its human Bearer access token
-with `goauthy.connections.use` and the exact configured connections resource
-audience. Owner and consumer identities come from the verified token, not JSON.
-Cookies, query parameters, machine/exchanged/DPoP tokens are not accepted.
-
-The current grant must authorize this owner/consumer in proxy mode. The registered
-API-key connector, digest and operation allowlist determine the destination and
-authentication header; callers cannot supply URLs or headers. Only configured
-scalar JSON response fields are returned, with no-store and no upstream headers.
-The current authority and credential are checked before dispatch and again before
-returning the result. Revocation cannot undo a request already sent upstream.
-
-Responses: 200 projected JSON; 400 invalid body/operation; 401 authentication;
-404 unavailable grant/connection; 409 conflicting current state; 502 upstream
-failure; 503 missing configuration/internal unavailability. No automatic retries.
-
-Real Rhiza plus a local TLS provider verifies successful header injection and
-projection, zero dispatch for invalid grants, and result discard when revocation
-occurs inside the provider handler. A separate actual HTTPS standalone/restart
-test uses real code+PKCE tokens to verify unknown operation, missing grant,
-missing token, missing audience and revoked grant denial. It deliberately does
-not dispatch a positive outbound request: this is not full positive public-route
-or consumer-application E2E evidence. Production private-network restrictions
-have not been relaxed for the fixture.
-
-Registered-provider support reuses `authcollection.validateDefinition`,
-`rbac.collectionProviderAuthority`, API-key storage and use-grant policy. Provider
-kind, enabled state, singleton reference and revision are checked at the guarded
-write/read. The provider-removal trigger revokes disconnected keys, while a legacy
-empty-list edit preserves the key. Disabled-provider status/revoke remain available.
-
-## Backoffice integration feedback (2026-09-07)
-
-Backoffice's BFF holds its own OIDC access token, not the GoAuthy browser cookie or
-CSRF token. It cannot proxy these owner-session routes. Do not copy session cookies
-or put credentials in redirect URLs. The next integration needs a documented
-GoAuthy-origin settings/approval URL, server-validated connection/consumer targets,
-allowlisted return URL and one-use state. Consumer/mode/purpose preselection must
-be presented for confirmation, not silently treated as consent. On return, the
-BFF must use its own read-scope Bearer token with the owner-oriented grant-status
-route to verify stored consent; it cannot use credential-status for a different
-execution consumer. Returning from the settings page alone is not proof of completion.
-The [one-use handoff contract](connection-use-handoffs.md) and HTML approval page
-are implemented for registered API-key proxy and separate credential-delivery
-consent. The native owner panel
-does not replace it or accept untrusted URL preselection. Actual Backoffice
-integration still needs consumer-side validation and feedback.
-
-## Owner-side Bearer status verification
-
-`GET /auth/v1/connections/{collection_id}/{connection_id}/grants/{grant_id}`
-requires a human Bearer token with `goauthy.connections.read` and the exact
-configured connections resource audience. The token owner determines ownership;
-the observing application need not be the grant's execution consumer. This permits
-Backoffice to verify its user's consent targeting Conductor, without sharing a
-GoAuthy cookie. Read scope never authorizes invocation or grant mutation.
-
-The 200 response is `{ "grant": <stored grant metadata>,
-"connection_generation": "<current parent generation>" }`. Grant and current
-parent generation are read in one linearizable Rhiza query. No credential is
-decrypted or returned. Revoked and expired grants remain readable; deleted/missing
-parents, other owners, mismatched paths/resources and failed SQL authority do not
-return the record. A new connection generation is distinguishable from the
-historical grant's `generation`.
-
-Consumers should compare the expected connection, consumer client ID, mode,
-resource and `allow_refresh` (omission means false), require matching generations,
-compare the connector digest for API keys only, and inspect revoked
-and expiry fields. This verifies stored consent only: current provider/client
-policy and credential state are still checked at actual invocation. It is not
-a capability, an `active`/readiness result or permission to export credentials.
-
-Requests have no body, query (including a bare `?`), Cookie or If-Match. Responses
-are no-store: 400 invalid request, 401 authentication, 404 unavailable target,
-503 missing configuration/internal unavailability. Existing owner browser/CSRF
-routes remain the only public grant mutation paths.
+Dated local TLS / standalone E2E runs and remaining integration wiring (`credential-status` router wiring, Backoffice consumer validation) are tracked in [docs/status.md](status.md) and [docs/capabilities.md](capabilities.md).

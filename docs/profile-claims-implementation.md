@@ -21,7 +21,7 @@ access-token profile parity is not completed by this batch.
 
 `GOAUTHY_USER_VALUES_PREFERRED_USERNAME_EMAIL_FALLBACK` defaults to `true`;
 only literal `true`/`false` are accepted. It affects both ID tokens and UserInfo
-and is returned by `users/values_config`. Address formatting follows pinned
+and is returned by `/auth/v1/users/values_config`. Address formatting follows pinned
 `src/jwt/src/claims.rs::AddressClaim::try_build`, including locality only when
 ZIP exists. The pinned UserInfo source assigns email after attempting its
 fallback; GoAuthy deliberately uses current profile email consistently with
@@ -29,6 +29,7 @@ ID tokens rather than reproducing that ordering bug.
 
 Executed checks include `TestProfileClaimsCodeRefreshUserInfoAndScopeIsolation`,
 the real Rhiza identity projection, configured policy/adapter tests, signed-token
-round trips, and `TestProfileClaimsLive` on standalone and exact-three Kind.
+round trips, and `TestProfileClaimsLive` (see [profile-claims-live.md](profile-claims-live.md)
+and [status.md](status.md)) on standalone and exact-three Kind.
 The live test includes ordinary-user profile changes, signed ID-token refresh,
 all-node UserInfo, OpenID-only withholding and profile-only email fallback.

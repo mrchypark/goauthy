@@ -1,7 +1,7 @@
 # Authentication UI scenarios
 
 Baseline: GoAuthy ea830e24; Rauthy v0.36.2 dd61ac3c84d6b238108dc8438b53043b5177a662.
-Status: scenario proposal awaiting Pro review; implementation and browser qualification pending.
+Status: dated working note (2026-09-26 Pro review completed with Conditional GO; initial implementation slices recorded below). For current product status, see [capabilities.md](capabilities.md) and [status.md](status.md).
 
 ## Page correspondence
 

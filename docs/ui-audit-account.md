@@ -1,5 +1,7 @@
 # Account UI control audit
 
+Audit date: 2026-09-26 (historical control audit snapshot; see [capabilities.md](capabilities.md) and [status.md](status.md) for current product status).
+
 Scope: the account page rendered by `internal/account/dashboard.html` and behavior in `dashboard.js`, `connections.js`, `connection_grants.js`, `devices.js`, and `locale.js`. This records static code/API-contract review and deterministic Node tests. No browser, deployed service, or live HTTP session was exercised; the UI suites use mocked DOM and mocked requests.
 
 ## Inventory and request paths

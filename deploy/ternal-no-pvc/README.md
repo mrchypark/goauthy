@@ -1,5 +1,7 @@
 # Ternal-dedicated GoAuthy, no-PVC profiles
 
+## Overview
+
 These isolated GoAuthy profiles are for Ternal only. They do not alter
 `deploy/k8s` or `deploy/standalone`, deploy MinIO, create a PVC, or share the
 default GoAuthy namespace, Secret, Rhiza cluster ID, or object-store prefix.
@@ -10,6 +12,31 @@ setting and peer port, while retaining the external S3 before-ack path and the
 required object-store guard. Both use `emptyDir` for `/var/lib/goauthy`; the
 external S3 checkpoint prefix is durable state. Neither profile claims that
 empty-disk recovery or backup/restore has been qualified.
+
+## Interface
+
+- `kustomization.yaml` & `base/` — Three-voter S3 HA profile (`StatefulSet/ternal-goauthy` in `ternal-auth`, `GOAUTHY_RHIZA_PROFILE=cluster`).
+- `standalone/` — One-member S3 overlay (`GOAUTHY_RHIZA_PROFILE=standalone`).
+- `gcs-standalone/` — One-member native GCS overlay (`GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER=gcs`).
+- `gcs-ha/` — Three-voter native GCS overlay (`GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER=gcs`, `GOAUTHY_RHIZA_PROFILE=cluster`).
+- `test.sh` — Offline manifest validation across all four overlays using `kustomize`, `yq`, and `awk`.
+- `ied-storage-verification.md` — Storage verification notes for IED.
+
+## Invariants
+
+- All profiles use `emptyDir` for `/var/lib/goauthy`, zero `volumeClaimTemplates`, `readOnlyRootFilesystem: true`, `automountServiceAccountToken: false`, and `GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE=true`.
+- Rendered manifests must not contain `PersistentVolumeClaim`, `Job`, `versity`, `:latest` image tags, or `CHANGEME`/`TODO` placeholders.
+- `standalone` and `gcs-standalone` must not retain `GOAUTHY_RHIZA_PEER*`/`_MEMBERS`/`_ADMIN*` or `peer` port `8444` (PDB `minAvailable: 1`); HA and `gcs-ha` retain 3 replicas, port `8444`, and PDB `minAvailable: 2`.
+- `gcs-standalone` and `gcs-ha` must use `object-store-bucket` and `object-store-prefix` from `ternal-goauthy-config` and must not contain S3 env vars, `service-account.json`, or `GOOGLE_APPLICATION_CREDENTIALS`.
+
+## Side Effects
+
+- `test.sh` writes temporary rendered manifests via `mktemp` and deletes them on `EXIT`.
+- Applying any overlay creates/updates resources in namespace `ternal-auth` (requiring out-of-band `ternal-goauthy-config` and `ternal-goauthy-secrets`).
+
+## Verification
+
+- Run: `./deploy/ternal-no-pvc/test.sh`
 
 ## Activation contract
 

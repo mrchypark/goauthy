@@ -24,12 +24,14 @@ UserInfo·등록 삭제도 재시작 전후 통과했다. 새 HA 검증은 별�
 Ternal amd64 후보에는 미포함이다.
 실행 선택은 `GOAUTHY_E2E_DEVICE_DPOP=1`; 기존 standalone runner를 사용하고
 Ternal CLI/native authcode 선택 플래그와 동시에 켜지 않는다. 정확한 로컬
-source-overlay/테스트 범위는 [STATUS.md](STATUS.md)를 따른다.
+source-overlay/테스트 범위는 [status.md](status.md)를 따른다.
 
 2026-09-06. 사용자가 확인한 범위는 **기기에서 코드 받기 → 다른 브라우저에서
 로그인·승인 → 기기에서 토큰으로 API 사용**이다. 기기 자산 목록이나 passkey
-등록 기능을 뜻하지 않는다. 당시 기록은 Rhiza v0.12.0, schema v63 후보 기준이다.
-현재 schema는 v79이며 아래 후속 지원 사항은 기존 제한 기록을 갱신한다.
+등록 기능을 뜻하지 않는다. 당시 기록은 Rhiza v0.12.0, schema v63 후보 기준이며
+2026-09-07 후속 지원 사항은 schema v79 기준으로 기존 제한 기록을 갱신한다(현재
+소스 기준은 `rhiza v0.24.0`, schema v114이며 제품 상태는 [capabilities.md](capabilities.md)를
+우선한다).
 
 ## 구현 및 확인 범위
 
@@ -166,65 +168,59 @@ control-plane에 배치된다. 서로 다른 물리 호스트의 장애 검증�
 
 - 2026-09-07 실제 Ternal API/CLI: Linux 격리 이미지
   `goauthy-ternal-device-e2e:20260907`에서 HTTPS GoAuthy 재시작 전 5.54초/후
-  5.56초 PASS. CLI Device login, subject/groups, private0600 session schema,
-  logout/local session 삭제 및 서버 authenticated=false 확인. 로그
-  `/tmp/goauthy-ternal-device-isolated-public-20260907.log`, runner 종료 0.
+  5.56초 PASS. CLI Device login, subject/groups, private 0600 session schema,
+  logout/local session 삭제 및 서버 authenticated=false 확인(runner 종료 0).
   Host mounts/ports 없음, network none. Host session 메타데이터 실행 전후 동일.
-  앞선 macOS 격리 실패 및 덮어쓰기 사건은 STATUS.md에 별도로 보존한다.
+  앞선 macOS 격리 실패 및 덮어쓰기 사건은 [status.md](status.md)에 별도로 보존한다.
 
 - 2026-09-07 수동 코드 입력 후속 검사: 기존 `device-review-20260907` 이미지에
   변경된 `device_oidc_test.go`, `device_oidc_ui_test.go`만 복사한 test-only overlay.
   서버 소스 변경 없음. `complete_uri`/`manual_code` 각각 cold login → 검토 → 승인
-  → OIDC/refresh/revoke 검사. 재시작 전 2.57/2.22초, 후 2.26/2.26초 PASS.
-  `/tmp/goauthy-device-manual-public-20260907.log`, runner 종료 0.
+  → OIDC/refresh/revoke 검사. 재시작 전 2.57/2.22초, 후 2.26/2.26초 PASS(runner 종료 0).
 
 - 2026-09-07 승인 context 후속 후보 `goauthy-saas-oauth-e2e:device-review-20260907`:
   실제 Chromium의 정확한 client/scopes 표시·코드 확인·명시적 승인 및 OIDC
-  재시작 전후 2.45/2.30초 PASS, runner 종료 0. 로그
-  `/tmp/goauthy-device-review-public-20260907.log`, 화면
-  `/tmp/goauthy-device-review-20260907.png`. 기존 계정 CSS를 재사용했다.
-  Device 전체 단위 검사 37.598초 PASS. 아래 미표시 기록은 이전 후보의 상태다.
+  재시작 전후 2.45/2.30초 PASS, runner 종료 0(승인 화면 캡처 확인).
+  기존 계정 CSS를 재사용했다. Device 전체 단위 검사 37.598초 PASS.
+  아래 미표시 기록은 이전 후보의 상태다.
 
 - 2026-09-07 최신 Chromium OIDC gate: `GOAUTHY_E2E_DEVICE_OIDC=1`과
   `GOAUTHY_E2E_DEVICE_OIDC_UI=1`을 함께 사용한다. 기존 격리 Dory test image의
   기본 SaaS workflow는 `GOAUTHY_E2E_REGISTERED_OAUTH2=0`으로 끈다.
   `GOAUTHY_E2E_DEVICE_OIDC_SCREENSHOT`은 컨테이너 내부 캡처 경로다.
   최종 소스 이미지 `goauthy-saas-oauth-e2e:device-native-final-20260907`의
-  재시작 전후 3.97/3.35초 PASS. 로그
-  `/tmp/goauthy-device-native-final-public-20260907.log`.
+  재시작 전후 3.97/3.35초 PASS.
   네이티브 폼의 null Origin에 기존 login과 동일한 제한적 stdlib 검사를 적용했고
   subject/CSRF를 유지했다. 전체 device race 191.477초 PASS.
   승인 화면의 요청 앱/권한 표시는 미완료다. 기존 HTTP-only 결과와 구분한다.
 
-- `/tmp/goauthy-device-public-ha-retry-20260906.log`: 새 Dory에서 종료 0.
+- 2026-09-06 public HA 재시도(새 Dory, 종료 0):
   공통 E2E 15.500초; confidential 7.49/7.56초, public 1.90/2.41초,
   managed 1.99/2.23초. 동일 pending grant Pod 교체 chaos 5.54초 통과.
   종료 뒤 소유 Kind cluster/container 제거 확인. 첫 실행은 VM inotify 한도,
   두 번째는 Kind CNI stdin 대기에서 중단했고 이 실패들은 통과로 세지 않는다.
-- `/tmp/goauthy-device-public-standalone-pass-20260906.log`: 종료 0.
+- 2026-09-06 public standalone 통과(종료 0):
   confidential 5.26/3.97초, public 1.13/1.39초, managed 1.67/0.92초.
   이전 실패들은 등록 fixture/정책 및 삭제된 등록의 idempotency replay 문제를
   드러냈으며 성공으로 세지 않는다. 새 실행은 새 등록 키를 사용한다.
-- `/tmp/goauthy-device-public-standalone-replay-20260906.log`: 최종 public refresh
-  replay `invalid_grant` 검사 추가 후 종료 0. confidential 4.24/3.70초,
+- 2026-09-06 public standalone replay 검사(최종 public refresh
+  replay `invalid_grant` 검사 추가 후 종료 0): confidential 4.24/3.70초,
   public 1.10/1.04초. 이 실행의 managed gate는 꺼져 있어 해당 skip을
   managed 검증으로 세지 않는다.
-- `/tmp/goauthy-device-auth-final-20260906.log`: OAuth 인증/기존 grant 집중 검사 통과.
-  `/tmp/goauthy-device-ambiguity-20260906.log`: 혼합·중복·malformed 인증 입력 통과.
-  `/tmp/goauthy-device-http-final-20260906.log`: device 패키지 전체 통과.
-  `/tmp/goauthy-device-dcr-verified-20260906.log`: HTTP 등록 회귀 검사 통과.
-- `/tmp/goauthy-device-auth-race-20260906.log`: device 9.604초,
-  OAuth 62.603초 집중 race 통과. 최종 vet 및 runner 구문/session-policy 통과.
-- `/tmp/goauthy-device-pilot-standalone-20260906.log`: 종료 0.
+- 2026-09-06 집중 검사/회귀(모두 통과): OAuth 인증/기존 grant 집중 검사,
+  혼합·중복·malformed 인증 입력, `device` 패키지 전체, HTTP DCR 등록 회귀 검사.
+- 2026-09-06 집중 race/vet: device 9.604초, OAuth 62.603초 집중 race 통과,
+  최종 `go vet` 및 runner 구문/session-policy 통과.
+- 2026-09-06 Device pilot standalone(종료 0):
   Device HTTP E2E 3.20초, 재시작 후 3.24초; managed-client도 두 번 통과.
-- `/tmp/goauthy-device-pilot-ha-final-20260906.log`: Device 7.27초,
+- 2026-09-06 Device pilot HA(종료 0): Device 7.27초,
   Pod 교체 후 6.59초 통과. 관리 client 2.57/1.98초, 공통 E2E 15.040초.
-  runner 종료 0 및 테스트 cluster 정리 확인.
+  테스트 cluster 정리 확인.
   첫 HA 실행의 공통 smoke/전용 관리자 gate 분리 오류는 수정했으며
   이전 실패 로그는 통과로 세지 않는다.
 - `internal/login/device_test.go`: 코드 보존, blank-code 수동 입력 경로,
   query/CSRF/일회용 interaction 및 강제 MFA 비밀번호 경계.
 - `cmd/goauthy/main_test.go`: forced-MFA verifier의 password session 거절과
-  MFA session 허용. 전체 관련 패키지 실행 결과는 status 문서에 기록한다.
+  MFA session 허용. 전체 관련 패키지 실행 결과는 [status.md](status.md)에 기록한다.
 
 모든 Rauthy 기능 및 RFC 8628 전체 완료 체크는 그대로 미완료다.

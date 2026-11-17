@@ -1,6 +1,6 @@
 # UI functional audit — 2026-09-26
 
-This is an evidence ledger, not a claim that every button passed live testing. Local preview is a disposable standalone deployment at localhost:18120. Three-node HTTP test parameters pointed to this same endpoint; they do not establish HA behavior.
+This is an evidence ledger, not a claim that every button passed live testing. Local preview is a disposable standalone deployment at localhost:18120. Three-node HTTP test parameters pointed to this same endpoint; they do not establish HA behavior. For current product capability status beyond this 2026-09-26/27 audit ledger, see [capabilities.md](capabilities.md) and [status.md](status.md).
 
 ## Detailed control inventories
 

@@ -49,7 +49,7 @@ GoAuthy는 **Argon2id v=19**를 사용합니다:
 - m (메모리): 19456 KiB (19 MiB)
 - t (반복): 2
 - p (병렬화): 1
-- 최대 동시성: 2
+- 최대 동시성: 4 (`internal/credential/password.go`의 `DefaultPolicy`, `GOAUTHY_ARGON2_MAX_CONCURRENCY`로 조정 가능)
 ```
 
 ### 패스워드 정책
@@ -268,17 +268,13 @@ Cache-Control: public, max-age=31536000, immutable
 
 ### 수동 블랙리스트
 
-관리자가 수동으로 IP를 블랙리스트에 추가할 수 있습니다:
+관리자가 수동으로 IP 또는 CIDR prefix를 블랙리스트에 추가할 수 있습니다. `POST /auth/v1/blacklist`는 만료 시각(`exp`, 현재 Unix 초 이후의 양수)을 필수로 요구합니다:
 
 ```bash
-# 영구 차단
+# 만료 시간 지정 차단 (exp는 Unix 초)
 curl -X POST /auth/v1/blacklist \
   -H "Authorization: Bearer <token>" \
-  -d '{"prefix": "192.168.1.0/24", "note": "악의적인 활동"}'
-
-# 만료 시간 있는 차단
-curl -X POST /auth/v1/blacklist \
-  -d '{"prefix": "10.0.0.0/8", "expires_at": "2024-12-31T23:59:59Z"}'
+  -d '{"ip": "192.168.1.0/24", "exp": 1798761599}'
 ```
 
 ---
@@ -289,7 +285,7 @@ curl -X POST /auth/v1/blacklist \
 
 ```bash
 GOAUTHY_GEOBLOCK_ENABLED=true
-GOAUTHY_GEOBLOCK_MODE=allow  # 또는 deny
+GOAUTHY_GEOBLOCK_TYPE=allow  # 또는 deny
 GOAUTHY_GEOBLOCK_COUNTRIES=KR,JP,US
 ```
 
@@ -298,11 +294,14 @@ GOAUTHY_GEOBLOCK_COUNTRIES=KR,JP,US
 - **allow**: 지정된 국가만 허용
 - **deny**: 지정된 국가 차단
 
-### 신뢰 프록시
+### 국가 판별 및 신뢰 프록시
+
+MaxMind DB(`GOAUTHY_GEOBLOCK_MAXMIND_DB`) 또는 신뢰 프록시 뒤의 국가 헤더를 사용합니다. MaxMind DB 없이 `GOAUTHY_GEOBLOCK_COUNTRY_HEADER`만 사용하는 경우 `GOAUTHY_TRUSTED_PROXIES` 설정이 필수입니다:
 
 ```bash
-GOAUTHY_GEOBLOCK_TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12
+GOAUTHY_TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12
 GOAUTHY_GEOBLOCK_COUNTRY_HEADER=X-Country
+# 선택: GOAUTHY_GEOBLOCK_BLOCK_UNKNOWN=true
 ```
 
 ---
@@ -311,9 +310,12 @@ GOAUTHY_GEOBLOCK_COUNTRY_HEADER=X-Country
 
 ### 지원 알고리즘
 
+`internal/dpop/proof.go`에서 다음 JWS 서명 알고리즘을 허용합니다:
+
 - EdDSA (Ed25519)
-- ES256 (ECDSA P-256)
-- RS256 (RSA-SHA256)
+- ES256, ES384, ES512 (ECDSA)
+- RS256, RS384, RS512 (RSA PKCS#1 v1.5)
+- PS256, PS384, PS512 (RSA-PSS)
 
 ### nonce 보호
 
@@ -344,17 +346,10 @@ GOAUTHY_GEOBLOCK_COUNTRY_HEADER=X-Country
 
 ## 감사 로깅
 
-### 이벤트 유형
+GoAuthy는 두 가지 별도 로그 저장소를 사용합니다 (자세한 계약은 [events.md](events.md) 및 [event-emitter-matrix.md](event-emitter-matrix.md) 참조):
 
-| 이벤트 | 설명 |
-|--------|------|
-| login_success | 성공적인 로그인 |
-| login_failure | 실패한 로그인 |
-| password_change | 패스워드 변경 |
-| session_create | 세션 생성 |
-| session_revoke | 세션 무효화 |
-| ip_blacklisted | IP 블랙리스트 추가 |
-| mfa_enabled | MFA 활성화 |
+- **가명 감사 로그 (`internal/audit`, `GET /auth/v1/events`)**: API-key/master-key 등 보안 작업의 가명화(`ActorHash`/`TargetHash`) 감사 이력을 저장합니다.
+- **라이프사이클 이벤트 (`internal/eventlog`, `POST /auth/v1/events`)**: `InvalidLogins`, `IpBlacklisted`, `UserPasswordReset`, `UserEmailChange`, `ForcedLogout`, `UserLoginRevoke`, `SuspiciousApiScan`, `LoginNewLocation`, `CredentialStuffing`, `EmailSendError`, `JwksRotated`, `ScimTaskFailed`, `BackchannelLogoutFailed` 등 PascalCase 이벤트 유형을 기록합니다.
 
 ---
 
@@ -369,18 +364,16 @@ GOAUTHY_ARGON2_ITERATIONS=3
 GOAUTHY_ARGON2_PARALLELISM=2
 GOAUTHY_ARGON2_MAX_CONCURRENCY=2
 
-# 세션
-GOAUTHY_SESSION_IDLE_TIMEOUT=30m
+# 브라우저 세션 유휴 타임아웃 (허용 범위: 10s~4h)
+GOAUTHY_BROWSER_SESSION_IDLE_TIMEOUT=30m
 
-# Rate Limiting
-GOAUTHY_RATE_LIMIT_ENABLED=true
-
-# 보안 헤더
-GOAUTHY_HSTS_ENABLED=true
+# 직접 TLS (설정 시 GOAUTHY_ISSUER는 https:// 필수)
+GOAUTHY_TLS_CERT_FILE=/path/to/tls.crt
+GOAUTHY_TLS_KEY_FILE=/path/to/tls.key
 
 # Geo-blocking (선택)
 GOAUTHY_GEOBLOCK_ENABLED=true
-GOAUTHY_GEOBLOCK_MODE=allow
+GOAUTHY_GEOBLOCK_TYPE=allow
 GOAUTHY_GEOBLOCK_COUNTRIES=KR
 ```
 
@@ -392,9 +385,16 @@ GOAUTHY_ARGON2_MEMORY_KIB=19456
 GOAUTHY_ARGON2_ITERATIONS=2
 GOAUTHY_ARGON2_PARALLELISM=1
 
-# HTTPS 비활성화
-GOAUTHY_TLS_ENABLED=false
+# 직접 TLS 비활성화: GOAUTHY_TLS_CERT_FILE / GOAUTHY_TLS_KEY_FILE 미설정
 ```
+
+---
+
+## 위험 및 경계
+
+- **패스워드 만료 비활성화**: 현재 프로덕션 startup은 `GOAUTHY_PASSWORD_VALID_DAYS`를 `0`으로 고정하며 0이 아닌 값을 거절합니다.
+- **ForwardAuth audience 경계**: `forward_auth`는 보호 리소스별 `aud` 격리를 수행하지 않으며, 이는 프록시 클라이언트/그룹 정책으로 제어하는 의도된 계약입니다.
+- **이벤트 로그 상태**: `event_log`는 [capabilities.md](capabilities.md) 기준 **Preview** 상태이며, 해시 체인 검증 코드는 존재하나 프로덕션 append-chain 연결은 미완료입니다.
 
 ---
 
