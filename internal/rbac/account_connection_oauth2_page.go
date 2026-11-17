@@ -7,18 +7,20 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/saas"
 	"github.com/mrchypark/goauthy/internal/ui"
 )
 
 var oauth2CompletionPage = template.Must(template.Must(ui.NewTemplates("oauth2-complete")).Parse(`<!doctype html>
-<html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{if eq .Language "ko"}}연결 저장됨{{else}}Connection saved{{end}} · GoAuthy</title>{{template "goauthy-head" .BasePath}}<link rel="stylesheet" href="{{.CSS}}"></head>
+<html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{if eq .Language "ko"}}연결 저장됨{{else}}Connection saved{{end}} · {{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}}</title>{{template "goauthy-head" .BasePath}}<link rel="stylesheet" href="{{.CSS}}">{{if .Brand.ThemeURL}}<link rel="stylesheet" href="{{.BasePath}}{{.Brand.ThemeURL}}">{{end}}</head>
 <body><main id="oauth2-complete"><h1>{{if eq .Language "ko"}}연결 저장됨{{else}}Connection saved{{end}}</h1>{{$message := "Your connection was saved. Using this service requires separate explicit approval."}}{{if eq .Language "ko"}}{{$message = "연결이 저장되었습니다. 이 서비스를 사용하려면 별도의 명시적 승인이 필요합니다."}}{{end}}{{template "alert" (dict "Content" $message)}}<p>{{if eq .Language "ko"}}원래 탭으로 돌아가거나 계정으로 계속하세요.{{else}}Return to the original tab, or continue to your account.{{end}}</p><a id="oauth2-account-link" class="button" rel="noreferrer" href="{{.Account}}">{{if eq .Language "ko"}}계정으로 돌아가기{{else}}Return to account{{end}}</a></main></body></html>`))
 
 type oauth2CompletionPageData struct {
 	CSS, Account, Language string
 	BasePath               string
+	Brand                  branding.Brand
 }
 
 func wantsOAuth2CompletionPage(r *http.Request) bool {
@@ -35,7 +37,7 @@ func (h *Handler) renderOAuth2CompletionPage(w http.ResponseWriter, r *http.Requ
 	w.Header().Add("Vary", "Accept-Language")
 	w.Header().Add("Vary", "Cookie")
 	issuerURL, _ := url.Parse(h.issuer)
-	_ = oauth2CompletionPage.Execute(w, oauth2CompletionPageData{BasePath: strings.TrimRight(issuerURL.Path, "/"), CSS: h.issuer + "/account/account.css", Account: h.issuer + "/account", Language: language})
+	_ = oauth2CompletionPage.Execute(w, oauth2CompletionPageData{BasePath: strings.TrimRight(issuerURL.Path, "/"), CSS: h.issuer + "/account/account.css", Account: h.issuer + "/account", Language: language, Brand: h.resolveBrand(r.Context())})
 }
 
 func (h *Handler) writeOAuth2Completion(w http.ResponseWriter, r *http.Request, status saas.OAuth2ConnectionStatus) {

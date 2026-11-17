@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/mrchypark/goauthy/internal/branding"
 )
 
 func TestElyDevicePagePreservesNativeDecision(t *testing.T) {
@@ -27,6 +29,25 @@ func TestElyDevicePagePreservesNativeDecision(t *testing.T) {
 					t.Errorf("missing %s", want)
 				}
 			}
+		}
+	}
+}
+
+func TestDeviceVerificationPageCommonBrand(t *testing.T) {
+	var out bytes.Buffer
+	err := verificationPage.Execute(&out, verificationPageData{
+		BasePath: "/tenant",
+		Account:  "/tenant/account",
+		CSS:      "/tenant/auth/v1/theme/global.css",
+		Brand:    branding.Brand{Name: "Acme ID", LogoURL: "/auth/v1/clients/acme/logo?v=1", ThemeURL: "/auth/v1/theme/acme/2"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, want := range []string{`href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in %s", want, body)
 		}
 	}
 }

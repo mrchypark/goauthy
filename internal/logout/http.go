@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/go-jose/go-jose/v4"
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/oauth"
@@ -30,7 +31,7 @@ const (
 	logoutRequestPrefix   = "logout-"
 )
 
-var confirmationPage = template.Must(template.Must(ui.NewTemplates("logout-confirmation")).Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{template "goauthy-head" .BasePath}}<link rel="stylesheet" href="{{.BasePath}}/auth/v1/theme/global.css"><title>{{.SignOut}}</title></head><body class="auth-page"><header class="auth-brand"><span class="brand-symbol" aria-hidden="true"></span><span>GoAuthy</span></header><main class="auth-panel"><h1>{{.SignOut}}</h1><p>{{.ConfirmSignOut}}</p><form method="post" action="logout"><input type="hidden" name="confirmation" value="{{.Interaction}}">{{template "button" (dict "Type" "submit" "Label" .SignOut)}}</form><a class="auth-return" href="{{.BasePath}}/account">{{if eq .Language "ko"}}취소하고 내 계정으로{{else}}Cancel and return to my account{{end}}</a></main></body></html>`))
+var confirmationPage = template.Must(template.Must(ui.NewTemplates("logout-confirmation")).Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{template "goauthy-head" .BasePath}}<link rel="stylesheet" href="{{.BasePath}}/auth/v1/theme/global.css">{{if .Brand.ThemeURL}}<link rel="stylesheet" href="{{.BasePath}}{{.Brand.ThemeURL}}">{{end}}<title>{{.SignOut}}</title></head><body class="auth-page"><header class="auth-brand">{{if .Brand.LogoURL}}<img class="client-login-logo" src="{{.BasePath}}{{.Brand.LogoURL}}" alt="{{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}}">{{else}}<span class="brand-symbol" aria-hidden="true"></span><span>{{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}}</span>{{end}}</header><main class="auth-panel"><h1>{{.SignOut}}</h1><p>{{.ConfirmSignOut}}</p><form method="post" action="logout"><input type="hidden" name="confirmation" value="{{.Interaction}}">{{template "button" (dict "Type" "submit" "Label" .SignOut)}}</form><a class="auth-return" href="{{.BasePath}}/account">{{if eq .Language "ko"}}취소하고 내 계정으로{{else}}Cancel and return to my account{{end}}</a></main></body></html>`))
 
 var errLogoutUnavailable = errors.New("logout state unavailable")
 
@@ -45,6 +46,25 @@ type Handler struct {
 	clients       []Client
 	resolveClient ClientResolver
 	fedcmEnabled  bool
+	brand         func(context.Context) (branding.Brand, error)
+}
+
+// SetBrandResolver configures common branding for the logout confirmation page.
+func (h *Handler) SetBrandResolver(resolve func(context.Context) (branding.Brand, error)) {
+	h.brand = resolve
+}
+
+func (h *Handler) resolveBrand(ctx context.Context) branding.Brand {
+	brand := branding.Brand{Name: "GoAuthy"}
+	if h.brand != nil {
+		if resolved, err := h.brand(ctx); err == nil {
+			if strings.TrimSpace(resolved.Name) == "" {
+				resolved.Name = "GoAuthy"
+			}
+			return resolved
+		}
+	}
+	return brand
 }
 
 // ClientResolver returns the current registry view for a client ID. The
@@ -319,12 +339,13 @@ func (h *Handler) renderConfirmation(w http.ResponseWriter, r *http.Request, coo
 	messages := i18n.MessagesFor(i18n.UILanguageFromRequest(r))
 	localizedLogoutHTMLHeaders(w, messages.Language)
 	issuerURL, _ := url.Parse(h.issuer)
-	_ = confirmationPage.Execute(w, confirmationPageData{BasePath: strings.TrimRight(issuerURL.Path, "/"), Interaction: interaction.Token, Messages: messages})
+	_ = confirmationPage.Execute(w, confirmationPageData{BasePath: strings.TrimRight(issuerURL.Path, "/"), Interaction: interaction.Token, Brand: h.resolveBrand(r.Context()), Messages: messages})
 }
 
 type confirmationPageData struct {
 	BasePath    string
 	Interaction string
+	Brand       branding.Brand
 	i18n.Messages
 }
 
@@ -414,7 +435,7 @@ func logoutSecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'")
 	w.Header().Set("X-Frame-Options", "DENY")
 }
 

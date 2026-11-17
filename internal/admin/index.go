@@ -2,6 +2,7 @@
 package admin
 
 import (
+	"context"
 	"embed"
 	"errors"
 	"html/template"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/ui"
 )
 
@@ -37,6 +39,7 @@ type Handler struct {
 	browserAdmin BrowserAdministrator
 	routes       []Route
 	basePath     string
+	brand        func(context.Context) (branding.Brand, error)
 }
 
 // NewIndexHandler validates and copies the concrete links used by the index.
@@ -66,6 +69,11 @@ func (h *Handler) SetIssuer(issuer string) {
 	}
 }
 
+// SetBrandResolver configures common branding for unauthenticated access pages.
+func (h *Handler) SetBrandResolver(resolve func(context.Context) (branding.Brand, error)) {
+	h.brand = resolve
+}
+
 // Index serves GET /auth/v1/admin. Authentication is delegated only to the
 // existing browserAdministrator callback, which enforces the active
 // peer-bound session, same-origin request, and issuer-specific cookie.
@@ -93,7 +101,7 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 	}
 	if !h.browserAdmin(w, r, false) {
 		if wantsHTML(r) {
-			renderAccessPage(w, r, h.basePath)
+			renderAccessPage(w, r, h.basePath, resolveOptionalBrand(r.Context(), h.brand))
 		}
 		return
 	}

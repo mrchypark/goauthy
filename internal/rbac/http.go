@@ -18,6 +18,7 @@ import (
 
 	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/authcollection"
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/clients"
 	"github.com/mrchypark/goauthy/internal/device"
@@ -64,6 +65,25 @@ type Handler struct {
 	connectionUseResource       string
 	connectionUseAuthorizer     func(*http.Request) (string, string, func() (string, []any), error)
 	connectionHandoffAuthorizer func(*http.Request) (string, string, func() (string, []any), error)
+	brand                       func(context.Context) (branding.Brand, error)
+}
+
+// SetBrandResolver configures common branding for RBAC HTML pages.
+func (h *Handler) SetBrandResolver(resolve func(context.Context) (branding.Brand, error)) {
+	h.brand = resolve
+}
+
+func (h *Handler) resolveBrand(ctx context.Context) branding.Brand {
+	brand := branding.Brand{Name: "GoAuthy"}
+	if h.brand != nil {
+		if resolved, err := h.brand(ctx); err == nil {
+			if strings.TrimSpace(resolved.Name) == "" {
+				resolved.Name = "GoAuthy"
+			}
+			return resolved
+		}
+	}
+	return brand
 }
 
 func (h *Handler) BindConnectionUseResource(resource string) error {

@@ -27,6 +27,30 @@ func TestUICommonBrandEscapingAndIssuerPaths(t *testing.T) {
 	}
 }
 
+func TestAccessPageCommonBrand(t *testing.T) {
+	u, _ := NewUI(func(http.ResponseWriter, *http.Request, bool) bool { return false })
+	u.SetIssuer("https://id.example/tenant")
+	u.SetBrandResolver(func(context.Context) (branding.Brand, error) {
+		return branding.Brand{Name: "Acme ID", LogoURL: "/auth/v1/clients/acme/logo?v=1", ThemeURL: "/auth/v1/theme/acme/2"}, nil
+	})
+	req := httptest.NewRequest(http.MethodGet, "/auth/v1/admin/dashboard", nil)
+	req.Header.Set("Accept", "text/html")
+	w := httptest.NewRecorder()
+	u.ServeHTTP(w, req)
+	for _, want := range []string{`<title>Acme ID</title>`, `href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("missing %q in %s", want, w.Body.String())
+		}
+	}
+
+	wDefault := httptest.NewRecorder()
+	uDefault, _ := NewUI(func(http.ResponseWriter, *http.Request, bool) bool { return false })
+	uDefault.ServeHTTP(wDefault, req)
+	if !strings.Contains(wDefault.Body.String(), `<title>GoAuthy</title>`) || !strings.Contains(wDefault.Body.String(), `>GoAuthy</a>`) {
+		t.Fatalf("expected GoAuthy fallback in %s", wDefault.Body.String())
+	}
+}
+
 func TestUIServesSameOriginAssetsAndCSRFProvider(t *testing.T) {
 	h, err := NewUI(func(w http.ResponseWriter, _ *http.Request, mutation bool) bool {
 		if mutation {

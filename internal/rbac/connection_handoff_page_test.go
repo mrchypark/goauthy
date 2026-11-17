@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/saas"
 )
 
@@ -229,5 +230,35 @@ func TestElyConnectionHandoffKeepsNativeConsent(t *testing.T) {
 	}
 	if strings.Contains(body, "<script") || strings.Contains(body, "hx-") {
 		t.Fatal("script or enhanced submission added")
+	}
+}
+
+func TestRBACPagesCommonBrand(t *testing.T) {
+	var handoffOut bytes.Buffer
+	err := connectionHandoffPage.Execute(&handoffOut, connectionHandoffPageData{
+		BasePath: "/tenant",
+		Brand:    branding.Brand{Name: "Acme ID", ThemeURL: "/auth/v1/theme/acme/2"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`· Acme ID</title>`, `href="/tenant/auth/v1/theme/acme/2"`, `<p class="eyebrow">Acme ID · `} {
+		if !strings.Contains(handoffOut.String(), want) {
+			t.Fatalf("handoff missing %q in %s", want, handoffOut.String())
+		}
+	}
+
+	var oauth2Out bytes.Buffer
+	err = oauth2CompletionPage.Execute(&oauth2Out, oauth2CompletionPageData{
+		BasePath: "/tenant",
+		Brand:    branding.Brand{Name: "Acme ID", ThemeURL: "/auth/v1/theme/acme/2"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`· Acme ID</title>`, `href="/tenant/auth/v1/theme/acme/2"`} {
+		if !strings.Contains(oauth2Out.String(), want) {
+			t.Fatalf("oauth2 completion missing %q in %s", want, oauth2Out.String())
+		}
 	}
 }

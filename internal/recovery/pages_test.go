@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/mrchypark/goauthy/internal/branding"
 )
 
 func TestResetHTMLNavigationDoesNotReplaceAPIBinding(t *testing.T) {
@@ -84,10 +86,7 @@ func TestElyRecoveryControlsAndScripts(t *testing.T) {
 	for _, mode := range []string{"request", "register", "reset"} {
 		t.Run(mode, func(t *testing.T) {
 			var out strings.Builder
-			if err := recoveryPage.Execute(&out, struct {
-				Base, Mode, Language string
-				Blocked              bool
-			}{"/tenant", mode, "ko", false}); err != nil {
+			if err := recoveryPage.Execute(&out, recoveryPageData{Base: "/tenant", Mode: mode, Language: "ko"}); err != nil {
 				t.Fatal(err)
 			}
 			body := out.String()
@@ -110,5 +109,35 @@ func TestElyRecoveryControlsAndScripts(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRecoveryPagesAndRevokeCommonBrand(t *testing.T) {
+	var out strings.Builder
+	err := recoveryPage.Execute(&out, recoveryPageData{
+		Base:     "/tenant",
+		Mode:     "request",
+		Language: "en",
+		Brand:    branding.Brand{Name: "Acme ID", LogoURL: "/auth/v1/clients/acme/logo?v=1", ThemeURL: "/auth/v1/theme/acme/2"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	for _, want := range []string{`Account recovery · Acme ID`, `href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`, `<footer class="auth-footer"><span>Acme ID</span>`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in %s", want, body)
+		}
+	}
+
+	h := NewLoginRevokeHandlerWithBrand(nil, nil, func(context.Context) (branding.Brand, error) {
+		return branding.Brand{Name: "Acme ID", ThemeURL: "/auth/v1/theme/acme/2"}, nil
+	})
+	req := httptest.NewRequest(http.MethodGet, "/auth/v1/users/u1/revoke/c1?ip=192.0.2.1", nil)
+	req.RequestURI = "/tenant/auth/v1/users/u1/revoke/c1?ip=192.0.2.1"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if !strings.Contains(w.Body.String(), `href="/tenant/auth/v1/theme/acme/2"`) {
+		t.Fatalf("missing theme stylesheet in revoke page: %s", w.Body.String())
 	}
 }

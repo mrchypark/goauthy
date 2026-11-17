@@ -93,3 +93,51 @@ func TestClientLoginBrandingLeavesDirectLoginInstructions(t *testing.T) {
 		t.Fatalf("response=%d %s", w.Code, w.Body.String())
 	}
 }
+
+func TestContinuationPagesRenderBrandLogoAndTheme(t *testing.T) {
+	brand := LoginBranding{Name: "Acme ID", LogoURL: "/tenant/auth/v1/clients/acme/logo?v=1"}
+	themeURL := "/tenant/auth/v1/theme/acme/2"
+
+	for _, tc := range []struct {
+		name   string
+		render func(*strings.Builder) error
+	}{
+		{
+			name: "otpStepUpPage",
+			render: func(b *strings.Builder) error {
+				return otpStepUpPage.Execute(b, loginPageData{IssuerPath: "/tenant", ThemeURL: themeURL, Brand: brand})
+			},
+		},
+		{
+			name: "fedCMLandingPage",
+			render: func(b *strings.Builder) error {
+				return fedCMLandingPage.Execute(b, fedCMLandingPageData{IssuerPath: "/tenant", ThemeURL: themeURL, Brand: brand})
+			},
+		},
+		{
+			name: "fedCMSuccessPage",
+			render: func(b *strings.Builder) error {
+				return fedCMSuccessPage.Execute(b, fedCMSuccessPageData{IssuerPath: "/tenant", ThemeURL: themeURL, Brand: brand})
+			},
+		},
+		{
+			name: "profilePage",
+			render: func(b *strings.Builder) error {
+				return profilePage.Execute(b, profilePageData{IssuerPath: "/tenant", ThemeURL: themeURL, Brand: brand})
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out strings.Builder
+			if err := tc.render(&out); err != nil {
+				t.Fatal(err)
+			}
+			body := out.String()
+			for _, want := range []string{`href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("missing %q in %s", want, body)
+				}
+			}
+		})
+	}
+}

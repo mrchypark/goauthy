@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/saas"
@@ -26,6 +27,7 @@ type connectionHandoffPageData struct {
 	Action, CSS, CSRF, GrantExpiry, TicketExpiry, ReturnURI, Account, Message string
 	Language                                                                  string
 	BasePath                                                                  string
+	Brand                                                                     branding.Brand
 	Complete, Approved                                                        bool
 }
 
@@ -48,6 +50,7 @@ func (h *Handler) ConnectionHandoffPage(w http.ResponseWriter, r *http.Request) 
 		data.CSS = h.issuer + "/account/account.css"
 		data.Account = h.issuer + "/account"
 		data.Language = i18n.UILanguageFromRequest(r)
+		data.Brand = h.resolveBrand(r.Context())
 		if data.Language == "ko" {
 			switch data.Message {
 			case "This request is invalid. Return to the requesting app and start again.":

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/i18n"
 )
 
@@ -25,9 +26,36 @@ func TestElyLogoutConfirmationPreservesNativeForm(t *testing.T) {
 			if strings.Contains(body, "<script") || strings.Contains(body, "hx-") {
 				t.Fatal("script or enhanced submission added")
 			}
-			if w.Header().Get("Content-Security-Policy") != "default-src 'none'; style-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'" {
+			if w.Header().Get("Content-Security-Policy") != "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'" {
 				t.Fatal("logout CSP changed")
 			}
 		})
+	}
+}
+
+func TestLogoutConfirmationCommonBrand(t *testing.T) {
+	w := httptest.NewRecorder()
+	err := confirmationPage.Execute(w, confirmationPageData{
+		BasePath:    "/tenant",
+		Interaction: "tok",
+		Brand:       branding.Brand{Name: "Acme ID", LogoURL: "/auth/v1/clients/acme/logo?v=1", ThemeURL: "/auth/v1/theme/acme/2"},
+		Messages:    i18n.MessagesFor("en"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := w.Body.String()
+	for _, want := range []string{`href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in %s", want, body)
+		}
+	}
+
+	wDefault := httptest.NewRecorder()
+	if err := confirmationPage.Execute(wDefault, confirmationPageData{BasePath: "/tenant", Interaction: "tok", Messages: i18n.MessagesFor("en")}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(wDefault.Body.String(), `<span>GoAuthy</span>`) {
+		t.Fatalf("expected GoAuthy fallback in %s", wDefault.Body.String())
 	}
 }

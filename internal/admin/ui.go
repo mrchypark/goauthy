@@ -107,7 +107,7 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if !u.browserAdmin(w, authRequest, false) {
 		if htmlPage {
-			renderAccessPage(w, r, u.basePath)
+			renderAccessPage(w, r, u.basePath, resolveOptionalBrand(r.Context(), u.brand))
 		}
 		return
 	}
