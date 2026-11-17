@@ -147,4 +147,4 @@ localization coverage remain excluded. Swagger/API docs and email HTML are
 outside this frontend migration; local Demo A/B behavior was nevertheless
 tested as an integration consumer.
 
-No live IED or production check is part of this verification record.
+No live GKE or production check is part of this verification record.

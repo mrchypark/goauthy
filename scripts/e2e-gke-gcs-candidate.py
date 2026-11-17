@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""IED GCS qualification runner with --replicas {1,3} support.
+"""GKE GCS qualification runner with --replicas {1,3} support.
 
 Creates per-run K8s resources (Secret, ConfigMap, Service, StatefulSet) in
 namespace ternal-auth, runs client_credentials + introspect + JWKS flow,
@@ -38,7 +38,7 @@ from ternal_consumer_probe import TernalProbe
 # ── constants ────────────────────────────────────────────────────────────────
 NAMESPACE = "ternal-auth"
 SERVICE_ACCOUNT = "ternal-goauthy"
-BUCKET = "ternal-ied-602454948273"
+BUCKET = os.environ.get("GOAUTHY_QUAL_GCS_BUCKET", "goauthy-qual-gcs-bucket")
 ISSUER_PORT = 18092
 ISSUER = f"http://127.0.0.1:{ISSUER_PORT}"
 ALLOWED_RESOURCE = "https://api.example.test/v1"
@@ -49,7 +49,7 @@ POD_DELETE_READY_TIMEOUT_S = 120
 PORT_FORWARD_START_TIMEOUT_S = 10
 HTTP_TIMEOUT_S = 15
 
-_KUBECTL_CTX = ["--context", "gke_ied-cluster"]
+_KUBECTL_CTX = ["--context", os.environ.get("GOAUTHY_QUAL_KUBE_CONTEXT", "gke-qual-cluster")]
 _IMAGE_RE = re.compile(r"^ghcr\.io/mrchypark/ternal@sha256:[0-9a-f]{64}$")
 
 
@@ -622,7 +622,7 @@ def _introspect_and_jwks(
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="IED GCS qualification runner")
+    ap = argparse.ArgumentParser(description="GKE GCS qualification runner")
     ap.add_argument("--image", required=True, help="Immutable container image digest")
     ap.add_argument("--replicas", type=int, choices=[1, 3], default=1, help="Number of replicas (1=standalone, 3=HA)")
     ap.add_argument("--ternal-bin", default=None, help="Absolute path to ternal-api binary (requires --password-hasher)")
@@ -766,7 +766,7 @@ def _main(run_id: str, image: str, replicas: int, *, consumer: bool = False, ter
                     print(f"  deleted {kind}/{name} uid={uid[:12]}… FAIL({exc})")
                     cleanup_failed = True
         print(f"\nGCS prefix (parent cleanup): {prefix}")
-        print(f"Network isolation: UNQUALIFIED (IED policy enforcement disabled)")
+        print(f"Network isolation: UNQUALIFIED (cluster policy enforcement disabled)")
 
     try:
         ensure_port_free(ISSUER_PORT)
@@ -888,7 +888,7 @@ def _main(run_id: str, image: str, replicas: int, *, consumer: bool = False, ter
             print(f"  key continuity      : PROVEN (full JWKS unchanged after replacement)")
             print(f"  emptyDir loss       : PROVEN (pod uid changed)")
             print(f"  distinct nodes      : PROVEN ({', '.join(node_names)})")
-            print(f"  network isolation   : UNQUALIFIED (IED policy enforcement disabled)")
+            print(f"  network isolation   : UNQUALIFIED (cluster policy enforcement disabled)")
             if probe is not None:
                 print(f"  Retained Ternal consumer: PROVEN")
             print(f"  GCS prefix          : {prefix}")
@@ -971,7 +971,7 @@ def _main(run_id: str, image: str, replicas: int, *, consumer: bool = False, ter
             print(f"  token continuity : PROVEN")
             print(f"  key continuity   : PROVEN")
             print(f"  emptyDir loss    : PROVEN (pod uid changed)")
-            print(f"  network isolation: UNQUALIFIED (IED policy enforcement disabled)")
+            print(f"  network isolation: UNQUALIFIED (cluster policy enforcement disabled)")
             if probe is not None:
                 print(f"  Retained Ternal consumer: PROVEN")
             print(f"  GCS prefix       : {prefix}")
