@@ -816,6 +816,7 @@ func run() (err error) {
 	commonBrand := func(ctx context.Context) (branding.Brand, error) {
 		return themeStore.Brand(ctx, clientLogoStore, "")
 	}
+	adminHandler.SetBrandResolver(commonBrand)
 	adminUI.SetBrandResolver(commonBrand)
 	adminUI.SetCSRFTokenProvider(adminCSRFTokenProvider(issuer))
 	if emailTemplates, tplErr := recovery.LoadEmailTemplates(os.Getenv("GOAUTHY_EMAIL_TEMPLATES_FILE")); tplErr == nil {
@@ -825,6 +826,7 @@ func run() (err error) {
 	if err != nil {
 		return fmt.Errorf("configure RBAC handler: %w", err)
 	}
+	rbacHandler.SetBrandResolver(commonBrand)
 	if err := rbacHandler.SetUserValuesPolicy(userValuesPolicy); err != nil {
 		return fmt.Errorf("configure user values policy: %w", err)
 	}
@@ -987,6 +989,7 @@ func run() (err error) {
 	if err != nil {
 		return fmt.Errorf("configure device handler: %w", err)
 	}
+	deviceHandler.SetBrandResolver(commonBrand)
 	var loginHandler *login.Handler
 	if passkeyService != nil {
 		if len(trustedProxies) > 0 {
@@ -1038,7 +1041,15 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
-	loginHandler.SetThemeURLResolver(themeStore.StylesheetURL)
+	issuerURL, _ := url.Parse(issuer)
+	issuerBasePath := strings.TrimRight(issuerURL.Path, "/")
+	loginHandler.SetThemeURLResolver(func(ctx context.Context, id string) (string, error) {
+		stylesheet, err := themeStore.StylesheetURL(ctx, id)
+		if err != nil || stylesheet == "" || issuerBasePath == "" {
+			return stylesheet, err
+		}
+		return issuerBasePath + stylesheet, nil
+	})
 	loginHandler.SetLoginBrandingResolver(func(ctx context.Context, id string) (login.LoginBranding, error) {
 		var theme branding.Theme
 		var err error
@@ -1059,8 +1070,7 @@ func run() (err error) {
 			result.English, result.Korean = theme.Login.CopyFor("en"), theme.Login.CopyFor("ko")
 		}
 		if brand.LogoURL != "" {
-			issuerURL, _ := url.Parse(issuer)
-			result.LogoURL = strings.TrimRight(issuerURL.Path, "/") + brand.LogoURL
+			result.LogoURL = issuerBasePath + brand.LogoURL
 		}
 		return result, nil
 	})
@@ -1191,6 +1201,7 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
+	logoutHandler.SetBrandResolver(commonBrand)
 	fedcmRuntime, err := fedcmRuntimeFromEnv(os.Getenv, db, keyring, issuer, browserStore, identityStore)
 	if err != nil {
 		return err
@@ -1294,8 +1305,9 @@ func run() (err error) {
 	if otpHandler != nil {
 		handler.HandleFunc("POST /auth/v1/users/otp/verify", loginHandler.OTPVerify)
 	}
-	handler.Handle("GET /auth/v1/users/{subject}/revoke/{code}", recovery.NewLoginRevokeHandler(identityStore, keyring, locationLookup))
+	handler.Handle("GET /auth/v1/users/{subject}/revoke/{code}", recovery.NewLoginRevokeHandlerWithBrand(identityStore, keyring, commonBrand, locationLookup))
 	if recoveryService != nil {
+		recoveryService.SetBrandResolver(commonBrand)
 		handler.HandleFunc("GET /auth/v1/users/password_reset", recoveryService.Page)
 		handler.HandleFunc("GET /auth/v1/users/recovery.js", recoveryService.PageScript)
 		handler.HandleFunc("POST /auth/v1/users/request_reset", recoveryService.RequestReset)

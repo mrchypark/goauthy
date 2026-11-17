@@ -10,7 +10,7 @@ data:
   # Issuer URLs - overridden at runtime via port-forward
   issuer-ha3: http://127.0.0.1:18091
   issuer-s1: http://127.0.0.1:18092
-  # GCS object store - bucket from existing ternal IED config
+  # GCS object store - bucket from qualification config
   gcs-bucket: GOAUTHY_QUAL_GCS_BUCKET
   # Prefixes are generated per-run UUID by the harness script.
   # The script patches this ConfigMap before apply.

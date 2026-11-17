@@ -1,19 +1,19 @@
-# IED storage qualification — 2026-09-07
+# GKE storage qualification — 2026-09-07
 
 Storage-only checkpoint, not application activation or real-user qualification.
 
-- Created dedicated GCS bucket `ternal-ied-602454948273` in `ASIA-NORTHEAST3`.
+- Created dedicated GCS bucket `goauthy-qual-gcs-bucket` in `ASIA-NORTHEAST3`.
 - Uniform bucket-level access enabled; public access prevention enforced.
 - Separate managed folders `goauthy/` and `ternal/` grant Object User only to
   their respective Kubernetes workload identities (`ternal-auth/ternal-goauthy`
   and `ternal/ternal`). No service-account JSON or static cloud credential was
   created. Existing buckets and providers were not reused.
-- On IED, the GoAuthy identity created, read, listed and deleted its own fixture;
+- On GKE, the GoAuthy identity created, read, listed and deleted its own fixture;
   reading a known fixture in the Ternal folder returned an explicit 403.
   Folder-scoped `gcloud storage ls` requires a trailing `/**`; an initial
   directory-style request attempted bucket-level listing and was denied.
   Bucket-wide permissions were not added to work around that denial.
-- A Linux/amd64 GoAuthy storage test binary ran in an IED Pod using `emptyDir`
+- A Linux/amd64 GoAuthy storage test binary ran in a GKE Pod using `emptyDir`
   and Workload Identity against native GCS. The writer exited without Rhiza
   Close, then a fresh process/data directory recovered the account and the
   original signing key. Correct-password acceptance, wrong-password rejection,
@@ -23,7 +23,7 @@ Storage-only checkpoint, not application activation or real-user qualification.
 - Local standalone MinIO/S3 transport recovery also passed. The current full
   storage suite passed after updating the schema-v69 test's expected full
   schema to include the v73 `verifier_envelope` column.
-- Removed the two IED probe Pods, uploaded test binary, both probe objects and
+- Removed the two GKE probe Pods, uploaded test binary, both probe objects and
   the exact recovery-test object prefix. No Pod or PVC remains in `ternal-auth`.
   The bucket, managed-folder IAM, namespace and service account remain for the
   requested deployment. Cloud soft-delete retention may retain deleted object

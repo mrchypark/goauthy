@@ -1,5 +1,5 @@
 #!/bin/sh
-# Disposable real S3 transport test, not an IED persistence qualification.
+# Disposable real S3 transport test, not a GKE persistence qualification.
 set -eu
 umask 077
 root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)

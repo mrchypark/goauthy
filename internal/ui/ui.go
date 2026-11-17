@@ -24,8 +24,9 @@ var stylesheets = []string{
 	"app.css", "ely-controls.css", "ely-patterns.css", "brand.css",
 }
 
-// NewTemplates loads the actual Ely components and a CSS-only goauthy-head.
-// Invoke the head with an issuer path (or ""); add page templates with Parse.
+// NewTemplates loads the actual Ely components, a CSS-only goauthy-head, and the
+// shared goauthy-brand header lockup. Pass Base="" to goauthy-brand when LogoURL
+// is already issuer-prefixed; otherwise pass the issuer base path.
 // Keep custom brand stylesheets after the head. Scripts remain page-owned.
 func NewTemplates(name string) (*template.Template, error) {
 	t, err := ely.NewTemplates()
@@ -36,7 +37,7 @@ func NewTemplates(name string) (*template.Template, error) {
 		"uiStylesheets": func() []string { return stylesheets },
 		"uiAssetBase":   assetBase,
 	}).Parse(`{{define "goauthy-head"}}{{$base := uiAssetBase .}}{{range uiStylesheets}}<link rel="stylesheet" href="{{$base}}{{.}}">
-{{end}}{{end}}`)
+{{end}}{{end}}{{define "goauthy-brand"}}{{$name := "GoAuthy"}}{{if .Name}}{{$name = .Name}}{{end}}{{if .LogoURL}}<img class="client-login-logo" src="{{.Base}}{{.LogoURL}}" alt="{{$name}}">{{else}}<span class="brand-symbol" aria-hidden="true"></span><span>{{$name}}</span>{{end}}{{end}}`)
 }
 
 func assetBase(prefix string) (string, error) {

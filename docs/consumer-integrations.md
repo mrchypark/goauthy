@@ -42,7 +42,7 @@ root는 새 이미지 scan JSON과 인증/메일 회귀 검사를 확인했다. 
 별도 GCS prefix의 old→candidate→emptyDir replay, token introspection/JWKS
 연속성 검증 후 기존 설정/비밀/storage를 유지한 image-only 교체와 Ready를
 보고했다. 실제 Chrome RP 로그인·관리자 session·logout도 통과했다고 보고했다.
-이는 담당의 운영 검증 보고이며 GoAuthy root가 직접 IED를 변경한 것은 아니다.
+이는 담당의 운영 검증 보고이며 GoAuthy root가 직접 GKE 클러스터를 변경한 것은 아니다.
 기존 schema 버전을 추정하거나 일반적인 downgrade 호환을 보장하지 않는다.
 
 | 소비자 | 완료한 실제 검증 | 아직 열린 수용 검사 |
@@ -58,7 +58,7 @@ JWKS/nonce/subject→UserInfo→revoke/401까지 standalone 재시작 전후 통
 이는 실제 소비자 RP의 웹 세션 테스트와 구분한다. Ternal 후보는
 [소스·이미지 identity](ternal-candidate-20260907.md)가 확정됐지만 arm64 Dory의
 amd64 실행 probe가 앱 시작 전 exec format error로 끝나 amd64 runner가 필요하다.
-후보 게시·IED 배포·host session 복구는 이 검증에서 수행하지 않았다.
+후보 게시·GKE 배포·host session 복구는 이 검증에서 수행하지 않았다.
 이 문단은 최초 로컬 후보 검사 이력이다. 이후 보안 후보의 담당 측 amd64
 실행·배포·웹 RP 검증 보고는 위 최신 요약을 따른다. host session 복구는
 여전히 확인되지 않았다.

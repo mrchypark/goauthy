@@ -196,7 +196,7 @@ for page in dashboard users clients roles groups api-keys scopes attributes coll
 	grep -q "href=\"/auth/v1/admin/$page\"" "$admin_body" || { echo "dashboard missing $page navigation" >&2; exit 1; }
 done
 [ "$(header_value Cache-Control "$admin_headers")" = no-store ] || exit 1
-[ "$(header_value Content-Security-Policy "$admin_headers")" = "default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" ] || exit 1
+[ "$(header_value Content-Security-Policy "$admin_headers")" = "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" ] || exit 1
 [ "$(header_value X-Frame-Options "$admin_headers")" = DENY ] || exit 1
 [ "$(header_value X-Content-Type-Options "$admin_headers")" = nosniff ] || exit 1
 [ "$(header_value Content-Type "$admin_headers")" = 'text/html; charset=utf-8' ] || exit 1
