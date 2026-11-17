@@ -44,19 +44,6 @@ func (s *Service) SetBrandResolver(resolve func(context.Context) (branding.Brand
 	s.brand = resolve
 }
 
-func resolveBrand(ctx context.Context, resolve func(context.Context) (branding.Brand, error)) branding.Brand {
-	brand := branding.Brand{Name: "GoAuthy"}
-	if resolve != nil {
-		if resolved, err := resolve(ctx); err == nil {
-			if strings.TrimSpace(resolved.Name) == "" {
-				resolved.Name = "GoAuthy"
-			}
-			return resolved
-		}
-	}
-	return brand
-}
-
 type recoveryPageData struct {
 	Base, Mode, Language string
 	Blocked              bool
@@ -72,5 +59,5 @@ func (s *Service) renderPage(w http.ResponseWriter, r *http.Request, mode string
 	w.Header().Add("Vary", "Cookie")
 	issuer, _ := url.Parse(s.issuer)
 	blocked := mode == "register" && s.captcha != nil && s.captcha.SiteKey() != ""
-	_ = recoveryPage.Execute(w, recoveryPageData{strings.TrimRight(issuer.Path, "/"), mode, i18n.UILanguageFromRequest(r), blocked, resolveBrand(r.Context(), s.brand)})
+	_ = recoveryPage.Execute(w, recoveryPageData{strings.TrimRight(issuer.Path, "/"), mode, i18n.UILanguageFromRequest(r), blocked, branding.ResolveOptional(r.Context(), s.brand)})
 }

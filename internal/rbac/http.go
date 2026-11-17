@@ -73,19 +73,6 @@ func (h *Handler) SetBrandResolver(resolve func(context.Context) (branding.Brand
 	h.brand = resolve
 }
 
-func (h *Handler) resolveBrand(ctx context.Context) branding.Brand {
-	brand := branding.Brand{Name: "GoAuthy"}
-	if h.brand != nil {
-		if resolved, err := h.brand(ctx); err == nil {
-			if strings.TrimSpace(resolved.Name) == "" {
-				resolved.Name = "GoAuthy"
-			}
-			return resolved
-		}
-	}
-	return brand
-}
-
 func (h *Handler) BindConnectionUseResource(resource string) error {
 	if h == nil {
 		return errors.New("RBAC handler required")

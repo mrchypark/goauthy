@@ -101,7 +101,7 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 	}
 	if !h.browserAdmin(w, r, false) {
 		if wantsHTML(r) {
-			renderAccessPage(w, r, h.basePath, resolveOptionalBrand(r.Context(), h.brand))
+			renderAccessPage(w, r, h.basePath, branding.ResolveOptional(r.Context(), h.brand))
 		}
 		return
 	}
@@ -110,7 +110,7 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) headers(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

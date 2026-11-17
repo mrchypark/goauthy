@@ -1041,7 +1041,15 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
-	loginHandler.SetThemeURLResolver(themeStore.StylesheetURL)
+	issuerURL, _ := url.Parse(issuer)
+	issuerBasePath := strings.TrimRight(issuerURL.Path, "/")
+	loginHandler.SetThemeURLResolver(func(ctx context.Context, id string) (string, error) {
+		stylesheet, err := themeStore.StylesheetURL(ctx, id)
+		if err != nil || stylesheet == "" || issuerBasePath == "" {
+			return stylesheet, err
+		}
+		return issuerBasePath + stylesheet, nil
+	})
 	loginHandler.SetLoginBrandingResolver(func(ctx context.Context, id string) (login.LoginBranding, error) {
 		var theme branding.Theme
 		var err error
@@ -1062,8 +1070,7 @@ func run() (err error) {
 			result.English, result.Korean = theme.Login.CopyFor("en"), theme.Login.CopyFor("ko")
 		}
 		if brand.LogoURL != "" {
-			issuerURL, _ := url.Parse(issuer)
-			result.LogoURL = strings.TrimRight(issuerURL.Path, "/") + brand.LogoURL
+			result.LogoURL = issuerBasePath + brand.LogoURL
 		}
 		return result, nil
 	})

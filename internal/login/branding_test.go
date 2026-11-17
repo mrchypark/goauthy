@@ -140,4 +140,26 @@ func TestContinuationPagesRenderBrandLogoAndTheme(t *testing.T) {
 			}
 		})
 	}
+
+	h := testHandler(t)
+	h.issuer = "https://id.example/tenant"
+	h.fedcmEnabled = true
+	h.SetThemeURLResolver(func(context.Context, string) (string, error) {
+		return "/tenant/auth/v1/theme/acme/2", nil
+	})
+	h.SetLoginBrandingResolver(func(context.Context, string) (LoginBranding, error) {
+		return LoginBranding{Name: "Acme ID", LogoURL: "/tenant/auth/v1/clients/acme/logo?v=1"}, nil
+	})
+	r := httptest.NewRequest(http.MethodGet, "/tenant/auth/fedcm/login", nil)
+	r.RemoteAddr = "198.51.100.14:1234"
+	w := httptest.NewRecorder()
+	h.FedCMLanding(w, r)
+	if w.Code != http.StatusOK || !strings.Contains(w.Header().Get("Content-Security-Policy"), "img-src 'self'") {
+		t.Fatalf("status=%d csp=%q", w.Code, w.Header().Get("Content-Security-Policy"))
+	}
+	for _, want := range []string{`href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("fedcm missing %q in %s", want, w.Body.String())
+		}
+	}
 }

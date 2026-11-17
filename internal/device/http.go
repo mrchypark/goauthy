@@ -41,7 +41,7 @@ const (
 	defaultVerificationLimit = 20
 )
 
-var verificationPage = template.Must(template.Must(ui.NewTemplates("device-verification")).Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{if eq .Language "ko"}}기기 확인{{else}}Device verification{{end}}</title>{{template "goauthy-head" .BasePath}}<link rel="stylesheet" href="{{.CSS}}">{{if .Brand.ThemeURL}}<link rel="stylesheet" href="{{.BasePath}}{{.Brand.ThemeURL}}">{{end}}</head><body class="auth-page"><header><a class="auth-brand" href="{{.Account}}">{{if .Brand.LogoURL}}<img class="client-login-logo" src="{{.BasePath}}{{.Brand.LogoURL}}" alt="{{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}}">{{else}}<span class="brand-symbol" aria-hidden="true"></span>{{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}}{{end}}</a></header><main class="auth-panel"><p class="auth-eyebrow">{{if eq .Language "ko"}}기기 접근{{else}}Device access{{end}}</p><h1>{{if eq .Language "ko"}}기기 확인{{else}}Device verification{{end}}</h1>
+var verificationPage = template.Must(template.Must(ui.NewTemplates("device-verification")).Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{if eq .Language "ko"}}기기 확인{{else}}Device verification{{end}}</title>{{template "goauthy-head" .BasePath}}<link rel="stylesheet" href="{{.CSS}}">{{if .Brand.ThemeURL}}<link rel="stylesheet" href="{{.BasePath}}{{.Brand.ThemeURL}}">{{end}}</head><body class="auth-page"><header><a class="auth-brand" href="{{.Account}}">{{template "goauthy-brand" (dict "Base" .BasePath "LogoURL" .Brand.LogoURL "Name" .Brand.Name)}}</a></header><main class="auth-panel"><p class="auth-eyebrow">{{if eq .Language "ko"}}기기 접근{{else}}Device access{{end}}</p><h1>{{if eq .Language "ko"}}기기 확인{{else}}Device verification{{end}}</h1>
 {{if .Message}}<p class="auth-error" role="alert">{{.Message}}</p>{{end}}
 {{if .Complete}}<p><a id="device-account-link" class="button" href="{{.Account}}">{{if eq .Language "ko"}}계정으로 돌아가기{{else}}Return to account{{end}}</a></p>
 {{else if .Review}}<p>{{if eq .Language "ko"}}직접 시작했고 코드가 기기의 코드와 일치할 때만 승인하세요. 로그인만으로는 접근 권한이 부여되지 않습니다.{{else}}Only approve if you started this request and the code matches your device. Signing in has not granted access.{{end}}</p><dl class="connection-key-settings"><dt>{{if eq .Language "ko"}}요청 앱(클라이언트 ID){{else}}Requesting app (client ID){{end}}</dt><dd id="device-client">{{.Review.ClientID}}</dd>{{if .Review.Resource}}<dt>{{if eq .Language "ko"}}접근 권한을 받는 리소스{{else}}Resource receiving access{{end}}</dt><dd>{{.Review.Resource}}</dd>{{end}}</dl><h2>{{if eq .Language "ko"}}요청된 권한{{else}}Requested permissions{{end}}</h2><ul id="device-scopes">{{range .Review.Scopes}}<li>{{.}}</li>{{else}}<li>{{if eq .Language "ko"}}이름이 지정된 권한이 없습니다{{else}}No named permissions requested{{end}}</li>{{end}}</ul>
@@ -98,19 +98,6 @@ type Handler struct {
 // SetBrandResolver configures common branding for the device verification page.
 func (h *Handler) SetBrandResolver(resolve func(context.Context) (branding.Brand, error)) {
 	h.brand = resolve
-}
-
-func (h *Handler) resolveBrand(ctx context.Context) branding.Brand {
-	brand := branding.Brand{Name: "GoAuthy"}
-	if h.brand != nil {
-		if resolved, err := h.brand(ctx); err == nil {
-			if strings.TrimSpace(resolved.Name) == "" {
-				resolved.Name = "GoAuthy"
-			}
-			return resolved
-		}
-	}
-	return brand
 }
 
 // SetReauthentication configures the same-subject MFA login continuation.
@@ -239,7 +226,7 @@ func (h *Handler) verifyPage(w http.ResponseWriter, r *http.Request) {
 	}
 	subject := approver.Session.Subject
 	mfa := approver.Session.AuthenticationMethod == "mfa"
-	data := verificationPageData{BasePath: strings.TrimRight(h.issuer.Path, "/"), CSS: h.endpoint("/auth/v1/theme/global.css"), Language: i18n.UILanguageFromRequest(r), Account: h.endpoint("/account"), Brand: h.resolveBrand(r.Context())}
+	data := verificationPageData{BasePath: strings.TrimRight(h.issuer.Path, "/"), CSS: h.endpoint("/auth/v1/theme/global.css"), Language: i18n.UILanguageFromRequest(r), Account: h.endpoint("/account"), Brand: branding.ResolveOptional(r.Context(), h.brand)}
 	render := func(status int) {
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -354,7 +341,7 @@ func (h *Handler) verifyDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	// One-use cookie reduces accidental repeated approval from a browser back button.
 	http.SetCookie(w, &http.Cookie{Name: h.csrfCookieName(), Value: "", Path: "/", HttpOnly: true, Secure: h.issuer.Scheme == "https", SameSite: http.SameSiteLaxMode, MaxAge: -1})
-	data := verificationPageData{BasePath: strings.TrimRight(h.issuer.Path, "/"), CSS: h.endpoint("/auth/v1/theme/global.css"), Language: i18n.UILanguageFromRequest(r), Account: h.endpoint("/account"), Brand: h.resolveBrand(r.Context()), Message: message, Complete: true}
+	data := verificationPageData{BasePath: strings.TrimRight(h.issuer.Path, "/"), CSS: h.endpoint("/auth/v1/theme/global.css"), Language: i18n.UILanguageFromRequest(r), Account: h.endpoint("/account"), Brand: branding.ResolveOptional(r.Context(), h.brand), Message: message, Complete: true}
 	if data.Language == "ko" {
 		data.Message = "기기가 승인되었습니다."
 		if action == "deny" {

@@ -46,8 +46,27 @@ func TestAccessPageCommonBrand(t *testing.T) {
 	wDefault := httptest.NewRecorder()
 	uDefault, _ := NewUI(func(http.ResponseWriter, *http.Request, bool) bool { return false })
 	uDefault.ServeHTTP(wDefault, req)
-	if !strings.Contains(wDefault.Body.String(), `<title>GoAuthy</title>`) || !strings.Contains(wDefault.Body.String(), `>GoAuthy</a>`) {
+	if !strings.Contains(wDefault.Body.String(), `<title>GoAuthy</title>`) || !strings.Contains(wDefault.Body.String(), `<span>GoAuthy</span></a>`) {
 		t.Fatalf("expected GoAuthy fallback in %s", wDefault.Body.String())
+	}
+
+	idx, err := NewIndexHandler(func(http.ResponseWriter, *http.Request, bool) bool { return false })
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx.SetIssuer("https://id.example/tenant")
+	idx.SetBrandResolver(func(context.Context) (branding.Brand, error) {
+		return branding.Brand{Name: "Acme ID", LogoURL: "/auth/v1/clients/acme/logo?v=1", ThemeURL: "/auth/v1/theme/acme/2"}, nil
+	})
+	idxW := httptest.NewRecorder()
+	idx.Index(idxW, req)
+	if !strings.Contains(idxW.Header().Get("Content-Security-Policy"), "img-src 'self'") {
+		t.Fatalf("missing img-src 'self' in index CSP: %q", idxW.Header().Get("Content-Security-Policy"))
+	}
+	for _, want := range []string{`<title>Acme ID</title>`, `href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`} {
+		if !strings.Contains(idxW.Body.String(), want) {
+			t.Fatalf("index missing %q in %s", want, idxW.Body.String())
+		}
 	}
 }
 

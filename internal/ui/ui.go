@@ -36,7 +36,7 @@ func NewTemplates(name string) (*template.Template, error) {
 		"uiStylesheets": func() []string { return stylesheets },
 		"uiAssetBase":   assetBase,
 	}).Parse(`{{define "goauthy-head"}}{{$base := uiAssetBase .}}{{range uiStylesheets}}<link rel="stylesheet" href="{{$base}}{{.}}">
-{{end}}{{end}}`)
+{{end}}{{end}}{{define "goauthy-brand"}}{{$name := "GoAuthy"}}{{if .Name}}{{$name = .Name}}{{end}}{{if .LogoURL}}<img class="client-login-logo" src="{{.Base}}{{.LogoURL}}" alt="{{$name}}">{{else}}<span class="brand-symbol" aria-hidden="true"></span><span>{{$name}}</span>{{end}}{{end}}`)
 }
 
 func assetBase(prefix string) (string, error) {

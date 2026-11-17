@@ -1,6 +1,7 @@
 package logout
 
 import (
+	"context"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -34,11 +35,16 @@ func TestElyLogoutConfirmationPreservesNativeForm(t *testing.T) {
 }
 
 func TestLogoutConfirmationCommonBrand(t *testing.T) {
+	h := &Handler{issuer: "https://id.example/tenant"}
+	h.SetBrandResolver(func(context.Context) (branding.Brand, error) {
+		return branding.Brand{Name: "Acme ID", LogoURL: "/auth/v1/clients/acme/logo?v=1", ThemeURL: "/auth/v1/theme/acme/2"}, nil
+	})
 	w := httptest.NewRecorder()
+	logoutSecurityHeaders(w)
 	err := confirmationPage.Execute(w, confirmationPageData{
 		BasePath:    "/tenant",
 		Interaction: "tok",
-		Brand:       branding.Brand{Name: "Acme ID", LogoURL: "/auth/v1/clients/acme/logo?v=1", ThemeURL: "/auth/v1/theme/acme/2"},
+		Brand:       branding.ResolveOptional(context.Background(), h.brand),
 		Messages:    i18n.MessagesFor("en"),
 	})
 	if err != nil {

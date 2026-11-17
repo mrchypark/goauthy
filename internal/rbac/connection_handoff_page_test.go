@@ -2,6 +2,7 @@ package rbac
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -234,31 +235,25 @@ func TestElyConnectionHandoffKeepsNativeConsent(t *testing.T) {
 }
 
 func TestRBACPagesCommonBrand(t *testing.T) {
-	var handoffOut bytes.Buffer
-	err := connectionHandoffPage.Execute(&handoffOut, connectionHandoffPageData{
-		BasePath: "/tenant",
-		Brand:    branding.Brand{Name: "Acme ID", ThemeURL: "/auth/v1/theme/acme/2"},
+	h := &Handler{issuer: "https://issuer.example.test/tenant"}
+	h.SetBrandResolver(func(context.Context) (branding.Brand, error) {
+		return branding.Brand{Name: "Acme ID", ThemeURL: "/auth/v1/theme/acme/2"}, nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	handoffReq := httptest.NewRequest(http.MethodGet, "/tenant/account/connection-handoffs/missing", nil)
+	handoffW := httptest.NewRecorder()
+	h.ConnectionHandoffPage(handoffW, handoffReq)
 	for _, want := range []string{`· Acme ID</title>`, `href="/tenant/auth/v1/theme/acme/2"`, `<p class="eyebrow">Acme ID · `} {
-		if !strings.Contains(handoffOut.String(), want) {
-			t.Fatalf("handoff missing %q in %s", want, handoffOut.String())
+		if !strings.Contains(handoffW.Body.String(), want) {
+			t.Fatalf("handoff missing %q in %s", want, handoffW.Body.String())
 		}
 	}
 
-	var oauth2Out bytes.Buffer
-	err = oauth2CompletionPage.Execute(&oauth2Out, oauth2CompletionPageData{
-		BasePath: "/tenant",
-		Brand:    branding.Brand{Name: "Acme ID", ThemeURL: "/auth/v1/theme/acme/2"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{`· Acme ID</title>`, `href="/tenant/auth/v1/theme/acme/2"`} {
-		if !strings.Contains(oauth2Out.String(), want) {
-			t.Fatalf("oauth2 completion missing %q in %s", want, oauth2Out.String())
+	oauth2Req := httptest.NewRequest(http.MethodGet, "/tenant/account/connections/oauth2/complete", nil)
+	oauth2W := httptest.NewRecorder()
+	h.renderOAuth2CompletionPage(oauth2W, oauth2Req)
+	for _, want := range []string{`· Acme ID</title>`, `<p class="eyebrow">Acme ID</p>`, `href="/tenant/auth/v1/theme/acme/2"`} {
+		if !strings.Contains(oauth2W.Body.String(), want) {
+			t.Fatalf("oauth2 completion missing %q in %s", want, oauth2W.Body.String())
 		}
 	}
 }

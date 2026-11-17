@@ -113,31 +113,32 @@ func TestElyRecoveryControlsAndScripts(t *testing.T) {
 }
 
 func TestRecoveryPagesAndRevokeCommonBrand(t *testing.T) {
-	var out strings.Builder
-	err := recoveryPage.Execute(&out, recoveryPageData{
-		Base:     "/tenant",
-		Mode:     "request",
-		Language: "en",
-		Brand:    branding.Brand{Name: "Acme ID", LogoURL: "/auth/v1/clients/acme/logo?v=1", ThemeURL: "/auth/v1/theme/acme/2"},
+	s := &Service{issuer: "https://id.example/tenant"}
+	s.SetBrandResolver(func(context.Context) (branding.Brand, error) {
+		return branding.Brand{Name: "Acme ID", LogoURL: "/auth/v1/clients/acme/logo?v=1", ThemeURL: "/auth/v1/theme/acme/2"}, nil
 	})
-	if err != nil {
-		t.Fatal(err)
+	pageReq := httptest.NewRequest(http.MethodGet, "/auth/v1/users/password_reset", nil)
+	pageW := httptest.NewRecorder()
+	s.Page(pageW, pageReq)
+	if !strings.Contains(pageW.Header().Get("Content-Security-Policy"), "img-src 'self'") {
+		t.Fatalf("missing img-src 'self' in recovery CSP: %q", pageW.Header().Get("Content-Security-Policy"))
 	}
-	body := out.String()
 	for _, want := range []string{`Account recovery · Acme ID`, `href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`, `<footer class="auth-footer"><span>Acme ID</span>`} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("missing %q in %s", want, body)
+		if !strings.Contains(pageW.Body.String(), want) {
+			t.Fatalf("missing %q in %s", want, pageW.Body.String())
 		}
 	}
 
 	h := NewLoginRevokeHandlerWithBrand(nil, nil, func(context.Context) (branding.Brand, error) {
-		return branding.Brand{Name: "Acme ID", ThemeURL: "/auth/v1/theme/acme/2"}, nil
+		return branding.Brand{Name: "Acme ID", LogoURL: "/auth/v1/clients/acme/logo?v=1", ThemeURL: "/auth/v1/theme/acme/2"}, nil
 	})
 	req := httptest.NewRequest(http.MethodGet, "/auth/v1/users/u1/revoke/c1?ip=192.0.2.1", nil)
 	req.RequestURI = "/tenant/auth/v1/users/u1/revoke/c1?ip=192.0.2.1"
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
-	if !strings.Contains(w.Body.String(), `href="/tenant/auth/v1/theme/acme/2"`) {
-		t.Fatalf("missing theme stylesheet in revoke page: %s", w.Body.String())
+	for _, want := range []string{`href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("missing %q in revoke page: %s", want, w.Body.String())
+		}
 	}
 }

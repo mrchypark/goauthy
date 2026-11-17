@@ -107,7 +107,7 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if !u.browserAdmin(w, authRequest, false) {
 		if htmlPage {
-			renderAccessPage(w, r, u.basePath, resolveOptionalBrand(r.Context(), u.brand))
+			renderAccessPage(w, r, u.basePath, branding.ResolveOptional(r.Context(), u.brand))
 		}
 		return
 	}
@@ -150,6 +150,9 @@ func (u *UI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			http.Error(w, "Brand unavailable", http.StatusServiceUnavailable)
 			return
+		}
+		if strings.TrimSpace(brand.Name) == "" {
+			brand.Name = "GoAuthy"
 		}
 	}
 	language := i18n.UILanguageFromRequest(r)

@@ -16,11 +16,11 @@ import (
 	"github.com/mrchypark/goauthy/internal/ui"
 )
 
-var loginRevokePage = template.Must(template.Must(ui.NewTemplates("login-revoke")).Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>{{.Title}}</title>{{template "goauthy-head" .BasePath}}<link rel="stylesheet" href="{{.BasePath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.BasePath}}{{.ThemeURL}}">{{end}}</head><body class="auth-page"><main class="auth-panel"><h1>{{.Title}}</h1>{{template "alert" (dict "Content" .Description)}}{{if .Warning}}<p>{{.Warning}}</p>{{end}}</main></body></html>`))
+var loginRevokePage = template.Must(template.Must(ui.NewTemplates("login-revoke")).Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer"><title>{{.Title}}</title>{{template "goauthy-head" .BasePath}}<link rel="stylesheet" href="{{.BasePath}}/auth/v1/theme/global.css">{{if .Brand.ThemeURL}}<link rel="stylesheet" href="{{.BasePath}}{{.Brand.ThemeURL}}">{{end}}</head><body class="auth-page"><header class="auth-brand">{{template "goauthy-brand" (dict "Base" .BasePath "LogoURL" .Brand.LogoURL "Name" .Brand.Name)}}</header><main class="auth-panel"><h1>{{.Title}}</h1>{{template "alert" (dict "Content" .Description)}}{{if .Warning}}<p>{{.Warning}}</p>{{end}}</main></body></html>`))
 
 type loginRevokePageData struct {
 	BasePath    string
-	ThemeURL    string
+	Brand       branding.Brand
 	Language    string
 	Title       string
 	Description string
@@ -33,7 +33,7 @@ func NewLoginRevokeHandler(identities *identity.Store, keyring *oidc.Keyring, lo
 }
 
 // NewLoginRevokeHandlerWithBrand serves the public unknown-login revocation link with optional common branding.
-func NewLoginRevokeHandlerWithBrand(identities *identity.Store, keyring *oidc.Keyring, brand func(context.Context) (branding.Brand, error), lookups ...func(netip.Addr) (*string, error)) http.Handler {
+func NewLoginRevokeHandlerWithBrand(identities *identity.Store, keyring *oidc.Keyring, resolve func(context.Context) (branding.Brand, error), lookups ...func(netip.Addr) (*string, error)) http.Handler {
 	var lookup func(netip.Addr) (*string, error)
 	if len(lookups) > 0 {
 		lookup = lookups[0]
@@ -67,8 +67,8 @@ func NewLoginRevokeHandlerWithBrand(identities *identity.Store, keyring *oidc.Ke
 		if publicURL, err := url.ParseRequestURI(r.RequestURI); err == nil && strings.HasSuffix(publicURL.Path, r.URL.Path) {
 			data.BasePath = strings.TrimSuffix(publicURL.Path, r.URL.Path)
 		}
-		data.ThemeURL = resolveBrand(r.Context(), brand).ThemeURL
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+		data.Brand = branding.ResolveOptional(r.Context(), resolve)
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		var body bytes.Buffer
 		_ = loginRevokePage.Execute(&body, data)
