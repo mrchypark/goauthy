@@ -195,7 +195,7 @@ func TestLoginRevokePageCSSOnlyIssuerAssets(t *testing.T) {
 			if w.Code != http.StatusOK {
 				t.Fatal(w.Code)
 			}
-			if got := w.Header().Get("Content-Security-Policy"); got != "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" {
+			if got := w.Header().Get("Content-Security-Policy"); got != "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'" {
 				t.Fatalf("CSP=%q", got)
 			}
 			if w.Header().Get("Referrer-Policy") != "no-referrer" || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("X-Content-Type-Options") != "nosniff" {

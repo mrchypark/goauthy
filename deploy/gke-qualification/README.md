@@ -1,10 +1,10 @@
-# IED GCS qualification harness
+# GKE GCS qualification harness
 
 ## Overview
 
 Bounded, live qualification for the latest candidate image against GCS with
 HA3 (3-member cluster) and standalone1 (single-member). This harness owns
-`scripts/e2e-ied-gcs-candidate.sh` and `deploy/ied-qualification/` only.
+`scripts/e2e-gke-gcs-candidate.sh` and `deploy/gke-qualification/` only.
 It does not modify `deploy/ternal-no-pvc`, production secrets, or any existing
 workload.
 
@@ -77,8 +77,8 @@ Both prefixes must be exclusive to this qualification run.
 
 ## Manifest validation
 
-    ./deploy/ied-qualification/test.sh
+    ./deploy/gke-qualification/test.sh
 
 ## Running (after parent review)
 
-    GOAUTHY_QUAL_GCS_BUCKET=bucket-name ./scripts/e2e-ied-gcs-candidate.sh
+    GOAUTHY_QUAL_GCS_BUCKET=bucket-name ./scripts/e2e-gke-gcs-candidate.sh

@@ -28,7 +28,7 @@ func TestIndexRedirectsToIssuerPrefixedDashboardWithSecurityHeaders(t *testing.T
 	}
 	for name, want := range map[string]string{
 		"cache":   "no-store",
-		"csp":     "default-src 'none'; style-src 'self'; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+		"csp":     "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
 		"frame":   "DENY",
 		"nosniff": "nosniff",
 		"type":    "text/html; charset=utf-8",

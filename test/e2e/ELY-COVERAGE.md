@@ -1,6 +1,6 @@
 # Ely disposable acceptance gates
 
-Run from the candidate worktree. Parent owns integration/commits and allocates the heavy execution slot. This fixture never reads the installed local bundle, talks to IED, uses external OAuth accounts, or provisions Kubernetes resources.
+Run from the candidate worktree. Parent owns integration/commits and allocates the heavy execution slot. This fixture never reads the installed local bundle, talks to GKE, uses external OAuth accounts, or provisions Kubernetes resources.
 
 ```sh
 sh scripts/test-e2e-ely-standalone.sh

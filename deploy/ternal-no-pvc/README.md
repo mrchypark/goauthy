@@ -99,7 +99,7 @@ only its dedicated Workload Identity principal through the metadata service.
 It remains `automountServiceAccountToken: false`; do not add a service-account
 JSON key, `GOOGLE_APPLICATION_CREDENTIALS`, or a static cloud credential. The
 bucket's `goauthy/` prefix must remain exclusive to this provider instance.
-Actual metadata-service and GCS egress reachability still require IED runtime
+Actual metadata-service and GCS egress reachability still require GKE runtime
 validation before activation.
 
 ## GCS HA profile
@@ -132,5 +132,5 @@ a new process with an empty data directory recovers the account and signing
 key through real S3 HTTP requests. Correct password acceptance, wrong password
 rejection, and missing/wrong master-key rejection are checked. Credentials
 are generated per run, passed without values in argv, and the fixture is
-removed. This is standalone S3 protocol evidence, not an IED, production TLS,
+removed. This is standalone S3 protocol evidence, not a GKE, production TLS,
 HA, or end-to-end Ternal OAuth qualification. No real user account is created.

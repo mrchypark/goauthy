@@ -15,7 +15,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/ui"
 )
 
-var profilePage = template.Must(template.Must(ui.NewTemplates("profile")).Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{template "goauthy-head" .IssuerPath}}<link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{if eq .Language "ko"}}프로필 업데이트{{else}}Update Profile{{end}}</title></head><body class="auth-page"><header class="auth-brand"><span class="brand-symbol" aria-hidden="true"></span><span>GoAuthy</span></header><main class="auth-panel"><p class="auth-eyebrow">{{if eq .Language "ko"}}내 계정{{else}}YOUR ACCOUNT{{end}}</p><h1>{{if eq .Language "ko"}}프로필 업데이트{{else}}Update Profile{{end}}</h1>{{if .Error}}<p class="auth-error" role="alert">{{.Error}}</p>{{end}}<form method="post" action=""><input type="hidden" name="interaction" value="{{.Interaction}}"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{range .Fields}}{{if .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{else}}<label>{{.Label}} {{template "input" (dict "Name" .Name "Value" .Value "Readonly" .Readonly "Required" .Required)}}</label>{{end}}{{end}}{{ $buttonLabel := "" }}{{if eq .Language "ko"}}{{$buttonLabel = "저장"}}{{else}}{{$buttonLabel = "Save"}}{{end}}{{template "button" (dict "Label" $buttonLabel "Type" "submit")}}</form><p><a id="profile-account-link" href="{{.Account}}">{{if eq .Language "ko"}}계정으로 나가기{{else}}Exit to account{{end}}</a></p></main></body></html>`))
+var profilePage = template.Must(template.Must(ui.NewTemplates("profile")).Parse(`<!doctype html><html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">{{template "goauthy-head" .IssuerPath}}<link rel="stylesheet" href="{{.IssuerPath}}/auth/v1/theme/global.css">{{if .ThemeURL}}<link rel="stylesheet" href="{{.ThemeURL}}">{{end}}<title>{{if eq .Language "ko"}}프로필 업데이트{{else}}Update Profile{{end}}</title></head><body class="auth-page"><header class="auth-brand">{{template "goauthy-brand" (dict "Base" "" "LogoURL" .Brand.LogoURL "Name" .Brand.Name)}}</header><main class="auth-panel"><p class="auth-eyebrow">{{if eq .Language "ko"}}내 계정{{else}}YOUR ACCOUNT{{end}}</p><h1>{{if eq .Language "ko"}}프로필 업데이트{{else}}Update Profile{{end}}</h1>{{if .Error}}<p class="auth-error" role="alert">{{.Error}}</p>{{end}}<form method="post" action=""><input type="hidden" name="interaction" value="{{.Interaction}}"><input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{range .Fields}}{{if .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{else}}<label>{{.Label}} {{template "input" (dict "Name" .Name "Value" .Value "Readonly" .Readonly "Required" .Required)}}</label>{{end}}{{end}}{{ $buttonLabel := "" }}{{if eq .Language "ko"}}{{$buttonLabel = "저장"}}{{else}}{{$buttonLabel = "Save"}}{{end}}{{template "button" (dict "Label" $buttonLabel "Type" "submit")}}</form><p><a id="profile-account-link" href="{{.Account}}">{{if eq .Language "ko"}}계정으로 나가기{{else}}Exit to account{{end}}</a></p></main></body></html>`))
 
 type profileField struct {
 	Name     string
@@ -31,6 +31,7 @@ type profilePageData struct {
 	Interaction       string
 	CSRFToken         string
 	ThemeURL          string
+	Brand             LoginBranding
 	Error             string
 	Language, Account string
 	Fields            []profileField
@@ -80,6 +81,38 @@ func (h *Handler) createProfileInteractionPayload(w http.ResponseWriter, r *http
 	}
 	redirectPath := profileIssuerPath(h.issuer) + "?interaction=" + url.QueryEscape(interaction.Token)
 	http.Redirect(w, r, redirectPath, http.StatusFound)
+}
+
+func (h *Handler) renderProfilePage(w http.ResponseWriter, r *http.Request, status int, redirectURI, clientID, interactionToken, csrf, language, errMsg string, fields []profileField) {
+	themeURL, err := h.resolveThemeURL(r.Context(), clientID)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		return
+	}
+	brand, err := h.resolveBranding(r.Context(), clientID)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		return
+	}
+	securityHeaders(w)
+	localizedHTMLHeaders(w, language)
+	w.Header().Set("Content-Security-Policy", authorizationFormCSP(redirectURI))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if status != http.StatusOK {
+		w.WriteHeader(status)
+	}
+	issuerBase := strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile")
+	_ = profilePage.Execute(w, profilePageData{
+		IssuerPath:  issuerBase,
+		Interaction: interactionToken,
+		CSRFToken:   csrf,
+		ThemeURL:    themeURL,
+		Brand:       brand,
+		Error:       errMsg,
+		Language:    language,
+		Account:     issuerBase + "/account",
+		Fields:      fields,
+	})
 }
 
 // profileGET handles GET /auth/profile?interaction=<token>
@@ -133,19 +166,7 @@ func (h *Handler) profileGET(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := buildProfileFields(policy, claims)
-	securityHeaders(w)
-	language := i18n.UILanguageFromRequest(r)
-	localizedHTMLHeaders(w, language)
-	w.Header().Set("Content-Security-Policy", authorizationFormCSP(request.RedirectURI))
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = profilePage.Execute(w, profilePageData{
-		IssuerPath:  strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile"),
-		Interaction: interactionToken,
-		CSRFToken:   csrf,
-		Language:    language,
-		Account:     strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile") + "/account",
-		Fields:      fields,
-	})
+	h.renderProfilePage(w, r, http.StatusOK, request.RedirectURI, request.ClientID, interactionToken, csrf, i18n.UILanguageFromRequest(r), "", fields)
 }
 
 // profilePOST handles POST /auth/profile
@@ -293,24 +314,11 @@ func (h *Handler) profilePOST(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(err, identity.ErrPreferredUsernameUnavailable) {
 				errMsg = "preferred username unavailable"
 			}
-			securityHeaders(w)
 			language := i18n.UILanguageFromRequest(r)
 			if language == "ko" && errors.Is(err, identity.ErrPreferredUsernameUnavailable) {
 				errMsg = "선호 사용자 이름을 사용할 수 없습니다"
 			}
-			localizedHTMLHeaders(w, language)
-			w.Header().Set("Content-Security-Policy", authorizationFormCSP(request.RedirectURI))
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusBadRequest)
-			_ = profilePage.Execute(w, profilePageData{
-				IssuerPath:  strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile"),
-				Interaction: interactionToken,
-				CSRFToken:   csrf,
-				Error:       errMsg,
-				Language:    language,
-				Account:     strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile") + "/account",
-				Fields:      fields,
-			})
+			h.renderProfilePage(w, r, http.StatusBadRequest, request.RedirectURI, request.ClientID, interactionToken, csrf, language, errMsg, fields)
 			return
 		}
 		if errors.Is(err, identity.ErrSelfProfileUnauthorized) {
