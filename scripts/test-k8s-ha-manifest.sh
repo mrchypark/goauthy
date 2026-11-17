@@ -143,6 +143,36 @@ require_peer_container_port() {
 	fi
 }
 
+require_voter_runtime_budget() {
+	text=$1
+	[ "$(printf '%s\n' "$text" | count_line '      terminationGracePeriodSeconds: 60')" -eq 1 ] || {
+		echo 'missing explicit 60-second GoAuthy termination grace period' >&2
+		exit 1
+	}
+	[ "$(printf '%s\n' "$text" | count_line '          requiredDuringSchedulingIgnoredDuringExecution:')" -eq 1 ] || {
+		echo 'missing required voter pod anti-affinity' >&2
+		exit 1
+	}
+	[ "$(printf '%s\n' "$text" | count_line '          preferredDuringSchedulingIgnoredDuringExecution:')" -eq 0 ] || {
+		echo 'voter anti-affinity must not be preferred-only' >&2
+		exit 1
+	}
+	if ! printf '%s\n' "$text" | awk '
+		{
+			line = $0
+			sub(/^[[:space:]]*/, "", line)
+		}
+		line == "startupProbe:" { probe = 1; next }
+		probe && line == "periodSeconds: 10" { period = 1; next }
+		probe && line == "failureThreshold: 60" { failures = 1; next }
+		probe && line ~ /^(startupProbe|livenessProbe|readinessProbe):$/ { probe = 0 }
+		END { exit !(period && failures) }
+	'; then
+		echo 'startupProbe budget must be 10 seconds x 60 failures (10 minutes)' >&2
+		exit 1
+	fi
+}
+
 require_readiness_http_probe() {
 	text=$1
 	if ! printf '%s\n' "$text" | awk '
@@ -215,9 +245,11 @@ require_line 'HA replicas' '  replicas: 3' "$goauthy_statefulset"
 }
 require_data_empty_dir "$goauthy_statefulset"
 require_env_value GOAUTHY_RHIZA_PROFILE cluster "$goauthy_statefulset"
+require_env_value GOAUTHY_RHIZA_STARTUP_TIMEOUT 10m "$goauthy_statefulset"
 require_env_value GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE '"true"' "$goauthy_statefulset"
 require_env_field GOAUTHY_NODE_ID metadata.name "$goauthy_statefulset"
 require_peer_container_port "$goauthy_statefulset"
+require_voter_runtime_budget "$goauthy_statefulset"
 
 # One StatefulSet template is instantiated three times; its single readiness
 # probe therefore supplies the /readyz probe for each of the three replicas.

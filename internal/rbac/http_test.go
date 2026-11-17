@@ -447,6 +447,34 @@ func membershipRequest(t *testing.T, cookie *http.Cookie, csrf, body string) *ht
 	return r
 }
 
+func TestAdminForceMFARejectsPasswordSessionAtAPIBoundary(t *testing.T) {
+	h, _, passwordCookie, _ := membershipHTTPFixture(t)
+	h.ConfigureAdminForceMFA(true)
+	request := func(cookie *http.Cookie) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/auth/v1/roles", nil)
+		r.AddCookie(cookie)
+		return r
+	}
+	denied := httptest.NewRecorder()
+	h.Roles(denied, request(passwordCookie))
+	if denied.Code != http.StatusUnauthorized {
+		t.Fatalf("password session status=%d want=401", denied.Code)
+	}
+	issued, err := h.browser.CreateSession(t.Context(), "admin", "mfa", time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mfaCookie, err := browser.SessionCookie(h.issuer, issued.Token, issued.ExpiresAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed := httptest.NewRecorder()
+	h.Roles(allowed, request(mfaCookie))
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("MFA session status=%d body=%q want=200", allowed.Code, allowed.Body.String())
+	}
+}
+
 func membershipNames(entities []Entity) []string {
 	result := make([]string, len(entities))
 	for i, entity := range entities {

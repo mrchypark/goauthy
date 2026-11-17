@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/passkey"
 	"github.com/mrchypark/rhiza"
@@ -36,6 +37,7 @@ func TestRegisterPasskeyStartFailsClosedWithoutReservingIdentity(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/auth/v1/register/passkey/start", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	request.RemoteAddr = "192.0.2.60:1234"
+	request = request.WithContext(browser.ContextWithPeerIP(request.Context(), "192.0.2.60"))
 	response := httptest.NewRecorder()
 	service.RegisterPasskeyStart(response, request)
 	if response.Code != http.StatusServiceUnavailable {

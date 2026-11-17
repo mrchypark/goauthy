@@ -6,9 +6,9 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"sync/atomic"
+
+	"github.com/mrchypark/goauthy/internal/securefile"
 )
 
 const maxRootCAFileSize = 256 << 10
@@ -58,27 +58,9 @@ func LoadRootCAs(path string) (*x509.CertPool, error) {
 	if path == "" {
 		return nil, nil
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open back-channel CA file: %w", err)
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat back-channel CA file: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		return nil, errors.New("back-channel CA file must be a regular file")
-	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return nil, errors.New("back-channel CA file must be owner-only")
-	}
-	data, err := io.ReadAll(io.LimitReader(f, maxRootCAFileSize+1))
+	data, err := securefile.Read(path, maxRootCAFileSize)
 	if err != nil {
 		return nil, fmt.Errorf("read back-channel CA file: %w", err)
-	}
-	if len(data) > maxRootCAFileSize {
-		return nil, fmt.Errorf("back-channel CA file exceeds %d bytes", maxRootCAFileSize)
 	}
 	pool := x509.NewCertPool()
 	count := 0

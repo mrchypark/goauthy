@@ -11,7 +11,7 @@ async function sessions() {
     '<div class="panel"><form id="session-filter" class="toolbar">' +
     '<label for="session-state">' + h('State') + '<select id="session-state">' + states.map(x => `<option value="${x}">${x}</option>`).join('') +
     '</select></label><label for="session-page-size">' + h('Rows') + '<input id="session-page-size" type="number" min="1" max="65535" step="1" inputmode="numeric" value="' + esc(pageSize) + '"></label>' +
-    '<button type="submit">' + h('Apply') + '</button><span class="hint" id="session-status">' + h('Loading…') + '</span></form><p class="hint">' + h('Requested page size; the server applies its paging threshold and returns smaller result sets in full.') + '</p></div>' +
+    '<button type="submit">' + h('Apply') + '</button><span class="hint" id="session-status" role="status" aria-live="polite">' + h('Loading…') + '</span></form><p class="hint">' + h('Requested page size; the server applies its paging threshold and returns smaller result sets in full.') + '</p></div>' +
     '<div id="session-table"></div><div id="session-paging"></div>' +
     '<div class="panel"><h2>' + h('Global logout') + '</h2><p class="warning">' + h('Revoke every browser session and OAuth token. This also ends your current administrator session.') + '</p>' +
     '<form id="global-logout"><label><input id="global-ack" type="checkbox"> ' + h('I understand this administrator session will be lost.') + '</label>' +

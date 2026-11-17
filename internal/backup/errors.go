@@ -46,6 +46,14 @@ func FailureMessage(err error) string {
 		return "checkpoint recovery pin ownership was lost"
 	}
 	switch err.Error() {
+	case "cannot open backup source":
+		return "backup source unavailable"
+	case "cannot open backup destination":
+		return "backup destination unavailable"
+	case "cannot validate backup destination catalog":
+		return "backup catalog validation failed"
+	case "cannot clean backup destination orphans":
+		return "backup orphan cleanup failed"
 	case "conflicting capture":
 		return "snapshot captured conflicting object versions"
 	case "incomplete capture", "capture reader remains open", "capture reader already active", "capture reader is closed":

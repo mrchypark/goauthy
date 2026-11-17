@@ -184,6 +184,9 @@ func (s *Store) UpdateUserWithGuard(ctx context.Context, subject string, input U
 			rhiza.SQLStatement{SQL: `INSERT INTO identity_authentication_modes(subject,mode,generation,updated_at_unix_ms) VALUES(?,'password',1,?) ON CONFLICT(subject) DO UPDATE SET mode='password',generation=generation+1,updated_at_unix_ms=excluded.updated_at_unix_ms`, Args: []any{subject, now.UnixMilli()}},
 			rhiza.SQLStatement{SQL: `DELETE FROM identity_password_history WHERE subject=? AND generation NOT IN(SELECT generation FROM identity_password_history WHERE subject=? ORDER BY generation DESC LIMIT ?)`, Args: []any{subject, subject, int64(max(0, s.rules.History-1))}},
 		)
+		revocationGuard := `subject=? AND password_phc=? AND password_generation=? AND password_changed_at_unix_ms=? AND disabled=0`
+		revocationArgs := []any{subject, newPHC, old.Generation + 1, now.UnixMilli()}
+		statements = append(statements, passwordRevocationStatements(subject, operation, "", now, revocationGuard, revocationArgs)...)
 	}
 	if emailChanged || !input.Enabled {
 		statements = append(statements,

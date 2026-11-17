@@ -72,6 +72,46 @@ func TestClaimsAPIKeyRightAndNoBrowserFallback(t *testing.T) {
 	}
 }
 
+func TestClaimsAdminForceMFARejectsPasswordSession(t *testing.T) {
+	ctx, store := claimsTestStore(t)
+	sessions, err := browser.NewStore(store.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities, err := identity.NewStore(store.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := NewHandler(store, sessions, identities, "https://issuer.example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.ConfigureAdminForceMFA(true)
+	request := func(method string) *http.Request {
+		issued, issueErr := sessions.CreateSession(ctx, "admin", method, time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC), "")
+		if issueErr != nil {
+			t.Fatal(issueErr)
+		}
+		cookie, cookieErr := browser.SessionCookie("https://issuer.example.test", issued.Token, issued.ExpiresAt)
+		if cookieErr != nil {
+			t.Fatal(cookieErr)
+		}
+		r := httptest.NewRequest(http.MethodGet, "/auth/v1/scopes", nil)
+		r.AddCookie(cookie)
+		return r
+	}
+	denied := httptest.NewRecorder()
+	h.Scopes(denied, request("pwd"))
+	if denied.Code != http.StatusUnauthorized {
+		t.Fatalf("password session status=%d want=401", denied.Code)
+	}
+	allowed := httptest.NewRecorder()
+	h.Scopes(allowed, request("mfa"))
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("MFA session status=%d want=200", allowed.Code)
+	}
+}
+
 func TestUserAttributePutRoutesDoNotConflict(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /auth/v1/users/{first}/{second}", func(http.ResponseWriter, *http.Request) {})

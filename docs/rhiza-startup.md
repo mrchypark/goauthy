@@ -25,12 +25,14 @@ checkpoints and history are rejected. Mixed-version peers and downgrade are
 unsupported. The earlier citation links to the
 [official v0.19.0 release](https://github.com/mrchypark/rhiza/releases/tag/v0.19.0).
 After Rhiza opens, `cmd/goauthy` starts the existing HTTP listener and answers
-canonical `GET /livez` while waiting up to 30 seconds for `DB.Ready()` and then
-initializing the schema and application. `/readyz` and all application routes
-return 503 until initialization finishes; the complete existing handler is then
-published atomically. TLS and request draining apply from the first accepted
-connection. Rhiza opening itself retains the existing startup-probe bound;
-probe budgets and storage durability are unchanged.
+canonical `GET /livez` while waiting for `DB.Ready()` and then initializing the
+schema and application. `GOAUTHY_RHIZA_STARTUP_TIMEOUT` controls that wait; its
+default is 10 minutes, matching the HA startup probe budget, with accepted values
+from 1 second through 1 hour. The HA manifests set the same 10-minute value
+explicitly. `/readyz` and all application routes return 503 until initialization
+finishes; the complete existing handler is then published atomically. Readiness
+still performs the existing quorum-backed linearizable check. TLS and request
+draining apply from the first accepted connection.
 
 The startup defer intentionally does not call `DB.Close()` until all startup
 initialization has succeeded and the server lifecycle is about to begin. This

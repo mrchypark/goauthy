@@ -33,6 +33,8 @@ const (
 	otpRateLimit   = 3
 	otpRatePeers   = 256
 	otpActiveLimit = 256
+	otpMaxFailures = 5
+	otpFailureTTL  = 15 * time.Minute
 )
 
 func otpSchemaStatements() []rhiza.SQLStatement {
@@ -50,6 +52,13 @@ func otpSchemaStatements() []rhiza.SQLStatement {
 			window_start_unix_seconds INTEGER NOT NULL,
 			count INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (subject_digest, window_start_unix_seconds)
+		) STRICT`},
+		{SQL: `CREATE TABLE IF NOT EXISTS identity_email_otp_verification_limits (
+			subject_digest TEXT PRIMARY KEY NOT NULL CHECK (length(subject_digest) = 43),
+			failed_attempts INTEGER NOT NULL CHECK (failed_attempts >= 0),
+			window_started_at_unix_ms INTEGER NOT NULL CHECK (window_started_at_unix_ms >= 0),
+			locked_until_unix_ms INTEGER NOT NULL DEFAULT 0 CHECK (locked_until_unix_ms >= 0),
+			updated_at_unix_ms INTEGER NOT NULL CHECK (updated_at_unix_ms >= 0)
 		) STRICT`},
 		// The password-plus-OTP binding is keyed by the browser session that
 		// proved the password, so every replica and restart reads one binding
@@ -109,12 +118,14 @@ func (s *OTPService) GenerateOTP(ctx context.Context, subject string) (string, e
 		RequestID: recoveryMutationID("otp-issue", subjectDigest, codeDigest, strconv.FormatInt(now.Unix(), 10)),
 		Statements: []rhiza.SQLStatement{
 			{SQL: `DELETE FROM identity_email_otp WHERE expires_at_unix_ms <= ?`, Args: []any{now.UnixMilli()}},
+			{SQL: `DELETE FROM identity_email_otp_verification_limits WHERE subject_digest=? AND ((locked_until_unix_ms>0 AND locked_until_unix_ms<=?) OR (locked_until_unix_ms=0 AND window_started_at_unix_ms<=?))`, Args: []any{subjectDigest, now.UnixMilli(), now.Add(-otpFailureTTL).UnixMilli()}},
 			{SQL: `DELETE FROM identity_email_otp_rate_limits WHERE window_start_unix_seconds < ?`, Args: []any{windowStart}},
 			{SQL: `INSERT INTO identity_email_otp (code_digest,subject,expires_at_unix_ms,consumed_attempt,consumed_at_unix_ms) SELECT ?,?,?,NULL,NULL
 				WHERE (? = '' OR COALESCE((SELECT CASE WHEN window_start_unix_seconds = ? THEN count ELSE 0 END FROM identity_email_otp_rate_limits WHERE subject_digest = ?), 0) < ?)
 				AND NOT EXISTS (SELECT 1 FROM identity_email_otp WHERE subject=? AND code_digest IN (?,?) AND expires_at_unix_ms>?)
+				AND NOT EXISTS (SELECT 1 FROM identity_email_otp_verification_limits WHERE subject_digest=? AND locked_until_unix_ms>?)
 				ON CONFLICT(subject, code_digest) DO NOTHING`,
-				Args: []any{codeDigest, subject, expires, subjectDigest, windowStart, subjectDigest, int64(otpRateLimit), subject, codeDigest, legacyDigest, now.UnixMilli()}, ExpectedRowsAffected: &one},
+				Args: []any{codeDigest, subject, expires, subjectDigest, windowStart, subjectDigest, int64(otpRateLimit), subject, codeDigest, legacyDigest, now.UnixMilli(), subjectDigest, now.UnixMilli()}, ExpectedRowsAffected: &one},
 			{SQL: `INSERT INTO identity_email_otp_rate_limits (subject_digest,window_start_unix_seconds,count) SELECT ?,?,1
 				ON CONFLICT(subject_digest, window_start_unix_seconds) DO UPDATE SET
 				count = identity_email_otp_rate_limits.count + 1`,
@@ -159,15 +170,8 @@ func (s *OTPService) VerifyOTP(ctx context.Context, subject, code string) (bool,
 	attempt := base64.RawURLEncoding.EncodeToString(attemptBytes)
 
 	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
-		RequestID: recoveryMutationID("otp-verify", codeDigest, legacyDigest, attempt),
-		Statements: []rhiza.SQLStatement{
-			{SQL: `DELETE FROM identity_email_otp WHERE expires_at_unix_ms <= ?`, Args: []any{now.UnixMilli()}},
-			{SQL: `UPDATE identity_email_otp SET consumed_attempt=?,consumed_at_unix_ms=?
-				WHERE code_digest IN (?,?) AND subject=?
-				AND (code_digest=? OR NOT EXISTS (SELECT 1 FROM identity_email_otp WHERE code_digest=? AND subject=?))
-				AND expires_at_unix_ms>=? AND consumed_attempt IS NULL`,
-				Args: []any{attempt, now.UnixMilli(), codeDigest, legacyDigest, subject, codeDigest, codeDigest, subject, now.UnixMilli()}},
-		},
+		RequestID:  recoveryMutationID("otp-verify", codeDigest, legacyDigest, attempt),
+		Statements: otpVerificationStatements(subject, codeDigest, legacyDigest, attempt, now.UnixMilli(), "", nil),
 	})
 	if err != nil {
 		return false, err
@@ -208,24 +212,14 @@ func (s *OTPService) VerifyOTPAndConsumeInteraction(ctx context.Context, session
 
 	_, err = storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID: recoveryMutationID("otp-verify-interaction", sessionDigest, interactionDigest, codeDigest, legacyDigest, attempt),
-		Statements: []rhiza.SQLStatement{
-			{SQL: `DELETE FROM identity_email_otp WHERE expires_at_unix_ms <= ?`, Args: []any{now.UnixMilli()}},
-			{SQL: `UPDATE identity_email_otp SET consumed_attempt=?, consumed_at_unix_ms=?
-				WHERE code_digest IN (?,?) AND subject=?
-				AND (code_digest=? OR NOT EXISTS (SELECT 1 FROM identity_email_otp WHERE code_digest=? AND subject=?))
-				AND expires_at_unix_ms>=? AND consumed_attempt IS NULL
-				AND EXISTS (SELECT 1 FROM identity_email_otp_interactions b
-					JOIN identity_users u ON u.subject=b.subject
-					JOIN identity_authentication_modes m ON m.subject=b.subject
-					WHERE b.session_digest=? AND b.subject=? AND b.interaction_digest=? AND b.expires_at_unix_ms>=?
-					AND u.password_generation=b.password_generation AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?)
-					AND m.mode='password' AND m.generation=b.authentication_generation)`,
-				Args: []any{attempt, now.UnixMilli(), codeDigest, legacyDigest, subject, codeDigest, codeDigest, subject, now.UnixMilli(), sessionDigest, subject, interactionDigest, now.UnixMilli(), now.UnixMilli()}},
-			{SQL: `DELETE FROM identity_email_otp_interactions WHERE session_digest=? AND subject=? AND interaction_digest=?
-				AND EXISTS (SELECT 1 FROM identity_email_otp WHERE code_digest IN (?,?) AND subject=? AND consumed_attempt=?
-					AND (code_digest=? OR NOT EXISTS (SELECT 1 FROM identity_email_otp WHERE code_digest=? AND subject=?)))`,
-				Args: []any{sessionDigest, subject, interactionDigest, codeDigest, legacyDigest, subject, attempt, codeDigest, codeDigest, subject}},
-		},
+		Statements: append(otpVerificationStatements(subject, codeDigest, legacyDigest, attempt, now.UnixMilli(), ` AND EXISTS (SELECT 1 FROM identity_email_otp_interactions b
+			JOIN identity_users u ON u.subject=b.subject
+			JOIN identity_authentication_modes m ON m.subject=b.subject
+			WHERE b.session_digest=? AND b.subject=? AND b.interaction_digest=? AND b.expires_at_unix_ms>=?
+			AND u.password_generation=b.password_generation AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms>?)
+			AND m.mode='password' AND m.generation=b.authentication_generation)`, []any{sessionDigest, subject, interactionDigest, now.UnixMilli(), now.UnixMilli()}), rhiza.SQLStatement{SQL: `DELETE FROM identity_email_otp_interactions WHERE session_digest=? AND subject=? AND interaction_digest=?
+			AND EXISTS (SELECT 1 FROM identity_email_otp WHERE code_digest IN (?,?) AND subject=? AND consumed_attempt=?
+				AND (code_digest=? OR NOT EXISTS (SELECT 1 FROM identity_email_otp WHERE code_digest=? AND subject=?)))`, Args: []any{sessionDigest, subject, interactionDigest, codeDigest, legacyDigest, subject, attempt, codeDigest, codeDigest, subject}}),
 	})
 	if err != nil {
 		return false, err
@@ -234,6 +228,39 @@ func (s *OTPService) VerifyOTPAndConsumeInteraction(ctx context.Context, session
 		return false, ErrOTPInvalid
 	}
 	return true, nil
+}
+
+// otpVerificationStatements keeps the success write, per-subject failure count,
+// lock activation, and invalidation in one replicated transaction. No peer IP is
+// involved, so requests cannot multiply the attempt budget across addresses.
+func otpVerificationStatements(subject, codeDigest, legacyDigest, attempt string, now int64, extraWhere string, extraArgs []any) []rhiza.SQLStatement {
+	subjectDigest := challengeDigest(subject)
+	successArgs := []any{attempt, now, codeDigest, legacyDigest, subject, codeDigest, codeDigest, subject, now}
+	successArgs = append(successArgs, extraArgs...)
+	successArgs = append(successArgs, subjectDigest, now)
+	success := rhiza.SQLStatement{
+		SQL: `UPDATE identity_email_otp SET consumed_attempt=?, consumed_at_unix_ms=?
+			WHERE code_digest IN (?,?) AND subject=?
+			AND (code_digest=? OR NOT EXISTS (SELECT 1 FROM identity_email_otp WHERE code_digest=? AND subject=?))
+			AND expires_at_unix_ms>=? AND consumed_attempt IS NULL` + extraWhere + `
+			AND NOT EXISTS (SELECT 1 FROM identity_email_otp_verification_limits WHERE subject_digest=? AND locked_until_unix_ms>?)`,
+		Args: successArgs,
+	}
+	failureArgs := []any{subjectDigest, now, now, subject, attempt, int64(otpMaxFailures), int64(otpMaxFailures), now + otpFailureTTL.Milliseconds(), now, subject, attempt}
+	return []rhiza.SQLStatement{
+		{SQL: `DELETE FROM identity_email_otp WHERE expires_at_unix_ms <= ?`, Args: []any{now}},
+		{SQL: `DELETE FROM identity_email_otp_verification_limits WHERE subject_digest=? AND ((locked_until_unix_ms>0 AND locked_until_unix_ms<=?) OR (locked_until_unix_ms=0 AND window_started_at_unix_ms<=?))`, Args: []any{subjectDigest, now, now - otpFailureTTL.Milliseconds()}},
+		success,
+		{SQL: `DELETE FROM identity_email_otp_verification_limits WHERE subject_digest=? AND EXISTS (SELECT 1 FROM identity_email_otp WHERE subject=? AND consumed_attempt=?)`, Args: []any{subjectDigest, subject, attempt}},
+		{SQL: `INSERT INTO identity_email_otp_verification_limits(subject_digest,failed_attempts,window_started_at_unix_ms,locked_until_unix_ms,updated_at_unix_ms)
+			SELECT ?,1,?,0,? WHERE NOT EXISTS (SELECT 1 FROM identity_email_otp WHERE subject=? AND consumed_attempt=?)
+			ON CONFLICT(subject_digest) DO UPDATE SET
+			failed_attempts=MIN(identity_email_otp_verification_limits.failed_attempts+1,?),
+			locked_until_unix_ms=CASE WHEN identity_email_otp_verification_limits.failed_attempts+1>=? THEN ? ELSE 0 END,
+			updated_at_unix_ms=?
+			WHERE NOT EXISTS (SELECT 1 FROM identity_email_otp WHERE subject=? AND consumed_attempt=?)`, Args: failureArgs},
+		{SQL: `DELETE FROM identity_email_otp WHERE subject=? AND EXISTS (SELECT 1 FROM identity_email_otp_verification_limits WHERE subject_digest=? AND locked_until_unix_ms>?)`, Args: []any{subject, subjectDigest, now}},
+	}
 }
 
 func normalizeOTPCode(subject, code string) (string, error) {

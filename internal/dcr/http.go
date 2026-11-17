@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,6 +21,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/redirecturi"
+	"github.com/mrchypark/goauthy/internal/securefile"
 )
 
 const registrationBodyLimit = 16 << 10
@@ -35,7 +35,7 @@ const deviceGrantType = "urn:ietf:params:oauth:grant-type:device_code"
 // LoadRegistrationToken loads the mounted global DCR bearer token without
 // exposing its value in errors.
 func LoadRegistrationToken(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	data, err := securefile.Read(path, 1<<20)
 	if err != nil {
 		return "", errors.New("read DCR registration token")
 	}

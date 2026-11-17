@@ -78,7 +78,7 @@ func DefaultTheme(clientID string) Theme {
 			Action:    []uint16{34, 100, 40},
 			Accent:    []uint16{265, 100, 53},
 			Error:     []uint16{15, 100, 37},
-			BtnText:   "white",
+			BtnText:   "#10231b",
 			ThemeSun:  "hsla(var(--action) / .7)",
 			ThemeMoon: "hsla(var(--accent) / .85)",
 		},

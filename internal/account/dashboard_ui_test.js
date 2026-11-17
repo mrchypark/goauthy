@@ -153,8 +153,9 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
   context.confirm = () => true;
   responses.push({ok: false, status: 503});
   await context.accountDashboard.convertPasswordless();
-  assert.equal(element('passwordless-convert').disabled, false, 'failed mutation must allow retry');
-  assert.match(element('passwordless-status').textContent, /503/);
+  assert.equal(element('passwordless-convert').disabled, true, 'unknown mutation outcome must block a blind retry');
+  assert.match(element('passwordless-status').textContent, /outcome is unknown/i);
+  context.accountDashboard.state.mutationUnknown = false;
   responses.push(json({}), {ok: false, status: 503});
   await context.accountDashboard.convertPasswordless();
   assert.match(element('passwordless-status').textContent, /503/, 'failed refresh must not report success');
@@ -292,8 +293,25 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
   await context.accountDashboard.submitPassword({ preventDefault() {}, target: form('password-form') });
   assert.equal(element('password-status').children[2].textContent, 'The current password is incorrect. Check it and try again.');
   context.fetch = async () => ({ ok: false, status: 503, json: async () => ({ error_code: 'mutation_outcome_unknown' }) });
-  await context.accountDashboard.submitPassword({ preventDefault() {}, target: form('password-form') });
+  const passwordFailureForm = form('password-form');
+  await context.accountDashboard.submitPassword({ preventDefault() {}, target: passwordFailureForm });
   assert.equal(element('password-status').children[2].textContent, 'Password change outcome is unknown. Check the current state before retrying.');
+  assert.equal(passwordFailureForm.submitButton.disabled, true, 'unknown password result must remain blocked');
+  const blockedPasswordRequests = requests.length;
+  context.fetch = async () => { throw new Error('offline'); };
+  await context.accountDashboard.submitPassword({ preventDefault() {}, target: passwordFailureForm });
+  assert.equal(requests.length, blockedPasswordRequests, 'unknown outcome must block a blind network retry');
+  assert.match(element('password-status').textContent, /outcome is unknown.*check the current state/i);
+  context.accountDashboard.state.mutationUnknown = false;
+  let networkAttempts = 0;
+  context.fetch = async () => { networkAttempts++; throw new Error('offline'); };
+  await context.accountDashboard.submitPassword({ preventDefault() {}, target: passwordFailureForm });
+  assert.equal(networkAttempts, 1, 'a failed fetch cannot prove that the mutation did not commit');
+  assert.equal(passwordFailureForm.submitButton.disabled, true);
+  assert.match(element('password-status').textContent, /outcome is unknown.*check the current state/i);
+  await context.accountDashboard.submitPassword({ preventDefault() {}, target: passwordFailureForm });
+  assert.equal(networkAttempts, 1, 'unknown outcome must block another network mutation');
+  context.accountDashboard.state.mutationUnknown = false;
   for (const [status, errorCode, message] of [
     [401, 'unexpected', 'Your session has expired. Sign in again.'],
     [403, 'invalid_current_password', 'Your session has expired. Sign in again.'],
@@ -302,5 +320,23 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
     context.fetch = async () => ({ ok: false, status, json: async () => ({ error_code: errorCode }) });
     await assert.rejects(context.accountDashboard.connectionDeps.request('/account/test'), (error) => error.status === status && error.message === message);
   }
+  for (const path of [
+    '/auth/v1/users/user%2F1/mfa_token',
+    '/auth/v1/users/user%2F1/webauthn/auth/start',
+    '/auth/v1/users/user%2F1/webauthn/auth/finish',
+    '/auth/v1/users/user%2F1/webauthn/register/start',
+  ]) {
+    context.accountDashboard.state.mutationUnknown = false;
+    let attempts = 0;
+    context.fetch = async () => { attempts++; throw new Error('offline'); };
+    await assert.rejects(context.accountDashboard.connectionDeps.request(path, { method: 'POST' }), (error) => error.message === 'offline' && !error.unknownOutcome);
+    assert.equal(context.accountDashboard.state.mutationUnknown, false, path + ' is a retryable challenge request');
+    await assert.rejects(context.accountDashboard.connectionDeps.request(path, { method: 'POST' }), (error) => error.message === 'offline');
+    assert.equal(attempts, 2, path + ' remains retryable after transport failure');
+  }
+  context.accountDashboard.state.mutationUnknown = false;
+  context.fetch = async () => { throw new Error('offline'); };
+  await assert.rejects(context.accountDashboard.connectionDeps.request('/auth/v1/account/connections/mfa_token', { method: 'POST' }), (error) => error.unknownOutcome === true);
+  assert.equal(context.accountDashboard.state.mutationUnknown, true, 'a collection named mfa_token is still a mutation');
   console.log('dashboard UI checks passed');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

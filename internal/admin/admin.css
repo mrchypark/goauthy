@@ -173,13 +173,12 @@ pre { overflow-x: auto; max-width: 100%; padding: 16px; background: var(--accent
 .theme-preview>p{margin:0 0 12px}
 
 /* elysdui components follow the active GoAuthy brand and compact admin density. */
-.common-brand { --color-ink:var(--ink); --color-muted:var(--muted); --color-line:var(--line); --border:var(--line); --focus:var(--accent); --accent-hover:var(--accent-dark); --accent-tint:var(--wash); }
 #app [data-slot=button] { min-height:36px; height:auto; padding:7px 12px; border-radius:6px; font:600 13px/1.5 var(--brand-font,sans-serif); }
 #app [data-slot=button][data-variant=primary] { background:var(--color-accent); color:var(--btn-text,#f6f8f0); }
-#app [data-slot=button][data-variant=secondary] { background:transparent; color:var(--ink); border-color:var(--line); }
+#app [data-slot=button][data-variant=secondary] { background:transparent; color:var(--color-ink); border-color:var(--border); }
 #app [data-slot=button]:focus-visible, #app [data-slot=input]:focus-visible, #app [data-slot=select]:focus-visible, #app [data-slot=textarea]:focus-visible { outline:2px solid var(--color-accent); outline-offset:3px; }
 #app .ui-table th, #app .ui-table td { padding:8px 10px; border-color:var(--line); }
-#app .ui-table th { background:var(--wash); }
+#app .ui-table th { background:var(--accent-tint); }
 #app :is(#user, #client-form, #collection-form, #catalog-form) { grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; }
 #app :is(#user, #client-form, #collection-form, #catalog-form) > :not(label) { grid-column:1 / -1; }
 @media(max-width:700px) { #app :is(#user, #client-form, #collection-form, #catalog-form) { grid-template-columns:1fr; } }

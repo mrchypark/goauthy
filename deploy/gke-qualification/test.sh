@@ -79,10 +79,13 @@ test "$(yq -r "$ha3 | (.spec.volumeClaimTemplates | length)" "$render")" = 0
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-0917") | .spec.template.spec.volumes[] | select(.name == "data") | has("emptyDir")' "$render")" = true
 test "$(yq -r "$ha3 | .spec.template.spec.serviceAccountName" "$render")" = ternal-goauthy
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-0917") | .spec.template.spec.containers[0].env[] | select(.name == "GOAUTHY_RHIZA_PROFILE") | .value' "$render")" = cluster
+test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-0917") | .spec.template.spec.containers[0].env[] | select(.name == "GOAUTHY_RHIZA_STARTUP_TIMEOUT") | .value' "$render")" = 10m
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-0917") | .spec.template.spec.containers[0].env[] | select(.name == "GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE") | .value' "$render")" = true
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-0917") | .spec.template.spec.containers[0].env[] | select(.name == "GOAUTHY_RHIZA_OBJECT_STORE_PROVIDER") | .value' "$render")" = gcs
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-0917") | .spec.template.spec.containers[0].env[] | select(.name == "GOAUTHY_RHIZA_PEER_ADDR") | .value' "$render")" = ":8444"
 test "$(yq -r "$ha3 | .spec.template.spec.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution | length" "$render")" = 1
+test "$(yq -r "$ha3 | .spec.template.spec.terminationGracePeriodSeconds" "$render")" = 60
+test "$(yq -r "$ha3 | (.spec.template.spec.containers[0].startupProbe.periodSeconds * .spec.template.spec.containers[0].startupProbe.failureThreshold)" "$render")" = 600
 
 # Verify peer container port
 if ! yq -e 'select(.kind == "StatefulSet" and .metadata.name == "goauthy-qual-0917") | .spec.template.spec.containers[0].ports[] | select(.name == "peer" and .containerPort == 8444 and .protocol == "UDP")' "$render" >/dev/null; then

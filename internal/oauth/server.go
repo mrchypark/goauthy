@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -34,6 +33,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/metrics"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/redirecturi"
+	"github.com/mrchypark/goauthy/internal/securefile"
 	"github.com/mrchypark/goauthy/internal/tracing"
 	"github.com/mrchypark/rhiza"
 	"github.com/ory/fosite"
@@ -307,7 +307,7 @@ type Store struct {
 }
 
 func LoadSecret(path string) ([]byte, error) {
-	encoded, err := os.ReadFile(path)
+	encoded, err := securefile.Read(path, 1<<20)
 	if err != nil {
 		return nil, fmt.Errorf("read OAuth HMAC secret: %w", err)
 	}
@@ -319,7 +319,7 @@ func LoadSecret(path string) ([]byte, error) {
 }
 
 func LoadClientSecret(path string) (string, error) {
-	value, err := os.ReadFile(path)
+	value, err := securefile.Read(path, 1<<20)
 	if err != nil {
 		return "", fmt.Errorf("read bootstrap OAuth client secret: %w", err)
 	}

@@ -5,7 +5,10 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"os"
 	"sync/atomic"
+
+	"github.com/mrchypark/goauthy/internal/securefile"
 )
 
 var ErrNoCertificate = errors.New("TLS certificate is not loaded")
@@ -26,7 +29,15 @@ func New(certificateFile, keyFile string) (*Reloader, error) {
 
 // Reload replaces the active certificate only after the new PEM pair validates.
 func (r *Reloader) Reload() error {
-	certificate, err := tls.LoadX509KeyPair(r.certificateFile, r.keyFile)
+	certificatePEM, err := os.ReadFile(r.certificateFile)
+	if err != nil {
+		return fmt.Errorf("load TLS certificate: %w", err)
+	}
+	keyPEM, err := securefile.Read(r.keyFile, 1<<20)
+	if err != nil {
+		return fmt.Errorf("load TLS certificate: %w", err)
+	}
+	certificate, err := tls.X509KeyPair(certificatePEM, keyPEM)
 	if err != nil {
 		return fmt.Errorf("load TLS certificate: %w", err)
 	}

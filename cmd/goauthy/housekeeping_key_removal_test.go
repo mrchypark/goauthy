@@ -19,7 +19,7 @@ import (
 func TestHousekeepingLeavesDedicatedTasksToTheirOwners(t *testing.T) {
 	t.Parallel()
 	db := retirementCmdDB(t, true)
-	jobs := buildHousekeepingJobs(db, nil, loginpolicy.NewStore(db), retirementCmdKeyring(t, "key-c"), nil, nil)
+	jobs := buildHousekeepingJobs(db, nil, loginpolicy.NewStore(db), retirementCmdKeyring(t, "key-c"), nil, nil, nil)
 	owners := map[string]int{}
 	for _, job := range jobs {
 		owners[job.Name]++

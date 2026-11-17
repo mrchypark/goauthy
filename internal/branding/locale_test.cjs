@@ -24,6 +24,7 @@ assert.equal(ko.context.GoAuthyI18n.t('Please check this message.'),'메시지�
 assert.equal(ko.context.GoAuthyI18n.t('Passkey sign-in failed'),'패스키 로그인에 실패했습니다.');
 assert.equal(ko.context.GoAuthyI18n.t('Please try your passkey again.'),'패스키로 다시 시도하세요.');
 assert.equal(ko.context.GoAuthyI18n.t('Password change outcome is unknown. Check the current state before retrying.'),'비밀번호 변경 결과를 확인할 수 없습니다. 현재 상태를 확인한 뒤 다시 시도하세요.');
+assert.equal(ko.context.GoAuthyI18n.t('Request outcome is unknown. Check the current state before retrying.'),'요청 결과를 확인할 수 없습니다. 현재 상태를 확인한 뒤 다시 시도하세요.');
 assert.equal(ko.context.GoAuthyI18n.t('Check the code and try again.'),'인증 코드를 확인하고 다시 시도하세요.');
 assert.equal(page('en').context.GoAuthyI18n.t('Password change outcome is unknown. Check the current state before retrying.'),'Password change outcome is unknown. Check the current state before retrying.');
 assert.equal(ko.context.GoAuthyI18n.t('Hello {name}',{name:'<script>'}),'Hello <script>');

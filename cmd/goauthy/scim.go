@@ -20,6 +20,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/eventlog"
 	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/scim"
+	"github.com/mrchypark/goauthy/internal/securefile"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -309,9 +310,9 @@ func validSCIMProviderID(id string) bool {
 }
 
 func loadSCIMToken(path string) (string, error) {
-	data, err := readSCIMRegularFile(path, maxSCIMTokenFileSize, "SCIM token")
+	data, err := securefile.Read(path, maxSCIMTokenFileSize)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("read SCIM token file: %w", err)
 	}
 	data = trimOneSCIMLineEnding(data)
 	if len(data) == 0 || !utf8.Valid(data) {

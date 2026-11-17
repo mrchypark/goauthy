@@ -174,12 +174,24 @@ func putThemeUI(t *testing.T, admin *http.Client, primary string, headers map[st
 	endpoint := primary + "/auth/v1/theme/" + url.PathEscape(clientID)
 	if clientID == "" {
 		endpoint = primary + "/auth/v1/branding/theme"
+		putHeaders["If-Match"] = themeUIETag(t, admin, primary, headers)
 	}
 	response := do(t, admin, http.MethodPut, endpoint, bytes.NewReader(body), putHeaders)
 	response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("theme UI PUT status=%d", response.StatusCode)
 	}
+}
+
+func themeUIETag(t *testing.T, admin *http.Client, primary string, headers map[string]string) string {
+	t.Helper()
+	response := do(t, admin, http.MethodPost, primary+"/auth/v1/branding/theme", nil, headers)
+	response.Body.Close()
+	etag := response.Header.Get("ETag")
+	if response.StatusCode != http.StatusOK || etag == "" {
+		t.Fatalf("theme UI ETag status=%d etag=%q", response.StatusCode, etag)
+	}
+	return etag
 }
 
 func themeUIInitialTheme(clientID string) branding.Theme {

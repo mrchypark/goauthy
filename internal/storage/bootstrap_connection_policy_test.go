@@ -57,9 +57,21 @@ func TestMigrationV113PreservesExistingClients(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	q, err = db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT (SELECT generation FROM bootstrap_connection_policy), (SELECT document_json FROM client_themes WHERE client_id='goauthy'), (SELECT hex(data) FROM client_logos WHERE client_id='goauthy'), (SELECT COUNT(*) FROM global_brand_themes), (SELECT COUNT(*) FROM global_brand_logos), (SELECT COUNT(*) FROM branding_legacy_resolution), (SELECT COUNT(*) FROM goauthy_schema_migrations WHERE version IN (113,114))`, Consistency: rhiza.ConsistencyLinearizable})
+	q, err = db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT (SELECT generation FROM bootstrap_connection_policy), (SELECT document_json FROM client_themes WHERE client_id='goauthy'), (SELECT hex(data) FROM client_logos WHERE client_id='goauthy'), (SELECT COUNT(*) FROM global_brand_themes), (SELECT COUNT(*) FROM global_brand_logos), (SELECT COUNT(*) FROM branding_legacy_resolution), (SELECT COUNT(*) FROM goauthy_schema_migrations WHERE version IN (113,114,115))`, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil || len(q.Rows) != 1 || !reflect.DeepEqual(q.Rows[0], []any{"original-pin", `{"brand":"legacy"}`, "010203", int64(0), int64(0), int64(0), int64(2)}) {
-		t.Fatalf("114 migration changed bootstrap or claimed legacy rows: %v %v", q.Rows, err)
+		t.Fatalf("v114 state changed bootstrap or claimed legacy rows: %v %v", q.Rows, err)
+	}
+	if err := Ready(ctx, db); err == nil {
+		t.Fatal("v114 state must not satisfy v115 readiness")
+	}
+	for range 2 {
+		if err := migrateOTPVerificationLimits(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	q, err = db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT (SELECT COUNT(*) FROM identity_email_otp_verification_limits), (SELECT COUNT(*) FROM goauthy_schema_migrations WHERE version IN (113,114,115))`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil || len(q.Rows) != 1 || !reflect.DeepEqual(q.Rows[0], []any{int64(0), int64(3)}) {
+		t.Fatalf("v115 migration state=%v err=%v", q.Rows, err)
 	}
 	if err := Ready(ctx, db); err != nil {
 		t.Fatal(err)

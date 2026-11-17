@@ -616,6 +616,28 @@ func TestDirectTLSRequiresHTTPSIssuer(t *testing.T) {
 	}
 }
 
+func TestSecureTransportHeadersEmitHSTSForProductionHTTPS(t *testing.T) {
+	t.Parallel()
+	for name, request := range map[string]*http.Request{
+		"direct TLS":      httptest.NewRequest(http.MethodGet, "https://id.example.test/", nil),
+		"forwarded HTTPS": httptest.NewRequest(http.MethodGet, "http://id.example.test/", nil),
+	} {
+		if name == "forwarded HTTPS" {
+			request.Header.Set("X-Forwarded-Proto", "https")
+		}
+		response := httptest.NewRecorder()
+		secureTransportHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })).ServeHTTP(response, request)
+		if got := response.Header().Get("Strict-Transport-Security"); got != "max-age=63072000; includeSubDomains; preload" {
+			t.Fatalf("%s HSTS=%q", name, got)
+		}
+	}
+	plain := httptest.NewRecorder()
+	secureTransportHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })).ServeHTTP(plain, httptest.NewRequest(http.MethodGet, "http://id.example.test/", nil))
+	if got := plain.Header().Get("Strict-Transport-Security"); got != "" {
+		t.Fatalf("plain HTTP HSTS=%q", got)
+	}
+}
+
 func TestSigningKeyRotationPeriod(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
@@ -767,6 +789,9 @@ func TestLoadPasskeyCookieKeyRequiresPrivateRegularFile(t *testing.T) {
 	if err := os.WriteFile(groupReadablePath, bytes.Repeat([]byte{7}, 32), 0o640); err != nil {
 		t.Fatal(err)
 	}
+	if key, err := loadPasskeyCookieKey(groupReadablePath); err != nil || !bytes.Equal(key, bytes.Repeat([]byte{7}, 32)) {
+		t.Fatalf("group-readable key=%d bytes err=%v", len(key), err)
+	}
 	otherReadablePath := filepath.Join(directory, "other-readable")
 	if err := os.WriteFile(otherReadablePath, bytes.Repeat([]byte{7}, 32), 0o604); err != nil {
 		t.Fatal(err)
@@ -775,7 +800,7 @@ func TestLoadPasskeyCookieKeyRequiresPrivateRegularFile(t *testing.T) {
 	if err := os.Symlink(validPath, symlinkPath); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{directory, shortPath, oversizePath, groupReadablePath, otherReadablePath, symlinkPath} {
+	for _, path := range []string{directory, shortPath, oversizePath, otherReadablePath, symlinkPath} {
 		if _, err := loadPasskeyCookieKey(path); err == nil {
 			t.Fatalf("accepted unsafe passkey key file %q", path)
 		}
@@ -1150,7 +1175,7 @@ func TestDCRScopePolicy(t *testing.T) {
 
 func TestBrowserAdministratorRejectsUnsafeOrAnonymousRequest(t *testing.T) {
 	t.Parallel()
-	callback := browserAdministrator(nil, nil, nil, "https://id.example.test")
+	callback := browserAdministrator(nil, nil, nil, "https://id.example.test", false)
 	for _, request := range []*http.Request{
 		httptest.NewRequest(http.MethodGet, "https://id.example.test/auth/v1/api_keys?probe=1", nil),
 		func() *http.Request {
@@ -1183,7 +1208,7 @@ func TestBrowserAdministratorRejectsUnsafeOrAnonymousRequest(t *testing.T) {
 	}
 }
 
-func TestBrowserAdministratorAllowsAuthenticatedBrowserWithoutAuthorization(t *testing.T) {
+func TestBrowserAdministratorAppliesForceMFAToPasswordSessions(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "browser-admin-authority", DataDir: migratedDataDir(t, "browser-admin-authority")})
@@ -1213,20 +1238,39 @@ func TestBrowserAdministratorAllowsAuthenticatedBrowserWithoutAuthorization(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	issued, err := browserStore.CreateSession(ctx, "subject-1", "pwd", time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC), "")
+	expires := time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
+	issued, err := browserStore.CreateSession(ctx, "subject-1", "pwd", expires, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	const issuer = "https://id.example.test"
-	cookie, err := browser.SessionCookie(issuer, issued.Token, issued.ExpiresAt)
+	pwdCookie, err := browser.SessionCookie(issuer, issued.Token, issued.ExpiresAt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodGet, issuer+"/auth/v1/api_keys", nil)
-	request.AddCookie(cookie)
-	response := httptest.NewRecorder()
-	if !browserAdministrator(rbacStore, browserStore, identities, issuer)(response, request, false) || response.Code != http.StatusOK {
-		t.Fatalf("status=%d", response.Code)
+	mfa, err := browserStore.CreateSession(ctx, "subject-1", "mfa", expires, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mfaCookie, err := browser.SessionCookie(issuer, mfa.Token, mfa.ExpiresAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(cookie *http.Cookie) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, issuer+"/auth/v1/api_keys", nil)
+		r.AddCookie(cookie)
+		return r
+	}
+	if !browserAdministrator(rbacStore, browserStore, identities, issuer, false)(httptest.NewRecorder(), request(pwdCookie), false) {
+		t.Fatal("password session rejected without forced MFA")
+	}
+	pwdDenied := httptest.NewRecorder()
+	if browserAdministrator(rbacStore, browserStore, identities, issuer, true)(pwdDenied, request(pwdCookie), false) || pwdDenied.Code != http.StatusUnauthorized {
+		t.Fatalf("password session status=%d want=401", pwdDenied.Code)
+	}
+	mfaAllowed := httptest.NewRecorder()
+	if !browserAdministrator(rbacStore, browserStore, identities, issuer, true)(mfaAllowed, request(mfaCookie), false) || mfaAllowed.Code != http.StatusOK {
+		t.Fatalf("MFA session status=%d want=200", mfaAllowed.Code)
 	}
 }
 

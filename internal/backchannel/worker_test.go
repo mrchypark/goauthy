@@ -121,7 +121,15 @@ func TestLoadRootCAsRequiresPrivatePEMCertificateFile(t *testing.T) {
 	if _, err := LoadRootCAs(""); err != nil {
 		t.Fatal(err)
 	}
-	for _, permission := range []os.FileMode{0o640, 0o620, 0o604, 0o602, 0o601} {
+	for _, permission := range []os.FileMode{0o640, 0o440} {
+		if err := os.Chmod(path, permission); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadRootCAs(path); err != nil {
+			t.Fatalf("rejected group-readable CA file mode %o: %v", permission, err)
+		}
+	}
+	for _, permission := range []os.FileMode{0o620, 0o604, 0o602, 0o601} {
 		if err := os.Chmod(path, permission); err != nil {
 			t.Fatal(err)
 		}

@@ -46,6 +46,16 @@ func TestGlobalBrandThemeAuthorizedWithoutOAuthClient(t *testing.T) {
 		}
 		return allowed
 	}, func(context.Context, string) error { return clients.ErrNotFound })
+	globalETag := func() string {
+		t.Helper()
+		w := httptest.NewRecorder()
+		handler.GlobalTheme(w, httptest.NewRequest(http.MethodPost, "/auth/v1/branding/theme", nil))
+		if w.Code != http.StatusOK || w.Header().Get("ETag") == "" {
+			t.Fatalf("common theme read status=%d headers=%v", w.Code, w.Header())
+		}
+		return w.Header().Get("ETag")
+	}
+	etag := globalETag()
 	theme := DefaultTheme(GlobalBrandID)
 	theme.BrandName = `GoAuthy ID "<operator>"`
 	body, _ := json.Marshal(theme)
@@ -60,12 +70,16 @@ func TestGlobalBrandThemeAuthorizedWithoutOAuthClient(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := themeRequest(http.MethodPut, "/auth/v1/theme/"+tc.id, bytes.NewReader(body), tc.id, "")
 		if tc.id == GlobalBrandID {
+			req.Header.Set("If-Match", etag)
 			handler.GlobalTheme(w, req)
 		} else {
 			handler.Theme(w, req)
 		}
 		if w.Code != tc.want {
 			t.Fatalf("allowed=%v id=%s status=%d body=%s", allowed, tc.id, w.Code, w.Body.String())
+		}
+		if tc.id == GlobalBrandID && w.Code == http.StatusOK {
+			etag = w.Header().Get("ETag")
 		}
 	}
 	got, err := store.GetFallback(ctx, "app-a")
@@ -85,6 +99,9 @@ func TestGlobalBrandThemeAuthorizedWithoutOAuthClient(t *testing.T) {
 			w := httptest.NewRecorder()
 			req := themeRequest(method, "/auth/v1/theme/"+tc.id, nil, tc.id, "")
 			if tc.id == GlobalBrandID {
+				if method == http.MethodDelete {
+					req.Header.Set("If-Match", etag)
+				}
 				handler.GlobalTheme(w, req)
 			} else {
 				handler.Theme(w, req)

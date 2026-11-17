@@ -183,4 +183,22 @@ func TestCommonBrandingAndLegacyContracts(t *testing.T) {
 	if doc.Paths.Value("/auth/v1/branding/logo").Put.RequestBody.Value.Content.Get("multipart/form-data") == nil {
 		t.Fatal("common logo upload missing multipart schema")
 	}
+	if doc.Paths.Value("/auth/v1/branding/logo").Delete.Responses.Status(200).Value.Headers["Clear-Site-Data"] == nil {
+		t.Fatal("common logo delete must document cache invalidation")
+	}
+	read := doc.Paths.Value("/auth/v1/branding/theme").Post
+	if read.Responses.Status(200).Value.Headers["ETag"] == nil {
+		t.Fatal("common theme read must document ETag")
+	}
+	put := doc.Paths.Value("/auth/v1/branding/theme").Put
+	if put.Parameters.GetByInAndName("header", "If-Match") == nil || put.Responses.Status(412) == nil || put.Responses.Status(428) == nil {
+		t.Fatal("common theme update must require If-Match and document 412/428")
+	}
+	deletion := doc.Paths.Value("/auth/v1/branding/theme").Delete
+	if deletion.Parameters.GetByInAndName("header", "If-Match") == nil || deletion.Responses.Status(412) == nil || deletion.Responses.Status(428) == nil {
+		t.Fatal("common theme reset must require If-Match and document 412/428")
+	}
+	if doc.Paths.Value("/auth/v1/clients/{id}/favicon").Delete.Responses.Status(200).Value.Headers["Clear-Site-Data"] == nil {
+		t.Fatal("client favicon delete must document cache invalidation")
+	}
 }

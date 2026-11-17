@@ -23,7 +23,10 @@
         element.dataset.elysdui = 'true';
         for (const className of sample.classList) element.classList.add(className);
         if (name === 'table') {
-          element.parentElement?.classList.add('ui-table-wrap');
+          if (element.parentElement) {
+            element.parentElement.classList.add('ui-table-wrap');
+            element.parentElement.tabIndex = 0;
+          }
           continue;
         }
         element.dataset.slot = name;

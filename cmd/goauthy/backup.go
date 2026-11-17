@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"sync"
 	"time"
 	_ "time/tzdata"
 
@@ -148,13 +149,15 @@ func scheduledBackupFromEnv(getenv func(string) string, source rhiza.Config) (*s
 type scheduledBackupRuntime struct {
 	config              *scheduledBackupConfig
 	source, destination objstore.Bucket
+	mu                  sync.Mutex
+	degraded            bool
 }
 
 // openBackupObjectStore is the provider factory the runtime opens with, kept as a
 // variable so tests can substitute a bucket without a live provider.
 var openBackupObjectStore = storage.OpenObjectStore
 
-func newScheduledBackupRuntime(ctx context.Context, c *scheduledBackupConfig) (runtime *scheduledBackupRuntime, err error) {
+func newScheduledBackupRuntime(_ context.Context, c *scheduledBackupConfig) (*scheduledBackupRuntime, error) {
 	if c == nil {
 		return nil, nil
 	}
@@ -165,43 +168,18 @@ func newScheduledBackupRuntime(ctx context.Context, c *scheduledBackupConfig) (r
 	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 {
 		return nil, errors.New("backup work directory must be private")
 	}
-	// Opening the stores is bounded metadata work. The trim below verifies
-	// artifacts by reading them in full, so it runs on the configured
-	// backup-operation budget, with the startup deadline only as a floor for a
-	// configuration that never set one.
-	initCtx, cancelInit := context.WithTimeout(ctx, 30*time.Second)
-	defer cancelInit()
-	r := &scheduledBackupRuntime{config: c}
-	defer func() {
-		if err != nil {
-			_ = r.Close()
-		}
-	}()
-	r.source, err = openBackupObjectStore(initCtx, c.source)
-	if err != nil {
-		return nil, errors.New("cannot open backup source")
+	if err := backup.CleanupWorkDir(c.work); err != nil {
+		return nil, errors.New("cannot clean backup work directory")
 	}
-	r.destination = r.source
-	if c.separate {
-		r.destination, err = openBackupObjectStore(initCtx, c.destination)
-		if err != nil {
-			return nil, errors.New("cannot open backup destination")
-		}
-	}
-	// Recover any catalog left oversized by a publication whose retention pass
-	// failed, so startup validation and every later publication can list it.
-	trimCtx, cancelTrim := context.WithTimeout(ctx, max(c.timeout, 30*time.Second))
-	defer cancelTrim()
-	if _, err = backup.TrimCatalog(trimCtx, r.destination, c.catalog, c.trustKeys, time.Now(), c.keepDays, c.maxEntries, true, c.retentionPolicy); err != nil {
-		return nil, errors.New("cannot validate backup destination catalog")
-	}
-	return r, nil
+	return &scheduledBackupRuntime{config: c}, nil
 }
 
 func (r *scheduledBackupRuntime) Close() error {
 	if r == nil {
 		return nil
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	var err error
 	if r.config.separate && r.destination != nil {
 		err = r.destination.Close()
@@ -209,13 +187,80 @@ func (r *scheduledBackupRuntime) Close() error {
 	if r.source != nil {
 		err = errors.Join(err, r.source.Close())
 	}
+	r.source, r.destination = nil, nil
 	return err
+}
+
+// ensureReady keeps an optional remote backup target from gating identity
+// startup. The worker retries this setup before every due slot after an outage.
+func (r *scheduledBackupRuntime) ensureReady(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.source != nil && r.destination != nil {
+		return nil
+	}
+	c := r.config
+	initCtx, cancelInit := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelInit()
+	source, err := openBackupObjectStore(initCtx, c.source)
+	if err != nil {
+		r.degraded = true
+		return errors.New("cannot open backup source")
+	}
+	destination := source
+	if c.separate {
+		destination, err = openBackupObjectStore(initCtx, c.destination)
+		if err != nil {
+			_ = source.Close()
+			r.degraded = true
+			return errors.New("cannot open backup destination")
+		}
+	}
+	cleanup := func() {
+		if c.separate {
+			_ = destination.Close()
+		}
+		_ = source.Close()
+	}
+	// Verification reads complete artifacts, so it uses the configured operation
+	// budget rather than startup's short initialization window.
+	checkCtx, cancelCheck := context.WithTimeout(ctx, max(c.timeout, 30*time.Second))
+	defer cancelCheck()
+	if _, err := backup.TrimCatalog(checkCtx, destination, c.catalog, c.trustKeys, time.Now(), c.keepDays, c.maxEntries, true, c.retentionPolicy); err != nil {
+		cleanup()
+		r.degraded = true
+		return errors.New("cannot validate backup destination catalog")
+	}
+	// Only remove artifacts older than the longest possible attempt plus a
+	// settlement window, so a concurrent publisher cannot lose its upload.
+	before := time.Now().UTC().Add(-(c.timeout + c.lease + 5*time.Minute))
+	if _, err := backup.SweepUncommittedArtifacts(checkCtx, destination, c.catalog, c.trustKeys, before, true); err != nil {
+		cleanup()
+		r.degraded = true
+		return errors.New("cannot clean backup destination orphans")
+	}
+	r.source, r.destination = source, destination
+	if r.degraded {
+		slog.Info("scheduled backup recovered", "state", "ready")
+	}
+	r.degraded = false
+	return nil
 }
 
 func (r *scheduledBackupRuntime) Run(ctx context.Context, db *rhiza.DB) error {
 	c := r.config
+	if ctx.Err() != nil {
+		return nil
+	}
+	if err := r.ensureReady(ctx); err != nil {
+		slog.Warn("scheduled backup degraded", "state", "degraded", "reason", backup.FailureMessage(err))
+	}
 	stage := "ownership"
 	return c.schedule.Run(ctx, db, c.scope, c.location, c.lease, c.timeout, func(jobCtx context.Context) error {
+		stage = "validation"
+		if err := r.ensureReady(jobCtx); err != nil {
+			return err
+		}
 		stage = "capacity"
 		// Publication precedes retention, so reserve the slot the next completion
 		// needs before uploading anything; an oversized catalog is already

@@ -44,8 +44,11 @@ func (h *Handler) Users(w http.ResponseWriter, r *http.Request) {
 	}
 	var guard string
 	var args []any
+	var scope string
+	var scopeArgs []any
 	if key != nil {
 		guard, args = h.store.apiKeys.AuthorizationGuard(*key, "Users", apikey.Read)
+		scope = "1=1"
 	} else {
 		// Retain the established browser preflight, then bind the query to this
 		// exact session as well as the current direct/delegated role.
@@ -64,11 +67,13 @@ func (h *Handler) Users(w http.ResponseWriter, r *http.Request) {
 		sessionGuard, sessionArgs := h.browser.SessionAuthorizationGuard(session, peer)
 		guard = "(" + adminGuard() + " OR " + delegatedAdminGuard() + ") AND " + sessionGuard
 		args = append([]any{actor, actor}, sessionArgs...)
+		scope = "(" + adminGuard() + " OR " + delegatedListSubjectScope("u.subject") + ")"
+		scopeArgs = []any{actor, actor}
 	}
 	if h.beforeUserListRead != nil {
 		h.beforeUserListRead()
 	}
-	page, err := h.store.listUsers(r.Context(), guard, args, options, h.userListThreshold)
+	page, err := h.store.listUsersScoped(r.Context(), guard, args, scope, scopeArgs, options, h.userListThreshold)
 	if err != nil {
 		h.writeStoreError(w, err)
 		return

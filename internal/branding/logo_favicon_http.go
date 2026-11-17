@@ -82,6 +82,7 @@ func (h *ClientLogoHandler) deleteFavicon(w http.ResponseWriter, r *http.Request
 		h.logoMutationError(w, err)
 		return
 	}
+	w.Header().Set("Clear-Site-Data", `"cache"`)
 	w.WriteHeader(http.StatusOK)
 }
 

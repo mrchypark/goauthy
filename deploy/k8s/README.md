@@ -74,9 +74,12 @@ durability remains fixed at `before-ack`.
 The namespace enforces Kubernetes Restricted Pod Security Admission. The
 StatefulSet also sets non-root execution, `RuntimeDefault` seccomp, read-only
 root filesystem, no privilege escalation, dropped capabilities, probes,
-resource bounds, ephemeral data volumes, preferred hostname anti-affinity, and default-deny ingress/egress.
+resource bounds, ephemeral data volumes, required hostname anti-affinity, a
+10-minute startup probe budget, and a 60-second termination grace period, plus
+default-deny ingress/egress.
 The `goauthy` PodDisruptionBudget requires two available pods during voluntary
-eviction; anti-affinity remains preferred so one-node Kind stays schedulable. The explicit ingress
+eviction. This fixed three-voter profile requires at least three schedulable
+worker nodes; a one-node Kind cluster cannot place all three voters. The explicit ingress
 policy permits port 8080 only from pods in the same namespace; `kubectl
 port-forward` is used by the host E2E runner. NetworkPolicy enforcement depends
 on the selected CNI, so manifest assertions are not proof of packet filtering.

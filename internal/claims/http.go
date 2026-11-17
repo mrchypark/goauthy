@@ -27,7 +27,12 @@ type Handler struct {
 	identity         *identity.Store
 	issuer           string
 	bootstrapClients map[string]struct{}
+	adminForceMFA    bool
 }
+
+// ConfigureAdminForceMFA applies the deployment policy to browser claim and
+// attribute administration. API-key authorization remains unchanged.
+func (h *Handler) ConfigureAdminForceMFA(enabled bool) { h.adminForceMFA = enabled }
 
 func NewHandler(store *Store, browserStore *browser.Store, identityStore *identity.Store, issuer string, bootstrapClientIDs ...string) (*Handler, error) {
 	if store == nil || browserStore == nil || identityStore == nil {
@@ -574,6 +579,10 @@ func (h *Handler) actor(w http.ResponseWriter, r *http.Request, mutation bool) (
 	}
 	session, err := h.browser.LoadSessionForPeer(r.Context(), cookie.Value, browser.PeerIPFromContext(r.Context()))
 	if err != nil || !session.Authenticated() || h.identity.ValidateSubject(r.Context(), session.Subject) != nil {
+		h.unauthorized(w)
+		return "", false
+	}
+	if h.adminForceMFA && session.AuthenticationMethod != "mfa" {
 		h.unauthorized(w)
 		return "", false
 	}

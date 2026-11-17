@@ -26,6 +26,19 @@ Previously, GoAuthy stored central/global branding (used on central account, adm
 
 ## Proposed Architecture
 
+The common-theme POST returns a strong `ETag`. Every common-theme PUT and DELETE
+must send that value in `If-Match`; a missing precondition returns `428`, while a
+stale or concurrent value returns `412` without changing the saved theme. Reload the
+common theme before retrying so edits are based on the current representation.
+Client-theme creation continues to use `If-None-Match: *`, so an absent client
+override can be created once without overwriting a concurrent writer. Common
+and client logo DELETE requests invalidate the same browser cache as logo PUT.
+
+**Reset common theme to defaults** deletes the common theme document, restoring
+the built-in `GoAuthy` name, colors, and login text. Logo changes save separately;
+**Remove common logo** removes only the common logo. Fresh installations retain
+the `GoAuthy` fallback until an administrator saves a name.
+
 Related package contracts: [`internal/branding/README.md`](../internal/branding/README.md), [`internal/clients/README.md`](../internal/clients/README.md), [`internal/dcr/README.md`](../internal/dcr/README.md), [`internal/storage/README.md`](../internal/storage/README.md), and [`docs/openapi.md`](openapi.md).
 
 ### 1. Admin UI & Inheritance Semantics
