@@ -83,6 +83,38 @@ func (h *Handler) createProfileInteractionPayload(w http.ResponseWriter, r *http
 	http.Redirect(w, r, redirectPath, http.StatusFound)
 }
 
+func (h *Handler) renderProfilePage(w http.ResponseWriter, r *http.Request, status int, redirectURI, clientID, interactionToken, csrf, language, errMsg string, fields []profileField) {
+	themeURL, err := h.resolveThemeURL(r.Context(), clientID)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		return
+	}
+	brand, err := h.resolveBranding(r.Context(), clientID)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+		return
+	}
+	securityHeaders(w)
+	localizedHTMLHeaders(w, language)
+	w.Header().Set("Content-Security-Policy", authorizationFormCSP(redirectURI))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if status != http.StatusOK {
+		w.WriteHeader(status)
+	}
+	issuerBase := strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile")
+	_ = profilePage.Execute(w, profilePageData{
+		IssuerPath:  issuerBase,
+		Interaction: interactionToken,
+		CSRFToken:   csrf,
+		ThemeURL:    themeURL,
+		Brand:       brand,
+		Error:       errMsg,
+		Language:    language,
+		Account:     issuerBase + "/account",
+		Fields:      fields,
+	})
+}
+
 // profileGET handles GET /auth/profile?interaction=<token>
 func (h *Handler) profileGET(w http.ResponseWriter, r *http.Request) {
 	session, sessionToken, ok := h.session(r)
@@ -134,31 +166,7 @@ func (h *Handler) profileGET(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields := buildProfileFields(policy, claims)
-	securityHeaders(w)
-	language := i18n.UILanguageFromRequest(r)
-	localizedHTMLHeaders(w, language)
-	w.Header().Set("Content-Security-Policy", authorizationFormCSP(request.RedirectURI))
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	themeURL, err := h.resolveThemeURL(r.Context(), request.ClientID)
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-		return
-	}
-	brand, err := h.resolveBranding(r.Context(), request.ClientID)
-	if err != nil {
-		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-		return
-	}
-	_ = profilePage.Execute(w, profilePageData{
-		IssuerPath:  strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile"),
-		Interaction: interactionToken,
-		CSRFToken:   csrf,
-		ThemeURL:    themeURL,
-		Brand:       brand,
-		Language:    language,
-		Account:     strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile") + "/account",
-		Fields:      fields,
-	})
+	h.renderProfilePage(w, r, http.StatusOK, request.RedirectURI, request.ClientID, interactionToken, csrf, i18n.UILanguageFromRequest(r), "", fields)
 }
 
 // profilePOST handles POST /auth/profile
@@ -306,36 +314,11 @@ func (h *Handler) profilePOST(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(err, identity.ErrPreferredUsernameUnavailable) {
 				errMsg = "preferred username unavailable"
 			}
-			securityHeaders(w)
 			language := i18n.UILanguageFromRequest(r)
 			if language == "ko" && errors.Is(err, identity.ErrPreferredUsernameUnavailable) {
 				errMsg = "선호 사용자 이름을 사용할 수 없습니다"
 			}
-			localizedHTMLHeaders(w, language)
-			w.Header().Set("Content-Security-Policy", authorizationFormCSP(request.RedirectURI))
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			themeURL, err := h.resolveThemeURL(r.Context(), request.ClientID)
-			if err != nil {
-				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-				return
-			}
-			brand, err := h.resolveBranding(r.Context(), request.ClientID)
-			if err != nil {
-				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-				return
-			}
-			w.WriteHeader(http.StatusBadRequest)
-			_ = profilePage.Execute(w, profilePageData{
-				IssuerPath:  strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile"),
-				Interaction: interactionToken,
-				CSRFToken:   csrf,
-				ThemeURL:    themeURL,
-				Brand:       brand,
-				Error:       errMsg,
-				Language:    language,
-				Account:     strings.TrimSuffix(profileIssuerPath(h.issuer), "/auth/profile") + "/account",
-				Fields:      fields,
-			})
+			h.renderProfilePage(w, r, http.StatusBadRequest, request.RedirectURI, request.ClientID, interactionToken, csrf, language, errMsg, fields)
 			return
 		}
 		if errors.Is(err, identity.ErrSelfProfileUnauthorized) {

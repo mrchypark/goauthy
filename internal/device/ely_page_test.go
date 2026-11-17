@@ -66,4 +66,11 @@ func TestDeviceVerificationPageCommonBrand(t *testing.T) {
 			t.Fatalf("missing %q in %s", want, body)
 		}
 	}
+
+	h.SetBrandResolver(nil)
+	wDefault := httptest.NewRecorder()
+	h.ServeHTTP(wDefault, req)
+	if wDefault.Code != http.StatusOK || !strings.Contains(wDefault.Body.String(), `<span>GoAuthy</span>`) {
+		t.Fatalf("expected GoAuthy fallback status=%d body=%s", wDefault.Code, wDefault.Body.String())
+	}
 }

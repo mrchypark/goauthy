@@ -24,8 +24,9 @@ var stylesheets = []string{
 	"app.css", "ely-controls.css", "ely-patterns.css", "brand.css",
 }
 
-// NewTemplates loads the actual Ely components and a CSS-only goauthy-head.
-// Invoke the head with an issuer path (or ""); add page templates with Parse.
+// NewTemplates loads the actual Ely components, a CSS-only goauthy-head, and the
+// shared goauthy-brand header lockup. Pass Base="" to goauthy-brand when LogoURL
+// is already issuer-prefixed; otherwise pass the issuer base path.
 // Keep custom brand stylesheets after the head. Scripts remain page-owned.
 func NewTemplates(name string) (*template.Template, error) {
 	t, err := ely.NewTemplates()

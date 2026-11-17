@@ -24,9 +24,6 @@ var accessPage = template.Must(template.Must(ui.NewTemplates("admin-access")).Pa
 </nav></main></body></html>`))
 
 func renderAccessPage(w http.ResponseWriter, r *http.Request, base string, brand branding.Brand) {
-	if strings.TrimSpace(brand.Name) == "" {
-		brand.Name = "GoAuthy"
-	}
 	_ = accessPage.Execute(w, struct {
 		Base, Language string
 		Brand          branding.Brand

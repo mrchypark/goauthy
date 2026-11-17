@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/mrchypark/goauthy/internal/branding"
+	"github.com/mrchypark/goauthy/internal/oauth"
 )
 
 func TestClientLoginBrandingEscapesCopyAndKeepsAuthenticationFields(t *testing.T) {
@@ -161,5 +162,45 @@ func TestContinuationPagesRenderBrandLogoAndTheme(t *testing.T) {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Fatalf("fedcm missing %q in %s", want, w.Body.String())
 		}
+	}
+
+	successW := httptest.NewRecorder()
+	h.writeFedCMSuccess(successW, r)
+	for _, want := range []string{`href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+		if !strings.Contains(successW.Body.String(), want) {
+			t.Fatalf("fedcm success missing %q in %s", want, successW.Body.String())
+		}
+	}
+
+	otpW := httptest.NewRecorder()
+	h.renderOTPStepUp(otpW, r, oauth.AuthorizationRequest{ClientID: "c1", RedirectURI: "https://app.example/cb"}, http.StatusOK)
+	if !strings.Contains(otpW.Header().Get("Content-Security-Policy"), "img-src 'self'") {
+		t.Fatalf("otp csp=%q", otpW.Header().Get("Content-Security-Policy"))
+	}
+	for _, want := range []string{`href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+		if !strings.Contains(otpW.Body.String(), want) {
+			t.Fatalf("otp missing %q in %s", want, otpW.Body.String())
+		}
+	}
+
+	profileW := httptest.NewRecorder()
+	h.renderProfilePage(profileW, r, http.StatusOK, "https://app.example/cb", "c1", "tok", "csrf", "en", "", nil)
+	if !strings.Contains(profileW.Header().Get("Content-Security-Policy"), "img-src 'self'") {
+		t.Fatalf("profile csp=%q", profileW.Header().Get("Content-Security-Policy"))
+	}
+	for _, want := range []string{`href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+		if !strings.Contains(profileW.Body.String(), want) {
+			t.Fatalf("profile missing %q in %s", want, profileW.Body.String())
+		}
+	}
+
+	hFail := testHandler(t)
+	hFail.SetThemeURLResolver(func(context.Context, string) (string, error) {
+		return "", errors.New("unavailable")
+	})
+	failW := httptest.NewRecorder()
+	hFail.renderProfilePage(failW, r, http.StatusOK, "https://app.example/cb", "c1", "tok", "csrf", "en", "", nil)
+	if failW.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 on profile theme failure, got %d", failW.Code)
 	}
 }
