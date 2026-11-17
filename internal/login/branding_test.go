@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/mrchypark/goauthy/internal/branding"
+	"github.com/mrchypark/goauthy/internal/oauth"
 )
 
 func TestClientLoginBrandingEscapesCopyAndKeepsAuthenticationFields(t *testing.T) {
@@ -91,5 +92,115 @@ func TestClientLoginBrandingLeavesDirectLoginInstructions(t *testing.T) {
 	h.DeviceLoginHandler(false).ServeHTTP(w, r)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "Signing in does not approve it.") || !strings.Contains(w.Body.String(), "Common ID") || strings.Contains(w.Body.String(), "Wrong security instructions") {
 		t.Fatalf("response=%d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestContinuationPagesRenderBrandLogoAndTheme(t *testing.T) {
+	brand := LoginBranding{Name: "Acme ID", LogoURL: "/tenant/auth/v1/clients/acme/logo?v=1"}
+	themeURL := "/tenant/auth/v1/theme/acme/2"
+
+	for _, tc := range []struct {
+		name   string
+		render func(*strings.Builder) error
+	}{
+		{
+			name: "otpStepUpPage",
+			render: func(b *strings.Builder) error {
+				return otpStepUpPage.Execute(b, loginPageData{IssuerPath: "/tenant", ThemeURL: themeURL, Brand: brand})
+			},
+		},
+		{
+			name: "fedCMLandingPage",
+			render: func(b *strings.Builder) error {
+				return fedCMLandingPage.Execute(b, fedCMLandingPageData{IssuerPath: "/tenant", ThemeURL: themeURL, Brand: brand})
+			},
+		},
+		{
+			name: "fedCMSuccessPage",
+			render: func(b *strings.Builder) error {
+				return fedCMSuccessPage.Execute(b, fedCMSuccessPageData{IssuerPath: "/tenant", ThemeURL: themeURL, Brand: brand})
+			},
+		},
+		{
+			name: "profilePage",
+			render: func(b *strings.Builder) error {
+				return profilePage.Execute(b, profilePageData{IssuerPath: "/tenant", ThemeURL: themeURL, Brand: brand})
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out strings.Builder
+			if err := tc.render(&out); err != nil {
+				t.Fatal(err)
+			}
+			body := out.String()
+			for _, want := range []string{`href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("missing %q in %s", want, body)
+				}
+			}
+		})
+	}
+
+	h := testHandler(t)
+	h.issuer = "https://id.example/tenant"
+	h.fedcmEnabled = true
+	h.SetThemeURLResolver(func(context.Context, string) (string, error) {
+		return "/tenant/auth/v1/theme/acme/2", nil
+	})
+	h.SetLoginBrandingResolver(func(context.Context, string) (LoginBranding, error) {
+		return LoginBranding{Name: "Acme ID", LogoURL: "/tenant/auth/v1/clients/acme/logo?v=1"}, nil
+	})
+	r := httptest.NewRequest(http.MethodGet, "/tenant/auth/fedcm/login", nil)
+	r.RemoteAddr = "198.51.100.14:1234"
+	w := httptest.NewRecorder()
+	h.FedCMLanding(w, r)
+	if w.Code != http.StatusOK || !strings.Contains(w.Header().Get("Content-Security-Policy"), "img-src 'self'") {
+		t.Fatalf("status=%d csp=%q", w.Code, w.Header().Get("Content-Security-Policy"))
+	}
+	for _, want := range []string{`href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("fedcm missing %q in %s", want, w.Body.String())
+		}
+	}
+
+	successW := httptest.NewRecorder()
+	h.writeFedCMSuccess(successW, r)
+	for _, want := range []string{`href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+		if !strings.Contains(successW.Body.String(), want) {
+			t.Fatalf("fedcm success missing %q in %s", want, successW.Body.String())
+		}
+	}
+
+	otpW := httptest.NewRecorder()
+	h.renderOTPStepUp(otpW, r, oauth.AuthorizationRequest{ClientID: "c1", RedirectURI: "https://app.example/cb"}, http.StatusOK)
+	if !strings.Contains(otpW.Header().Get("Content-Security-Policy"), "img-src 'self'") {
+		t.Fatalf("otp csp=%q", otpW.Header().Get("Content-Security-Policy"))
+	}
+	for _, want := range []string{`href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+		if !strings.Contains(otpW.Body.String(), want) {
+			t.Fatalf("otp missing %q in %s", want, otpW.Body.String())
+		}
+	}
+
+	profileW := httptest.NewRecorder()
+	h.renderProfilePage(profileW, r, http.StatusOK, "https://app.example/cb", "c1", "tok", "csrf", "en", "", nil)
+	if !strings.Contains(profileW.Header().Get("Content-Security-Policy"), "img-src 'self'") {
+		t.Fatalf("profile csp=%q", profileW.Header().Get("Content-Security-Policy"))
+	}
+	for _, want := range []string{`href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+		if !strings.Contains(profileW.Body.String(), want) {
+			t.Fatalf("profile missing %q in %s", want, profileW.Body.String())
+		}
+	}
+
+	hFail := testHandler(t)
+	hFail.SetThemeURLResolver(func(context.Context, string) (string, error) {
+		return "", errors.New("unavailable")
+	})
+	failW := httptest.NewRecorder()
+	hFail.renderProfilePage(failW, r, http.StatusOK, "https://app.example/cb", "c1", "tok", "csrf", "en", "", nil)
+	if failW.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 on profile theme failure, got %d", failW.Code)
 	}
 }

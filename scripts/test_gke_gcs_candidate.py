@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for e2e-ied-gcs-candidate.py using stdlib unittest + mocks."""
+"""Unit tests for e2e-gke-gcs-candidate.py using stdlib unittest + mocks."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ sys.path.insert(0, __import__("os").path.dirname(__file__))
 
 import importlib.util
 _spec = importlib.util.spec_from_file_location(
-    "e2e_ied_gcs_candidate",
-    __import__("os").path.join(__import__("os").path.dirname(__file__), "e2e-ied-gcs-candidate.py"),
+    "e2e_gke_gcs_candidate",
+    __import__("os").path.join(__import__("os").path.dirname(__file__), "e2e-gke-gcs-candidate.py"),
 )
 mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(mod)
@@ -71,7 +71,7 @@ class TestKubectlCreateStdin(unittest.TestCase):
         self.assertEqual(result["metadata"]["uid"], "uid-123")
         cmd = mock_run.call_args[0][0]
         self.assertIn("--context", cmd)
-        self.assertIn("gke_ied-cluster", cmd)
+        self.assertIn("gke-qual-cluster", cmd)
         self.assertIn("create", cmd)
 
 
@@ -519,7 +519,7 @@ class TestMainLifecycle(unittest.TestCase):
     """Test the full main() lifecycle by patching thin external wrappers."""
 
     def _run_main(self, extra_argv=None):
-        argv = ["e2e-ied-gcs-candidate.py", "--image", VALID_IMAGE]
+        argv = ["e2e-gke-gcs-candidate.py", "--image", VALID_IMAGE]
         if extra_argv:
             argv.extend(extra_argv)
         with mock.patch("sys.argv", argv):
@@ -625,7 +625,7 @@ class TestMainLifecycle(unittest.TestCase):
 
     @mock.patch.object(mod, "kubectl_create_stdin")
     def test_bad_image_no_create(self, mock_kcs):
-        with mock.patch("sys.argv", ["e2e-ied-gcs-candidate.py", "--image", "bad-image"]):
+        with mock.patch("sys.argv", ["e2e-gke-gcs-candidate.py", "--image", "bad-image"]):
             result = mod.main()
         self.assertEqual(result, 1)
         mock_kcs.assert_not_called()
@@ -633,7 +633,7 @@ class TestMainLifecycle(unittest.TestCase):
     @mock.patch.object(mod, "ensure_port_free", side_effect=RuntimeError("port in use"))
     @mock.patch.object(mod, "kubectl_create_stdin")
     def test_occupied_port_no_create(self, mock_kcs, mock_epf):
-        with mock.patch("sys.argv", ["e2e-ied-gcs-candidate.py", "--image", VALID_IMAGE]):
+        with mock.patch("sys.argv", ["e2e-gke-gcs-candidate.py", "--image", VALID_IMAGE]):
             result = mod.main()
         self.assertEqual(result, 1)
         mock_kcs.assert_not_called()
@@ -698,7 +698,7 @@ class TestMainHA3Lifecycle(unittest.TestCase):
     """Test the HA3 main() lifecycle with mocked externals."""
 
     def _run_ha3(self):
-        argv = ["e2e-ied-gcs-candidate.py", "--image", VALID_IMAGE, "--replicas", "3"]
+        argv = ["e2e-gke-gcs-candidate.py", "--image", VALID_IMAGE, "--replicas", "3"]
         with mock.patch("sys.argv", argv):
             return mod.main()
 
@@ -943,17 +943,17 @@ class TestMainHA3Lifecycle(unittest.TestCase):
     def test_ha3_replicas_flag_routing(self):
         """--replicas 3 routes to _main_ha3, --replicas 1 routes to _main_standalone."""
         with mock.patch.object(mod, "_main_ha3", return_value=0) as mock_ha3:
-            with mock.patch("sys.argv", ["e2e-ied-gcs-candidate.py", "--image", VALID_IMAGE, "--replicas", "3"]):
+            with mock.patch("sys.argv", ["e2e-gke-gcs-candidate.py", "--image", VALID_IMAGE, "--replicas", "3"]):
                 mod.main()
             mock_ha3.assert_called_once()
 
         with mock.patch.object(mod, "_main_standalone", return_value=0) as mock_s1:
-            with mock.patch("sys.argv", ["e2e-ied-gcs-candidate.py", "--image", VALID_IMAGE, "--replicas", "1"]):
+            with mock.patch("sys.argv", ["e2e-gke-gcs-candidate.py", "--image", VALID_IMAGE, "--replicas", "1"]):
                 mod.main()
             mock_s1.assert_called_once()
 
         with mock.patch.object(mod, "_main_standalone", return_value=0) as mock_s1:
-            with mock.patch("sys.argv", ["e2e-ied-gcs-candidate.py", "--image", VALID_IMAGE]):
+            with mock.patch("sys.argv", ["e2e-gke-gcs-candidate.py", "--image", VALID_IMAGE]):
                 mod.main()
             mock_s1.assert_called_once()
 
@@ -1165,7 +1165,7 @@ class TestPairArgsExecutableCheck(unittest.TestCase):
     """Tests for os.access(path, os.X_OK) validation of --ternal-bin and --password-hasher."""
 
     def _run_main(self, extra_argv):
-        argv = ["e2e-ied-gcs-candidate.py", "--image", VALID_IMAGE] + extra_argv
+        argv = ["e2e-gke-gcs-candidate.py", "--image", VALID_IMAGE] + extra_argv
         with mock.patch("sys.argv", argv):
             return mod.main()
 
@@ -1188,7 +1188,7 @@ class TestConsumerProbeLifecycle(unittest.TestCase):
     """Tests for TernalProbe login-before-fault, verify-after-replacement, cleanup->__exit__."""
 
     def _run_main(self, replicas):
-        argv = ["e2e-ied-gcs-candidate.py", "--image", VALID_IMAGE,
+        argv = ["e2e-gke-gcs-candidate.py", "--image", VALID_IMAGE,
                 "--replicas", str(replicas),
                 "--ternal-bin", "/usr/bin/ternal",
                 "--password-hasher", "/usr/bin/hasher"]
@@ -1513,7 +1513,7 @@ class TestConsumerProbeLifecycle(unittest.TestCase):
 
     def test_invalid_pair_no_factory_calls(self):
         """When --ternal-bin given without --password-hasher, no factory calls."""
-        argv = ["e2e-ied-gcs-candidate.py", "--image", VALID_IMAGE,
+        argv = ["e2e-gke-gcs-candidate.py", "--image", VALID_IMAGE,
                 "--ternal-bin", "/usr/bin/ternal"]
         with mock.patch("sys.argv", argv):
             with mock.patch.object(mod, "TernalProbe") as mock_probe:

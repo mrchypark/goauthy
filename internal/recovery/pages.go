@@ -1,12 +1,14 @@
 package recovery
 
 import (
+	"context"
 	_ "embed"
 	"html/template"
 	"net/http"
 	"net/url"
 	"strings"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/ui"
 )
@@ -37,17 +39,25 @@ func (s *Service) PageScript(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(pagesJS)
 }
 
+// SetBrandResolver configures common branding for recovery and registration pages.
+func (s *Service) SetBrandResolver(resolve func(context.Context) (branding.Brand, error)) {
+	s.brand = resolve
+}
+
+type recoveryPageData struct {
+	Base, Mode, Language string
+	Blocked              bool
+	Brand                branding.Brand
+}
+
 func (s *Service) renderPage(w http.ResponseWriter, r *http.Request, mode string) {
 	securityHeaders(w)
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Add("Vary", "Accept")
 	w.Header().Add("Vary", "Accept-Language")
 	w.Header().Add("Vary", "Cookie")
 	issuer, _ := url.Parse(s.issuer)
 	blocked := mode == "register" && s.captcha != nil && s.captcha.SiteKey() != ""
-	_ = recoveryPage.Execute(w, struct {
-		Base, Mode, Language string
-		Blocked              bool
-	}{strings.TrimRight(issuer.Path, "/"), mode, i18n.UILanguageFromRequest(r), blocked})
+	_ = recoveryPage.Execute(w, recoveryPageData{strings.TrimRight(issuer.Path, "/"), mode, i18n.UILanguageFromRequest(r), blocked, branding.ResolveOptional(r.Context(), s.brand)})
 }

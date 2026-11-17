@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/captcha"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/identity"
@@ -56,6 +57,7 @@ type Service struct {
 	registration  *openRegistration
 	captcha       captcha.Verifier
 	passkeys      *passkey.Service
+	brand         func(context.Context) (branding.Brand, error)
 }
 
 type openRegistration struct {
