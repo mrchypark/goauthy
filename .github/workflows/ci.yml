@@ -49,7 +49,7 @@ jobs:
         run: sh scripts/test-object-store-contract.sh
 
       # Synthetic filesystem archive proof; does not qualify app init on clouds.
-      - name: Local archive v0.21.2 to v0.23.0 compatibility
+      - name: Local archive v0.21.2 to v0.24.0 compatibility
         timeout-minutes: 20
         run: sh scripts/test-rhiza-local-upgrade.sh
 
@@ -125,8 +125,8 @@ jobs:
       - name: deploy/standalone-local
         run: sh ./deploy/standalone-local/test.sh
 
-      - name: deploy/ied-qualification
-        run: ./deploy/ied-qualification/test.sh
+      - name: deploy/gke-qualification
+        run: ./deploy/gke-qualification/test.sh
 
       # Cheap offline oracle checks for the issue #113 isolation summarizer,
       # its CI report aggregation, and the production image-binding controls.

@@ -14,7 +14,7 @@ trap 'rm -f "$render"' EXIT
 
 # Render all base manifests concatenated as separate YAML documents; without
 # --- separators yq sees a single merged document and select() matches nothing.
-for manifest in "$root"/deploy/ied-qualification/base/*.yaml; do
+for manifest in "$root"/deploy/gke-qualification/base/*.yaml; do
 	printf '\n---\n'
 	cat "$manifest"
 done >"$render"
@@ -24,7 +24,7 @@ done >"$render"
 # wins) and strict parsers reject, so the rendered resources would not be the
 # reviewed ones. Fall back to a document/entry count when PyYAML is missing.
 if python3 -c 'import yaml' >/dev/null 2>&1; then
-	python3 - "$root"/deploy/ied-qualification/base/*.yaml <<'PY' || exit 1
+	python3 - "$root"/deploy/gke-qualification/base/*.yaml <<'PY' || exit 1
 import sys
 
 import yaml
@@ -60,7 +60,7 @@ for path in sys.argv[1:]:
 			sys.exit(1)
 PY
 else
-	for manifest in "$root"/deploy/ied-qualification/base/*.yaml; do
+	for manifest in "$root"/deploy/gke-qualification/base/*.yaml; do
 		documents=$(grep -c '^---$' "$manifest" || true)
 		apis=$(grep -c '^apiVersion:' "$manifest" || true)
 		[ "$((documents + 1))" -eq "$apis" ] || {
@@ -182,4 +182,4 @@ s1_count=$(yq -r 'select(.metadata.labels."app.kubernetes.io/part-of" == "goauth
 [ "$ha3_count" -ge 4 ] || { echo "HA3 resources (expected >=4: ss, svc, pdb, np) got $ha3_count" >&2; exit 1; }
 [ "$s1_count" -ge 4 ] || { echo "S1 resources (expected >=4: ss, svc, pdb, np) got $s1_count" >&2; exit 1; }
 
-echo "ied-qualification manifest checks passed"
+echo "gke-qualification manifest checks passed"

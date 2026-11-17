@@ -23,11 +23,7 @@ GoAuthy의 사용자 세션 → SaaS 연결 → 사용자 동의 → 소비자 �
 1. `REGISTERED_OAUTH2=1`, `OAUTH2_ACTIVE_RESTART=1`, `CONSUMER_REFRESH=1`: `TestConnectionOAuth2RegisteredSuccess` **PASS 1.47s**, runner 종료 0.
 2. 위 설정에 `OAUTH2_HANDOFF_UI=1`, `OAUTH2_CONNECTION_UI=1`, `OAUTH2_CALLBACK_UI=1` 추가: 실제 Chromium 연결·callback·동의 화면을 포함해 **PASS 7.74s**, runner 종료 0.
 
-모든 설정 접두사는 `GOAUTHY_E2E_`이다. 같은 owner session, consumer token, connection, grant를 유지하고 GoAuthy를 두 번 재시작했다. 버전별 동일 access token 유지, 소비자 갱신 후 버전 증가, 오래된 버전 거부, 동의 철회 후 전달 거부를 확인했다. 제공자는 합성이며 실제 외부 SaaS 계정으로 로그인하지 않았다.
-
-로그:
-- `/tmp/goauthy-saas-readiness.log`
-- `/tmp/goauthy-saas-handoff-readiness.log`
+모든 설정 접두사는 `GOAUTHY_E2E_`이다. 같은 owner session, consumer token, connection, grant를 유지하고 GoAuthy를 두 번 재시작했다. 버전별 동일 access token 유지, 소비자 갱신 후 버전 증가, 오래된 버전 거부, 동의 철회 후 전달 거부를 확인했다. 제공자는 합성이며 실제 외부 SaaS 계정으로 로그인하지 않았다. (2026-09-27 SaaS OAuth readiness 및 handoff UI standalone 실행 모두 종료 0)
 
 ### 만료·재사용·권한 경계
 
@@ -35,7 +31,7 @@ GoAuthy의 사용자 세션 → SaaS 연결 → 사용자 동의 → 소비자 �
 go test -mod=readonly -count=1 -timeout=5m ./internal/saas -run '^(TestUseHandoff.*|TestUseGrantRefresh.*|TestRefreshCredentialChecksExpiryAndCurrentAuthority|TestOAuth2RevokePreventsRefreshResurrection)$'
 ```
 
-**PASS 3.736s**. Handoff 만료·replay·동시 승인·client/authority 경계, refresh 동의·만료·철회·동시 실행, 철회된 credential의 복구 방지 검사다. 실제 서비스에서 토큰이 만료될 때까지 기다린 E2E와는 구분한다. 로그: `/tmp/goauthy-saas-boundaries-readiness.log`.
+**PASS 3.736s**. Handoff 만료·replay·동시 승인·client/authority 경계, refresh 동의·만료·철회·동시 실행, 철회된 credential의 복구 방지 검사다. 실제 서비스에서 토큰이 만료될 때까지 기다린 E2E와는 구분한다.
 
 ### Conductor 코드와 집중 검사
 
@@ -54,7 +50,7 @@ GoAuthy HTTPS standalone에 `USE_GRANTS=1`, `CREDENTIAL_DELIVERY=1`, `RAW_AUTHOR
 - 승인된 API key를 GoAuthy에서 조회하고 Conductor 어댑터로 로컬 TLS 제공자에 두 번 호출.
 - 동의 철회 후 전달 거부, 결과 없음, 제공자 호출 0.
 
-공급자 주소는 테스트 transport로 로컬 TLS에 매핑되며 실제 Gowid에 호출하지 않았다. Conductor OAuth delivery adapter와 공개 execution/queue는 이 bridge 범위에 포함되지 않는다. 상위 `test/e2e` 패키지의 `no tests to run`과 달리 `test/e2e/browser`의 선택된 검사 및 그 자식 Conductor 검사는 실제 실행됐다. 로그: `/tmp/goauthy-conductor-readiness.log`.
+공급자 주소는 테스트 transport로 로컬 TLS에 매핑되며 실제 Gowid에 호출하지 않았다. Conductor OAuth delivery adapter와 공개 execution/queue는 이 bridge 범위에 포함되지 않는다. 상위 `test/e2e` 패키지의 `no tests to run`과 달리 `test/e2e/browser`의 선택된 검사 및 그 자식 Conductor 검사는 실제 실행됐다.
 
 ## 남은 수용 조건
 

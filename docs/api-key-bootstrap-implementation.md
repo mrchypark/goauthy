@@ -1,5 +1,7 @@
 # API-key bootstrap secret compatibility
 
+> **Current status:** Admin API keys are **Preview** in [capabilities.md](capabilities.md); scoped API keys, bootstrap modes, and cross-Pod usage exist, while full management/UI workflow qualification remains open.
+
 ## Current verification checklist
 
 This table distinguishes implemented behavior from the remaining deployment gates.
@@ -33,7 +35,6 @@ candidates; current dated results in [status.md](status.md) take precedence.
 | [x] Native peer network partition and healing | existing iproute2/Kind fault injection, generated-bootstrap overlay and CLI | live exact-three Kind PASS 2026-09-09: original key/permissions, minority fail-closed behavior, current-log redaction and unchanged identities |
 | [ ] Concurrent bootstrap-write durability during partition | existing project chaos/restore infrastructure | dedicated concurrent Generate mutation evidence remains missing |
 | [ ] General TOML secrets configuration parity | already installed `pelletier/go-toml/v2` | separate configuration surface; not an API-key JSON parser gap |
-
 
 ### Input-format research (2026-09-08)
 
@@ -100,7 +101,7 @@ New deterministic real-Rhiza tests verify generated-token authentication,
 independent retry, unchanged bytes/token/deadline, recovery from a prewritten
 artifact and zero partial imports for malformed/tampered/expired/mismatched
 artifacts. CLI tests verify exact retrieval, expiry equality, non-overwrite and
-safe purge. `/tmp/goauthy-wide-batch-bootstrap-20260906.log` records the run.
+safe purge (see [status.md](status.md) for recorded test runs).
 
 ### Shared Generate startup (schema85)
 
@@ -146,8 +147,8 @@ before importing any API-key rows. This also retries the boundary after an earli
 link succeeded but directory sync failed. Errors propagate; the file is preserved
 for authenticated recovery rather than replaced.
 
-Final generated-artifact/import/recovery focused race PASS 36.773s:
-`/tmp/goauthy-generated-artifact-durability-final.log`; API-key vet PASS.
+Final generated-artifact/import/recovery focused race PASS 36.773s
+(`internal/apikey`); API-key `go vet` PASS.
 This verifies the filesystem calls and import behavior on this host, not power-loss
 or deployed HA durability.
 
@@ -177,8 +178,8 @@ returns false for an absent artifact. GoAuthy now matches that idempotent behavi
 repeated `-purge-expired` prints `{"removed":false}`. A missing key directory while
 an artifact exists remains an error, with no deletion or credential output.
 The prior repeated-purge test reproduced an ENOENT failure. After the fix, the full
-CLI race suite passed 1.828s (`/tmp/goauthy-generated-purge-idempotency.log`), and
-API-key/CLI vet passed. That earlier run predates the shared startup integration described above.
+CLI race suite (`./cmd/goauthy-bootstrap-secrets`) passed 1.828s, and
+API-key/CLI `go vet` passed. That earlier run predates the shared startup integration described above.
 
 ### Runnable deployment checks
 

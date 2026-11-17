@@ -1,6 +1,8 @@
 # Managed static clients: partial core
 
-2026-09-06, Rhiza v0.12.0 / schema v65. Bootstrap 설정이나 DCR 등록을
+> **Current status:** Dynamic Client Registration and managed client registration/management are **Preview** in [capabilities.md](capabilities.md); final-candidate HA qualification of the supported registration/management paths remains open.
+
+2026-09-06, Rhiza v0.12.0 / schema v65 (historical implementation note; current schema and Rhiza versions are tracked in `go.mod` and [status.md](status.md)). Bootstrap 설정이나 DCR 등록을
 대체하지 않는 명시적 관리자 registry다. 전체 Rauthy client parity가 아니다.
 
 ## 구현
@@ -21,7 +23,7 @@
 - [x] standalone 실제 HTTP CRUD, confidential client-credentials, disable/
   re-enable, secret rotation, stale update/delete 거절, ID 재사용 금지 통과.
 - [x] exact-three HA 교차 Pod HTTP 및 goauthy-0 UID 교체·3 Pod Ready 후
-  재실행 통과: 2.57/1.98초, `/tmp/goauthy-device-pilot-ha-final-20260906.log`.
+  재실행 통과: 2.57/1.98초 (상세 기록은 [status.md](status.md) 참조).
 
 지원되는 흐름은 authorization_code, refresh_token, confidential
 client_credentials 및 managed Device Grant다. 지원 scope는
@@ -43,9 +45,8 @@ OpenAPI의 managed-client 경로를 따른다. 지원하지 않는 Rauthy 입력
 - [x] 회전 응답의 secret 재조회는 회전 결과 revision에 묶는다. 경쟁 회전 뒤
   더 최신 secret을 이전 ETag와 섞어 반환하지 않고 충돌로 거절한다.
 - [x] 실제 Chromium UI → public Device 승인 → access/refresh → 비활성화와
-  confidential secret 회전을 standalone 및 동일 DB 재시작 후 검증했다.
-  `/tmp/goauthy-managed-device-ui-standalone-retry-20260906.log`, 종료 0.
-  관리 HTTP 1.96/1.73초, 관리 UI 8.17/4.93초. 기존 public/confidential Device도 통과했다.
+  confidential secret 회전을 standalone 및 동일 DB 재시작 후 검증했다
+  (종료 0, 관리 HTTP 1.96/1.73초, 관리 UI 8.17/4.93초; 기존 public/confidential Device도 통과, 상세 기록은 [status.md](status.md) 참조).
 - [ ] 이 후보의 exact-three UI 및 동일 managed pending grant Pod 교체 최종 검증.
 
 기존 Fosite의 client 인증/토큰 처리를 재사용하고 새 패키지는 추가하지 않았다.

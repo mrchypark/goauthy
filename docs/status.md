@@ -1,3 +1,7 @@
+# GoAuthy Status & Dated Qualification Ledger
+
+> **Historical-baseline note:** Entries below are reverse-chronological dated execution records (covering earlier baselines such as Rhiza `v0.10.0` / `v0.12.3` / `v0.21.x` and Schema `v102`). For the current dependency baseline (`Go 1.27.4`, `Rhiza v0.24.0`, `latticedb-go v0.13.0`, schema `v114`), see [go.mod](../go.mod) and [README.md](../README.md); for current capability status, see [capabilities.md](capabilities.md), [no-pvc-dr.md](no-pvc-dr.md), and [encrypted-backup-design.md](encrypted-backup-design.md).
+
 ## 2026-09-18 Actual Ternal operational qualification / runtime image / open-registration E2E
 
 ### Runtime image
@@ -6,7 +10,7 @@
 
 ### Actual Ternal operational qualification
 
-Ternal consumer (commit `52df50507fadfd460e2ad39eac1f5a3e8b130a13`) OIDC + same-cookie auth/session and hosts PASS. GCS standalone run `2183abd5-4c6b-4e43-ab42-ad035264aadb` and HA-3 run `b0f87aa5-b77e-4e82-8eff-700584419d66`: same pre-fault token / full JWKS / all 3 physical hosts / survivor / replacement emptyDir loss. All owned K8s resources + secrets + GCS exact prefixes verified absent. HA startup required four restarts before readiness. No physical node fault / CNI enforcement; shared IED policy disabled, must isolate approved env.
+Ternal consumer (commit `52df50507fadfd460e2ad39eac1f5a3e8b130a13`) OIDC + same-cookie auth/session and hosts PASS. GCS standalone run `2183abd5-4c6b-4e43-ab42-ad035264aadb` and HA-3 run `b0f87aa5-b77e-4e82-8eff-700584419d66`: same pre-fault token / full JWKS / all 3 physical hosts / survivor / replacement emptyDir loss. All owned K8s resources + secrets + GCS exact prefixes verified absent. HA startup required four restarts before readiness. No physical node fault / CNI enforcement; shared cluster policy disabled, must isolate approved env.
 
 ### New test coverage (2026-09-18)
 
@@ -94,7 +98,7 @@ Schema is now v102 (was v58 at parity.md baseline date). Migrations v98-v102: sc
 - Frozen f1443a3d branding 83.586s and storage 164.346s tests PASS
 - Immutable image `ghcr.io/mrchypark/ternal@sha256:b618c4afd388ca3f175d7783835d3ce0fb964541c192141dcf5faa0433ecf29e` published; Grype 0.118.0 0 matches/0 ignored exit 0; live operational qualification pending
 - Native GCS HA overlay render PASS; live operational qualification pending
-- CNI deny test FAILED on IED/GKE `gke_ied-cluster`: HTTP remained reachable after removing the allow policy because NetworkPolicy enforcement is disabled. The corrected preflight blocks before creating resources; the test namespace is absent.
+- CNI deny test FAILED on GKE `gke-qual-cluster`: HTTP remained reachable after removing the allow policy because NetworkPolicy enforcement is disabled. The corrected preflight blocks before creating resources; the test namespace is absent.
 - Discoverable credentials pinned at `ResidentKeyDiscouraged` — not an established required gap
 - Global hash-chain runtime absent; upstream requirement not established
 - Fresh-browser passkey-only login: confirmed open

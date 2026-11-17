@@ -56,7 +56,7 @@ spec:
             - name: GOAUTHY_LISTEN_ADDR
               value: :8080
             - name: GOAUTHY_CLUSTER_ID
-              value: ternal-goauthy-ied
+              value: ternal-goauthy-gke
             - name: GOAUTHY_NODE_ID
               valueFrom:
                 fieldRef:

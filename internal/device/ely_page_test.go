@@ -2,8 +2,15 @@ package device
 
 import (
 	"bytes"
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/mrchypark/goauthy/internal/branding"
+	"github.com/mrchypark/goauthy/internal/browser"
 )
 
 func TestElyDevicePagePreservesNativeDecision(t *testing.T) {
@@ -28,5 +35,42 @@ func TestElyDevicePagePreservesNativeDecision(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestDeviceVerificationPageCommonBrand(t *testing.T) {
+	issuerURL, _ := url.Parse("https://id.example/tenant")
+	h := &Handler{
+		issuer: issuerURL,
+		subject: func(*http.Request) (AuthenticatedSubject, bool) {
+			return AuthenticatedSubject{
+				Session: browser.Session{ID: "sess-1", Subject: "user-1", AuthenticationMethod: "pwd"},
+				SessionGuard: func() (string, []any) {
+					return "SELECT 1", nil
+				},
+			}, true
+		},
+	}
+	h.SetBrandResolver(func(context.Context) (branding.Brand, error) {
+		return branding.Brand{Name: "Acme ID", LogoURL: "/auth/v1/clients/acme/logo?v=1", ThemeURL: "/auth/v1/theme/acme/2"}, nil
+	})
+	req := httptest.NewRequest(http.MethodGet, "/oidc/device/verify", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || !strings.Contains(w.Header().Get("Content-Security-Policy"), "img-src 'self'") {
+		t.Fatalf("status=%d csp=%q", w.Code, w.Header().Get("Content-Security-Policy"))
+	}
+	body := w.Body.String()
+	for _, want := range []string{`href="/tenant/auth/v1/theme/acme/2"`, `src="/tenant/auth/v1/clients/acme/logo?v=1"`, `alt="Acme ID"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in %s", want, body)
+		}
+	}
+
+	h.SetBrandResolver(nil)
+	wDefault := httptest.NewRecorder()
+	h.ServeHTTP(wDefault, req)
+	if wDefault.Code != http.StatusOK || !strings.Contains(wDefault.Body.String(), `<span>GoAuthy</span>`) {
+		t.Fatalf("expected GoAuthy fallback status=%d body=%s", wDefault.Code, wDefault.Body.String())
 	}
 }

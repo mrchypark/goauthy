@@ -33,7 +33,7 @@ handoff(provider/account/scopes 검토)와 장기 실행을 위한 승인된 ref
 URI와 introspection 제한은 [소비자 토큰 계약](consumer-token-resources.md)을 따른다.
 Backoffice 실제 로그인→승인→실행 E2E는 여전히 0건이다.
 
-아래 초기 조사와 역사적 SKIP 기록보다 이 요약 및 STATUS.md의 후속 결과를
+아래 초기 조사와 역사적 SKIP 기록보다 이 요약 및 [status.md](status.md)의 후속 결과를
 우선한다. 부분 pilot 성공은 운영 연결 완료가 아니다.
 
 보안 후속: 기존 amd64 후보의 High 의존성 취약점을
@@ -42,7 +42,7 @@ root는 새 이미지 scan JSON과 인증/메일 회귀 검사를 확인했다. 
 별도 GCS prefix의 old→candidate→emptyDir replay, token introspection/JWKS
 연속성 검증 후 기존 설정/비밀/storage를 유지한 image-only 교체와 Ready를
 보고했다. 실제 Chrome RP 로그인·관리자 session·logout도 통과했다고 보고했다.
-이는 담당의 운영 검증 보고이며 GoAuthy root가 직접 IED를 변경한 것은 아니다.
+이는 담당의 운영 검증 보고이며 GoAuthy root가 직접 GKE 클러스터를 변경한 것은 아니다.
 기존 schema 버전을 추정하거나 일반적인 downgrade 호환을 보장하지 않는다.
 
 | 소비자 | 완료한 실제 검증 | 아직 열린 수용 검사 |
@@ -58,7 +58,7 @@ JWKS/nonce/subject→UserInfo→revoke/401까지 standalone 재시작 전후 통
 이는 실제 소비자 RP의 웹 세션 테스트와 구분한다. Ternal 후보는
 [소스·이미지 identity](ternal-candidate-20260907.md)가 확정됐지만 arm64 Dory의
 amd64 실행 probe가 앱 시작 전 exec format error로 끝나 amd64 runner가 필요하다.
-후보 게시·IED 배포·host session 복구는 이 검증에서 수행하지 않았다.
+후보 게시·GKE 배포·host session 복구는 이 검증에서 수행하지 않았다.
 이 문단은 최초 로컬 후보 검사 이력이다. 이후 보안 후보의 담당 측 amd64
 실행·배포·웹 RP 검증 보고는 위 최신 요약을 따른다. host session 복구는
 여전히 확인되지 않았다.
@@ -79,7 +79,7 @@ GoAuthy 내부 fixed-clock HTTP 검사로 해당 SKIP을 완료 처리하지 않
 
 후속 관리 Bearer gate는 `GOAUTHY_E2E_PROVIDER_BEARER=1 GOAUTHY_E2E_TLS=1
 GOAUTHY_STANDALONE_OPEN_REG_PORT=17960 sh scripts/e2e-open-registration-standalone.sh`.
-`/tmp/goauthy-provider-bearer-live-20260907.log` 종료 0, 재시작 전후 각 1.11초 PASS.
+2026-09-07 실행 종료 0, 재시작 전후 각 1.11초 PASS.
 GoAuthy cookie 없이 실제 PKCE access token으로 제공자 CRUD, wrong audience/scope,
 nonadmin, revoked token, cookie 혼합 거절을 검증했다. 담당에게
 `GOAUTHY_PROVIDERS_RESOURCE`, read/write scope catalog·DCR audience 등록,
@@ -88,13 +88,13 @@ Backoffice BFF의 서버측 access-token 사용 계약을 전달했다. 실제 B
 
 제공자 CRUD 후속 gate: `GOAUTHY_E2E_PROVIDER_REGISTRATION=1 GOAUTHY_E2E_TLS=1
 GOAUTHY_STANDALONE_OPEN_REG_PORT=17950 sh scripts/e2e-open-registration-standalone.sh`.
-`/tmp/goauthy-provider-registration-both-kinds-final-20260907.log` 종료 0:
+2026-09-07 실행 종료 0:
 OAuth2/API-key 제공자 CRUD는 재시작 전 0.16초, 후 0.18초 PASS.
 이는 GoAuthy browser-admin 경로의 검증이다. 외부 OIDC Bearer 관리·연결 callback·
 consumer 동의/credential-use가 남았음을 Backoffice 담당에게 함께 전달했다.
 
 `GOAUTHY_E2E_DEVICE_OIDC=1 GOAUTHY_E2E_TLS=1 GOAUTHY_STANDALONE_OPEN_REG_PORT=17940 sh scripts/e2e-open-registration-standalone.sh`
-는 `/tmp/goauthy-open-registration-tls-17940.zmLtTT`에서 정상 종료했다.
+는 2026-09-07 실행에서 정상 종료했다.
 `TestDeviceOIDCLive`는 재시작 전 1.89초, 후 1.93초 PASS다. 임시 CA와
 localhost/127.0.0.1 SAN 인증서를 사용하고 시스템 trust store는 변경하지 않는다.
 이는 실제 Backoffice 브라우저 연동이나 새 HA 검증 완료를 의미하지 않는다.
@@ -209,7 +209,7 @@ Compos 담당과 합의한 첫 pilot: host-local 별도 standalone DB, issuer �
   session 조회, 비회원 workspace 403, 첫 session logout 후 401 및 두 번째 session
   독립 유지·자체 logout 통과. 두 번째 logout 뒤 추가 GET 401은 최초 live 검사에 없었다.
   담당 피드백으로 이 증거 범위를 정정했고 추가 assertion과 재검증을 요청했다.
-- 로그 `/tmp/goauthy-compos-live-20260907.log`, outer 종료 0.
+- 2026-09-07 첫 Compos 연동 실행, outer 종료 0.
   `TestConsumerTokenFixture` package 1.388초, `TestGoAuthyLiveE2E` 0.88초.
 - WRONG_AUD/WRONG_SCOPE/EXPIRED/REVOKED 네 subtest는 fixture 미제공으로 명시적 SKIP.
   전체 음성 matrix 또는 장기 실사용 완료로 계산하지 않는다.
@@ -222,7 +222,7 @@ GoAuthy Device OIDC 기능을 구현해야 하며 Ternal의 필수 ID token/RBAC
 
 ## 2026-09-07 실제 음성 검사 확장
 
-같은 실행 명령으로 `/tmp/goauthy-compos-negative-20260907.log` 종료 0 확인.
+같은 실행 명령으로 2026-09-07 음성 검사 실행 종료 0 확인.
 실제 사용자 authorization-code 발급 경로를 재사용해 다른 audience의 활성 토큰,
 openid 없는 활성 토큰, 실제 `/oidc/revoke` 후 inactive인 토큰을 생성한다.
 서버 토큰을 조작하거나 단순 임의 문자열을 폐기 토큰으로 대신하지 않는다.
@@ -239,18 +239,17 @@ openid 없는 활성 토큰, 실제 `/oidc/revoke` 후 inactive인 토큰을 생
 introspection caller, `compos.api` scope 및 resource-bound token fixture를 추가했다.
 `GOAUTHY_E2E_COMPOS_OAUTH2=1` runner의 최초 두 실행은 실패했다.
 첫 실제 실행은 custom scope catalog 누락으로 client lookup이 거절됐고,
-scope 등록을 추가한 다음에는 attribute 없는 scope가 400으로 거절됐다.
-`/tmp/goauthy-compos-oauth2-live-20260907.log` 및
-`/tmp/goauthy-compos-oauth2-live-final-20260907.log`는 모두 실패 증거다.
-권한 전용 scope를 수정한 뒤에도 DCR RP audience가 비어 있어 authorization이 거절됐다.
-`/tmp/goauthy-compos-oauth2-permission-scope-20260907.log` 역시 실패 증거다.
+scope 등록을 추가한 다음에는 attribute 없는 scope가 400으로 거절됐다
+(2026-09-07 초기 OAuth2 실행 두 건 모두 실패 증거).
+권한 전용 scope를 수정한 뒤에도 DCR RP audience가 비어 있어 authorization이 거절됐다
+(세 번째 실행 역시 실패 증거).
 기존 Compos session pilot PASS에 이 새 모드 결과를 합산하지 않는다.
 
 2026-09-07 새 direct OAuth2 actual PASS:
 
 - GoAuthy permission-only scope와 authenticated DCR `audience` 등록을 사용했다.
   RP와 introspection caller는 서로 다른 새 client이며 기존 bootstrap 토큰을 재사용하지 않는다.
-- `/tmp/goauthy-compos-oauth2-audience-20260907.log`, runner 종료 0.
+- 2026-09-07 실행, runner 종료 0.
   GoAuthy token fixture 1.25초 / Compos `TestOAuth2LiveE2E` 0.71초(package 1.499초).
 - 실제 Basic cross-client introspection + resource-bound token의 UserInfo sub/verified email 검증.
   consumer에서는 `openid compos.api`와 exact resource를 확인한다.
@@ -273,7 +272,7 @@ sh scripts/e2e-open-registration-standalone.sh
 
 2026-09-07 actual standard identity pilot 완료(공통 fixture 최종 후보):
 
-- `/tmp/goauthy-beesuh-identity-live-final-20260907.log`, runner 종료 0.
+- 2026-09-07 최종 실행, runner 종료 0.
   GoAuthy 전용 DCR RP+별도 caller fixture 1.25초, Beesuh live 0.71초(package 1.307초).
 - `https://beesuh.local.test` audience와 `openid` 필수 scope, 실제 introspection/UserInfo,
   compact 0600 `memberships.json`의 `(issuer, sub, workspace-a)` 명시 매핑을 사용한다.
@@ -282,9 +281,7 @@ sh scripts/e2e-open-registration-standalone.sh
 - EXPIRED만 명시 SKIP. provider/Codex 실제 계정, production auth wiring, 새 HA 증거가 아니다.
   테스트 issuer/DB/credential 파일은 consumer 검사 후 정리됐다.
 - 공통 fixture의 필수 scope를 Beesuh(openid)와 Compos(compos.api)별로 분리했다.
-  최종 Compos 회귀도 0.78초, runner 종료 0:
-  `/tmp/goauthy-compos-oauth2-shared-fixture-final-20260907.log`.
-  앞선 `/tmp/goauthy-compos-oauth2-shared-fixture-20260907.log`는 fixture 오류의 실패 기록이다.
+  최종 Compos 회귀도 0.78초, runner 종료 0(앞선 fixture 오류 실행은 실패 기록).
 
 ```sh
 GOAUTHY_E2E_BEESUH=1 \

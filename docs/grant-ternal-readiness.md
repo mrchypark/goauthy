@@ -25,7 +25,7 @@ Ternal 저장소에서 실행:
 GOAUTHY_ROOT=/absolute/path/to/goauthy sh deploy/e2e/goauthy-standalone.sh
 ```
 
-`TestGoAuthyAuthorizationCodeConsumer` 통과. Discovery/JWKS, confidential `client_secret_post`, S256 PKCE, ID token issuer/sub/groups, issuer와 subject에 결합된 principal, 코드 재사용 및 잘못된 PKCE 거부를 검사한다. 근거: Ternal `internal/auth/goauthy_integration_test.go`와 `/tmp/goauthy-ternal-readiness-live.log`.
+`TestGoAuthyAuthorizationCodeConsumer` 통과. Discovery/JWKS, confidential `client_secret_post`, S256 PKCE, ID token issuer/sub/groups, issuer와 subject에 결합된 principal, 코드 재사용 및 잘못된 PKCE 거부를 검사한다. 근거: Ternal `internal/auth/goauthy_integration_test.go` (2026-09-27 standalone 실행 통과).
 
 Ternal 설정 계약: 정확한 callback(`/auth/callback`), client ID/secret, `openid groups`, ID token의 `groups`, 관리자 그룹 `ternal-admins`. Ternal 로그아웃은 Ternal 세션을 폐기하며 provider 전체 로그아웃을 뜻하지 않는다. `(issuer, sub)`가 바뀌면 기존 사용자와 다른 principal이 된다.
 
@@ -33,8 +33,6 @@ CLI는 기존 `deploy/e2e-ternal-device/Dockerfile`과 로컬 Dory BuildKit으�
 
 최종 `TestTernalDeviceCLILive`는 GoAuthy 재시작 전후 모두 통과하고 runner가 종료 코드 0으로 완료됐다. 실제 `ternalctl login`, 사용자·그룹 조회, 세션 파일 권한 0600과 API origin 결합, 로그아웃 후 파일 삭제·whoami 실패·서버 세션 무효화를 검사했다. 기존 로그인 세션의 재시작 생존 여부를 검사한 것은 아니며, 재시작 뒤 새 로그인 흐름을 반복했다.
 
-- 빌드 로그: `/tmp/goauthy-ternal-device-build-final.log`
-- 실행 로그: `/tmp/goauthy-ternal-device-readiness-final.log`
 - 테스트 이미지: `goauthy-ternal-device-e2e:readiness-20260927`
 - 이미지 manifest list: `sha256:f929bc823a2e26f4253f0882178e7ded27aa8cd7a218df64e3813c4d99edbcc8`
 

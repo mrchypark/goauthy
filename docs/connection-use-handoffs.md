@@ -149,15 +149,16 @@ the flow; do not blindly retry approval or treat an ambiguous response as succes
 2026-09-08 OAuth follow-up: schema81 version-fenced OAuth handoff and its native
 review page passed actual HTTPS Chromium cold login, explicit approval and owner
 grant recheck, followed by confidential consumer access-token delivery, owner
-refresh and revocation. Standalone before/after restart: 20.24/2.97 seconds, exit 0,
-`/tmp/goauthy-oauth-handoff-live-20260908-v2.log`. The first attempt omitted the
+refresh and revocation. Standalone before/after restart: 20.24/2.97 seconds, exit 0
+(2026-09-08). The first attempt omitted the
 documented fixture hostname mapping and failed readiness; it is not acceptance
 evidence. This test does not navigate to a real consumer BFF callback or qualify
 cold-MFA, production OAuth adapters, automatic refresh or HA.
 Older verification paragraphs below record the API-key-only milestone.
 
 Uses existing OAuth resource authorization, managed clients, credential encryption,
-consent policy and Rhiza transactions, plus Go stdlib `crypto/sha256`,
+consent policy and Rhiza (embedded distributed SQLite store; implemented on v0.12.0,
+current `go.mod` is `v0.24.0`) transactions, plus Go stdlib `crypto/sha256`,
 `encoding/base64`, `net/url`. No added dependencies or new token protocol.
 Rhiza v0.12.0's ordinary batch receipt omits per-statement results unless rows are
 requested; `RETURNING` + `WantRows` explicitly returns the inserted/consumed ID.
@@ -165,11 +166,10 @@ Checking omitted statement results previously reported a conflict after commit;
 the creation/approval regression tests exercise this through real Rhiza.
 
 Actual HTTPS standalone acceptance with real code+PKCE requester tokens passed
-before and after restart (`/tmp/goauthy-handoff-final-live-20260907.log`): proposal without
+before and after restart (2026-09-07): proposal without
 implicit consent, exact callback validation, owner review, digest mismatch,
 approval/denial and replay denial. This is HTTP acceptance, not browser/BFF E2E.
-Focused storage/OAuth/HTTP boundary race checks passed in
-`/tmp/goauthy-handoff-boundaries-race-20260907.log`. Full parity, OAuth
+Focused storage/OAuth/HTTP boundary race checks also passed (2026-09-07). Full parity, OAuth
 handoffs, full cold-MFA, BFF integration and final HA/chaos verification remain open.
 
 ### Browser form security
@@ -190,9 +190,26 @@ non-submission, explicit approval, exact return link, persisted grant/revoke and
 separate denial. The browser never navigates to the external callback in this
 fixture; Backoffice's own callback/state-consumption tests remain required.
 
-Final browser evidence: `/tmp/goauthy-handoff-page-final-live-20260907.log`, exit 0,
-Chromium 1.57s/1.04s before/after restart. Focused login/Device/FedCM and page
-boundary race tests passed in `/tmp/goauthy-handoff-page-final-race.log`.
-The final screenshot `/tmp/goauthy-handoff-page-final-20260907.png` was inspected.
+Final browser evidence (2026-09-07): exit 0,
+Chromium 1.57s/1.04s before/after restart, with populated review page screenshot
+inspected. Focused login/Device/FedCM and page boundary race tests also passed.
 Full OpenAPI validation and related package vet passed. These do not close the
 remaining consumer integration, cold-MFA, OAuth/SDK or HA/chaos requirements.
+
+## Risks and boundaries
+
+- **BFF state responsibility**: `state` character validation does not prove entropy or
+  session binding; the BFF must retain and verify its own expiring, one-use,
+  session-bound state and re-query the grant against pre-stored expectations.
+- **No recall of delivered credentials**: Consent revocation or expiry blocks future
+  delivery/proxy calls, but cannot recall an already-delivered API key or OAuth
+  access token.
+- **Cold-browser MFA/passkey gap**: `/account/connection-login` supports existing
+  authenticated sessions and password login when MFA is not forced; cold-browser
+  MFA/passkey login continuation is not yet wired into this path.
+- **Cluster bootstrap pin rollout**: Mixed old/new or unset/configured rolling
+  operation for `GOAUTHY_CONNECTIONS_RESOURCE` pinning is not qualified; drain and
+  restart all serving nodes with matching configuration.
+- **No automatic refresh or BFF callback E2E**: OAuth delivery returns only the access
+  token without automatic refresh, and real Backoffice BFF callback consumption
+  remains separate from GoAuthy standalone tests.

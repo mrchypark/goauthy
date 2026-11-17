@@ -76,7 +76,7 @@ on `PATH`.
 
 ## Current status
 
-Toolchain checked on 2026-10-14: Go 1.27.2, Node 26.5.0, npm 11.17.0, Docker,
+Toolchain checked on 2026-10-14: Go 1.27.2 (current `go.mod` targets Go 1.27.4), Node 26.5.0, npm 11.17.0, Docker,
 Kind, and kubectl are installed. Google Chrome is installed at
 `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` and reports
 version 155.0.8059.40, although Chrome, Chromium, and Playwright are not on
@@ -111,10 +111,7 @@ the focused logout final-delta checks passed.
 Pascal's actual-page fixture `internal/admin/ely_browser_test.go` passed in
 Chrome in 4.37s. Korean admin rendering was checked at 1440px and 375px with
 no overflow; controls, menu, preview, and local assets completed successfully.
-The saved artifacts are:
-
-- `/Users/cypark/.codex/task-state/goauthy-ely-frontend/admin-visual/admin-branding-ko-1440.png`
-- `/Users/cypark/.codex/task-state/goauthy-ely-frontend/admin-visual/admin-branding-ko-375.png`
+The saved visual check artifacts (`admin-branding-ko-1440.png` and `admin-branding-ko-375.png`) were stored outside the repository in local task state and are not committed.
 
 The parent visually inspected both screenshots and found them good. That
 page-rendering fixture does not exercise authentication or persisted mutations.
@@ -147,4 +144,4 @@ localization coverage remain excluded. Swagger/API docs and email HTML are
 outside this frontend migration; local Demo A/B behavior was nevertheless
 tested as an integration consumer.
 
-No live IED or production check is part of this verification record.
+No live GKE or production check is part of this verification record.

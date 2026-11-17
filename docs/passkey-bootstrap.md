@@ -1,5 +1,7 @@
 # Bootstrap passkey policy
 
+> **Current status:** Passkeys / WebAuthn are **Preview** in [capabilities.md](capabilities.md); registration, login, MFA, and conversion slices exist, while approval-entry browser method coverage and supported recovery/administration workflows need explicit qualification.
+
 Passkeys are an opt-in feature. GoAuthy creates the passkey service only when
 the complete `GOAUTHY_PASSKEY_RP_ID`, `GOAUTHY_PASSKEY_ORIGINS`, and
 `GOAUTHY_PASSKEY_KEY_FILE` configuration is present. With that configuration

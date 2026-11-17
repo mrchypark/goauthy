@@ -1,6 +1,8 @@
 # Login-location revoke contract
 
-Bounded, read-only parity findings for `GET /auth/v1/users/{id}/revoke/{code}`. Evidence is limited to the pinned `rauthy` tag `v0.36.2` and the local files already inspected.
+> **Current implementation status:** The production login-revoke and browser-location paths are now implemented in GoAuthy (`GET /auth/v1/users/{subject}/revoke/{code}` in `cmd/goauthy/main.go` via `recovery.NewLoginRevokeHandler` in `internal/recovery/login_revoke_http.go`, `FindOrCreateLoginRevokeCode` and atomic guarded `RevokeLogin` in `internal/identity/login_revoke.go`, `RecordBrowserLoginLocation` in `internal/identity/browser_login_location.go`, `cmd/goauthy/login_location.go`, `UserLoginRevoke` event emission, and master-key retirement/rewrap integration via `oidc.LoginRevokeCodePurpose`). Sections below preserve the upstream parity research and decided contracts (`GA-DESIGN-002`).
+
+Bounded, read-only parity findings for `GET /auth/v1/users/{id}/revoke/{code}`. Evidence is limited to the pinned `rauthy` tag `v0.36.2` and the local files inspected at the time of research.
 
 ## Upstream contract
 
@@ -24,7 +26,7 @@ Bounded, read-only parity findings for `GET /auth/v1/users/{id}/revoke/{code}`. 
 
 The parity baseline is upstream’s shared per-user 48-character code, no automatic expiry, no automatic code-to-original-address binding, query-supplied `ip` in the revoke link and event, HTML outer status `200`, and the cleanup/event sequence above. The docs requirement for expiry, replay, race, and invalid-link tests does not by itself authorize changing those semantics.
 
-The following remain unresolved and should be decided before production implementation:
+The following were recorded as open design decisions prior to production implementation (resolved in the current codebase: GoAuthy uses keyring-sealed recoverable 48-character codes with atomic guarded consume, `RecordBrowserLoginLocation` for browser ID + IP location tracking, and `UserLoginRevoke` event emission):
 
 - Whether local hardening should use a recoverable protected code or an equivalent deterministic keyed derivation with a per-user nonce and domain separation, plus an atomic guarded consume, while keeping the same code format, lifetime, re-send behavior, and query-IP event behavior. Digest-only storage must not be selected because it cannot reproduce the shared code for later new-location mails.
 - Whether email delivery is best effort like upstream or must use the existing durable back-channel/outbox approach.
@@ -32,7 +34,7 @@ The following remain unresolved and should be decided before production implemen
 - How new-location detection is actually wired in GoAuthy. Upstream references browser ID, user agent, and `ipgeo`; local inspected code proves only subject/IP/time/count storage, and `RecordLoginLocation` had no production caller in the inspected search. Browser correlation and geolocation behavior are therefore unproven.
 - Whether the upstream `ip` query value should be accepted as event metadata exactly as-is; it is not proof of the original login address or a trusted peer address (`docs/package-research.md:349-364`).
 
-No production files were edited.
+*(Historical parity-research note above predated production wiring; see the top-level status note and `internal/identity/login_revoke.go`, `internal/recovery/login_revoke_http.go`, and `cmd/goauthy/login_location.go` for the current implementation.)*
 
 ## Additional pinned browser-location evidence
 

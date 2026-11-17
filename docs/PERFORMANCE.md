@@ -82,9 +82,9 @@ are noisy and do not support significance claims. The 10-minute test context and
 
 ```sh
 set -e
-WORKTREE=/Users/cypark/.codex/worktrees/login-browser-fixes/goauthy
-BASELINE=/Users/cypark/.codex/task-state/goauthy-v038-review-fixes-20261024/baseline-source
-RESULTS=/Users/cypark/.codex/task-state/goauthy-v038-review-fixes-20261024/http-runtime
+WORKTREE=/path/to/goauthy
+BASELINE=/path/to/goauthy-v0.3.8
+RESULTS=/path/to/http-runtime-results
 mkdir -p "$RESULTS"
 cp "$WORKTREE/internal/oauth/review_http_measurement_test.go" "$BASELINE/internal/oauth/"
 for REP in 1 2 3; do

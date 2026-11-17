@@ -1,7 +1,9 @@
 # Upstream Provider Authentication Decision Record
 
+> **Superseded historical record (2026-09-12):** This decision record preserves the initial design and status as of 2026-09-12. Subsequent implementation and qualification (see [status.md](status.md) 2026-09-17 and [capabilities.md](capabilities.md)) wired federated identity creation (`internal/identity/federated_create.go`), autolink, admin claim mapping, and ForceMFA, and **Upstream OIDC login**, **GitHub upstream login**, and **Upstream account linking/unlinking** are now **Qualified** in [capabilities.md](capabilities.md).
+
 **Date:** 2026-09-12
-**Status:** Implementation ongoing (tests not all passed)
+**Status:** Historical (2026-09-12: implementation ongoing; superseded by [status.md](status.md) and [capabilities.md](capabilities.md))
 **Source:** Parent + ChatGPT Pro consultation ([Pro consult URL](https://chatgpt.com/g/g-p-69ecdc42175c819186cf485b225c0e46-codex-request/c/6aa541eb-6650-83ee-b34b-90f01a544eb2) -- 2 responses, advisory not executed)
 
 ## Existing custom/Google/OIDC upstream
@@ -26,9 +28,9 @@ This selects managed-only generic OAuth trusted userinfo identity. Requirements:
 
 Schema 97 trigger atomically rejects "into"/"outmode" updates for the same provider ID. New ID requires no binding transfer. Same-mode updates rotate on every write. Old readers seeing the unknown enum fail closed -- must upgrade before enable.
 
-## Roles, MFA, and unimplemented scope
+## Roles, MFA, and unimplemented scope (as of 2026-09-12)
 
-Roles and MFA are not auto-accepted from profile. Generic MFA is unknown. Admin MFA, autolink, and onboarding remain unimplemented.
+At the time of this 2026-09-12 record, roles and MFA were not auto-accepted from profile, and admin MFA, autolink, and onboarding remained unimplemented. Those items were subsequently implemented and qualified (`internal/identity/federated_create.go`, `cmd/goauthy/federated_resolver.go`); see [status.md](status.md) and [capabilities.md](capabilities.md) for current scope.
 
 ## Full source/API parity status
 
