@@ -1,8 +1,12 @@
 # Lifecycle events
 
-Baseline: Rauthy v0.36.2 (`dd61ac3c84d6b238108dc8438b53043b5177a662`),
-Rhiza v0.12.0, GoAuthy schema 60. This is not the existing pseudonymous
-API-key/master-key audit API. Full event parity is **incomplete**.
+Baseline when introduced: Rauthy v0.36.2 (`dd61ac3c84d6b238108dc8438b53043b5177a662`),
+Rhiza v0.12.0, GoAuthy schema 60 (current `go.mod` uses `rhiza v0.24.0` and
+schema `v102`, which adds `prev_hash`/`integrity_hash` columns on `event_log`).
+This is not the existing pseudonymous API-key/master-key audit API. Full event
+parity is **incomplete** (capability status: **Preview** in
+[capabilities.md](capabilities.md); hash-chain verification code exists, while
+production append-chain wiring is not complete).
 
 ## Feature and package ledger
 
@@ -25,15 +29,15 @@ API-key/master-key audit API. Full event parity is **incomplete**.
 | [x] | `ScimTaskFailed` at failed outbox attempt limit (scoped) | Failed completion and expired-final-claim recovery use stdlib crypto identity/quoted actions and Rhiza guarded atomic INSERT/UPDATE. Whole-package, fixed-clock/race/rollback and actual user-create failure 5-attempt standalone/HA POST/SSE/restart gates pass. Group-create/user-delete workflows also pass both modes with five failed provider lookups per resource and restart persistence; actual mutation-method failures have separate HTTPS integration tests. Group-update/delete/full-sync live gates and full retry/configuration remain separate. Explicit upstream type inconsistency and quoting adaptation in [research](package-research.md); [current evidence](status.md). |
 | [x] | `ForcedLogout` on per-user administrative logout (scoped) | Mounted `DELETE /auth/v1/sessions/{subject}`; existing Rhiza batch captures authoritative email, revokes local artifacts, enqueues subject-only user/client back-channel work and appends Notice/null IP/data. Local store/HTTP/OpenAPI race and standalone/HA session/access-token/fresh-login/POST/SSE checks pass, including cold restart/Pod replacement persistence. Actual per-user subject-only RP delivery and preservation of the other user's same-client session also pass standalone/exact-three HA; broader gates remain open in [status](status.md). |
 | [ ] | Email, Matrix and Slack delivery thresholds/retry | Existing `go-mail` can send email; durable delivery and notifier adapters are not implemented. |
-| [ ] | Event management UI, all-type E2E and delivery/stream chaos | Not implied by the creation/query tests. |
+| [ ] | All-type E2E and delivery/stream chaos | `admin.js` includes event filtering/pagination UI; all-type E2E and delivery/stream chaos are not implied by the creation/query tests. |
 
 The other DTO types are accepted for filtering but have **no lifecycle emitter**
 yet: `IpBlacklistRemoved`,
 `NewGoAuthyVersion`, `PossibleBruteForce`, `GoAuthyStarted`, `GoAuthyHealthy`,
-`GoAuthyUnhealthy`, `SecretsMigrated`,
-`UserLoginRevoke`, `SuspiciousApiScan`, `LoginNewLocation`,
-`CredentialStuffing`, `EmailSendError`. Similar existing audit records do not
-count as these emitters.
+`GoAuthyUnhealthy`, `SecretsMigrated`. (`UserLoginRevoke`, `SuspiciousApiScan`,
+`LoginNewLocation`, `CredentialStuffing`, and `EmailSendError` now have scoped
+or production emitters tracked in [event-emitter-matrix.md](event-emitter-matrix.md).)
+Similar existing audit records do not count as these emitters.
 The [24-type matrix](event-emitter-matrix.md) keeps per-type implementation and
 package/integration anchors separate from transport and notification completion.
 
@@ -215,7 +219,13 @@ prevents a later exchange using it. A target token already issued with that
 actor remains active until its own expiry (or its own revocation); the actor
 reference is attribution and does not create a live revocation dependency.
 
-### Password grant dependency: pinned contract still unimplemented
+### Password grant dependency: 2026-09-11 baseline (superseded by current wiring)
+
+> **Note:** The paragraphs below record the 2026-09-11 pre-implementation
+> contract analysis. Current `internal/oauth/server.go` now wires
+> `newPasswordGrantHandler` and `passwordRefreshFactory` (subject to client
+> admission), and `TokenIssued` emission for password HTTP issuance/refresh is
+> tracked in [event-emitter-matrix.md](event-emitter-matrix.md).
 
 Source check: Rauthy v0.36.2 `src/service/src/oidc/grant_types/password.rs` and
 `src/service/src/token_set.rs::TokenSet::from_user`. The password producer passes

@@ -91,6 +91,8 @@ Managed client 테스트는 `scripts/e2e-standalone.sh`가 `GOAUTHY_E2E_MANAGED_
 
 ## 확인한 테스트 증거와 미검증 항목
 
+기준일: 2026-09-27 작성 시점의 로컬 실행 및 `localhost:18120` 프리뷰 확인 기록입니다. 현재 제품 상태는 [capabilities.md](capabilities.md)와 [status.md](status.md)를 참조하세요.
+
 이 작업에서 통과한 focused Node checks는 `catalog_ui_test.js`, `clients_ui_test.js`, `collections_ui_test.js`, `providers_ui_test.js`입니다. 로컬 HTTP handler/store 검증 `go test ./internal/rbac ./internal/authcollection ./internal/saas ./internal/ipblacklist ./internal/claims ./internal/device ./internal/eventlog`도 통과했습니다.
 
 이 작업 중 위 원격 E2E 명령은 실행하지 않았습니다. 따라서 문서에 적힌 fixture의 실제 현재 배포 준비 여부, preview 18120의 권한·영속성 설정, 외부 제공자/API 연동, SMTP 수신, 둘 이상의 실제 pod 간 복제, 장애 후 정리 동작은 확인되지 않았습니다. Node UI fixture는 요청 payload와 화면 상태를 검증하지만 실제 로그인·CSRF·서버 권한이나 DB persistence를 단독으로 증명하지 않습니다. 이를 확인하려면 별도 폐기 가능 배포에서 표에 적힌 fixture를 준비하고 지정 E2E만 실행해야 합니다.

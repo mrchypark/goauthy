@@ -57,3 +57,8 @@ Responsive classes use desktop >1000px, tablet 541–1000px and mobile ≤540px.
 Not claimed as live-tested: credential changes, hardware passkeys, upstream IdP/FedCM, MFA/profile-required transitions, actual access grants/revocation, CAPTCHA, non-admin account and prefixed issuer deployment. Relevant handler and behavior tests cover several of these boundaries, but are separate evidence. Existing denied admin navigation was tested signed out, not using a real non-admin account.
 
 Root `/` is a no-store redirect: anonymous → `/account/login`, authenticated administrator → `/auth/v1/admin/dashboard`, other active account → `/account`. Standalone account login returns to this fixed root; OAuth/device/handoff destinations are unchanged. Root query parameters never select a destination. The former public landing page has been removed.
+
+## Risks and boundaries
+
+- Language selection (`goauthy_ui_locale`) applies only to `en` and `ko` UI catalog keys and never alters account/email `locale`, permissions, or authentication policy.
+- Navigating via Home/Exit never cancels an active OIDC interaction or implies `access_denied`; explicit server mutations remain required for Device or Handoff denial.

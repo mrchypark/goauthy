@@ -1,6 +1,6 @@
 # GoAuthy API·UI 전체 인벤토리
 
-기준일: 2026-09-26. 기준: `feature/authentication-ui-scenarios`, HEAD `ea830e24` + 현재 미커밋 UI/브랜드 변경. **릴리즈된 main만의 목록이 아니라 현재 로컬 구현의 목록**이다.
+기준일: 2026-09-26. 기준: `feature/authentication-ui-scenarios`, HEAD `ea830e24` + 당시 미커밋 UI/브랜드 변경. **릴리즈된 main만의 목록이 아니라 해당 시점 로컬 구현의 스냅샷**이다. 이후 추가된 경로(예: `/auth/v1/elysdui.css`, `/auth/v1/ui/*`, `/auth/v1/branding/theme*`, `/auth/v1/branding/logo`, `/auth/v1/branding/legacy*`, `/metrics/object-store`, `/metrics/archive/v1`)는 `cmd/goauthy/main.go`와 `internal/ui/ui.go`를 기준으로 확인하고, 현재 제품 지원 상태는 [capabilities.md](capabilities.md)와 [status.md](status.md)를 참조한다.
 
 실제 `cmd/goauthy` 라우터, KV/UI 하위 라우터, OpenAPI 카탈로그를 대조했다. 선택 기능까지 합친 코드 수준의 목록이며, 모든 경로가 현재 localhost 배포에서 활성화되었다는 뜻은 아니다. 이번 점검은 코드 기반 인벤토리이며 모든 변경 API를 실제 실행하지 않았다.
 
@@ -14,11 +14,9 @@
 
 ## 01. 서비스·운영·발견
 
-
-
 | 경로 | 메서드 | 설명 | 인증 방식(메서드별) | 활성 조건 |
 |---|---|---|---|---|
-| `/` | GET | 서비스 식별 문자열 GoAuthy 반환. 홈페이지 UI는 아님 | GET: 공개/프로토콜별 검증¹ | 등록됨; 권한·정책·대상 상태에 따라 거부 가능 |
+| `/` | GET | 브라우저 세션 상태에 따라 `/account/login`, `/account`, `/auth/v1/admin/dashboard`로 303 이동. `Authorization` 헤더는 거부 | GET: 공개/프로토콜별 검증¹ | 등록됨; 권한·정책·대상 상태에 따라 거부 가능 |
 | `/.well-known/oauth-authorization-server` | GET | OAuth 서버 메타데이터 | GET: 공개/프로토콜별 검증¹ | 등록됨; 권한·정책·대상 상태에 따라 거부 가능 |
 | `/.well-known/openid-configuration` | GET | OIDC 제공자 메타데이터 | GET: 공개/프로토콜별 검증¹ | 등록됨; 권한·정책·대상 상태에 따라 거부 가능 |
 | `/livez` | GET | 프로세스 생존 확인. 정상 204 | GET: 공개/프로토콜별 검증¹ | 등록됨; 권한·정책·대상 상태에 따라 거부 가능 |
@@ -133,8 +131,6 @@
 
 ## 06. 역할·그룹·클레임
 
-
-
 | 경로 | 메서드 | 설명 | 인증 방식(메서드별) | 활성 조건 |
 |---|---|---|---|---|
 | `/auth/v1/groups` | GET, POST | 그룹 목록(GET), 생성(POST) | GET: 브라우저 세션 또는 권한 API 키<br>POST: 브라우저 세션 + CSRF 또는 권한 API 키 | 등록됨; 권한·정책·대상 상태에 따라 거부 가능 |
@@ -147,8 +143,6 @@
 | `/auth/v1/users/attr/{name}` | PUT, DELETE | 사용자 속성 정의 수정(PUT), 삭제(DELETE) | PUT: 브라우저 세션 + CSRF 또는 권한 API 키<br>DELETE: 브라우저 세션 + CSRF 또는 권한 API 키 | 등록됨; 권한·정책·대상 상태에 따라 거부 가능 |
 
 ## 07. OAuth 클라이언트 관리
-
-
 
 | 경로 | 메서드 | 설명 | 인증 방식(메서드별) | 활성 조건 |
 |---|---|---|---|---|
@@ -200,8 +194,6 @@ GoAuthy에 로그인하기 위한 외부 IdP 설정이다. 09번의 외부 SaaS 
 | `/auth/v1/saas/providers/{provider_id}` | GET, PUT, DELETE | 외부 SaaS 연결 제공자 조회·수정·삭제 | GET: 브라우저 세션 또는 OAuth Bearer<br>PUT: 브라우저 세션 + CSRF 또는 OAuth Bearer<br>DELETE: 브라우저 세션 + CSRF 또는 OAuth Bearer | 등록됨; 권한·정책·대상 상태에 따라 거부 가능 |
 
 ## 10. API 키·세션·감사·보안 운영
-
-
 
 | 경로 | 메서드 | 설명 | 인증 방식(메서드별) | 활성 조건 |
 |---|---|---|---|---|
@@ -273,8 +265,6 @@ Swagger UI는 기본 비활성이다. 활성화해도 기본은 관리자 전용
 | `/auth/v1/docs/swagger-ui.css` | GET, HEAD | Swagger UI 정적 자산 | GET: 공개/프로토콜별 검증¹<br>HEAD: 공개/프로토콜별 검증¹ | Swagger 활성; 기본 비공개(관리자), 공개 설정 가능 |
 
 ## 14. 테마·브랜드 자산
-
-
 
 | 경로 | 메서드 | 설명 | 인증 방식(메서드별) | 활성 조건 |
 |---|---|---|---|---|
@@ -391,7 +381,7 @@ Swagger UI는 기본 비활성이다. 활성화해도 기본은 관리자 전용
 
 | 경로 | 실제 응답 |
 |---|---|
-| `/` | 영어·한국어 공개 홈. 계정 로그인, 기기 코드 입력, 활성화된 복구·가입 화면으로 이동 |
+| `/` | 브라우저 세션 유무·권한에 따라 `/account/login`, `/account`, `/auth/v1/admin/dashboard`로 303 리다이렉트(별도 HTML 없음) |
 | `/account/data` | 프로필·CSRF JSON |
 | `/account/password` | 비밀번호 정책·CSRF JSON |
 | `/auth/v1/users/{subject}/self/delete` GET | 탈퇴 준비 API, 별도 HTML 아님 |

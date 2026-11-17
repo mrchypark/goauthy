@@ -44,3 +44,19 @@ Successful registration returns the original compact JWT unchanged in the
 `software_statement` response member. Invalid and untrusted statements return
 `invalid_software_statement` and `unapproved_software_statement`, respectively.
 No statement claim can select a client ID, expose key material, or execute SQL.
+
+## Risks and boundaries
+
+- **Static startup trust only**: Trust configuration is loaded once at startup from
+  `GOAUTHY_DCR_SOFTWARE_STATEMENT_TRUST_FILE`; remote `jwks_uri` fetching is never
+  performed and trust changes require restarting all serving nodes. Invalid
+  configuration fails closed at startup.
+- **Policy enforcement cannot be bypassed**: While verified statement metadata
+  overrides duplicate request JSON fields per RFC 7591, it remains subject to
+  GoAuthy's DCR redirect URI, grant, scope, and anonymous-registration policies.
+- **Issuer allow-list visibility**: Returning `unapproved_software_statement`
+  intentionally exposes whether an issuer is absent from the configured allow-list;
+  do not treat the issuer list as secret material.
+- **Maturity boundary**: Dynamic Client Registration (including software statements)
+  is `Preview` in [capabilities.md](capabilities.md), with final-candidate HA
+  qualification open.

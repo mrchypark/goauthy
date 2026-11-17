@@ -214,8 +214,22 @@ IdP 로그아웃의 서로 다른 결과도 검사한다. 콜백 재사용·잘�
 
 당시 로컬 검증·측정에 사용한 worktree에는 커밋되지 않은 변경이 포함되어 있었고,
 측정 시점의 소스 snapshot을 별도로 보존하지 않았으므로 당시 HEAD만으로 실행 구현을 재현할 수 없다.
-현재 문서가 설명하는 소스의 `go.mod` Rhiza dependency는 `v0.19.1-0.20261008214459-3895b723e194`이고
-GoAuthy schema는 v112다. 이 버전 표시는 당시 측정 소스의 정확한 식별이나
+2026-10-23 기록 당시 소스의 `go.mod` Rhiza dependency는 `v0.19.1-0.20261008214459-3895b723e194`이고
+GoAuthy schema는 v112였다(현재 소스는 `rhiza v0.24.0`, schema v114). 이 버전 표시는 당시 측정 소스의 정확한 식별이나
 release/production 배포 또는 runtime qualification의 증거가 아니다.
 기존 Compos 연동 결과는 해당 시험 시점의 로컬 worktree 기반이며 release/production 증거가 아니다.
 세부 성공·거절·SKIP은 [소비자 연동 기록](consumer-integrations.md)에 분리해 기록한다.
+
+## 위험 및 경계
+
+- **Introspection caller ACL 부재**: `/oidc/introspect`는 등록된 confidential
+  client의 Basic 인증을 요구하지만 audience별 조회 ACL은 없으므로, 각 소비자가
+  `aud`/`scope`/`sub`를 직접 검증해야 한다.
+- **Token Exchange 제한**: token exchange는 활성화된 managed confidential client
+  전용이며(DCR 미지원) refresh token을 출력하지 않는다. 일반 사용자 위임이나 앱
+  세션 수명주기 관리를 대체하지 않는다.
+- **RP 로그아웃 redirect 제한**: Managed/DCR client의 `/oidc/logout`은 요청한
+  `post_logout_redirect_uri`를 거절하며 OAuth callback URI를 logout allowlist로
+  전용하지 않는다(`GOAUTHY_BOOTSTRAP_POST_LOGOUT_REDIRECT_URIS`만 별도 지원).
+- **이메일 기반 자동 병합 금지**: 안정적인 계정 식별자는 `(issuer, sub)`이며
+  이메일만으로 기존 계정을 자동 병합하지 않는다.

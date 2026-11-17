@@ -10,7 +10,8 @@ GET /metrics/archive/v1
 ```
 
 All three routes require the configured bearer token. The archive endpoint keeps
-its version 1 fixed stage shape for compatibility; on Rhiza v0.21.0 every stage
+its version 1 fixed stage shape for compatibility; on current Rhiza (`v0.24.0`
+in `go.mod`) `cmd/goauthy` serves `unavailableArchiveStatsV1` where every stage
 is unavailable (`available: false`) with `null` count and duration values. These
 values mean unavailable, not zero.
 
@@ -29,3 +30,12 @@ The listener is started and shut down independently from the application
 server, while either server failure still terminates the process. Database
 readiness and request instrumentation are recorded in the private metrics
 registry; no process-global Prometheus registry is modified.
+
+## Boundaries and status
+
+- Capability status is **Preview** in [capabilities.md](capabilities.md): the
+  dedicated listener and core OAuth/login/readiness metrics are wired, while
+  broader observability remains open.
+- HTTP route labels are bounded (`/`, `/oidc/*`, `/auth/*`, `/other`) to prevent
+  cardinality explosion. Bearer tokens containing whitespace, CR/LF, or commas
+  are rejected, and token comparison uses constant-time SHA-256 digest matching.

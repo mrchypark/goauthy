@@ -120,7 +120,7 @@ access token의 현재 유효성이나 외부 서비스 가용성을 보증하�
 `refreshing`을 무한 대기하지 않는다. 동일 grant/version을 처음 관찰한 시점부터
 최대 1분 동안 5초보다 자주 조회하지 않고, 계속 같은 상태면 owner 해제·재연결로
 안내한다. 이 시간은 claim 만료나 자동 재시도 허가가 아니다. 비밀을 제외한 관찰
-기록과 충돌 처리 절차는 [중단된 갱신 복구](connection-use-grants.md#interrupted-refresh-recovery)를 따른다.
+기록과 충돌 처리 절차는 [중단된 갱신 복구](connection-use-grants.md#6-explicit-oauth2-refresh--interrupted-recovery)를 따른다.
 비활성 컬렉션/provider도 owner가 확인·해제할 수 있다. 사용자 자체가 비활성화되거나
 현재 session이 무효하면 접근할 수 없다. scopes는 비어 있어도 배열이며 비밀은 없다.
 
@@ -164,9 +164,9 @@ scope를 함께 검사하며, 동일 audience 조건을 DB 변경 시점에도 �
 managed Device Flow도 최초 `/oidc/device` 요청에 등록된 `resource`를 보내 audience를
 발급받을 수 있다. 토큰 교환/refresh 요청에는 resource를 다시 보내지 않는다.
 기존 `TestConnectionResourcesPilot`은 새 계약에 맞춘 재검증 전까지 과거 PASS를
-현재 후보의 증거로 사용하지 않는다. 신규 Device resource 검증 범위는 status.md에 기록한다.
+현재 후보의 증거로 사용하지 않는다. 신규 Device resource 검증 범위는 [status.md](status.md)에 기록한다.
 
-## 필요한 최소 공통 계약 (미구현 요구사항)
+## 필요한 최소 공통 계약 (2026-09-07 초기 요구사항; 구현된 계약은 [capabilities.md](capabilities.md) 및 [connection-use-grants.md](connection-use-grants.md) 참조)
 
 사용자 확인: 아래 기능은 소비자가 별도로 만들어야 할 기능이 아니라 **GoAuthy가
 공개 API로 먼저 구현할 제품 범위**다. 컬렉션 CRUD만으로 완료 처리하지 않는다.
@@ -261,3 +261,18 @@ owner의 저장된 동의와 현재 연결 generation을 조회할 수 있다. �
 실행 권한이나 SDK readiness가 아니고 비밀도 반환하지 않는다. 실제 HTTPS에서
 별도 read-only client와 실행 client의 권한 분리를 검증했다. 일회성 승인 handoff는
 구현됐으며 Backoffice 실제 앱 통합은 여전히 남아 있다.
+
+## 위험 및 경계
+
+- **임의 HTTP 프록시 및 원문 비밀 반출 불가**: 일반 HTTP 프록시, OAuth refresh
+  token 반출, 제공자 `client_secret` 반출은 제품 계약에 포함되지 않는다.
+- **전달 시 자동 refresh 없음**: credential delivery와 `credential-status`는
+  외부 OAuth refresh나 백그라운드 스케줄링을 실행하지 않으며, 만료·철회·미확인
+  expiry 시 실행을 중단해야 한다.
+- **이미 전달된 자격증명 회수 불가**: 로컬 해제, 동의 철회, 만료는 이후 전달과
+  proxy 호출만 차단하며 이미 전달된 API key나 OAuth access token을 회수하지
+  못한다.
+- **`connected` 상태의 의미**: `connected`는 저장된 credential 상태가 `ready`임을
+  뜻할 뿐 외부 제공자에서의 실시간 토큰 유효성이나 서비스 가용성을 보증하지 않는다.
+- **제품 성숙도 경계**: 현재 상태는 [capabilities.md](capabilities.md) 기준
+  `Preview`/`Experimental`이며, 버전 고정된 범용 소비자 SDK는 아직 지원하지 않는다.

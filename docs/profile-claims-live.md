@@ -9,4 +9,7 @@ that an `openid`-only authorization does not include profile claims.
 
 The test requires the normal E2E URL, secondary URL, browser admin credentials,
 and client secret. It is intentionally not a startup or harness test and does
-not claim coverage of an unconfigured tertiary endpoint.
+not claim coverage of an unconfigured tertiary endpoint. See
+[profile-claims-implementation.md](profile-claims-implementation.md) for the
+underlying claim projection contract and [status.md](status.md) for recorded
+execution results.

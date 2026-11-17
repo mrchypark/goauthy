@@ -1,5 +1,7 @@
 # GoAuthy standalone Kubernetes profile
 
+## Overview
+
 This existing profile runs one GoAuthy StatefulSet pod with
 `GOAUTHY_RHIZA_PROFILE=standalone` and Rhiza `Local: false`. GoAuthy's `data`
 volume is an `emptyDir` bounded to 1Gi: it is a disposable recovery cache, not
@@ -17,6 +19,29 @@ GoAuthy's product data PVC.
 This is only a storage/topology overlay. It retains every non-cluster
 application setting from the HA manifest; `test.sh` compares the rendered
 environment lists so a feature cannot silently disappear in standalone mode.
+
+## Interface
+
+- `kustomization.yaml` — Kustomize overlay referencing `../k8s`, `networkpolicy.yaml`, and patches (`statefulset-patch.yaml`, `service-patch.yaml`, `pdb-patch.yaml`, `delete-resources.yaml`).
+- `test.sh` — Offline validation script comparing `deploy/standalone` and `deploy/k8s` renders with `kustomize`, `yq`, and `awk`.
+
+## Invariants
+
+- `StatefulSet/goauthy` has `replicas: 1`, zero `volumeClaimTemplates`, `emptyDir.sizeLimit: 1Gi` for `data`, `GOAUTHY_RHIZA_PROFILE=standalone`, `GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE=true`, and `PodDisruptionBudget` `minAvailable: 1`.
+- Pod template retains `app.kubernetes.io/component: object-store-client` so `versity-ingress` admits TCP/9000.
+- Rendered manifest must not contain `GOAUTHY_RHIZA_PEER_ADDR`, `GOAUTHY_RHIZA_MEMBERS`, `GOAUTHY_RHIZA_ADMIN_TOKEN`, or `peer` ports.
+- Application environment variable names must match `deploy/k8s` (excluding `GOAUTHY_RHIZA_(PEER_ADDR|MEMBERS|ADMIN_TOKEN)`).
+
+## Side Effects
+
+- `test.sh` writes temporary rendered manifests via `mktemp` and removes them on `EXIT`.
+- Applying via `kubectl apply -k deploy/standalone` creates/updates Kubernetes resources including the VersityGW test fixture PVC.
+
+## Verification
+
+- Run: `./deploy/standalone/test.sh`
+
+## Usage & Operational Notes
 
 Build or apply it with Kustomize:
 

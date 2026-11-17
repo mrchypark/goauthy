@@ -1,6 +1,6 @@
 # 사용자 관리: 계약과 구현 잔여 항목
 
-기준: Rauthy v0.36.2, Rhiza v0.12.0, GoAuthy schema 61.
+기준(도입 당시): Rauthy v0.36.2, Rhiza v0.12.0, GoAuthy schema 61 (현재 `go.mod` 기준 `rhiza v0.24.0`, schema `v102`).
 전체 사용자 CRUD는 **미완료**다. 기존 삭제·멤버십·비밀번호 API가 있다는 이유로
 사용자 생성/상세 조회/전체 프로필 수정을 완료 처리하지 않는다.
 
@@ -130,32 +130,24 @@ K8s와 standalone은 기존 공유 포트 lock을 사용하거나 별도 직렬 
 - [x] 생성 UI에 preferred_username/user_expires/tz와 서버가 지원하는 9개
   언어를 연결했다. 실제 Chromium 생성·수정·삭제에서 새 필드와 프랑스어의
   저장·보존을 검증했다(4.85s, standalone batch exit 0).
-  근거: `/tmp/goauthy-admin-create-ui-language-live-20260910.log`.
-  exact-three Kind Chromium에서도 통과했다(10.64s, 전체 gate exit 0):
-  `/tmp/goauthy-create-ui-kind-20260910.log`.
+  exact-three Kind Chromium에서도 통과했다(10.64s, 전체 gate exit 0).
 - [x] create-only API 키의 생성 성공, 상세 조회 403, 키 폐기 후 생성 401을
   standalone 전체 lifecycle/restart 배치에서 확인했다(생성 0.34s, exit 0).
-  `/tmp/goauthy-create-only-key-live-final-20260910.log`; 같은 endpoint를 사용하므로
-  교차 Pod 권한은 후속 Kind 전체 gate에서도 통과했다(아래 근거).
+  같은 endpoint를 사용하므로 교차 Pod 권한은 후속 Kind 전체 gate에서도 통과했다(아래 근거).
 - [x] 위임 그룹 관리자의 exact/wildcard 복합 그룹 생성, 비관리 그룹·전역 역할·
   빈 그룹 거부, 기존 세션에서 wildcard 권한 제거 후 exact 권한만 유지하는
   경계를 standalone 전체 lifecycle/restart 배치에서 확인했다(exit 0).
-  `/tmp/goauthy-delegated-create-retry-aware-20260910.log`.
   같은 실행에서 실제 429의 Retry-After를 기다린 비밀번호 재설정도 통과했다.
 - [x] preferred username 이메일 fallback 기본값/비활성화 설정과 명시적 이름
   우선순위는 구현돼 있다. 집중 단위 검사 PASS(0.936s); 기본 fallback의
-  profile-only ID token은 기존 standalone TestProfileClaimsLive PASS(1.42s),
-  `/tmp/goauthy-admin-create-ui-language-live-20260910.log`.
+  profile-only ID token은 기존 standalone TestProfileClaimsLive PASS(1.42s).
 - [x] 위임/API-key 생성의 교차 Pod E2E: exact-three Kind 생성 lifecycle
   4.62s 및 전체 gate exit 0. 이벤트 stream·교체 후 지속성 검사도 통과했다.
-  `/tmp/goauthy-delegated-create-kind-20260910.log`.
 - [ ] 전체 원본 `new_user/new_rauthy_admin` 이벤트·알림,
   메일 durable retry/outbox 및 재전송 관리 API.
 - [x] fallback=false 실제 배포에서 최초·refresh·profile-only ID token과 UserInfo의
-  preferred_username 미노출을 확인했다(TestProfileClaimsLive 1.66s, batch exit 0).
-  근거: `/tmp/goauthy-profile-no-email-fallback-20260910.log`. 이는 standalone 증거다.
-  같은 강화된 검사의 fallback=true 실행도 통과했다(1.64s, batch exit 0):
-  `/tmp/goauthy-profile-email-fallback-enabled-20260910.log`.
+  preferred_username 미노출을 확인했다(TestProfileClaimsLive 1.66s, batch exit 0, standalone 증거).
+  같은 강화된 검사의 fallback=true 실행도 통과했다(1.64s, batch exit 0; 상세 실행 이력은 [status](status.md) 참조).
 - [ ] preferred-username 로그인 재검증 정책, fallback 비활성화 HA, 전체 생성 관리 UI,
   생성 자체의 pod 교체/quorum chaos.
 
@@ -187,7 +179,7 @@ SSE는 현재 GoAuthy의 pseudonymous API-key/master-key audit와 다른 계약�
   같은 생성 배치에서 저장. 검증·개인정보 보존 경계는 [events](events.md).
 - [ ] persistence/notification threshold 및 email/Matrix/Slack 전달.
 - [x] Events:read/API key 또는 현재 browser admin 권한의 POST 시간/level/type 조회.
-- [ ] SSE stream.
+- [x] SSE stream (`GET /auth/v1/events/stream`; 구현 및 검증 범위는 [events](events.md) 및 [status](status.md) 참조).
 
 기존 audit CHECK에 사용자 문자열만 추가하거나 기존 GET audit 응답을 원본
 event API 완료로 표시하지 않는다. IP/email 보존 정책과 event DTO, 저장/조회는

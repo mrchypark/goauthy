@@ -1,5 +1,7 @@
 # GoAuthy 보안 강화 결과 보고서
 
+> **참고 (2026-09-12 시점 보고서)**: 이 문서는 2026-09-12 기준의 보안 개선 작업 기록입니다. 현재 프로덕션 기본값(`DefaultRules` `LengthMin=14`, `DefaultPolicy` `MaxConcurrency=4`, `GOAUTHY_PASSWORD_VALID_DAYS=0` 고정 등)과 전체 보안 아키텍처는 [security.md](security.md) 및 [capabilities.md](capabilities.md)를 참조하십시오.
+
 ## 작업 일시
 2026-09-12
 
