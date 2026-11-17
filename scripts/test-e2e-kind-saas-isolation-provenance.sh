@@ -64,7 +64,7 @@ case "$1 $2" in
     elif [ "${MOCK_CONFIG_PRESENT-}" = "$target" ]; then
       config_field=$(printf ',"containerimage.config.digest":"sha256:%s"' "$config")
     fi
-    printf '{"buildx.build.provenance":{"buildType":"https://mobyproject.org/buildkit@v1","materials":[]},"buildx.build.ref":"ied-amd64/test","containerimage.descriptor":{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:%s","platform":{"architecture":"arm64","os":"linux"}},"containerimage.digest":"sha256:%s","image.name":"docker.io/library/goauthy-saas-isolation-%s:e2e"%s}\n' "$manifest" "$manifest" "$target" "$config_field" >"$metadata"
+    printf '{"buildx.build.provenance":{"buildType":"https://mobyproject.org/buildkit@v1","materials":[]},"buildx.build.ref":"builder-amd64/test","containerimage.descriptor":{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:%s","platform":{"architecture":"arm64","os":"linux"}},"containerimage.digest":"sha256:%s","image.name":"docker.io/library/goauthy-saas-isolation-%s:e2e"%s}\n' "$manifest" "$manifest" "$target" "$config_field" >"$metadata"
     ;;
   'create '*) exit 42 ;;
   'rm '*) exit 0 ;;

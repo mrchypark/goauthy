@@ -1,6 +1,6 @@
 # Ternal local GoAuthy candidate — 2026-09-07
 
-Local build complete; no registry publication or IED deployment was performed.
+Local build complete; no registry publication or GKE deployment was performed.
 This is a candidate, not full Rauthy parity or production qualification.
 
 ## Artifact identity
@@ -84,6 +84,6 @@ an application startup or functional test. An authorized amd64 runner is needed
 to qualify this exact image; the artifact must not be marked runtime-qualified.
 
 Remaining: amd64 candidate runtime qualification, actual Ternal web-session
-completion, deployed-schema upgrade/rollback, GCS empty-disk recovery and IED
+completion, deployed-schema upgrade/rollback, GCS empty-disk recovery and GKE
 network/identity checks. Existing local S3 recovery evidence is not native GCS
-or IED evidence. No HA rolling-upgrade or new chaos qualification is claimed.
+or GKE evidence. No HA rolling-upgrade or new chaos qualification is claimed.
