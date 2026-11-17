@@ -1,5 +1,7 @@
 # Admin core UI/API audit
 
+Audit date: 2026-09-26 (historical control audit snapshot; see [capabilities.md](capabilities.md) and [status.md](status.md) for current product status).
+
 Scope: dashboard plus users, roles, groups, and API keys in `internal/admin/admin.js`. The browser uses the existing same-origin session and fetches `/auth/v1/admin/csrf` before routing. Mutations add that token as `X-CSRF-Token`; the server performs the authoritative session, CSRF, and permission checks. The UI’s `api()` helper sets pending state around mutations, preserves non-empty text HTTP error bodies, and restores pending state in `finally`.
 
 ## Control evidence

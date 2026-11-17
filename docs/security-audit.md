@@ -1,5 +1,7 @@
 # GoAuthy 보안 감사 보고서
 
+> **참고 (2026-09-12 시점 감사 기록)**: 이 문서는 2026-09-12 기준의 시점 감사 보고서입니다. 이후 패스워드 정책(`internal/credential/policy.go`, `DefaultRules` `LengthMin=14`, `DefaultPolicy` `MaxConcurrency=4`) 등 후속 변경 사항과 현재 보안 아키텍처는 [security-improvements.md](security-improvements.md) 및 [security.md](security.md)를 참조하십시오.
+
 ## 감사 일시
 2026-09-12
 
@@ -132,7 +134,7 @@ ContentSecurityPolicy: "... style-src 'self' 'unsafe-inline'; ..."
 |------|------|------|
 | 패스워드 해싱 | A | Argon2id, OWASP 권장 |
 | 패스워드 정책 | C | 강도 검증 부족 |
-| 세션 관리 | A- | IP 바인딩 우화 가능 |
+| 세션 관리 | A- | IP 바인딩 우회 가능 |
 | CSRF 보호 | A | HMAC 기반, 상수 시간 |
 | 보안 헤더 | B+ | CSP 'unsafe-inline' |
 | Rate Limiting | A | 점진적 차단, 자동 블랙리스트 |

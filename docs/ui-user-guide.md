@@ -26,7 +26,7 @@
 | 역할·그룹 | 정의 생성 → 이름·JSON 메타데이터 편집 → 사용자에게 별도로 배정 | [역할과 그룹](ui-guide-admin.md#역할과-그룹) |
 | 관리 API 키 | 최소 권한·만료 지정 → 비밀 값 보관 → 교체/폐기 | [API 키](ui-guide-admin.md#api-키) |
 | 클라이언트 | 웹/기기 프리셋 → URI·플로·scope 검토 → 등록 → 실제 앱 검증 | [클라이언트](ui-guide-integrations.md#oauth-클라이언트-등록) |
-| 클라이언트별 로그인 화면 | Clients 목록의 Customize 또는 클라이언트 편집의 Login appearance → light/dark 스타일 미리보기 → Save 또는 Reset | [로그인 화면 편집기](ui-guide-integrations.md) |
+| 클라이언트별 로그인 화면 | Clients 목록의 Customize 또는 클라이언트 편집의 Login appearance → light/dark 스타일 미리보기 → Save 또는 Reset | [로그인 화면 편집기](ui-guide-integrations.md#클라이언트별-로그인-화면-꾸미기) |
 | 속성·범위 | 속성 정의 → 토큰별 scope 매핑 → 클라이언트 허용 범위 설정 | [속성과 스코프](ui-guide-integrations.md#사용자-속성과-스코프) |
 | 컬렉션 | 인증 방식·제공자·메타데이터 필드 정의 → 저장 | [컬렉션](ui-guide-integrations.md#인증-컬렉션-정의) |
 | 공급자 | OAuth endpoint/callback 또는 API connector 설정 → 저장 → 외부 연동 검증 | [공급자](ui-guide-integrations.md#saas-제공자-등록) |

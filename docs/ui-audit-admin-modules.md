@@ -1,5 +1,7 @@
 # Admin module UI behavior audit
 
+Audit date: 2026-09-26 (historical module audit snapshot; see [capabilities.md](capabilities.md) and [status.md](status.md) for current product status).
+
 Scope: `catalog.js`, `clients.js`, `collections.js`, `providers.js`, `sessions.js`, `events.js`, `blacklist.js`, and `templates.js`, their focused Node UI tests, plus the corresponding handlers/stores named below. This is a source-and-test audit, not a live browser run. Node UI tests use bounded DOM/API fixtures; they prove the client-side behavior they invoke, not deployment wiring, authorization, or persistence. The Go tests provide separate evidence for the API contracts and storage rules.
 
 | Module and controls | Handler behavior and API/persistence contract | Evidence and remaining limits |

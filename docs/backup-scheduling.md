@@ -119,7 +119,7 @@ not complete a scheduling checklist item.
 Final `create` Kind qualification passed (2026-09-09, exit 0): independent
 source/destination MinIO, signed publication, retention, local artifact/source
 Kind deletion, fresh Kind restore, original credentials and new-token validation
-on all three voters. Log: `/tmp/goauthy-create-kind-20260909.log`. GoAuthy uses
+on all three voters. GoAuthy uses
 no PVC. This manual gate does not prove physical-host independence or automatic
 scheduling; the later scheduled gate is recorded below.
 
@@ -187,8 +187,7 @@ The real-MinIO operator gate now runs this actual timer against standalone
 Rhiza. Its callback performs `backup.Create` and `backup.Prune`, then the test
 fetches and authenticates the signed remote artifact, restores a fresh prefix,
 opens Rhiza on a new data directory and verifies original SQL rows. The extended
-gate passed in 6.845s (2026-09-09); log:
-`/tmp/goauthy-scheduled-s3-20260909.log`. Fixture containers were cleaned up.
+gate passed in 6.845s (2026-09-09). Fixture containers were cleaned up.
 Focused race tests cover failure followed by the next run, job deadline
 cancellation and cancellation during a future wait; vet passed.
 
@@ -197,7 +196,7 @@ Production configuration/key loading, embedded timezone data, worker lifecycle
 and sanitized reporting are now wired. `make test-backup-scheduled-s3` invokes
 the production runtime against real MinIO and standalone Rhiza, then fetches
 and restores the signed encrypted backup into fresh storage. It passed in
-6.757s on 2026-09-09 (`/tmp/goauthy-server-backup-s3-20260909.log`). This is
+6.757s on 2026-09-09. This is
 not a server-process or three-voter test. The later basic scheduled Kind DR
 gate and two-voter-loss gate passed; paused-holder qualification remains open.
 
@@ -237,7 +236,7 @@ new running container IDs for both killed voters, unchanged Pod UIDs and an
 unchanged survivor container before the second slot and full DR checks.
 This profile does not simulate a paused former lease holder.
 
-The initial quorum run (`/tmp/goauthy-scheduled-kind-quorum-20260909.log`)
+The initial quorum run
 exited 1 without observing a failure log. A confirmed observer bug discarded
 container stderr: [crictl preserves stdout and stderr separately](https://github.com/kubernetes-sigs/cri-tools/blob/master/cmd/crictl/logs.go),
 while Go's default logger writes stderr. The CRI helper now merges both streams
@@ -246,8 +245,7 @@ and passes after this correction. The failed run is not quorum qualification.
 
 ### Basic scheduled Kind qualification
 
-The final exact-three server gate passed on 2026-09-09 (exit 0), log
-`/tmp/goauthy-scheduled-kind-stage-20260909.log`. It verified a single signed
+The final exact-three server gate passed on 2026-09-09 (exit 0). It verified a single signed
 completion and the exact slot's post-marker success log, retention, source Kind
 and local-artifact removal, external-catalog fetch into a fresh Kind/prefix,
 no GoAuthy PVC and original/new credentials across all three restored voters.
@@ -256,8 +254,7 @@ explained by this pass. Scheduler failure/chaos and key rotation remain open.
 
 ### Source-storage outage qualification
 
-The first live outage gate passed (exit 0) on 2026-09-09; log
-`/tmp/goauthy-scheduled-kind-outage-20260909.log`. With source MinIO unavailable,
+The first live outage gate passed (exit 0) on 2026-09-09. With source MinIO unavailable,
 the first exact slot failed and the signed catalog was empty. After source
 recovery, the second exact slot completed, followed by retention and complete
 external-catalog fresh-Kind DR with credential continuity. All fixtures were
@@ -265,8 +262,7 @@ cleaned up. Quorum-loss and paused-holder cases are not covered by this result.
 
 ### Two-voter loss qualification
 
-The final quorum profile passed (exit 0) on 2026-09-09; log
-`/tmp/goauthy-scheduled-kind-quorum-stderr-20260909.log`. Both targeted containers
+The final quorum profile passed (exit 0) on 2026-09-09. Both targeted containers
 exited 137 with kubelet stopped. The 08:22 UTC slot timed out at ownership after
 10 seconds and the signed catalog remained empty. With the default 60-second
 lease unchanged, kubelet recovery replaced only the two killed containers,
@@ -286,8 +282,7 @@ catalog validation and retention use the full bundle. Trust is loaded at startup
 changing keys requires restart and does not change the replicated ownership scope.
 See [operator procedure](backup-operator.md) and [package rationale](package-research.md).
 
-The production-runtime MinIO test passed in 13.420s on 2026-09-09, log
-`/tmp/goauthy-server-backup-rotation-marker-s3-20260909.log`. It verifies old/new
+The production-runtime MinIO test passed in 13.420s on 2026-09-09. It verifies old/new
 scheduled completions and exact linearizable slot markers, refuses startup when
 old trust is removed with old records retained, and decrypts/restores both backups
 into independent fresh prefixes with SQL continuity. Library/CLI/config race
@@ -305,13 +300,13 @@ Both real entries survive retention of a third, expired fixture. Local copies
 and source Kind are removed before external-catalog restoration of the new backup
 into fresh emptyDirs. The default 60-second lease is unchanged.
 
-The first live rotation run (`/tmp/goauthy-scheduled-kind-rotation-20260909.log`)
+The first live rotation run
 completed its first backup and old-key fetch, then exited 5 before rotating.
 Its helper had not initialized the expected Kind node required by the existing
 container-ID checker. The helper now runs the existing single-node preflight
 before capturing identities. That run does not qualify live key rotation.
 
-The next run (`/tmp/goauthy-scheduled-kind-rotation-node-20260909.log`) completed
+The next run completed
 the 09:00 UTC old-key backup and all three rolling restarts, but its 09:03
 scheduled attempt failed at `stage=create` with the generic error classification;
 the gate exited 1 and cleaned up. Its cause is not established. Safe native
@@ -323,8 +318,8 @@ native checkpoint publisher contention: holding `AcquirePublisherClaim` makes
 Create return `checkpoint.ErrPublisherBusy`, with no destination uploads and
 empty scratch; explicit claim release makes the same inputs publish successfully.
 The focused race check passed in 2.290s. This establishes a contention case,
-not the cause of the generic Kind failure above. The classified live retry uses
-`/tmp/goauthy-scheduled-kind-rotation-classified-20260909.log`; it passed as below.
+not the cause of the generic Kind failure above. The classified live retry
+passed as below.
 
 ### Live signing-key rotation qualification
 
@@ -347,8 +342,7 @@ existing six-attempt Export retry allowlist (100, 200, 400, 800, 1600ms cancella
 backoff). Fenced and joined cleanup errors remain fail-closed without retry;
 publication happens only after a successful export. No dependency was added.
 
-`make test-backup-checkpoint-busy-s3` passed on real MinIO in 6.595s
-(`/tmp/goauthy-checkpoint-busy-final-s3-20260909.log`). Native held claims produce
+`make test-backup-checkpoint-busy-s3` passed on real MinIO in 6.595s. Native held claims produce
 six reads, zero uploads and empty scratch; explicit release permits publication.
 A second case releases the native claim during a later read and proves the same
 Create call retries successfully. Both results are fetched, decrypted and
@@ -359,9 +353,7 @@ fresh bounded cleanup context and prefix-before-copy registration fixed it.
 
 Updated-candidate production scheduled S3 passed (13.207s) and manual full Kind
 external-catalog/no-PVC DR passed (exit 0), including original source/local
-ciphertext removal, fresh emptyDirs and credentials on all three voters. Logs:
-`/tmp/goauthy-checkpoint-busy-scheduled-s3-20260909.log` and
-`/tmp/goauthy-checkpoint-busy-kind-20260909.log`. Kind did not inject publisher
+ciphertext removal, fresh emptyDirs and credentials on all three voters. Kind did not inject publisher
 contention; the forced-contention evidence is the native MinIO test. These results
 do not establish the cause of the earlier generic rotation failure.
 
@@ -390,8 +382,7 @@ not evidence of Linux SIGSTOP/SIGCONT, TTL expiry or remote-write fencing.
 cooperative boundary with real Rhiza: replace the owner through native KV, wait
 for cancellation, let the old callback return nil, and require ErrLeaseLost,
 no completion marker and the exact successor token still present. Focused race
-passed (2.439s); the full backupschedule race suite passed (14.727s), log
-`/tmp/goauthy-backup-lost-holder-race-20260909.log`. Production code was unchanged.
+passed (2.439s); the full backupschedule race suite passed (14.727s). Production code was unchanged.
 The process-pause gate above remains unchecked.
 
 A temporary Go overlay removing only RunSlot's post-job context check still
@@ -420,7 +411,7 @@ KIND_CLUSTER=goauthy-backup-restore-e2e-sp9 E2E_PORT=59361 \
 ./scripts/e2e-kind-backup-restore.sh
 ```
 
-Log: `/tmp/goauthy-scheduled-kind-pause-20260909.log`. At this entry's writing,
+At this entry's writing,
 the local BuildKit build is running; no Kind qualification pass is claimed.
 Scratch presence plus an established catalog connection identifies a Create
 holder connected to the paused catalog; it does not prove a specific PUT has
@@ -434,9 +425,8 @@ that Dory `docker cp` succeeded for ordinary storage but left no visible file
 inside a mounted `/tmp` tmpfs. The observer now streams through `docker exec -i`
 into the running mount namespace with umask 077. The real Docker regression
 `sh scripts/test-backup-pause-copy.sh` passes exact binary-byte comparison and
-mode 0600. Shell syntax, holder and clock checks also pass. A new live attempt
-uses `/tmp/goauthy-scheduled-kind-pause-tmpfs-20260909.log`; qualification remains
-pending until its terminal result. The original failed log is retained.
+mode 0600. Shell syntax, holder and clock checks also pass. In a new live attempt,
+qualification remains pending until its terminal result.
 
 The tmpfs-fixed run reached the actual fault: the node clock passed the first
 10:09 UTC slot, kubelet was inactive, and `/proc` showed one GoAuthy process in
@@ -459,8 +449,7 @@ now retain their original causes while distinguishing `lease_acquire` from
 native call failed. Full backupschedule race passed (15.434s), focused server
 checks passed (0.991s), and vet/shell regressions passed. Before resuming a failed
 fault, the gate now captures only fixed scheduler diagnostics and UDP socket
-state. The next live candidate log is
-`/tmp/goauthy-scheduled-kind-pause-diagnostic-20260909.log`; no success is claimed
+state. In the next live candidate, no success is claimed
 until terminal verification. No evidence currently establishes a need to change
 Rhiza quorum, lease length, or publication policy.
 
@@ -484,15 +473,13 @@ checks pass. Only the pause test's rendered liveness failureThreshold is 120 at
 the existing 10-second period; production manifests and other profiles are
 unchanged. It checks all three Pod UIDs/container IDs/CRI PIDs before and after
 resumption, NodeReady, ready MinIO endpoints and authenticated Service/DNS access
-through the existing mc helper. The new live attempt is
-`/tmp/goauthy-scheduled-kind-pause-kubelet-20260909.log`; it has started and is not
+through the existing mc helper. The new live attempt has started and is not
 yet a qualified pass. This candidate also contains the default-preserving
 retention-policy implementation, but this pause profile does not test expire-all.
 
 The first kubelet-preserving attempt ended exit 1 before app deployment because
 the new pause-only liveness change failed the strict manifest-render guard.
-Log: `/tmp/goauthy-scheduled-kind-pause-kubelet-20260909.log`. It did not inject a
-pause or exercise DR. The fix must be reproduced against actual Kustomize output,
+It did not inject a pause or exercise DR. The fix must be reproduced against actual Kustomize output,
 not only a source-text guard, before another live candidate is started.
 
 The render failure was reproduced and fixed: actual Kustomize probe indentation
@@ -500,8 +487,8 @@ is 8/10 spaces, but the first matcher used source YAML's 10/12 spaces. The
 replacement count therefore remained zero. `test-backup-pause.sh` now invokes
 real apply_app rendering with actual Kustomize input and only kubectl stubbed;
 pause requires exactly one liveness-specific threshold 120 and default requires
-none. Render, clock, tmpfs-copy and diff checks passed. The next live attempt log
-is `/tmp/goauthy-scheduled-kind-pause-render-20260909.log`; result is pending.
+none. Render, clock, tmpfs-copy and diff checks passed. The next live attempt
+result is pending.
 
 ### 2026-09-09 paused-holder observer execution correction
 
@@ -537,7 +524,6 @@ the 11:04 failure remains unexplained until a new observed classification.
 
 The `pause-native-errors` run completed with exit 0:
 `GOAUTHY_E2E_SCHEDULED_BACKUP=1 GOAUTHY_E2E_SCHEDULED_BACKUP_PAUSE_HOLDER=1 KIND_CLUSTER=goauthy-backup-restore-e2e-sp11 E2E_PORT=59361 ./scripts/e2e-kind-backup-restore.sh`.
-Log: `/tmp/goauthy-scheduled-kind-pause-native-errors-20260909.log`.
 First slot 11:27 UTC; successor slot 11:30 UTC. The fixture observes Create
 scratch plus a catalog connection, stops the exact CRI process for over 65s,
 keeps Kubernetes/source storage healthy, and verifies unchanged voter identities.

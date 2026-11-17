@@ -1,10 +1,14 @@
 # Account dashboard
 
+> **Current status:** Account self-service UI is **Preview** in [capabilities.md](capabilities.md); profile, passkey, localization, and external connection/grant/device slices exist, while full end-to-end self-service workflow qualification remains open.
+
 `GET /account` is the authenticated account page. `/account/data` returns the
 current active subject's credential-free profile, issuer-bound CSRF token,
 password policy and enabled password/passkey flags. Same-origin JS/CSS are
-embedded at `/account/app.js` and `/account/account.css`. Issuer path prefixes
-are retained in asset and mutation URLs.
+embedded at `/account/app.js`, `/account/account.css`, `/account/locale.js`,
+`/account/connections.js`, `/account/connection-grants.js`, and
+`/account/devices.js`. Issuer path prefixes are retained in asset and mutation
+URLs.
 
 Implemented actions reuse existing production handlers:
 
@@ -79,8 +83,10 @@ virtual-authenticator gate is `TestAccountPasskeyUIAcrossPods`; consult
 compile-only skipped gate as a pass.
 
 Still incomplete: ordinary-user session management UI, provider links, recovery UI,
-full profile-policy discovery/editing, localized text and their browser/chaos
-coverage. The broad self-service feature remains unchecked.
+full profile-policy discovery/editing, and full end-to-end/chaos coverage for
+those workflows (localized UI strings via `locale.js` and external
+connection/grant/device slices are now served under `/account`). The broad
+self-service feature remains `Preview` rather than `Qualified`.
 
 ## Account mode and deletion
 

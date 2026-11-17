@@ -1,5 +1,7 @@
 # Browser admin UI implementation
 
+> **Current status:** Admin UI is **Preview** in [capabilities.md](capabilities.md); core user, client, collection, and module management slices exist, but it is not yet a complete management console.
+
 The browser UI is served by `internal/admin.UI` under these page routes:
 
 - `/auth/v1/admin/users` — live user list, detail/edit, create and subject-confirmed delete form.
@@ -61,9 +63,11 @@ The API-key browser lifecycle passed in standalone and exact-three Kind;
 see [status](status.md) for the final candidate logs and remaining chaos scope.
 
 Remaining full-admin gaps include full profile policy discovery,
-dedicated membership assignment screens, full client policy/provider/settings
-screens and their feature-specific E2E. Password and expiry editor semantics need
-their own browser value/boundary assertions; CRUD coverage is not that proof.
+dedicated membership assignment screens, full settings screens, and
+feature-specific E2E coverage (embedded UI modules now also cover dashboard,
+themes, providers, blacklist, events, email-template previews, and localization).
+Password and expiry editor semantics need their own browser value/boundary
+assertions; CRUD coverage is not that proof.
 
 The managed-client core screen is now wired at `/auth/v1/admin/clients` with
 Web/Device presets, all currently supported grant flows, CAS edits, explicit
@@ -89,8 +93,10 @@ coverage does not automatically establish browser coverage.
 
 Known follow-up: the catalog's `/new` page sentinel conflicts with an existing
 scope/attribute literally named `new`; that reserved-name editing path needs a
-distinct create URL and browser regression. General admin issuer-prefix routing
-and full small-screen/device coverage also remain unfinished. The broad admin
+distinct create URL and browser regression. `UI.SetIssuer` now rewrites local
+`/auth/v1/`, `/account`, and `/oidc/` paths in embedded assets for issuer-prefix
+deployments, though full small-screen/device coverage and end-to-end
+qualification across all admin screens remain unfinished. The broad admin
 feature must not be checked off on the strength of the successful fixture names.
 
 Authentication collections reuse the existing admin/account asset and CSRF

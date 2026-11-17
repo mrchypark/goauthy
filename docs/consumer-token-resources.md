@@ -62,3 +62,17 @@ HTTPS 브라우저 검사를 통과했다. 남은 구현은 실제 외부 BFF ca
 장시간 실행을 위한 승인된 갱신 orchestration, 각 앱의 실제 로그인→승인→실행
 통합. 기존 API-key handoff를 OAuth 승인으로 해석하지 않는다. 일반 OAuth 토큰과
 account_id만으로 Codex app-server 호환을 보장하지 않는다.
+
+## 위험 및 경계
+
+- **Introspection caller ACL 부재**: `/oidc/introspect`는 등록된 confidential
+  client의 Basic 인증을 요구하지만 audience별 caller ACL은 없으므로, 각 소비자가
+  반환된 `aud`, `scope`, `sub`를 직접 검증해야 한다.
+- **단일 resource·단일 client 경계**: 다중 audience 토큰 발급이나 refresh 시
+  다른 resource로의 전환/축소는 지원하지 않으며(`invalid_target`), cross-client
+  token exchange가 일반 위임을 대신하지 않는다.
+- **Allowlist 및 익명 DCR 제한**: `GOAUTHY_CONNECTIONS_RESOURCE`와
+  `GOAUTHY_PROVIDERS_RESOURCE`는 `GOAUTHY_BOOTSTRAP_ALLOWED_RESOURCES`에 포함되어야
+  하며, 익명 DCR로는 resource 권한을 획득할 수 없다.
+- **자동 refresh 부재**: credential delivery는 자동 OAuth refresh를 수행하지
+  않으며 만료·철회·미확인 expiry 상태에서는 실행을 중단해야 한다.

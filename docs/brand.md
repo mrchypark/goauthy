@@ -9,3 +9,8 @@ Approved direction: B / Gateway (2026-09-26). Two separated planes form an open 
 - Fonts are bundled and served from the same origin. No external font requests. `font-display: swap` preserves usable text while loading.
 
 Assets live in `internal/branding/assets`. Manrope is from google/fonts (OFL); Pretendard is v1.3.9 from orioncactus/pretendard (OFL). Both licenses are bundled alongside the fonts. The generated concept was redrawn as simple geometry for interface use; the favicon is SVG. Explicitly configured deployment favicons retain precedence.
+
+## Boundaries
+
+- `internal/ui` (`github.com/mrchypark/ely-htmx`) also serves `geist.woff2` and `geist-mono.woff2` alongside `pretendard.woff2` under `/auth/v1/ui/` for the migrated UI shell.
+- Only whitelisted embedded assets are served with `X-Content-Type-Options: nosniff`; custom theme/logo/favicon uploads are validated and sanitized in `internal/branding`.

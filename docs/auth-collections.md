@@ -196,8 +196,8 @@ Rhiza의 동일 변경에 포함된 DB trigger로 해당 토큰을 revoked로 �
 이 작은 SQL trigger와 소유권 guard를 직접 구현했다. 추가 의존성은 없다.
 
 standalone 설정 로딩/관리자 목록/익명 거절/동일 DB 재시작 후 재조회:
-`/tmp/goauthy-saas-catalog-e2e-final-20260906.log` 종료 0.
-첫 `/tmp/goauthy-saas-catalog-e2e-20260906.log`는 HTTP localhost callback
+2026-09-06 standalone catalog E2E 실행 종료 0.
+첫 standalone catalog E2E 시도는 HTTP localhost callback
 fixture가 loopback-IP 정책에 맞지 않아 시작 실패했다. fixture를 127.0.0.1로
 고쳤으며 정책을 완화하지 않았다. 외부 GitHub 호출은 없는 목록 E2E다.
 
@@ -286,11 +286,10 @@ schema77은 등록 API-key 제공자 제거에도 폐기를 적용하되 legacy 
   Promise barrier를 통한 이전 화면의 늦은 상태 응답 무시.
 - [x] `TestConnectionAPIKeyPilot/browser`: 실제 Chromium 등록/교체,
   외부 요청의 동시 교체 후 충돌 및 입력 삭제, 재조회 후 폐기.
-  standalone 및 재시작 후 최종 로그:
-  `/tmp/goauthy-saas-api-key-ui-e2e-final-20260906.log` (종료 0).
+  standalone 및 재시작 후 최종 실행 종료 0 (2026-09-06).
 - [ ] 실제 SaaS 요청의 키 삽입, 원격 철회, 재연결과 해당 UI의 HA 검증.
 
-### API-key 대상 동의 및 내부 호출 엔진 (2026-09-06)
+### API-key 대상 동의 및 내부 호출 엔진 (2026-09-06 당시 기록; 이후 공개 HTTP/동의 화면 연결은 [capabilities.md](capabilities.md) 및 [external-credential-consumer-contract.md](external-credential-consumer-contract.md) 참조)
 
 `APIKeyConnector`는 운영자가 신뢰하는 설정을 검증하고 불변 복사한다.
 ID/인증 header 및 prefix/작업별 고정 HTTPS URL/GET method/응답 필드 타입을
@@ -389,23 +388,19 @@ main 통합 회귀는 손상된 고아 credential의 키 폐기 거절과 batch 
 - [x] 사용자 hard-delete 시 자신의 draft 연결만 동일 트랜잭션에서 정리.
 - [x] strict JSON, 예약 필드/정수 범위, 소유권/권한·revision 거절, tombstone 재사용 거절.
 - [x] 가짜 시계의 owner 만료 경계와 interposed 연결 생성 후 schema 변경 거절.
-- [x] standalone 실제 HTTP/SMTP/login CRUD 및 프로세스 재시작 후 재실행.
-  `/tmp/goauthy-collections-standalone-20260906.log` 종료 0, 0.39/0.36초.
-- [x] Dory exact-three 교차 Pod CRUD 및 Pod 교체 후 재실행.
-  `/tmp/goauthy-collections-ha-20260906.log` 종료 0, 0.79/1.04초.
-- [x] 집중 회귀/race/vet 통과. `/tmp/goauthy-collections-focused-20260906.log`,
-  `/tmp/goauthy-collections-race-20260906.log`, `/tmp/goauthy-collections-vet-20260906.log`.
+- [x] standalone 실제 HTTP/SMTP/login CRUD 및 프로세스 재시작 후 재실행
+  (2026-09-06, 종료 0, 0.39/0.36초).
+- [x] Dory exact-three 교차 Pod CRUD 및 Pod 교체 후 재실행
+  (2026-09-06, 종료 0, 0.79/1.04초).
+- [x] 집중 회귀/race/vet 통과 (2026-09-06).
 - [x] 관리자 정의/사용자 소유 draft 관리 UI, CSRF/If-Match, 비활성·충돌 입력 보존.
 - [x] Chromium standalone/재시작 후 실제 CRUD, int64 최대값·false·미입력 enum,
-  문자열 줄바꿈과 선택지 공백/줄바꿈 보존, 1280/375 viewport overflow 검사.
-  `/tmp/goauthy-collections-ui-final-standalone-20260906.log` 종료 0,
-  API 0.51/0.38초, UI 3.61/3.10초.
-- [x] 신규 Node UI 회귀 및 기존 dashboard/admin/catalog/session Node 검사.
-  최종 집중 Go `/tmp/goauthy-collections-ui-final-go-20260906.log`와
-  `/tmp/goauthy-collections-ui-final-vet-20260906.log` 종료 0.
-- [x] 최종 UI 후보 Dory exact-three 교차 Pod API/UI 및 동일 draft Pod 교체.
-  `/tmp/goauthy-collections-ui-final-ha-20260906.log` 종료 0,
-  API 1.04/0.88초, UI 4.00/3.55초, 동일 ID/revision/metadata chaos 5.06초.
+  문자열 줄바꿈과 선택지 공백/줄바꿈 보존, 1280/375 viewport overflow 검사
+  (2026-09-06 standalone UI E2E 종료 0, API 0.51/0.38초, UI 3.61/3.10초).
+- [x] 신규 Node UI 회귀 및 기존 dashboard/admin/catalog/session Node 검사,
+  최종 집중 Go 테스트 및 `go vet` 종료 0 (2026-09-06).
+- [x] 최종 UI 후보 Dory exact-three 교차 Pod API/UI 및 동일 draft Pod 교체
+  (2026-09-06, 종료 0, API 1.04/0.88초, UI 4.00/3.55초, 동일 ID/revision/metadata chaos 5.06초).
   교체 후 3 Pod Ready/새 UID와 UI 재실행, 소유 cluster/container 정리 확인.
 - [ ] 한 SaaS의 연결→암호화 저장→실제 작업→갱신→연결 해제.
 - [ ] Agent 등록→사용자 승인→특정 연결 사용→위임 철회.
@@ -414,7 +409,7 @@ main 통합 회귀는 손상된 고아 credential의 키 폐기 거절과 batch 
 - [ ] 가짜 시계·barrier 기반 만료/경쟁/장애 결정론적 테스트.
 - [ ] standalone 및 exact-three 교차 Pod E2E, refresh 중 Pod 손실·쿼럼 손실.
 
-첫 UI HA 로그 `/tmp/goauthy-collections-ui-ha-20260906.log`는 실패 기록이다.
+첫 UI HA 시도(2026-09-06)는 실패 기록이다.
 Pod 교체 후 테스트 사용자 cleanup이 삭제된 primary forward를 사용해 EOF가
 발생했다. 다른 cleanup과 동일하게 survivor `apiBase`를 사용하도록 수정했고
 최종 HA gate가 그 cleanup까지 통과했다. 실패 실행을 통과로 세지 않는다.

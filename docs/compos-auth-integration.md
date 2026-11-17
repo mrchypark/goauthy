@@ -65,6 +65,13 @@ sh scripts/e2e-open-registration-standalone.sh
 
 포트 범위는 각각 18250–18252와 18260–18262이다. 다른 runner와 포트가 겹치면 전용 lock을 함께 사용하면 안 된다. 이번 기존 UI preview 18120은 유지했다. 테스트 서버·DB·credential fixture는 종료 시 제거되므로 상시 서비스 연결을 생성한 것은 아니다.
 
-로그: `/tmp/goauthy-compos-session-readiness.log`, `/tmp/goauthy-compos-oauth-readiness.log`.
+두 프로필(세션 연동 및 OAuth2 Bearer 연동) 모두 2026-09-27 실행에서 종료 코드 0으로 통과했다.
 
 남은 작업: 실제 만료 토큰 E2E, 사용자용 브라우저/Device 로그인 진입, 배포용 issuer/client/resource와 기존 principal의 명시적 계정 연결 검증. 이메일만으로 기존 계정을 자동 병합하지 않는다.
+
+## 위험 및 경계
+
+- **만료 토큰 E2E 미검증**: 실제 만료 토큰(`EXPIRED`)은 두 경로 모두 SKIP되었으므로 전체 음성 matrix 통과로 간주하지 않는다.
+- **로컬 세션과 IdP 세션 분리**: GoAuthy 로그아웃 또는 토큰 철회가 기존 Compos 세션을 즉시 폐기하는 back-channel 기능은 없다.
+- **이메일 기반 자동 병합 금지**: 기존 principal과의 연결은 명시적 매핑만 허용하며, 이메일 주소만으로 계정을 자동 병합하지 않는다.
+- **Introspection caller 격리**: GoAuthy introspection endpoint는 등록된 confidential client의 Basic 인증을 요구하지만 audience별 caller ACL은 없으므로, Compos가 `aud`/`scope`/`sub`를 직접 검증해야 한다.

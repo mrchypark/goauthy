@@ -1,5 +1,7 @@
 # Event notifications
 
+> **Current status:** Outbound notifications and the event log are **Preview** in [capabilities.md](capabilities.md); core delivery, generation reconciliation, and guarded querying are wired, while retention, metrics, and deployed Slack/Matrix TLS-fixture E2E remain open.
+
 The server now starts a context-owned notification worker when
 `GOAUTHY_EVENT_NOTIFICATION_TARGETS` names one or more whitespace-separated
 targets: `email slack matrix`. No targets means no worker and no destination
@@ -51,11 +53,11 @@ Verification:
 - TLS-local Slack/Matrix protocol tests, untrusted certificate/redirect
   rejection, SMTP MIME and redacted errors.
 - Fixed-clock runtime threshold, retry-before/equality, concurrent worker and
-  cancellation tests: `/tmp/goauthy-wide-batch-notify-race-20260906.log`
-  (notify 36.948s, command configuration 2.199s, exit 0).
+  cancellation tests (`go test -race ./internal/notify` 36.948s,
+  command configuration 2.199s, exit 0).
 - Standalone server: guarded Test event on every configured URL reaches the
-  local SMTP sink by exact event ID and recipient. Combined browser/HTTP/claims/
-  email batch: `/tmp/goauthy-wide-batch-standalone-20260906.log`, exit 0.
+  local SMTP sink by exact event ID and recipient (combined browser/HTTP/claims/
+  email standalone batch, exit 0; see [status.md](status.md)).
 - Current HA/Pod-replacement result is recorded in [status](status.md), rather
   than inferred from the queue tests.
 
