@@ -1,6 +1,6 @@
 # Rhiza runtime profiles
 
-The application defines two explicit Rhiza modes. Its source dependency is
+The application defines four explicit Rhiza profiles (`standalone`, `standalone-local`, `dev`, and `cluster`). Its source dependency is
 pinned in [`go.mod`](../../go.mod); that source pin does not identify the
 version deployed in production. `standalone` uses one embedded member and a
 single data directory.
@@ -68,7 +68,7 @@ provenance only; it does not establish restore compatibility. Qualify restores
 against the intended producer and consumer builds as a separate operator gate.
 The harness sets the cluster-only `GOAUTHY_RHIZA_CHECKPOINT_INTERVAL=1s` so
 `checkpoint/CURRENT` appears deterministically; production overrides are bounded
-to `1s` through `24h`, and standalone/dev reject the setting. Cluster S3
+to `1s` through `24h`, and `dev`/`standalone-local` reject the setting (`standalone` accepts it). Cluster S3
 durability remains fixed at `before-ack`.
 
 The namespace enforces Kubernetes Restricted Pod Security Admission. The

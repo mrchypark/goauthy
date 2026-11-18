@@ -14,7 +14,7 @@ GoAuthy is a pre-alpha Go OAuth 2.0 / OIDC identity provider targeting behaviora
 
 GoAuthy runs as a single binary (`cmd/goauthy`) with no external database server in the default deployment topology ("no GoAuthy PVC"):
 
-- **Storage & replication (`Rhiza v0.24.0`, `latticedb-go v0.13.0`, schema `v114`)**: State is stored in an embedded `*rhiza.DB` SQLite/consensus engine (`github.com/mrchypark/rhiza`, commit [`e9cefbbb260d2f62b2a47971de3f091720b42a68`](https://github.com/mrchypark/rhiza/commit/e9cefbbb260d2f62b2a47971de3f091720b42a68)) using `emptyDir` local storage paired with synchronous `before-ack` object-store publication (S3 or GCS) for disaster recovery.
+- **Storage & replication (`Rhiza v0.24.0`, `latticedb-go v0.13.0`, schema `v115`)**: State is stored in an embedded `*rhiza.DB` SQLite/consensus engine (`github.com/mrchypark/rhiza`, commit [`e9cefbbb260d2f62b2a47971de3f091720b42a68`](https://github.com/mrchypark/rhiza/commit/e9cefbbb260d2f62b2a47971de3f091720b42a68)) using `emptyDir` local storage paired with synchronous `before-ack` object-store publication (S3 or GCS) for disaster recovery.
 - **OAuth 2.0 / OIDC core (`ory/fosite` fork `v0.49.0-goauthy.1`)**: Uses a minimally patched `github.com/mrchypark/fosite` fork for security fixes and compatibility; the policy is to return to upstream once published and qualified.
 - **Cryptography & WebAuthn**: `go-jose/v4` for EdDSA JWT/JWKS signing, `go-webauthn` for passkeys, Argon2id for password hashing, and `*oidc.Keyring` with **GAOP** (GoAuthy Authenticated Object Protection) AES-256-GCM envelope encryption.
 - **Runtime requirement**: Go `1.27.4` minimum (also enforced by the root `Dockerfile`).
@@ -33,7 +33,7 @@ GoAuthy runs as a single binary (`cmd/goauthy`) with no external database server
 
 ## Quickstart (`dev` Profile)
 
-`goauthy` reads `secrets/master-keys/`, `secrets/oauth-hmac`, and `secrets/bootstrap-client` from default relative paths unless overridden by environment variables, and uses `GOAUTHY_CLUSTER_ID` as the bootstrap client ID.
+`goauthy` reads `secrets/master-keys/`, `secrets/oauth-hmac`, and `secrets/bootstrap-client` from default relative paths unless overridden by environment variables, and uses `GOAUTHY_BOOTSTRAP_CLIENT_ID` (default `goauthy-dev`) as the bootstrap client ID.
 
 ```bash
 mkdir -p secrets/master-keys

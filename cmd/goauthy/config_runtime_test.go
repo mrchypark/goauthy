@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -397,6 +399,82 @@ func TestRunConfigCommandArgonMemoryBudgetAccepted(t *testing.T) {
 			var out bytes.Buffer
 			if err := runConfigCommand([]string{"check"}, getenv, &out); err != nil {
 				t.Fatalf("config check=%v", err)
+			}
+		})
+	}
+}
+
+func TestAPIKeyBrowserAdminQueryRoutes(t *testing.T) {
+	t.Parallel()
+	baseCalls := 0
+	wrapped := apiKeyBrowserAdmin(func(w http.ResponseWriter, r *http.Request, _ bool) bool {
+		baseCalls++
+		return r.URL.RawQuery == ""
+	})
+
+	for _, tc := range []struct {
+		method string
+		target string
+		want   bool
+	}{
+		{http.MethodPut, "/auth/v1/api_keys?name=team%2Fkey", true},
+		{http.MethodDelete, "/auth/v1/api_keys?name=team%2Fkey", true},
+		{http.MethodPut, "/auth/v1/api_keys/secret?name=team%2Fkey", true},
+		{http.MethodPut, "/auth/v1/api_keys?name=a&name=b", false},
+		{http.MethodPut, "/auth/v1/api_keys?other=1", false},
+		{http.MethodGet, "/auth/v1/api_keys?name=team%2Fkey", false},
+		{http.MethodPut, "/auth/v1/roles?name=team%2Fkey", false},
+	} {
+		req := httptest.NewRequest(tc.method, tc.target, nil)
+		rec := httptest.NewRecorder()
+		if got := wrapped(rec, req, true); got != tc.want {
+			t.Fatalf("%s %s: got=%t want=%t", tc.method, tc.target, got, tc.want)
+		}
+	}
+	if baseCalls != 7 {
+		t.Fatalf("expected 7 base calls, got=%d", baseCalls)
+	}
+}
+
+func TestEmailOTPRuntimeConfigValidation(t *testing.T) {
+	t.Parallel()
+	resetKeyFile := writeTestFile(t, t.TempDir(), "reset-key", strings.Repeat("k", 32))
+	for _, tc := range []struct {
+		name      string
+		overrides map[string]string
+		wantErr   string
+	}{
+		{
+			name:      "invalid email otp bool",
+			overrides: map[string]string{"GOAUTHY_EMAIL_OTP_ENABLED": "not-a-bool"},
+			wantErr:   "GOAUTHY_EMAIL_OTP_ENABLED",
+		},
+		{
+			name:      "email otp without password recovery",
+			overrides: map[string]string{"GOAUTHY_EMAIL_OTP_ENABLED": "true"},
+			wantErr:   "GOAUTHY_PASSWORD_RECOVERY_ENABLED",
+		},
+		{
+			name: "email otp without smtp host",
+			overrides: map[string]string{
+				"GOAUTHY_EMAIL_OTP_ENABLED":         "true",
+				"GOAUTHY_PASSWORD_RECOVERY_ENABLED": "true",
+				"GOAUTHY_PASSWORD_RESET_KEY_FILE":   resetKeyFile,
+			},
+			wantErr: "invalid SMTP host",
+		},
+		{
+			name:      "missing email templates file",
+			overrides: map[string]string{"GOAUTHY_EMAIL_TEMPLATES_FILE": filepath.Join(t.TempDir(), "missing.json")},
+			wantErr:   "load email templates",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			getenv := applicationConfigTestEnv(t, tc.overrides)
+			var out bytes.Buffer
+			err := runConfigCommand([]string{"check"}, getenv, &out)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err=%v want substring %q", err, tc.wantErr)
 			}
 		})
 	}

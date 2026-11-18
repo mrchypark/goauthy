@@ -14,12 +14,14 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/eventlog"
+	"github.com/mrchypark/goauthy/internal/netsec"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
@@ -447,26 +449,19 @@ func resolveEndpoint(ctx context.Context, u *url.URL, allowPrivate bool) (net.IP
 	}
 	for _, ip := range ips {
 		resolved := net.IP(ip.AsSlice())
-		if allowedIP(resolved, allowPrivate) {
-			return resolved, nil
+		if !allowedIP(resolved, allowPrivate) {
+			return nil, errEndpointUnsafe
 		}
 	}
-	return nil, errEndpointUnsafe
+	return net.IP(ips[0].AsSlice()), nil
 }
 
 func allowedIP(ip net.IP, allowPrivate bool) bool {
-	if ip.IsUnspecified() || ip.IsMulticast() {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
 		return false
 	}
-	if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || isCGNAT(ip) {
-		return allowPrivate
-	}
-	return ip.IsGlobalUnicast()
-}
-
-func isCGNAT(ip net.IP) bool {
-	ip = ip.To4()
-	return ip != nil && ip[0] == 100 && ip[1]&0xc0 == 0x40
+	return netsec.AllowedAddr(addr, allowPrivate)
 }
 
 func randomToken() (string, error) {

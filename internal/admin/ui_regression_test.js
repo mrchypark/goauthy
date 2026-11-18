@@ -69,15 +69,15 @@ const ctx = {document, console, FormData, confirm: () => true, setTimeout: fn =>
       return {ok: true, headers: {get: () => 'application/json'}, json: async () => ({keys: ctx.keyRows})};
     if (opts.method === 'POST' && url === '/auth/v1/api_keys')
       return {ok: true, headers: {get: () => 'text/plain'}, text: async () => 'managed-key$one-time-secret'};
-    if (opts.method === 'PUT' && url.endsWith('/secret') && ctx.failBodyNext) {
+    if (opts.method === 'PUT' && url.split('?')[0].endsWith('/secret') && ctx.failBodyNext) {
       ctx.failBodyNext = false;
       return {ok: true, status: 200, headers: {get: () => 'text/plain'}, text: async () => { throw Error('body stream failed'); }};
     }
-    if (opts.method === 'PUT' && url.endsWith('/secret'))
+    if (opts.method === 'PUT' && url.split('?')[0].endsWith('/secret'))
       return {ok: true, headers: {get: () => 'text/plain'}, text: async () => 'managed-key$rotated-secret'};
     if (opts.method === 'PUT' && url === '/auth/v1/theme/client-a')
       return {ok: true, status: 200, headers: {get: () => 'application/json'}, json: async () => { throw Error('theme PUT has no body'); }};
-    if (opts.method === 'DELETE' && url.startsWith('/auth/v1/api_keys/')) {
+    if (opts.method === 'DELETE' && url.startsWith('/auth/v1/api_keys')) {
       ctx.keyRows = [];
       return {ok: true, status: 200, headers: {get: () => null}, json: async () => { throw Error('empty delete body'); }};
     }
@@ -189,7 +189,7 @@ const ready = vm.runInNewContext(source, ctx);
   ctx.userForm('', {}, 'operator');
   assert.match(document.getElementById('app').innerHTML, /href="\/auth\/v1\/admin\/operators">Cancel<\/a>/);
   assert.match(document.getElementById('app').innerHTML, /requires password recovery and email delivery/);
-  assert.match(document.getElementById('app').innerHTML, /Assign rauthy_admin/);
+  assert.match(document.getElementById('app').innerHTML, /Assign goauthy_admin/);
   assert.match(document.getElementById('app').innerHTML, />Create operator<\/button>/);
   document.getElementById('email').value = 'operator@example.test';
   document.getElementById('language').value = 'en';
@@ -291,7 +291,7 @@ const ready = vm.runInNewContext(source, ctx);
   document.getElementById('key-expiry').value = '2000000000';
   await document.getElementById('key-form').onsubmit({preventDefault() {}});
   payload = JSON.parse(calls.at(-1).opts.body);
-  assert.equal(calls.at(-1).url, '/auth/v1/api_keys/managed-key');
+  assert.equal(calls.at(-1).url, '/auth/v1/api_keys?name=managed-key');
   assert.equal(calls.at(-1).opts.method, 'PUT');
   assert.equal(payload.name, 'managed-key');
   assert.deepEqual(payload.access, [{group: 'Users', access_rights: ['read']}]);
@@ -322,7 +322,7 @@ const ready = vm.runInNewContext(source, ctx);
   assert.equal(createKeySubmitter.disabled, true);
   const rotateButton = {disabled: false, dataset: {rotate: 'managed-key'}};
   await document.click({target: rotateButton});
-  assert.equal(calls.at(-1).url, '/auth/v1/api_keys/managed-key/secret');
+  assert.equal(calls.at(-1).url, '/auth/v1/api_keys/secret?name=managed-key');
   assert.equal(calls.at(-1).opts.method, 'PUT');
   assert.equal(calls.at(-1).opts.headers['X-CSRF-Token'], 'csrf');
   assert.equal(document.getElementById('secret').textContent, 'Rotated secret (copy now): managed-key$rotated-secret');
@@ -336,7 +336,7 @@ const ready = vm.runInNewContext(source, ctx);
   ctx.failBodyNext = true;
   await document.click({target: unreadableRotateButton});
   assert.equal(calls.length, callsBeforeUnreadableSecret + 1);
-  assert.equal(calls.at(-1).url, '/auth/v1/api_keys/managed-key/secret');
+  assert.equal(calls.at(-1).url, '/auth/v1/api_keys/secret?name=managed-key');
   assert.equal(calls.at(-1).opts.method, 'PUT');
   assert.equal(document.getElementById('secret').textContent,
     '요청 결과를 확인할 수 없습니다. 다시 시도하기 전에 현재 상태를 확인하세요.');
@@ -353,7 +353,7 @@ const ready = vm.runInNewContext(source, ctx);
   assert.equal(calls.at(-1).opts.headers['X-CSRF-Token'], 'csrf');
   const deleteKeyButton = {disabled: false, dataset: {remove: 'managed-key'}};
   await document.click({target: deleteKeyButton});
-  assert.equal(calls.at(-2).url, '/auth/v1/api_keys/managed-key');
+  assert.equal(calls.at(-2).url, '/auth/v1/api_keys?name=managed-key');
   assert.equal(calls.at(-2).opts.method, 'DELETE');
   assert.equal(calls.at(-2).opts.headers['X-CSRF-Token'], 'csrf');
   assert.match(document.getElementById('table').innerHTML, /No API keys\./);

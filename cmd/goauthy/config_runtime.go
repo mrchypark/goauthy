@@ -272,6 +272,18 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 			return err
 		}
 	}
+	if templatesFile := getenv("GOAUTHY_EMAIL_TEMPLATES_FILE"); templatesFile != "" {
+		if _, err := recovery.LoadEmailTemplates(templatesFile); err != nil {
+			return fmt.Errorf("load email templates: %w", err)
+		}
+	}
+	otpEnabled, err := emailOTPEnabled(getenv)
+	if err != nil {
+		return err
+	}
+	if otpEnabled && (!cfg.RecoveryEnabled || getenv("GOAUTHY_SMTP_HOST") == "") {
+		return errors.New("GOAUTHY_EMAIL_OTP_ENABLED=true requires GOAUTHY_PASSWORD_RECOVERY_ENABLED=true and GOAUTHY_SMTP_HOST")
+	}
 
 	if _, err := signingKeyRotationPeriod(getenv); err != nil {
 		return err

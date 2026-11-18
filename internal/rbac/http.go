@@ -222,9 +222,14 @@ func (h *Handler) LoginRestriction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet {
-		policy, err := h.store.GetBootstrapClientLoginRestrictionForAdmin(r.Context(), actor, clientID)
+		var (
+			policy BootstrapClientLoginRestriction
+			err    error
+		)
 		if key != nil {
 			policy, err = h.store.GetBootstrapClientLoginRestriction(r.Context(), clientID)
+		} else {
+			policy, err = h.store.GetBootstrapClientLoginRestrictionForAdmin(r.Context(), actor, clientID)
 		}
 		if err != nil {
 			h.writeStoreError(w, err)
