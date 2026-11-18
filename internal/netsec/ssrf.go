@@ -25,11 +25,10 @@ func SafeDialContext(timeout time.Duration, allowPrivate bool) func(context.Cont
 			return nil, err
 		}
 		if ip, parseErr := netip.ParseAddr(host); parseErr == nil {
-			ip = ip.Unmap()
 			if !AllowedAddr(ip, allowPrivate) {
 				return nil, ErrUnsafeHost
 			}
-			return dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ip.Unmap().String(), port))
 		}
 		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 		if err != nil || len(ips) == 0 {
@@ -39,7 +38,7 @@ func SafeDialContext(timeout time.Duration, allowPrivate bool) func(context.Cont
 			return nil, err
 		}
 		for _, ip := range ips {
-			if !AllowedAddr(ip.Unmap(), allowPrivate) {
+			if !AllowedAddr(ip, allowPrivate) {
 				return nil, ErrUnsafeHost
 			}
 		}
