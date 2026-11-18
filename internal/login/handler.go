@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -176,6 +177,7 @@ type Handler struct {
 	upstreamProviders               func(ctx context.Context) ([]UpstreamProvider, error)
 	lockdown                        *loginpolicy.LockdownStore
 	userValuesPolicy                *identity.UserValuesPolicy
+	lastPolicySuccessMs             atomic.Int64
 }
 
 // SetRecoveryPages exposes only routes enabled by the runtime.
@@ -1463,10 +1465,6 @@ func (h *Handler) finishAuthentication(w http.ResponseWriter, r *http.Request, s
 // The caller must consume its one-use interaction first and dispatch to its
 // own destination afterward; this function never issues OAuth credentials.
 func (h *Handler) completeBrowserAuthentication(w http.ResponseWriter, r *http.Request, sessionToken, subject, authMethod, peerIP string, passwordGeneration, authenticationGeneration int64, parentDigest string, onConsumed func() error, binding *browser.UpstreamSessionBinding) (browser.IssuedSession, bool) {
-	if _, err := h.identity.UserBySubject(r.Context(), subject); err != nil {
-		http.Error(w, "Invalid login request", http.StatusUnauthorized)
-		return browser.IssuedSession{}, false
-	}
 	if h.lockdown != nil {
 		locked, _, _, lockdownErr := h.lockdown.IsLockedDown(r.Context())
 		if lockdownErr != nil {
@@ -2144,12 +2142,27 @@ func (h *Handler) recordAuthStage(ctx context.Context, stage metrics.AuthStage, 
 // recordSuccessfulAuthentication is intentionally a no-op for every
 // authentication error: outages and Argon work-limit failures must neither
 // erase brute-force state nor influence the durable timing floor.
+const policySuccessFlushInterval = 10 * time.Second
+
 func (h *Handler) recordSuccessfulAuthentication(ctx context.Context, peerIP string, elapsed time.Duration, authErr error) error {
 	if authErr != nil || h.policy == nil {
 		return authErr
 	}
 	successStart := time.Now()
+	nowMs := h.now().UTC().UnixMilli()
+	last := h.lastPolicySuccessMs.Load()
+	if last != 0 && nowMs >= last && nowMs-last < policySuccessFlushInterval.Milliseconds() {
+		h.recordAuthStage(ctx, metrics.AuthStagePolicySuccess, successStart)
+		return nil
+	}
+	if !h.lastPolicySuccessMs.CompareAndSwap(last, nowMs) {
+		h.recordAuthStage(ctx, metrics.AuthStagePolicySuccess, successStart)
+		return nil
+	}
 	successErr := h.policy.Success(ctx, peerIP, elapsed)
+	if successErr != nil {
+		h.lastPolicySuccessMs.CompareAndSwap(nowMs, last)
+	}
 	h.recordAuthStage(ctx, metrics.AuthStagePolicySuccess, successStart)
 	return successErr
 }
