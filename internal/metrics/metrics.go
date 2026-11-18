@@ -157,10 +157,6 @@ type Registry struct {
 	apiKeyFailureStorageFailed      prometheus.Counter
 	apiKeyFailureWriteSuccess       prometheus.Counter
 
-	cacheHits      *prometheus.CounterVec
-	cacheMisses    *prometheus.CounterVec
-	cacheEvictions *prometheus.CounterVec
-
 	authStageDuration            *prometheus.HistogramVec
 	authStageCanceledCompletions *prometheus.CounterVec
 
@@ -287,28 +283,6 @@ func newRegistry(clk clock) *Registry {
 			[]string{"operation"},
 		),
 
-		cacheHits: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "goauthy_cache_hits_total",
-				Help: "Total number of cache hits.",
-			},
-			[]string{"cache"},
-		),
-		cacheMisses: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "goauthy_cache_misses_total",
-				Help: "Total number of cache misses.",
-			},
-			[]string{"cache"},
-		),
-		cacheEvictions: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "goauthy_cache_evictions_total",
-				Help: "Total number of cache evictions.",
-			},
-			[]string{"cache"},
-		),
-
 		authStageDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "goauthy_auth_stage_duration_seconds",
@@ -344,9 +318,6 @@ func newRegistry(clk clock) *Registry {
 		r.apiKeyFailureStatementFailed,
 		r.apiKeyFailureStorageFailed,
 		r.apiKeyFailureWriteSuccess,
-		r.cacheHits,
-		r.cacheMisses,
-		r.cacheEvictions,
 		r.authStageDuration,
 		r.authStageCanceledCompletions,
 	)
@@ -566,15 +537,6 @@ func (r *Registry) AuthStageCanceledCompletion(stage AuthStage) {
 	}
 	r.authStageCanceledCompletions.WithLabelValues(string(stage)).Inc()
 }
-
-// CacheHit increments the cache hit counter for the given cache name.
-func (r *Registry) CacheHit(cache string) { r.cacheHits.WithLabelValues(cache).Inc() }
-
-// CacheMiss increments the cache miss counter for the given cache name.
-func (r *Registry) CacheMiss(cache string) { r.cacheMisses.WithLabelValues(cache).Inc() }
-
-// CacheEviction increments the cache eviction counter for the given cache name.
-func (r *Registry) CacheEviction(cache string) { r.cacheEvictions.WithLabelValues(cache).Inc() }
 
 // ------------------------------------------------------------------
 // Collector accessors — test-only read path via prometheus.Collector.

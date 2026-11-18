@@ -1,13 +1,13 @@
 # metrics
 
 ## Overview
-`metrics` provides an isolated Prometheus `Registry`, bounded-cardinality HTTP instrumentation middleware, Bearer-authenticated metrics exposition, and typed counters/histograms for database readiness, pool gauges, security outcomes, API-key audit suppression, cache activity, and authentication stages.
+`metrics` provides an isolated Prometheus `Registry`, bounded-cardinality HTTP instrumentation middleware, Bearer-authenticated metrics exposition, and typed counters/histograms for database readiness, pool gauges, security outcomes, API-key audit suppression, and authentication stages.
 
 ## Interface
 - Stage enum: `AuthStage` and its 12 constants (`AuthStageCredentialLookup` through `AuthStagePolicySuccess`) in [metrics.go](file:///Users/cypark/Documents/project/goauthy/internal/metrics/metrics.go#L98-L113).
 - Registry and HTTP handlers: `Registry`, `NewRegistry`, `Registry.Handler`, `AuthenticatedHandler`, and `Registry.Instrument` in [metrics.go](file:///Users/cypark/Documents/project/goauthy/internal/metrics/metrics.go#L136-L439).
-- Recording methods: `DBReadiness`, `DBPool`, `AuthSuccess`, `AuthFailure`, `TokenOK`, `TokenReject`, `APIKeyAuthFailureSuppressedInterval`, `APIKeyAuthFailureSuppressedBusy`, `APIKeyAuthFailureStatementFailed`, `APIKeyAuthFailureStorageFailed`, `APIKeyAuthFailureWriteSuccess`, `DBQueryDuration`, `AuthStageDuration`, `AuthStageCanceledCompletion`, `CacheHit`, `CacheMiss`, and `CacheEviction` in [metrics.go](file:///Users/cypark/Documents/project/goauthy/internal/metrics/metrics.go#L490-L577).
-- Test collector accessors: `AuthSuccessCounter`, `AuthFailureCounter`, `TokenOKCounter`, `AuthStageDurationCollector`, and `TokenRejectCounter` in [metrics.go](file:///Users/cypark/Documents/project/goauthy/internal/metrics/metrics.go#L584-L596).
+- Recording methods: `DBReadiness`, `DBPool`, `AuthSuccess`, `AuthFailure`, `TokenOK`, `TokenReject`, `APIKeyAuthFailureSuppressedInterval`, `APIKeyAuthFailureSuppressedBusy`, `APIKeyAuthFailureStatementFailed`, `APIKeyAuthFailureStorageFailed`, `APIKeyAuthFailureWriteSuccess`, `DBQueryDuration`, `AuthStageDuration`, and `AuthStageCanceledCompletion` in [metrics.go](file:///Users/cypark/Documents/project/goauthy/internal/metrics/metrics.go).
+- Test collector accessors: `AuthSuccessCounter`, `AuthFailureCounter`, `TokenOKCounter`, `AuthStageDurationCollector`, and `TokenRejectCounter` in [metrics.go](file:///Users/cypark/Documents/project/goauthy/internal/metrics/metrics.go).
 
 ## Invariants
 - Never registers collectors on `prometheus.DefaultRegisterer`; every `Registry` owns a private `prometheus.Registry` ([metrics.go:newRegistry](file:///Users/cypark/Documents/project/goauthy/internal/metrics/metrics.go#L183-L185)).
