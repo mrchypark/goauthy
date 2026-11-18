@@ -1,15 +1,14 @@
 package login
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/device"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 	"github.com/mrchypark/goauthy/internal/oauth"
 )
 
@@ -41,9 +40,7 @@ func (h *Handler) SetApprovalForceMFA(enabled bool) { h.approvalForceMFA = enabl
 func (h *Handler) resolveAuthenticationRequest(r *http.Request, payload []byte) (authenticationRequest, error) {
 	if len(payload) > 0 && payload[0] == '{' {
 		var saved approvalLoginInteraction
-		decoder := json.NewDecoder(bytes.NewReader(payload))
-		decoder.DisallowUnknownFields()
-		if decoder.Decode(&saved) != nil || decoder.Decode(new(any)) != io.EOF || saved.Purpose != approvalLoginPayload {
+		if jsonstrict.DecodeStrict(payload, &saved) != nil || saved.Purpose != approvalLoginPayload {
 			return authenticationRequest{}, errors.New("invalid login continuation")
 		}
 		targets := 0
