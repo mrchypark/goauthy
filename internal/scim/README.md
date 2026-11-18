@@ -16,7 +16,7 @@ Provides a stateless, bounded outbound SCIM 2.0 HTTP client for Users and Groups
 - `[outbox.go:Outbox]` never persists SCIM Bearer credentials in outbox job rows; `[outbox.go:ClientResolver]` resolves credentials dynamically at `Step` time.
 - `[mapping.go:UserMappingStore]` links are immutable once written; a changed `remote_user_id` for an existing `(client_id, local_external_id)` fails closed with `ErrIdentifierChanged`.
 - `[groups.go:Client.SyncGroup]` falls back to `displayName` lookup only when `externalId` has no match and the remote group is unmanaged (empty `externalId`).
-- `[scim.go:New]` disables HTTP redirects and enforces HTTPS (unless explicitly overridden for trusted test transports).
+- `[scim.go:New]` disables HTTP redirects, enforces HTTPS (unless explicitly overridden for trusted test transports), and wires `netsec.SafeDialContext` (gating private/loopback/CGNAT destinations on `Config.AllowPrivate`, defaulting to `false`, while always blocking link-local and IANA special-use ranges).
 
 ## Side Effects
 - Sends outbound HTTPS `GET`/`POST`/`PUT`/`DELETE` requests to external SCIM `/Users` and `/Groups` endpoints.

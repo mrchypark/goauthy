@@ -13,7 +13,7 @@
 - All browser state is bound to `browser.Store` sessions and single-use `AuthorizationInteraction` tokens (`interactionLifetime = 5m`, `sessionLifetime = 4h`) with CSRF tokens and `Sec-Fetch-Site` / origin checks ([handler.go](file:///Users/cypark/Documents/project/goauthy/internal/login/handler.go#L42-L50), [account_login.go:accountLoginPost](file:///Users/cypark/Documents/project/goauthy/internal/login/account_login.go#L62-L68)).
 - CSP `form-action` policies (`authorizationFormCSP`, `authorizationFormCSPWithNonce`) only include an external redirect origin after OAuth redirect-URI registration validation and IDNA ASCII normalization, never from raw query strings ([form_policy.go:authorizationFormCSP](file:///Users/cypark/Documents/project/goauthy/internal/login/form_policy.go#L14-L51)).
 - `DeviceLoginHandler` never looks up the device code, preventing code-existence disclosure at the login boundary ([device.go:DeviceLoginHandler](file:///Users/cypark/Documents/project/goauthy/internal/login/device.go#L21-L36)).
-- `ErrExternalAuthentication` hides which upstream binding check failed ([handler.go:ErrExternalAuthentication](file:///Users/cypark/Documents/project/goauthy/internal/login/handler.go#L137-L141)).
+- `ErrExternalAuthentication` hides which upstream binding check failed ([handler.go:ErrExternalAuthentication](file:///Users/cypark/Documents/project/goauthy/internal/login/handler.go#L139-L144)).
 
 ## Side Effects
 - Reads and mutates browser sessions, interactions, identity credentials/profiles, login-policy counters, and OAuth authorization completions in Rhiza.
