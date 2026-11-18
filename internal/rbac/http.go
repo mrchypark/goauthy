@@ -545,16 +545,14 @@ func decodeLoginRestriction(w http.ResponseWriter, r *http.Request) (loginRestri
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, adminRequestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 || jsonstrict.RejectDuplicateKeys(body) != nil {
+	if err != nil || len(body) == 0 {
 		return loginRestrictionRequest{}, errors.New("invalid JSON")
 	}
 	var wire struct {
 		RestrictGroupPrefix json.RawMessage `json:"restrict_group_prefix"`
 		Revision            *int64          `json:"revision"`
 	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&wire); err != nil || decoder.Decode(&struct{}{}) != io.EOF || wire.Revision == nil || len(wire.RestrictGroupPrefix) == 0 || *wire.Revision < 0 {
+	if err := jsonstrict.DecodeStrict(body, &wire); err != nil || wire.Revision == nil || len(wire.RestrictGroupPrefix) == 0 || *wire.Revision < 0 {
 		return loginRestrictionRequest{}, errors.New("invalid login restriction")
 	}
 	if bytes.Equal(wire.RestrictGroupPrefix, []byte("null")) {
@@ -584,7 +582,7 @@ func decodeMembershipPatch(w http.ResponseWriter, r *http.Request) (membershipPa
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, adminRequestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 || jsonstrict.RejectDuplicateKeys(body) != nil {
+	if err != nil || len(body) == 0 {
 		return membershipPatch{}, errors.New("invalid JSON")
 	}
 	var wire struct {
@@ -594,9 +592,7 @@ func decodeMembershipPatch(w http.ResponseWriter, r *http.Request) (membershipPa
 		} `json:"put"`
 		Del *[]string `json:"del"`
 	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&wire); err != nil || decoder.Decode(&struct{}{}) != io.EOF || wire.Put == nil || wire.Del == nil {
+	if err := jsonstrict.DecodeStrict(body, &wire); err != nil || wire.Put == nil || wire.Del == nil {
 		return membershipPatch{}, errors.New("invalid JSON")
 	}
 	patch := membershipPatch{}
@@ -664,7 +660,7 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, role bool) (entityReq
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, adminRequestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 || jsonstrict.RejectDuplicateKeys(body) != nil {
+	if err != nil || len(body) == 0 {
 		return entityRequest{}, errors.New("invalid JSON")
 	}
 	var wire struct {
@@ -672,9 +668,7 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, role bool) (entityReq
 		Group *string         `json:"group"`
 		Meta  json.RawMessage `json:"meta"`
 	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&wire); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+	if err := jsonstrict.DecodeStrict(body, &wire); err != nil {
 		return entityRequest{}, errors.New("invalid JSON")
 	}
 	if role && (wire.Role == nil || wire.Group != nil) || !role && (wire.Group == nil || wire.Role != nil) {

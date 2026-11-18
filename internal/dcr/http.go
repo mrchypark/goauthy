@@ -2,7 +2,6 @@
 package dcr
 
 import (
-	"bytes"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -447,13 +446,8 @@ func decodeRegistrationRequest(w http.ResponseWriter, r *http.Request) (registra
 	if err != nil {
 		return registrationRequest{}, err
 	}
-	if err := jsonstrict.RejectDuplicateKeys(body); err != nil {
-		return registrationRequest{}, err
-	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
 	var request registrationRequest
-	if err := decoder.Decode(&request); err != nil {
+	if err := jsonstrict.DecodeStrict(body, &request); err != nil {
 		return registrationRequest{}, err
 	}
 	var fields map[string]json.RawMessage
@@ -469,9 +463,6 @@ func decodeRegistrationRequest(w http.ResponseWriter, r *http.Request) (registra
 	_, request.softwareStatementPresent = fields["software_statement"]
 	_, request.dpopBoundAccessTokensPresent = fields["dpop_bound_access_tokens"]
 	_, request.audiencePresent = fields["audience"]
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return registrationRequest{}, errors.New("multiple JSON values")
-	}
 	return request, nil
 }
 

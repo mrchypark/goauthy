@@ -43,6 +43,14 @@ func TestAllowedAddr(t *testing.T) {
 		{"224.0.0.1", true, false},
 		{"192.0.2.1", true, false},
 		{"2001:db8::1", true, false},
+		{"2001:db8::1%eth0", false, false},
+		{"2001:db8::1%eth0", true, false},
+		{"64:ff9b::127.0.0.1%eth0", false, false},
+		{"64:ff9b::127.0.0.1%eth0", true, false},
+		{"::%eth0", false, false},
+		{"::%eth0", true, false},
+		{"::1%lo0", false, false},
+		{"::1%lo0", true, false},
 	}
 	for _, tc := range cases {
 		ip := netip.MustParseAddr(tc.addr)

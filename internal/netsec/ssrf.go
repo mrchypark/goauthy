@@ -87,13 +87,16 @@ var specialUsePrefixes = []netip.Prefix{
 }
 
 // AllowedAddr reports whether addr is safe for outbound server-initiated requests.
-// Link-local (including cloud metadata 169.254.0.0/16) and IANA special-use
-// ranges are always rejected, even when allowPrivate is true.
+// Zoned IPv6 addresses, link-local (including cloud metadata 169.254.0.0/16),
+// and IANA special-use ranges are always rejected, even when allowPrivate is true.
 func AllowedAddr(addr netip.Addr, allowPrivate bool) bool {
-	if !addr.IsValid() || addr.IsUnspecified() || addr.IsMulticast() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() {
+	if !addr.IsValid() || addr.Zone() != "" {
 		return false
 	}
 	addr = addr.Unmap()
+	if addr.IsUnspecified() || addr.IsMulticast() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() {
+		return false
+	}
 	if addr.IsPrivate() || addr.IsLoopback() || isCGNAT(addr) {
 		return allowPrivate
 	}

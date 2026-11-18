@@ -201,9 +201,10 @@ func TestOAuth2TokenExchangerReusesConnectionWithFreshRuntimeSnapshot(t *testing
 	roots := x509.NewCertPool()
 	roots.AddCert(server.Certificate())
 	for _, exchanger := range []*OAuth2TokenExchanger{first, second} {
-		transport, ok := exchanger.httpClient(exchanger.configs["provider"]).Transport.(*http.Transport)
+		client := exchanger.httpClient(exchanger.configs["provider"])
+		transport, ok := client.Transport.(*http.Transport)
 		if !ok {
-			t.Fatalf("default transport type = %T", exchanger.client.Transport)
+			t.Fatalf("default transport type = %T", client.Transport)
 		}
 		if _, ok := originalTLSConfigs[transport]; !ok {
 			originalTLSConfigs[transport] = nil
