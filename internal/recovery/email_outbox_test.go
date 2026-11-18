@@ -105,6 +105,39 @@ func TestEmailOutboxPermanentSMTPFailureIsTerminal(t *testing.T) {
 	}
 }
 
+func TestSMTPSendFuncSuppressesDeliveryFailureCallback(t *testing.T) {
+	t.Parallel()
+	host, port := splitSMTPAddress(t, startRejectingSMTPFixture(t))
+	sender, err := NewSMTPSender(SMTPConfig{Host: host, Port: port, From: "support@example.test", Timeout: time.Second, AllowInsecure: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbacks := 0
+	sender.OnDeliveryFailure = func(string, string, string, string, string, error) {
+		callbacks++
+	}
+	if err := SMTPSendFunc(sender)(t.Context(), "alice@example.test", "Subject", "body", ""); err == nil {
+		t.Fatal("expected outbox send error")
+	}
+	if callbacks != 0 {
+		t.Fatalf("expected 0 callbacks during outbox send, got=%d", callbacks)
+	}
+	host2, port2 := splitSMTPAddress(t, startRejectingSMTPFixture(t))
+	sender2, err := NewSMTPSender(SMTPConfig{Host: host2, Port: port2, From: "support@example.test", Timeout: time.Second, AllowInsecure: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender2.OnDeliveryFailure = func(string, string, string, string, string, error) {
+		callbacks++
+	}
+	if err := sender2.SendOTP(t.Context(), "alice@example.test", "123456", "en", time.Now().Add(time.Minute)); err == nil {
+		t.Fatal("expected direct send error")
+	}
+	if callbacks != 1 {
+		t.Fatalf("expected 1 callback on direct send failure, got=%d", callbacks)
+	}
+}
+
 func TestEmailOutboxCompletionIDsAreLeaseScoped(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)

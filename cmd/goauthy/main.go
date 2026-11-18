@@ -734,7 +734,7 @@ func run() (err error) {
 		return fmt.Errorf("configure KV store: %w", err)
 	}
 	kvHandler := kv.NewHandler(kvStore, browserAdmin)
-	apiKeyHandler := apikey.NewHandler(apiKeyStore, browserAdmin)
+	apiKeyHandler := apikey.NewHandler(apiKeyStore, apiKeyBrowserAdmin(browserAdmin))
 	retirementHandler := masterkeyretirement.NewHandler(db, apiKeyStore, retirementMembers)
 	clientLogoStore, err := branding.NewClientLogoStore(db)
 	if err != nil {
@@ -1857,6 +1857,29 @@ func dcrScopePolicy(getenv func(string) string) (dcr.ScopePolicy, error) {
 		return dcr.ScopePolicy{}, fmt.Errorf("GOAUTHY_DCR_ALLOWED_SCOPES and GOAUTHY_DCR_DEFAULT_SCOPES must be unique valid scopes with defaults allowed: %w", err)
 	}
 	return policy, nil
+}
+
+func apiKeyBrowserAdmin(base func(http.ResponseWriter, *http.Request, bool) bool) func(http.ResponseWriter, *http.Request, bool) bool {
+	return func(w http.ResponseWriter, r *http.Request, mutation bool) bool {
+		if base == nil {
+			return false
+		}
+		if r != nil && r.URL != nil && r.URL.RawQuery != "" && !r.URL.ForceQuery {
+			allowedRoute := ((r.Method == http.MethodPut || r.Method == http.MethodDelete) && r.URL.Path == "/auth/v1/api_keys") ||
+				(r.Method == http.MethodPut && r.URL.Path == "/auth/v1/api_keys/secret")
+			if allowedRoute {
+				if values, err := url.ParseQuery(r.URL.RawQuery); err == nil && len(values) == 1 {
+					if names, ok := values["name"]; ok && len(names) == 1 && names[0] != "" {
+						cloned := r.Clone(r.Context())
+						cloned.URL.RawQuery = ""
+						cloned.URL.ForceQuery = false
+						return base(w, cloned, mutation)
+					}
+				}
+			}
+		}
+		return base(w, r, mutation)
+	}
 }
 
 func browserAdministrator(rbacStore *rbac.Store, browserStore *browser.Store, identityStore *identity.Store, issuer string, forceMFA bool) func(http.ResponseWriter, *http.Request, bool) bool {

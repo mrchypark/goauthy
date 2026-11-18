@@ -482,3 +482,29 @@ func membershipNames(entities []Entity) []string {
 	}
 	return result
 }
+
+func TestLoginRestrictionAllowsAPIKey(t *testing.T) {
+	t.Parallel()
+	h, store, _, _ := membershipHTTPFixture(t)
+	h.bootstrapClients = map[string]struct{}{"bootstrap-client": {}}
+	keys, err := apikey.NewStore(store.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.BindAPIKeys(keys)
+	_, token, err := keys.Create(context.Background(), nil, apikey.Request{
+		Name:   "client-reader",
+		Access: []apikey.Access{{Group: "Clients", AccessRights: []apikey.Right{apikey.Read}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/auth/v1/clients/bootstrap-client/login_restriction", nil)
+	req.SetPathValue("id", "bootstrap-client")
+	req.Header.Set("Authorization", "API-Key "+token)
+	rec := httptest.NewRecorder()
+	h.LoginRestriction(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}

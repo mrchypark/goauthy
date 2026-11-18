@@ -97,14 +97,10 @@ func loginRevokeCopy(r *http.Request, success bool) loginRevokePageData {
 			return copy
 		}
 	}
-	htmlLang := language
-	if htmlLang == "zhhans" {
-		htmlLang = "zh-Hans"
-	}
 	if language == "ko" {
-		return loginRevokePageData{Language: htmlLang, Title: "코드를 찾을 수 없습니다", Description: "요청한 코드를 찾을 수 없습니다."}
+		return loginRevokePageData{Language: "ko", Title: "코드를 찾을 수 없습니다", Description: "요청한 코드를 찾을 수 없습니다."}
 	}
-	return loginRevokePageData{Language: htmlLang, Title: "Code not found", Description: "The requested code could not be found."}
+	return loginRevokePageData{Language: "en", Title: "Code not found", Description: "The requested code could not be found."}
 }
 
 func loginRevokeQueryIP(r *http.Request) (netip.Addr, bool) {

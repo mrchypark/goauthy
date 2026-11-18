@@ -750,3 +750,28 @@ func (s *fakeSender) alreadyRegisteredRecipients() []string {
 	defer s.mu.Unlock()
 	return append([]string(nil), s.already...)
 }
+
+func TestRegisterOpenInactiveSubjectReturnsNoContent(t *testing.T) {
+	t.Parallel()
+	service, _ := testService(t, "subject-1", "alice")
+	enableOpenRegistration(t, service, ExactRedirectURIs([]string{"https://app.example.test/registered"}))
+	service.OnUserCreated = func() {
+		if _, err := storage.Execute(context.Background(), service.db, rhiza.ExecuteRequest{
+			RequestID: "delete-concurrently",
+			SQL:       `DELETE FROM identity_users WHERE username=?`,
+			Args:      []any{"new@example.test"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	challenge, err := service.pow.Issue(context.Background(), service.powDifficulty, service.powTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := solveProof(t, challenge)
+	body := `{"email":"new@example.test","given_name":"New","redirect_uri":"https://app.example.test/registered","pow":"` + proof + `"}`
+	resp := openRegistrationRequest(t, service, body, "192.0.2.84:1234")
+	if resp.Code != http.StatusNoContent || resp.Body.Len() != 0 {
+		t.Fatalf("status=%d body=%q", resp.Code, resp.Body.String())
+	}
+}

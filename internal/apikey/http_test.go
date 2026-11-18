@@ -263,6 +263,33 @@ func TestSlashAPIKeyQueryRoutes(t *testing.T) {
 		t.Fatalf("rotate status=%d body=%s", rotW.Code, rotW.Body.String())
 	}
 
+	testReq := httptest.NewRequest(http.MethodGet, "/auth/v1/api_keys/test?name=team%2Fkey", nil)
+	testReq.Header.Set("Authorization", "API-Key "+strings.TrimSpace(rotW.Body.String()))
+	testW := httptest.NewRecorder()
+	h.Test(testW, testReq)
+	if testW.Code != http.StatusOK {
+		t.Fatalf("test status=%d body=%s", testW.Code, testW.Body.String())
+	}
+
+	for _, target := range []string{
+		"/auth/v1/api_keys?name=a&name=b",
+		"/auth/v1/api_keys?other=1",
+	} {
+		badReq := httptest.NewRequest(http.MethodDelete, target, nil)
+		badW := httptest.NewRecorder()
+		h.Key(badW, badReq)
+		if badW.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for %s, got %d body=%s", target, badW.Code, badW.Body.String())
+		}
+	}
+	pathAndQuery := httptest.NewRequest(http.MethodDelete, "/auth/v1/api_keys/plain?name=other", nil)
+	pathAndQuery.SetPathValue("name", "plain")
+	pqW := httptest.NewRecorder()
+	h.Key(pqW, pathAndQuery)
+	if pqW.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for path+query, got %d body=%s", pqW.Code, pqW.Body.String())
+	}
+
 	delReq := httptest.NewRequest(http.MethodDelete, "/auth/v1/api_keys?name=team%2Fkey", nil)
 	delW := httptest.NewRecorder()
 	h.Key(delW, delReq)

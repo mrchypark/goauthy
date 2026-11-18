@@ -601,3 +601,42 @@ func TestAuthorizeOmitsMFAContinuationForUnforcedClient(t *testing.T) {
 		t.Fatalf("unforced client lost the passkey button script body=%q", body)
 	}
 }
+
+func TestForcedMFAOTPStepUpRecordsPolicyFailureOnInvalidOTP(t *testing.T) {
+	t.Parallel()
+	h, db := testHandlerWithDB(t, true)
+	_, _ = testOTPStepUp(t, h, db)
+	ctx := context.Background()
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{
+		RequestID: "otp-failure-profile",
+		SQL:       "INSERT OR IGNORE INTO identity_user_profiles (subject,email,email_verified,preferred_username) VALUES (?,?,1,?)",
+		Args:      []any{"user-1", "alice@example.test", "user-1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	page := httptest.NewRecorder()
+	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
+	if page.Code != http.StatusOK {
+		t.Fatalf("authorize status=%d", page.Code)
+	}
+	init := page.Result().Cookies()[0]
+	interaction := interactionToken(t, page.Body.String())
+	stepUp := httptest.NewRecorder()
+	h.Login(stepUp, postLogin(init, interaction, "alice", "correct password"))
+	if stepUp.Code != http.StatusOK {
+		t.Fatalf("step-up status=%d body=%q", stepUp.Code, stepUp.Body.String())
+	}
+	req := postOTPForm(init, "000000")
+	invalid := httptest.NewRecorder()
+	h.OTPVerify(invalid, req)
+	if invalid.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid OTP status=%d body=%q", invalid.Code, invalid.Body.String())
+	}
+	status, err := h.policy.Check(ctx, "192.0.2.1", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Failures != 1 {
+		t.Fatalf("expected 1 policy failure after invalid OTP, got=%d", status.Failures)
+	}
+}

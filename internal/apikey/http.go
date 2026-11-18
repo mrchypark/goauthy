@@ -64,17 +64,35 @@ func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
-func keyName(r *http.Request) string {
-	if name := r.PathValue("name"); name != "" {
-		return name
+func keyName(r *http.Request) (string, bool) {
+	if r == nil || r.URL == nil {
+		return "", false
 	}
-	return r.URL.Query().Get("name")
+	if name := r.PathValue("name"); name != "" {
+		if r.URL.RawQuery != "" || r.URL.ForceQuery {
+			return "", false
+		}
+		return name, true
+	}
+	values, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil || len(values) != 1 {
+		return "", false
+	}
+	names, ok := values["name"]
+	if !ok || len(names) != 1 || names[0] == "" {
+		return "", false
+	}
+	return names[0], true
 }
 
 func (h *Handler) Key(w http.ResponseWriter, r *http.Request) {
 	h.headers(w)
-	name := keyName(r)
+	name, validName := keyName(r)
 	if r.Method == http.MethodPut {
+		if !validName {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		p, ok, wrote := h.principal(w, r, true, Update)
 		if !ok {
 			if !wrote {
@@ -95,6 +113,10 @@ func (h *Handler) Key(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodDelete {
+		if !validName {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		p, ok, wrote := h.principal(w, r, true, Delete)
 		if !ok {
 			if !wrote {
@@ -119,6 +141,11 @@ func (h *Handler) Secret(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	name, validName := keyName(r)
+	if !validName {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 	p, ok, wrote := h.principal(w, r, true, Update)
 	if !ok {
 		if !wrote {
@@ -126,7 +153,7 @@ func (h *Handler) Secret(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	v, e := h.store.Rotate(r.Context(), p, keyName(r))
+	v, e := h.store.Rotate(r.Context(), p, name)
 	if e != nil {
 		h.error(w, e)
 		return
@@ -141,13 +168,18 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	name, validName := keyName(r)
+	if !validName {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 	authorization, ok := Authorization(r)
 	if !ok {
 		h.deny(w, r)
 		return
 	}
 	p, e := h.store.Authenticate(r.Context(), authorization)
-	if e != nil || p.Name != keyName(r) {
+	if e != nil || p.Name != name {
 		h.deny(w, r)
 		return
 	}

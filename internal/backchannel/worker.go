@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/eventlog"
+	"github.com/mrchypark/goauthy/internal/netsec"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
@@ -455,43 +456,12 @@ func resolveEndpoint(ctx context.Context, u *url.URL, allowPrivate bool) (net.IP
 	return net.IP(ips[0].AsSlice()), nil
 }
 
-var specialUsePrefixes = []netip.Prefix{
-	netip.MustParsePrefix("64:ff9b::/96"),
-	netip.MustParsePrefix("64:ff9b:1::/48"),
-	netip.MustParsePrefix("100::/64"),
-	netip.MustParsePrefix("2001::/32"),
-	netip.MustParsePrefix("2001:2::/48"),
-	netip.MustParsePrefix("2001:db8::/32"),
-	netip.MustParsePrefix("2002::/16"),
-	netip.MustParsePrefix("192.0.0.0/24"),
-	netip.MustParsePrefix("192.0.2.0/24"),
-	netip.MustParsePrefix("198.18.0.0/15"),
-	netip.MustParsePrefix("198.51.100.0/24"),
-	netip.MustParsePrefix("203.0.113.0/24"),
-	netip.MustParsePrefix("240.0.0.0/4"),
-}
-
 func allowedIP(ip net.IP, allowPrivate bool) bool {
-	if ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
 		return false
 	}
-	if addr, ok := netip.AddrFromSlice(ip); ok {
-		addr = addr.Unmap()
-		for _, prefix := range specialUsePrefixes {
-			if prefix.Contains(addr) {
-				return false
-			}
-		}
-	}
-	if ip.IsPrivate() || ip.IsLoopback() || isCGNAT(ip) {
-		return allowPrivate
-	}
-	return ip.IsGlobalUnicast()
-}
-
-func isCGNAT(ip net.IP) bool {
-	ip = ip.To4()
-	return ip != nil && ip[0] == 100 && ip[1]&0xc0 == 0x40
+	return netsec.AllowedAddr(addr, allowPrivate)
 }
 
 func randomToken() (string, error) {

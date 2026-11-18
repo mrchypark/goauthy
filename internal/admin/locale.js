@@ -9,7 +9,6 @@ Object.assign(globalThis.GoAuthyI18n.messages, {
   'New role':'새 역할','New group':'새 그룹','Manage roles through the live authorization service.':'실시간 권한 서비스에서 역할을 관리합니다.','Manage groups through the live authorization service.':'실시간 권한 서비스에서 그룹을 관리합니다.','{count} roles':'역할 {count}개','{count} groups':'그룹 {count}개','{count} users':'사용자 {count}명','Saving…':'저장 중…','Creating…':'만드는 중…','Deleting…':'삭제 중…','Rotating…':'교체 중…','Expiry must be a safe integer of at least 1719784800':'만료 시간은 1719784800 이상의 안전한 정수여야 합니다.','Request outcome is unknown. Check the current state before retrying.':'요청 결과를 확인할 수 없습니다. 다시 시도하기 전에 현재 상태를 확인하세요.',
   'CSRF token unavailable':'CSRF 토큰을 사용할 수 없습니다.',
   'Ask the service operator to wire the issuer-bound CSRF provider.':'서비스 운영자에게 issuer에 바인딩된 CSRF 공급자를 연결하도록 요청하세요.',
-  'Administration':'관리',
   'Choose an area above.':'위에서 영역을 선택하세요.',
   'Select a management area from the navigation.':'탐색 메뉴에서 관리 영역을 선택하세요.'
 });

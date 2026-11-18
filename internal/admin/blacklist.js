@@ -44,7 +44,7 @@ async function blacklist() {
     const ip = e.target.dataset.remove;
     if (!ip || !confirm(t('Remove {ip} from the blacklist?', {ip}))) return;
     try {
-      await api('/auth/v1/blacklist/' + ip.split('/').map(encodeURIComponent).join('/'), {method: 'DELETE'});
+      await api('/auth/v1/blacklist/' + encodeURI(ip), {method: 'DELETE'});
       await load();
     } catch (err) { showError(document.getElementById('bl-list'), err); }
   };

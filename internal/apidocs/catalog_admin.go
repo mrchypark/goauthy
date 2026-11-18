@@ -240,12 +240,13 @@ func addAdminOperations(doc *openapi3.T, features Features) error {
 	add("GET", "/auth/v1/api_keys", "List API keys (browser administrator only)", nil, obj(map[string]*openapi3.Schema{"keys": openapi3.NewArraySchema().WithItems(keyResponse.Value)}, "keys"), browserRead)
 	create := add("POST", "/auth/v1/api_keys", "Create API key; returns the one-time name$secret", keyRequest.Value, nil, browserWrite)
 	create.Responses.Status(200).Value.Content = openapi3.Content{"text/plain": {Schema: &openapi3.SchemaRef{Value: s}}}
-	add("PUT", "/auth/v1/api_keys", "Update API key (name query parameter)", keyRequest.Value, keyResponse.Value, browserWrite).AddParameter(openapi3.NewQueryParameter("name").WithRequired(true).WithSchema(s))
-	add("DELETE", "/auth/v1/api_keys", "Delete API key (name query parameter)", nil, nil, browserWrite).AddParameter(openapi3.NewQueryParameter("name").WithRequired(true).WithSchema(s))
-	rotateQuery := add("PUT", "/auth/v1/api_keys/secret", "Rotate API key secret (name query parameter)", nil, nil, browserWrite)
-	rotateQuery.AddParameter(openapi3.NewQueryParameter("name").WithRequired(true).WithSchema(s))
+	apiKeyQueryDesc := "API key name (supports names containing '/', 'secret', or 'test')"
+	add("PUT", "/auth/v1/api_keys", "Update API key (supports '/' and reserved names via name query parameter)", keyRequest.Value, keyResponse.Value, browserWrite).AddParameter(openapi3.NewQueryParameter("name").WithDescription(apiKeyQueryDesc).WithRequired(true).WithSchema(s))
+	add("DELETE", "/auth/v1/api_keys", "Delete API key (supports '/' and reserved names via name query parameter)", nil, nil, browserWrite).AddParameter(openapi3.NewQueryParameter("name").WithDescription(apiKeyQueryDesc).WithRequired(true).WithSchema(s))
+	rotateQuery := add("PUT", "/auth/v1/api_keys/secret", "Rotate API key secret (supports '/' and reserved names via name query parameter)", nil, nil, browserWrite)
+	rotateQuery.AddParameter(openapi3.NewQueryParameter("name").WithDescription(apiKeyQueryDesc).WithRequired(true).WithSchema(s))
 	rotateQuery.Responses.Status(200).Value.Content = create.Responses.Status(200).Value.Content
-	add("GET", "/auth/v1/api_keys/test", "Check the API key named in the name query parameter", nil, keyResponse.Value, keyOnly).AddParameter(openapi3.NewQueryParameter("name").WithRequired(true).WithSchema(s))
+	add("GET", "/auth/v1/api_keys/test", "Check the API key named in the name query parameter (supports '/' and reserved names)", nil, keyResponse.Value, keyOnly).AddParameter(openapi3.NewQueryParameter("name").WithDescription(apiKeyQueryDesc).WithRequired(true).WithSchema(s))
 	add("PUT", "/auth/v1/api_keys/{name}", "Update API key", keyRequest.Value, keyResponse.Value, browserWrite)
 	add("DELETE", "/auth/v1/api_keys/{name}", "Delete API key", nil, nil, browserWrite)
 	rotate := add("PUT", "/auth/v1/api_keys/{name}/secret", "Rotate API key secret", nil, nil, browserWrite)
