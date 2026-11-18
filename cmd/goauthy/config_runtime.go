@@ -81,16 +81,16 @@ func loadApplicationConfig(getenv func(string) string) (applicationConfig, error
 	if c.Favicon, err = faviconFromEnv(getenv); err != nil {
 		return applicationConfig{}, fmt.Errorf("configure favicon: %w", err)
 	}
-	if c.CIMDEnabled, err = cimdEnabled(getenv); err != nil {
+	if c.CIMDEnabled, err = envBool(getenv, "GOAUTHY_CIMD_ENABLED"); err != nil {
 		return applicationConfig{}, err
 	}
-	if c.CIMDIgnoreUnknownAuthFlows, err = cimdIgnoreUnknownAuthFlowsFromEnv(getenv); err != nil {
+	if c.CIMDIgnoreUnknownAuthFlows, err = envBool(getenv, "GOAUTHY_CIMD_IGNORE_UNKNOWN_AUTH_FLOWS"); err != nil {
 		return applicationConfig{}, err
 	}
-	if c.CIMDDangerUnvalidated, err = cimdDangerAllowUnvalidatedResourceFromEnv(getenv); err != nil {
+	if c.CIMDDangerUnvalidated, err = envBool(getenv, "GOAUTHY_CIMD_DANGER_ALLOW_UNVALIDATED_RESOURCE"); err != nil {
 		return applicationConfig{}, err
 	}
-	if c.RecoveryEnabled, err = passwordRecoveryEnabled(getenv); err != nil {
+	if c.RecoveryEnabled, err = envBool(getenv, "GOAUTHY_PASSWORD_RECOVERY_ENABLED"); err != nil {
 		return applicationConfig{}, err
 	}
 	if c.OpenRegistration, c.PasswordNewExpiry, err = openRegistrationFromEnv(getenv, c.RecoveryEnabled, c.Issuer); err != nil {
@@ -103,13 +103,13 @@ func loadApplicationConfig(getenv func(string) string) (applicationConfig, error
 	if c.Passkey, err = passkeyConfigFromEnv(getenv); err != nil {
 		return applicationConfig{}, err
 	}
-	if c.ForwardAuthHeaders, err = forwardAuthHeadersFromEnv(getenv); err != nil {
+	if c.ForwardAuthHeaders, err = envBool(getenv, "GOAUTHY_FORWARD_AUTH_HEADERS"); err != nil {
 		return applicationConfig{}, err
 	}
-	if c.SelfDeleteEnabled, err = selfDeleteEnabledFromEnv(getenv); err != nil {
+	if c.SelfDeleteEnabled, err = envBool(getenv, "GOAUTHY_ENABLE_SELF_DELETE"); err != nil {
 		return applicationConfig{}, err
 	}
-	if c.WebIDEnabled, err = webIDEnabledFromEnv(getenv); err != nil {
+	if c.WebIDEnabled, err = envBool(getenv, "GOAUTHY_WEB_ID_ENABLED"); err != nil {
 		return applicationConfig{}, err
 	}
 	if c.Notifications, err = notificationsFromEnv(getenv); err != nil {
@@ -157,7 +157,7 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 	if _, err := scheduledBackupFromEnv(getenv, cfg.Rhiza); err != nil {
 		return err
 	}
-	if _, err := ipBlacklistEnabled(getenv); err != nil {
+	if _, err := envBool(getenv, "GOAUTHY_IP_BLACKLIST_ENABLED"); err != nil {
 		return err
 	}
 	generatedBootstrap, err := generatedBootstrapConfigFromEnv(getenv)
@@ -214,12 +214,8 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 		}
 	}
 
-	argonPolicy, err := argonPolicyFromEnv(getenv)
-	if err != nil {
+	if _, err := argonPolicyFromEnv(getenv); err != nil {
 		return err
-	}
-	if _, err := credential.NewHasher(argonPolicy); err != nil {
-		return fmt.Errorf("configure Argon2 password policy: %w", err)
 	}
 	if _, err := passwordRulesFromEnvWithRecovery(getenv, cfg.RecoveryEnabled); err != nil {
 		return err
@@ -244,7 +240,7 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 		}
 	}
 
-	bootstrapForceMFAValue, err := bootstrapForceMFA(getenv)
+	bootstrapForceMFAValue, err := envBool(getenv, "GOAUTHY_BOOTSTRAP_FORCE_MFA")
 	if err != nil {
 		return err
 	}
@@ -277,7 +273,7 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 			return fmt.Errorf("load email templates: %w", err)
 		}
 	}
-	otpEnabled, err := emailOTPEnabled(getenv)
+	otpEnabled, err := envBool(getenv, "GOAUTHY_EMAIL_OTP_ENABLED")
 	if err != nil {
 		return err
 	}
@@ -344,7 +340,7 @@ func validateRuntimeConfig(getenv func(string) string, cfg applicationConfig) er
 	if _, err := clientCredentialsTokenLifetime(getenv); err != nil {
 		return err
 	}
-	if _, err := clientCredentialsMapSubFromEnv(getenv); err != nil {
+	if _, err := envBool(getenv, "GOAUTHY_CLIENT_CREDENTIALS_MAP_SUB"); err != nil {
 		return err
 	}
 	if _, err := bootstrapDefaultAudience(getenv); err != nil {

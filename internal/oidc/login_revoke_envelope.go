@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"errors"
 
-	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
 
@@ -19,68 +18,43 @@ func LoginRevokeCodePurpose(subject, generation string) string {
 // RewrapLoginRevokeCodeBatch re-encrypts at most 32 shared login-revoke codes
 // under the active master key, preserving each code and generation binding.
 func RewrapLoginRevokeCodeBatch(ctx context.Context, db *rhiza.DB, keyring *Keyring, cursor string) (SigningKeyRewrapBatchResult, error) {
-	if db == nil || keyring == nil {
-		return SigningKeyRewrapBatchResult{}, errors.New("login-revoke rewrap is not configured")
-	}
-	active, err := keyring.ActiveMasterKeyID()
-	if err != nil {
-		return SigningKeyRewrapBatchResult{}, err
-	}
-	exists, err := loginRevokeTableExists(ctx, db)
-	if err != nil {
-		return SigningKeyRewrapBatchResult{}, err
-	}
-	if !exists {
-		return SigningKeyRewrapBatchResult{Cursor: cursor, Done: true}, nil
-	}
-	result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT subject,generation,code_envelope FROM identity_login_revoke WHERE subject > ? ORDER BY subject LIMIT 32`, Args: []any{cursor}, Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil {
-		return SigningKeyRewrapBatchResult{}, err
-	}
-	if len(result.Rows) == 0 {
-		return SigningKeyRewrapBatchResult{Cursor: cursor, Done: true}, nil
-	}
-	last := cursor
-	changed := int64(0)
-	for _, row := range result.Rows {
-		if len(row) != 3 {
-			return SigningKeyRewrapBatchResult{}, errors.New("invalid login-revoke envelope row")
-		}
-		subject, subjectOK := row[0].(string)
-		generation, generationOK := row[1].(string)
-		envelope, envelopeOK := loginRevokeEnvelopeBytes(row[2])
-		if !subjectOK || !generationOK || !envelopeOK || subject == "" || generation == "" || len(envelope) == 0 {
-			return SigningKeyRewrapBatchResult{}, errors.New("invalid login-revoke envelope row")
-		}
-		last = subject
-		purpose := LoginRevokeCodePurpose(subject, generation)
-		keyID, err := keyring.PurposeEnvelopeKeyID(purpose, envelope)
-		if err != nil {
-			return SigningKeyRewrapBatchResult{}, err
-		}
-		if keyID == active {
-			continue
-		}
-		plain, err := keyring.OpenEnvelope(purpose, envelope)
-		if err != nil {
-			return SigningKeyRewrapBatchResult{}, err
-		}
-		replacement, err := keyring.SealEnvelope(purpose, plain)
-		if err != nil {
-			return SigningKeyRewrapBatchResult{}, err
-		}
-		digest := sha256.Sum256(append(append([]byte(subject+"\x00"+generation+"\x00"), envelope...), replacement...))
-		response, err := storage.ExecuteEnvelope(ctx, db, active, rhiza.ExecuteRequest{
-			RequestID: "login-revoke-rewrap/" + base64.RawURLEncoding.EncodeToString(digest[:16]),
-			SQL:       `UPDATE identity_login_revoke SET code_envelope=? WHERE subject=? AND generation=? AND code_envelope=?`,
-			Args:      []any{replacement, subject, generation, envelope},
-		})
-		if err != nil {
-			return SigningKeyRewrapBatchResult{}, err
-		}
-		changed += response.RowsAffected
-	}
-	return SigningKeyRewrapBatchResult{Cursor: last, Rewrapped: int(changed), Done: len(result.Rows) < 32}, nil
+	return rewrapEnvelopeBatch(
+		ctx,
+		db,
+		keyring,
+		cursor,
+		"login-revoke rewrap is not configured",
+		func(ctx context.Context, db *rhiza.DB, cursor string) ([]envelopeRow, bool, error) {
+			exists, err := loginRevokeTableExists(ctx, db)
+			if err != nil {
+				return nil, false, err
+			}
+			if !exists {
+				return nil, true, nil
+			}
+			result, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT subject,generation,code_envelope FROM identity_login_revoke WHERE subject > ? ORDER BY subject LIMIT 32`, Args: []any{cursor}, Consistency: rhiza.ConsistencyLinearizable})
+			if err != nil {
+				return nil, false, err
+			}
+			rows := make([]envelopeRow, 0, len(result.Rows))
+			for _, row := range result.Rows {
+				if len(row) != 3 {
+					return nil, false, errors.New("invalid login-revoke envelope row")
+				}
+				subject, subjectOK := row[0].(string)
+				generation, generationOK := row[1].(string)
+				envelope, envelopeOK := loginRevokeEnvelopeBytes(row[2])
+				if !subjectOK || !generationOK || !envelopeOK || subject == "" || generation == "" || len(envelope) == 0 {
+					return nil, false, errors.New("invalid login-revoke envelope row")
+				}
+				rows = append(rows, envelopeRow{key: subject, generation: generation, envelope: envelope})
+			}
+			return rows, false, nil
+		},
+		LoginRevokeCodePurpose,
+		"login-revoke-rewrap/",
+		`UPDATE identity_login_revoke SET code_envelope=? WHERE subject=? AND generation=? AND code_envelope=?`,
+	)
 }
 
 func loginRevokeTableExists(ctx context.Context, db *rhiza.DB) (bool, error) {

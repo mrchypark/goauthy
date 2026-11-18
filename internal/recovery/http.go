@@ -14,6 +14,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 	"github.com/mrchypark/goauthy/internal/passkey"
 )
 
@@ -361,13 +362,12 @@ func decodeJSON[T any](w http.ResponseWriter, r *http.Request, limit int64) (T, 
 		return value, errors.New("invalid content type")
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&value); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		return value, err
 	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return value, errors.New("trailing JSON")
+	if err := jsonstrict.DecodeStrict(body, &value); err != nil {
+		return value, err
 	}
 	return value, nil
 }

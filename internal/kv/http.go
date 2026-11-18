@@ -8,7 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
+
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 )
 
 const bodyLimit int64 = 64 << 10
@@ -100,9 +101,7 @@ func decode(r *http.Request, v any) error {
 	if e != nil {
 		return ErrBadRequest
 	}
-	d := json.NewDecoder(strings.NewReader(string(b)))
-	d.DisallowUnknownFields()
-	if e = d.Decode(v); e != nil || d.Decode(&struct{}{}) != io.EOF {
+	if jsonstrict.DecodeStrict(b, v) != nil {
 		return ErrBadRequest
 	}
 	return nil

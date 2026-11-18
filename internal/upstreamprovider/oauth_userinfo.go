@@ -27,7 +27,7 @@ func (e *OAuth2TokenExchanger) exchangeOAuthUserInfo(ctx context.Context, provid
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := e.client.Do(req)
+	resp, err := e.httpClient(cfg).Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +17,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/account"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 	"github.com/mrchypark/goauthy/internal/login"
 	"github.com/mrchypark/goauthy/internal/oauth"
 	"github.com/mrchypark/goauthy/internal/securefile"
@@ -113,7 +113,7 @@ func upstreamHandlerFromEnv(getenv func(string) string, db *rhiza.DB, keyring up
 			}
 			return subject, nil
 		},
-		ResolveVerified: staticResolveVerified(&FederatedIdentityResolver{IdentityStore: identityStore}),
+		ResolveVerified: (&FederatedIdentityResolver{IdentityStore: identityStore}).resolveVerified,
 		Complete: func(w http.ResponseWriter, r *http.Request, token, interaction, subject string, upstream *upstreamprovider.OIDCSession) {
 			var binding *browser.UpstreamSessionBinding
 			if upstream != nil {
@@ -147,14 +147,9 @@ func loadUpstreamProviders(path, issuer string) (map[string]configuredUpstreamPr
 	if len(data) > maxUpstreamProvidersFileSize {
 		return nil, errors.New("upstream providers file exceeds 65536 bytes")
 	}
-	decoder := json.NewDecoder(strings.NewReader(string(data)))
-	decoder.DisallowUnknownFields()
 	var document upstreamProvidersDocument
-	if err := decoder.Decode(&document); err != nil {
+	if err := jsonstrict.DecodeStrict(data, &document); err != nil {
 		return nil, fmt.Errorf("decode upstream providers file: %w", err)
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return nil, errors.New("upstream providers file must contain exactly one JSON document")
 	}
 	if len(document.Providers) < 1 || len(document.Providers) > 16 {
 		return nil, errors.New("upstream providers must contain 1 to 16 providers")
@@ -178,14 +173,9 @@ func loadUpstreamProviders(path, issuer string) (map[string]configuredUpstreamPr
 }
 
 func decodeUpstreamProviderFileConfig(data []byte) (upstreamProviderFileConfig, error) {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	var fileConfig upstreamProviderFileConfig
-	if err := decoder.Decode(&fileConfig); err != nil {
+	if err := jsonstrict.DecodeStrict(data, &fileConfig); err != nil {
 		return upstreamProviderFileConfig{}, fmt.Errorf("decode upstream provider: %w", err)
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return upstreamProviderFileConfig{}, errors.New("upstream provider must contain exactly one JSON object")
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {

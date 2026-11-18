@@ -19,6 +19,7 @@ import (
 
 	"github.com/mrchypark/goauthy/internal/eventlog"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 	"github.com/mrchypark/goauthy/internal/scim"
 	"github.com/mrchypark/goauthy/internal/securefile"
 	"github.com/mrchypark/goauthy/internal/storage"
@@ -169,17 +170,9 @@ func loadSCIMProviders(path string) (map[string]loadedSCIMProvider, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := rejectDuplicateJSONNames(data); err != nil {
-		return nil, errors.New("SCIM providers file contains duplicate JSON fields")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	var document scimProvidersDocument
-	if err := decoder.Decode(&document); err != nil {
+	if err := jsonstrict.DecodeStrict(data, &document); err != nil {
 		return nil, fmt.Errorf("decode SCIM providers file: %w", err)
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return nil, errors.New("SCIM providers file must contain exactly one JSON document")
 	}
 	if len(document.Providers) < 1 || len(document.Providers) > maxSCIMProviders {
 		return nil, fmt.Errorf("SCIM providers must contain 1 to %d providers", maxSCIMProviders)
@@ -207,17 +200,9 @@ func loadSCIMProviders(path string) (map[string]loadedSCIMProvider, error) {
 }
 
 func decodeSCIMProvider(data []byte) (scimProviderFileConfig, error) {
-	if err := rejectDuplicateJSONNames(data); err != nil {
-		return scimProviderFileConfig{}, errors.New("SCIM provider contains duplicate JSON fields")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	var config scimProviderFileConfig
-	if err := decoder.Decode(&config); err != nil {
+	if err := jsonstrict.DecodeStrict(data, &config); err != nil {
 		return scimProviderFileConfig{}, errors.New("decode SCIM provider configuration")
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return scimProviderFileConfig{}, errors.New("SCIM provider must contain exactly one JSON object")
 	}
 	if !validSCIMProviderID(config.ID) {
 		return scimProviderFileConfig{}, errors.New("invalid SCIM provider id")
@@ -239,63 +224,6 @@ func validSCIMBaseURL(raw string) bool {
 	return strictHTTPSURL(raw) && err == nil && parsed.RawPath == "" && parsed.Opaque == ""
 }
 
-func rejectDuplicateJSONNames(data []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	var walk func() error
-	walk = func() error {
-		token, err := decoder.Token()
-		if err != nil {
-			return err
-		}
-		switch delimiter := token.(type) {
-		case json.Delim:
-			switch delimiter {
-			case '{':
-				seen := make(map[string]struct{})
-				for decoder.More() {
-					name, err := decoder.Token()
-					if err != nil {
-						return err
-					}
-					key, ok := name.(string)
-					if !ok {
-						return errors.New("object key is not a string")
-					}
-					if _, exists := seen[key]; exists {
-						return errors.New("duplicate object key")
-					}
-					seen[key] = struct{}{}
-					if err := walk(); err != nil {
-						return err
-					}
-				}
-				_, err = decoder.Token()
-				return err
-			case '[':
-				for decoder.More() {
-					if err := walk(); err != nil {
-						return err
-					}
-				}
-				_, err = decoder.Token()
-				return err
-			}
-		}
-		return nil
-	}
-	if err := walk(); err != nil {
-		return err
-	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("multiple JSON documents")
-		}
-		return err
-	}
-	return nil
-}
-
 func validSCIMProviderID(id string) bool {
 	if id == "" || len(id) > 64 || id != strings.TrimSpace(id) {
 		return false
@@ -314,7 +242,7 @@ func loadSCIMToken(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read SCIM token file: %w", err)
 	}
-	data = trimOneSCIMLineEnding(data)
+	data = bytes.TrimSuffix(bytes.TrimSuffix(data, []byte("\n")), []byte("\r"))
 	if len(data) == 0 || !utf8.Valid(data) {
 		return "", errors.New("SCIM token must be non-empty UTF-8 without whitespace or control characters")
 	}
@@ -383,16 +311,6 @@ func readSCIMRegularFile(path string, limit int, label string) ([]byte, error) {
 		return nil, fmt.Errorf("%s file exceeds %d bytes", label, limit)
 	}
 	return data, nil
-}
-
-func trimOneSCIMLineEnding(data []byte) []byte {
-	if len(data) >= 2 && data[len(data)-2] == '\r' && data[len(data)-1] == '\n' {
-		return data[:len(data)-2]
-	}
-	if len(data) > 0 && data[len(data)-1] == '\n' {
-		return data[:len(data)-1]
-	}
-	return data
 }
 
 // Step scans all local users once for every provider and then executes at most

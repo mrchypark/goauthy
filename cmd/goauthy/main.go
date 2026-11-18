@@ -233,7 +233,7 @@ func run() (err error) {
 	if err := admitMasterKeyRuntime(ctx, db, keyring); err != nil {
 		return err
 	}
-	blacklistEnabled, err := ipBlacklistEnabled(os.Getenv)
+	blacklistEnabled, err := envBool(os.Getenv, "GOAUTHY_IP_BLACKLIST_ENABLED")
 	if err != nil {
 		return err
 	}
@@ -584,7 +584,7 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
-	bootstrapForceMFA, err := bootstrapForceMFA(os.Getenv)
+	bootstrapForceMFA, err := envBool(os.Getenv, "GOAUTHY_BOOTSTRAP_FORCE_MFA")
 	if err != nil {
 		return err
 	}
@@ -599,7 +599,7 @@ func run() (err error) {
 	if err != nil {
 		return err
 	}
-	clientCredentialsMapSub, err := clientCredentialsMapSubFromEnv(os.Getenv)
+	clientCredentialsMapSub, err := envBool(os.Getenv, "GOAUTHY_CLIENT_CREDENTIALS_MAP_SUB")
 	if err != nil {
 		return err
 	}
@@ -995,22 +995,17 @@ func run() (err error) {
 		return fmt.Errorf("configure device handler: %w", err)
 	}
 	deviceHandler.SetBrandResolver(commonBrand)
-	var loginHandler *login.Handler
-	if passkeyService != nil {
-		if len(trustedProxies) > 0 {
-			loginHandler, err = login.NewWithPolicyRecoveryPasskeysAndTrustedProxies(issuer, browserStore, identityStore, oauthServer, loginPolicyStore, expiredRecovery, passkeyService, trustedProxies)
-		} else {
-			loginHandler, err = login.NewWithPolicyRecoveryAndPasskeys(issuer, browserStore, identityStore, oauthServer, loginPolicyStore, expiredRecovery, passkeyService)
-		}
-	} else {
-		if len(trustedProxies) > 0 {
-			loginHandler, err = login.NewWithPolicyAndTrustedProxies(issuer, browserStore, identityStore, oauthServer, loginPolicyStore, expiredRecovery, trustedProxies)
-		} else {
-			loginHandler, err = login.NewWithPolicyAndRecovery(issuer, browserStore, identityStore, oauthServer, loginPolicyStore, expiredRecovery)
-		}
-	}
+	loginHandler, err := login.New(issuer, browserStore, identityStore, oauthServer)
 	if err != nil {
 		return err
+	}
+	loginHandler.SetPolicy(loginPolicyStore)
+	loginHandler.SetOnPasswordExpired(expiredRecovery)
+	if passkeyService != nil {
+		loginHandler.SetPasskeyService(passkeyService)
+	}
+	if len(trustedProxies) > 0 {
+		loginHandler.SetTrustedProxies(trustedProxies)
 	}
 	loginHandler.SetLockdownStore(lockdownStore)
 	loginHandler.SetApprovalForceMFA(bootstrapForceMFA)
@@ -1081,9 +1076,8 @@ func run() (err error) {
 	})
 	loginHandler.SetBrowserIDPolicy(browserIDPolicy)
 	loginHandler.SetLoginLocationObserver(notifyLoginLocation)
-	loginHandler.SetCaptchaSiteKey(captchaVerifier.SiteKey())
 	var otpHandler *recovery.OTPHandler
-	otpEnabled, err := emailOTPEnabled(os.Getenv)
+	otpEnabled, err := envBool(os.Getenv, "GOAUTHY_EMAIL_OTP_ENABLED")
 	if err != nil {
 		return err
 	}
@@ -1153,7 +1147,7 @@ func run() (err error) {
 				}
 				return subject, nil
 			},
-			ResolveVerified: staticResolveVerified(&FederatedIdentityResolver{IdentityStore: identityStore}),
+			ResolveVerified: (&FederatedIdentityResolver{IdentityStore: identityStore}).resolveVerified,
 			Complete: func(w http.ResponseWriter, r *http.Request, token, interaction, subject string, upstream *upstreamprovider.OIDCSession) {
 				var binding *browser.UpstreamSessionBinding
 				if upstream != nil {
@@ -1916,10 +1910,10 @@ func browserAdministrator(rbacStore *rbac.Store, browserStore *browser.Store, id
 	}
 }
 
-func bootstrapForceMFA(getenv func(string) string) (bool, error) {
-	value, err := strconv.ParseBool(envValue(getenv, "GOAUTHY_BOOTSTRAP_FORCE_MFA", "false"))
+func envBool(getenv func(string) string, name string) (bool, error) {
+	value, err := strconv.ParseBool(envValue(getenv, name, "false"))
 	if err != nil {
-		return false, errors.New("GOAUTHY_BOOTSTRAP_FORCE_MFA must be a boolean")
+		return false, fmt.Errorf("%s must be a boolean", name)
 	}
 	return value, nil
 }
@@ -1947,46 +1941,6 @@ func forwardAuthPasskeyEnrollment(service *passkey.Service) func(context.Context
 	}
 }
 
-func cimdEnabled(getenv func(string) string) (bool, error) {
-	value, err := strconv.ParseBool(envValue(getenv, "GOAUTHY_CIMD_ENABLED", "false"))
-	if err != nil {
-		return false, errors.New("GOAUTHY_CIMD_ENABLED must be a boolean")
-	}
-	return value, nil
-}
-
-func cimdIgnoreUnknownAuthFlowsFromEnv(getenv func(string) string) (bool, error) {
-	value, err := strconv.ParseBool(envValue(getenv, "GOAUTHY_CIMD_IGNORE_UNKNOWN_AUTH_FLOWS", "false"))
-	if err != nil {
-		return false, errors.New("GOAUTHY_CIMD_IGNORE_UNKNOWN_AUTH_FLOWS must be a boolean")
-	}
-	return value, nil
-}
-
-func cimdDangerAllowUnvalidatedResourceFromEnv(getenv func(string) string) (bool, error) {
-	value, err := strconv.ParseBool(envValue(getenv, "GOAUTHY_CIMD_DANGER_ALLOW_UNVALIDATED_RESOURCE", "false"))
-	if err != nil {
-		return false, errors.New("GOAUTHY_CIMD_DANGER_ALLOW_UNVALIDATED_RESOURCE must be a boolean")
-	}
-	return value, nil
-}
-
-func webIDEnabledFromEnv(getenv func(string) string) (bool, error) {
-	value, err := strconv.ParseBool(envValue(getenv, "GOAUTHY_WEB_ID_ENABLED", "false"))
-	if err != nil {
-		return false, errors.New("GOAUTHY_WEB_ID_ENABLED must be a boolean")
-	}
-	return value, nil
-}
-
-func emailOTPEnabled(getenv func(string) string) (bool, error) {
-	value, err := strconv.ParseBool(envValue(getenv, "GOAUTHY_EMAIL_OTP_ENABLED", "false"))
-	if err != nil {
-		return false, errors.New("GOAUTHY_EMAIL_OTP_ENABLED must be a boolean")
-	}
-	return value, nil
-}
-
 func argonPolicyFromEnv(getenv func(string) string) (credential.Policy, error) {
 	policy := credential.DefaultPolicy()
 	var err error
@@ -2009,14 +1963,6 @@ func argonPolicyFromEnv(getenv func(string) string) (credential.Policy, error) {
 		return credential.Policy{}, fmt.Errorf("invalid Argon2 password policy: %w", err)
 	}
 	return policy, nil
-}
-
-func passwordRecoveryEnabled(getenv func(string) string) (bool, error) {
-	value, err := strconv.ParseBool(envValue(getenv, "GOAUTHY_PASSWORD_RECOVERY_ENABLED", "false"))
-	if err != nil {
-		return false, errors.New("GOAUTHY_PASSWORD_RECOVERY_ENABLED must be a boolean")
-	}
-	return value, nil
 }
 
 func openRegistrationFromEnv(getenv func(string) string, recoveryEnabled bool, issuer string) (recovery.RegistrationConfig, time.Duration, error) {
@@ -2207,22 +2153,6 @@ func loadPasskeyCookieKey(path string) ([]byte, error) {
 		return nil, errors.New("passkey key must be exactly 32 bytes")
 	}
 	return key, nil
-}
-
-func forwardAuthHeadersFromEnv(getenv func(string) string) (bool, error) {
-	enabled, err := strconv.ParseBool(envValue(getenv, "GOAUTHY_FORWARD_AUTH_HEADERS", "false"))
-	if err != nil {
-		return false, errors.New("GOAUTHY_FORWARD_AUTH_HEADERS must be a boolean")
-	}
-	return enabled, nil
-}
-
-func selfDeleteEnabledFromEnv(getenv func(string) string) (bool, error) {
-	enabled, err := strconv.ParseBool(envValue(getenv, "GOAUTHY_ENABLE_SELF_DELETE", "false"))
-	if err != nil {
-		return false, errors.New("GOAUTHY_ENABLE_SELF_DELETE must be a boolean")
-	}
-	return enabled, nil
 }
 
 func passkeyOrigins(raw string) ([]string, error) {
@@ -2518,14 +2448,6 @@ func clientCredentialsTokenLifetime(getenv func(string) string) (time.Duration, 
 		return 0, errors.New("GOAUTHY_BOOTSTRAP_CLIENT_CREDENTIALS_TOKEN_LIFETIME must be between 2s and 24h")
 	}
 	return lifetime, nil
-}
-
-func clientCredentialsMapSubFromEnv(getenv func(string) string) (bool, error) {
-	value, err := strconv.ParseBool(envValue(getenv, "GOAUTHY_CLIENT_CREDENTIALS_MAP_SUB", "false"))
-	if err != nil {
-		return false, errors.New("GOAUTHY_CLIENT_CREDENTIALS_MAP_SUB must be a boolean")
-	}
-	return value, nil
 }
 
 // startBackchannelDelivery starts the back-channel logout delivery worker. It
@@ -2886,14 +2808,6 @@ func trustedProxiesFromEnv(getenv func(string) string) ([]netip.Prefix, error) {
 		return nil, errors.New("GOAUTHY_TRUSTED_PROXIES must be a comma-separated list of CIDR prefixes")
 	}
 	return prefixes, nil
-}
-
-func ipBlacklistEnabled(getenv func(string) string) (bool, error) {
-	enabled, err := strconv.ParseBool(envValue(getenv, "GOAUTHY_IP_BLACKLIST_ENABLED", "false"))
-	if err != nil {
-		return false, errors.New("GOAUTHY_IP_BLACKLIST_ENABLED must be a boolean")
-	}
-	return enabled, nil
 }
 
 type geoblockConfig struct {

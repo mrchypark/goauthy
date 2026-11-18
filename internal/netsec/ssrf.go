@@ -1,7 +1,74 @@
 // Package netsec provides shared network security helpers such as SSRF IP filtering.
 package netsec
 
-import "net/netip"
+import (
+	"context"
+	"crypto/tls"
+	"errors"
+	"net"
+	"net/http"
+	"net/netip"
+	"time"
+)
+
+// ErrUnsafeHost is returned when an outbound target resolves to a disallowed IP address.
+var ErrUnsafeHost = errors.New("outbound host resolves to unsafe IP address")
+
+// SafeDialContext returns a DialContext function that validates literal or
+// DNS-resolved IP addresses with AllowedAddr and dials the pinned IP directly
+// to prevent DNS rebinding.
+func SafeDialContext(timeout time.Duration, allowPrivate bool) func(context.Context, string, string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: timeout}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		if ip, parseErr := netip.ParseAddr(host); parseErr == nil {
+			if !AllowedAddr(ip, allowPrivate) {
+				return nil, ErrUnsafeHost
+			}
+			return dialer.DialContext(ctx, network, net.JoinHostPort(ip.Unmap().String(), port))
+		}
+		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		if err != nil || len(ips) == 0 {
+			if err == nil {
+				err = ErrUnsafeHost
+			}
+			return nil, err
+		}
+		for _, ip := range ips {
+			if !AllowedAddr(ip, allowPrivate) {
+				return nil, ErrUnsafeHost
+			}
+		}
+		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].Unmap().String(), port))
+	}
+}
+
+// NewSafeHTTPClient builds an HTTP client that disables proxy/redirect/compression
+// bypasses, enforces TLS 1.2+, and pins DNS-resolved IPs validated by AllowedAddr.
+func NewSafeHTTPClient(timeout time.Duration, allowPrivate bool, tlsConfig *tls.Config) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DisableCompression = true
+	if tlsConfig != nil {
+		transport.TLSClientConfig = tlsConfig.Clone()
+	} else if transport.TLSClientConfig == nil {
+		transport.TLSClientConfig = &tls.Config{}
+	} else {
+		transport.TLSClientConfig = transport.TLSClientConfig.Clone()
+	}
+	if transport.TLSClientConfig.MinVersion < tls.VersionTLS12 {
+		transport.TLSClientConfig.MinVersion = tls.VersionTLS12
+	}
+	transport.DialContext = SafeDialContext(timeout, allowPrivate)
+	return &http.Client{
+		Transport:     transport,
+		Timeout:       timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+}
 
 var specialUsePrefixes = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("100.64.0.0/10"),
@@ -19,13 +86,16 @@ var specialUsePrefixes = []netip.Prefix{
 }
 
 // AllowedAddr reports whether addr is safe for outbound server-initiated requests.
-// Link-local (including cloud metadata 169.254.0.0/16) and IANA special-use
-// ranges are always rejected, even when allowPrivate is true.
+// Zoned IPv6 addresses, link-local (including cloud metadata 169.254.0.0/16),
+// and IANA special-use ranges are always rejected, even when allowPrivate is true.
 func AllowedAddr(addr netip.Addr, allowPrivate bool) bool {
-	if !addr.IsValid() || addr.IsUnspecified() || addr.IsMulticast() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() {
+	if !addr.IsValid() || addr.Zone() != "" {
 		return false
 	}
 	addr = addr.Unmap()
+	if addr.IsUnspecified() || addr.IsMulticast() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() {
+		return false
+	}
 	if addr.IsPrivate() || addr.IsLoopback() || isCGNAT(addr) {
 		return allowPrivate
 	}

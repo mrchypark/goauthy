@@ -1,10 +1,10 @@
 # Account Recovery, Registration & Email OTP (`internal/recovery`)
 
 ## Overview
-Manages password-reset flows (email reset tokens, PoW-gated requests, enhanced reset tokens), open user registration (including passkey-only registration), email OTP login/verification, login-location notifications, login-revoke links, and a durable encrypted email outbox over SMTP.
+Manages password-reset flows (email reset tokens, PoW-gated requests, enhanced reset tokens), open user registration (password-based; passkey-only registration endpoints currently fail closed pending enrollment-binding support), email OTP login/verification, login-location notifications, login-revoke links, and a durable encrypted email outbox over SMTP.
 
 ## Interface
-- `[service.go:Service]`, `[service.go:NewService]`, `[service.go:ServiceOption]`, `[service.go:WithOpenRegistration]` — Core recovery and registration service (`RequestReset`, `GetReset`, `PutReset`, `ProofOfWork`, `RegisterOpen`, `RegisterPasskeyStart`, `RegisterPasskeyFinish`, `Page`, `PageScript`, `BindEmail`, `IssueForSubject`, `InvalidateAllResetTokens`, `CleanupExpiredTokens`, `CreateUser`, `CreatePasskeyOnlyUser`, `NotifyUserUpdate`, `SetCaptchaVerifier`, `SetPasskeyService`).
+- `[service.go:Service]`, `[service.go:NewService]`, `[service.go:ServiceOption]`, `[service.go:WithOpenRegistration]` — Core recovery and registration service (`RequestReset`, `GetReset`, `PutReset`, `ProofOfWork`, `RegisterOpen`, `RegisterPasskeyStart` [fail-closed], `RegisterPasskeyFinish` [fail-closed], `Page`, `PageScript`, `BindEmail`, `IssueForSubject`, `InvalidateAllResetTokens`, `CleanupExpiredTokens`, `CreateUser`, `CreatePasskeyOnlyUser`, `NotifyUserUpdate`, `SetCaptchaVerifier`, `SetPasskeyService`).
 - `[service.go:SchemaStatements]` — Returns Rhiza DDL statements for `identity_recovery_emails`, OTP tables, and email outbox tables.
 - `[security_enhanced.go]`: `DefaultEnhancedConfig`, `EnhancedResetConfig`, `EnhancedResetToken`, `Service.IssueEnhancedResetToken`, `Service.ValidateEnhancedResetToken`, `Service.ConsumeEnhancedResetToken`.
 - `[otp.go]` & `[otp_http.go]`: `OTPService`, `NewOTPService`, `OTPHandler`, `NewOTPHandler`, `OTPInteractionStore`, `NewOTPInteractionStore`.

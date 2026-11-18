@@ -16,6 +16,20 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
+func clientFaviconDB(t *testing.T) (context.Context, *rhiza.DB) {
+	t.Helper()
+	ctx := context.Background()
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "client-favicon-test", DataDir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := storage.Migrate(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	return ctx, db
+}
+
 func TestGlobalWritesRejectExistingGoauthyBootstrap(t *testing.T) {
 	ctx, db := clientFaviconDB(t)
 	themes, _ := NewThemeStore(db)

@@ -23,6 +23,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/clients"
 	"github.com/mrchypark/goauthy/internal/device"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 	"github.com/mrchypark/goauthy/internal/passkey"
 	"github.com/mrchypark/goauthy/internal/recovery"
 	"github.com/mrchypark/goauthy/internal/saas"
@@ -544,16 +545,14 @@ func decodeLoginRestriction(w http.ResponseWriter, r *http.Request) (loginRestri
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, adminRequestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 || rejectDuplicateJSONFields(body) != nil {
+	if err != nil || len(body) == 0 {
 		return loginRestrictionRequest{}, errors.New("invalid JSON")
 	}
 	var wire struct {
 		RestrictGroupPrefix json.RawMessage `json:"restrict_group_prefix"`
 		Revision            *int64          `json:"revision"`
 	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&wire); err != nil || decoder.Decode(&struct{}{}) != io.EOF || wire.Revision == nil || len(wire.RestrictGroupPrefix) == 0 || *wire.Revision < 0 {
+	if err := jsonstrict.DecodeStrict(body, &wire); err != nil || wire.Revision == nil || len(wire.RestrictGroupPrefix) == 0 || *wire.Revision < 0 {
 		return loginRestrictionRequest{}, errors.New("invalid login restriction")
 	}
 	if bytes.Equal(wire.RestrictGroupPrefix, []byte("null")) {
@@ -583,7 +582,7 @@ func decodeMembershipPatch(w http.ResponseWriter, r *http.Request) (membershipPa
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, adminRequestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 || rejectDuplicateJSONFields(body) != nil {
+	if err != nil || len(body) == 0 {
 		return membershipPatch{}, errors.New("invalid JSON")
 	}
 	var wire struct {
@@ -593,9 +592,7 @@ func decodeMembershipPatch(w http.ResponseWriter, r *http.Request) (membershipPa
 		} `json:"put"`
 		Del *[]string `json:"del"`
 	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&wire); err != nil || decoder.Decode(&struct{}{}) != io.EOF || wire.Put == nil || wire.Del == nil {
+	if err := jsonstrict.DecodeStrict(body, &wire); err != nil || wire.Put == nil || wire.Del == nil {
 		return membershipPatch{}, errors.New("invalid JSON")
 	}
 	patch := membershipPatch{}
@@ -653,68 +650,6 @@ func patchNames(raw json.RawMessage, group bool) ([]string, error) {
 	return values, nil
 }
 
-// rejectDuplicateJSONFields walks nested structures because encoding/json
-// otherwise silently accepts duplicate key/value pairs.
-func rejectDuplicateJSONFields(body []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	if err := walkJSONValue(decoder); err != nil {
-		return err
-	}
-	if _, err := decoder.Token(); err != io.EOF {
-		return errors.New("trailing JSON")
-	}
-	return nil
-}
-
-func walkJSONValue(decoder *json.Decoder) error {
-	token, err := decoder.Token()
-	if err != nil {
-		return err
-	}
-	delimiter, ok := token.(json.Delim)
-	if !ok {
-		return nil
-	}
-	switch delimiter {
-	case '{':
-		seen := map[string]struct{}{}
-		for decoder.More() {
-			key, err := decoder.Token()
-			if err != nil {
-				return err
-			}
-			name, ok := key.(string)
-			if !ok {
-				return errors.New("invalid object key")
-			}
-			if _, exists := seen[name]; exists {
-				return errors.New("duplicate JSON key")
-			}
-			seen[name] = struct{}{}
-			if err := walkJSONValue(decoder); err != nil {
-				return err
-			}
-		}
-		end, err := decoder.Token()
-		if err != nil || end != json.Delim('}') {
-			return errors.New("unterminated object")
-		}
-	case '[':
-		for decoder.More() {
-			if err := walkJSONValue(decoder); err != nil {
-				return err
-			}
-		}
-		end, err := decoder.Token()
-		if err != nil || end != json.Delim(']') {
-			return errors.New("unterminated array")
-		}
-	default:
-		return errors.New("invalid JSON delimiter")
-	}
-	return nil
-}
-
 func decodeRequest(w http.ResponseWriter, r *http.Request, role bool) (entityRequest, error) {
 	if len(r.Header.Values("Content-Type")) != 1 {
 		return entityRequest{}, errors.New("content type")
@@ -725,7 +660,7 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, role bool) (entityReq
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, adminRequestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 || duplicateFields(body) != nil {
+	if err != nil || len(body) == 0 {
 		return entityRequest{}, errors.New("invalid JSON")
 	}
 	var wire struct {
@@ -733,9 +668,7 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, role bool) (entityReq
 		Group *string         `json:"group"`
 		Meta  json.RawMessage `json:"meta"`
 	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&wire); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+	if err := jsonstrict.DecodeStrict(body, &wire); err != nil {
 		return entityRequest{}, errors.New("invalid JSON")
 	}
 	if role && (wire.Role == nil || wire.Group != nil) || !role && (wire.Group == nil || wire.Role != nil) {
@@ -751,47 +684,6 @@ func decodeRequest(w http.ResponseWriter, r *http.Request, role bool) (entityReq
 		wire.Meta = nil
 	}
 	return entityRequest{Name: name, Meta: wire.Meta}, nil
-}
-
-func duplicateFields(body []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	token, err := decoder.Token()
-	if err != nil {
-		return err
-	}
-	if delimiter, ok := token.(json.Delim); !ok || delimiter != '{' {
-		return errors.New("object required")
-	}
-	seen := map[string]struct{}{}
-	for decoder.More() {
-		token, err := decoder.Token()
-		if err != nil {
-			return err
-		}
-		key, ok := token.(string)
-		if !ok {
-			return errors.New("invalid key")
-		}
-		if _, exists := seen[key]; exists {
-			return errors.New("duplicate key")
-		}
-		seen[key] = struct{}{}
-		var discard json.RawMessage
-		if err := decoder.Decode(&discard); err != nil {
-			return err
-		}
-	}
-	token, err = decoder.Token()
-	if err != nil {
-		return err
-	}
-	if delimiter, ok := token.(json.Delim); !ok || delimiter != '}' {
-		return errors.New("object required")
-	}
-	if _, err := decoder.Token(); err != io.EOF {
-		return errors.New("trailing JSON")
-	}
-	return nil
 }
 
 func validID(id string) bool {

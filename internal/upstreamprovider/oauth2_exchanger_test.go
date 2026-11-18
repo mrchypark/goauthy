@@ -134,11 +134,12 @@ func TestOAuth2TokenExchangerClientPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	transport, ok := defaultClient.client.Transport.(*http.Transport)
+	resolvedDefault := defaultClient.httpClient(configs["provider"])
+	transport, ok := resolvedDefault.Transport.(*http.Transport)
 	if !ok || transport.Proxy != nil || !transport.DisableCompression || transport.TLSClientConfig == nil || transport.TLSClientConfig.MinVersion != tls.VersionTLS12 {
-		t.Fatalf("default transport = %#v", defaultClient.client.Transport)
+		t.Fatalf("default transport = %#v", resolvedDefault.Transport)
 	}
-	if defaultClient.client.Timeout != upstreamTokenExchangeTimeout || defaultClient.client.CheckRedirect(nil, nil) != http.ErrUseLastResponse {
+	if resolvedDefault.Timeout != upstreamTokenExchangeTimeout || resolvedDefault.CheckRedirect(nil, nil) != http.ErrUseLastResponse {
 		t.Fatal("default client does not enforce exchange policy")
 	}
 
@@ -181,7 +182,7 @@ func TestOAuth2TokenExchangerReusesConnectionWithFreshRuntimeSnapshot(t *testing
 	makeExchanger := func(path, clientID, secret string) *OAuth2TokenExchanger {
 		exchanger, err := NewOAuth2TokenExchanger(map[string]Config{"provider": {
 			Issuer: "https://issuer.example.test", AuthorizationEndpoint: "https://issuer.example.test/auth",
-			TokenEndpoint: server.URL + path, ClientID: clientID,
+			TokenEndpoint: server.URL + path, ClientID: clientID, AllowPrivate: true,
 		}}, map[string]string{"provider": secret}, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -200,9 +201,10 @@ func TestOAuth2TokenExchangerReusesConnectionWithFreshRuntimeSnapshot(t *testing
 	roots := x509.NewCertPool()
 	roots.AddCert(server.Certificate())
 	for _, exchanger := range []*OAuth2TokenExchanger{first, second} {
-		transport, ok := exchanger.client.Transport.(*http.Transport)
+		client := exchanger.httpClient(exchanger.configs["provider"])
+		transport, ok := client.Transport.(*http.Transport)
 		if !ok {
-			t.Fatalf("default transport type = %T", exchanger.client.Transport)
+			t.Fatalf("default transport type = %T", client.Transport)
 		}
 		if _, ok := originalTLSConfigs[transport]; !ok {
 			originalTLSConfigs[transport] = nil

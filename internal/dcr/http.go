@@ -2,7 +2,6 @@
 package dcr
 
 import (
-	"bytes"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -19,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/redirecturi"
 	"github.com/mrchypark/goauthy/internal/securefile"
@@ -46,7 +46,7 @@ func LoadRegistrationToken(path string) (string, error) {
 	return token, nil
 }
 
-// Handler exposes registration creation and read-only self-management.
+// Handler exposes RFC 7591 registration creation and RFC 7592 client configuration self-management.
 type Handler struct {
 	store               *Store
 	issuer              string
@@ -446,13 +446,8 @@ func decodeRegistrationRequest(w http.ResponseWriter, r *http.Request) (registra
 	if err != nil {
 		return registrationRequest{}, err
 	}
-	if err := rejectDuplicateTopLevelFields(body); err != nil {
-		return registrationRequest{}, err
-	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
 	var request registrationRequest
-	if err := decoder.Decode(&request); err != nil {
+	if err := jsonstrict.DecodeStrict(body, &request); err != nil {
 		return registrationRequest{}, err
 	}
 	var fields map[string]json.RawMessage
@@ -468,51 +463,7 @@ func decodeRegistrationRequest(w http.ResponseWriter, r *http.Request) (registra
 	_, request.softwareStatementPresent = fields["software_statement"]
 	_, request.dpopBoundAccessTokensPresent = fields["dpop_bound_access_tokens"]
 	_, request.audiencePresent = fields["audience"]
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return registrationRequest{}, errors.New("multiple JSON values")
-	}
 	return request, nil
-}
-
-func rejectDuplicateTopLevelFields(body []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	token, err := decoder.Token()
-	if err != nil {
-		return err
-	}
-	if delimiter, ok := token.(json.Delim); !ok || delimiter != '{' {
-		return errors.New("registration body must be an object")
-	}
-	seen := make(map[string]struct{})
-	for decoder.More() {
-		token, err := decoder.Token()
-		if err != nil {
-			return err
-		}
-		name, ok := token.(string)
-		if !ok {
-			return errors.New("invalid registration field")
-		}
-		if _, exists := seen[name]; exists {
-			return errors.New("duplicate registration field")
-		}
-		seen[name] = struct{}{}
-		var value json.RawMessage
-		if err := decoder.Decode(&value); err != nil {
-			return err
-		}
-	}
-	token, err = decoder.Token()
-	if err != nil {
-		return err
-	}
-	if delimiter, ok := token.(json.Delim); !ok || delimiter != '}' {
-		return errors.New("registration body must be an object")
-	}
-	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
-		return errors.New("multiple JSON values")
-	}
-	return nil
 }
 
 func (r registrationRequest) createRequest(allowLoopback bool, policy ScopePolicy) (CreateRequest, error) {

@@ -873,7 +873,6 @@ func accountFailureCount(t *testing.T, db *rhiza.DB, accountHash string) int64 {
 func TestLoginPageOmitsUnverifiableCaptchaField(t *testing.T) {
 	t.Parallel()
 	h := testHandler(t)
-	h.SetCaptchaSiteKey("captcha-site-key")
 	page := httptest.NewRecorder()
 	h.Authorize(page, httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil))
 	body := page.Body.String()
@@ -1441,7 +1440,7 @@ func TestPasswordlessCookieUsesHostPrefixOnlyForHTTPS(t *testing.T) {
 func TestConstructorStoresNormalizedIssuerForCookies(t *testing.T) {
 	t.Parallel()
 	base := testHandler(t)
-	h, err := NewWithRecovery("HTTPS://ISSUER.EXAMPLE.TEST/", base.browser, base.identity, base.oauth, nil)
+	h, err := New("HTTPS://ISSUER.EXAMPLE.TEST/", base.browser, base.identity, base.oauth)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1649,10 +1648,12 @@ func testHandlerWithDBAndManagedDirectory(t testing.TB, forceMFA, managed bool) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewWithPolicyRecoveryAndPasskeys("http://localhost", browserStore, identityStore, oauthServer, loginpolicy.NewStore(db), nil, passkeys)
+	h, err := New("http://localhost", browserStore, identityStore, oauthServer)
 	if err != nil {
 		t.Fatal(err)
 	}
+	h.SetPolicy(loginpolicy.NewStore(db))
+	h.SetPasskeyService(passkeys)
 	// Existing login behavior tests exercise policy state but do not sleep.
 	h.wait = func(context.Context, time.Duration) error { return nil }
 	h.deadline = func(http.ResponseWriter, time.Time) error { return nil }
@@ -1990,10 +1991,12 @@ func testHandlerWithTrustedProxies(t *testing.T) *Handler {
 		t.Fatal(err)
 	}
 	trustedProxies := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")}
-	h, err := NewWithPolicyAndTrustedProxies("http://localhost", browserStore, identityStore, oauthServer, loginpolicy.NewStore(db), nil, trustedProxies)
+	h, err := New("http://localhost", browserStore, identityStore, oauthServer)
 	if err != nil {
 		t.Fatal(err)
 	}
+	h.SetPolicy(loginpolicy.NewStore(db))
+	h.SetTrustedProxies(trustedProxies)
 	h.wait = func(context.Context, time.Duration) error { return nil }
 	h.deadline = func(http.ResponseWriter, time.Time) error { return nil }
 	return h

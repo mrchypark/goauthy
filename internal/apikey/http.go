@@ -1,7 +1,6 @@
 package apikey
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/mrchypark/goauthy/internal/audit"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 )
 
 // Handler serves /auth/v1/api_keys. BrowserAdmin must validate the existing
@@ -309,76 +309,11 @@ func decode(w http.ResponseWriter, r *http.Request, v *Request) bool {
 		return false
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16<<10))
-	if err != nil || rejectDuplicateFields(body) != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		return false
-	}
-	d := json.NewDecoder(bytes.NewReader(body))
-	d.DisallowUnknownFields()
-	if d.Decode(v) != nil || d.Decode(&struct{}{}) == nil {
+	if err != nil || jsonstrict.DecodeStrict(body, v) != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return false
 	}
 	return true
-}
-func rejectDuplicateFields(body []byte) error {
-	d := json.NewDecoder(bytes.NewReader(body))
-	if err := walkJSON(d); err != nil {
-		return err
-	}
-	if _, err := d.Token(); err != io.EOF {
-		return errors.New("trailing json")
-	}
-	return nil
-}
-
-func walkJSON(d *json.Decoder) error {
-	token, err := d.Token()
-	if err != nil {
-		return err
-	}
-	delim, ok := token.(json.Delim)
-	if !ok {
-		return nil
-	}
-	switch delim {
-	case '{':
-		seen := map[string]struct{}{}
-		for d.More() {
-			key, err := d.Token()
-			if err != nil {
-				return err
-			}
-			name, ok := key.(string)
-			if !ok {
-				return errors.New("key")
-			}
-			if _, duplicate := seen[name]; duplicate {
-				return errors.New("duplicate field")
-			}
-			seen[name] = struct{}{}
-			if err := walkJSON(d); err != nil {
-				return err
-			}
-		}
-		end, err := d.Token()
-		if err != nil || end != json.Delim('}') {
-			return errors.New("object")
-		}
-	case '[':
-		for d.More() {
-			if err := walkJSON(d); err != nil {
-				return err
-			}
-		}
-		end, err := d.Token()
-		if err != nil || end != json.Delim(']') {
-			return errors.New("array")
-		}
-	default:
-		return errors.New("delimiter")
-	}
-	return nil
 }
 func (h *Handler) headers(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")

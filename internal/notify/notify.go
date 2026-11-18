@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/eventlog"
+	"github.com/mrchypark/goauthy/internal/netsec"
 )
 
 const (
@@ -173,7 +174,7 @@ func HTTPClient(timeout time.Duration) *http.Client {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-	return &http.Client{Timeout: timeout, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+	return netsec.NewSafeHTTPClient(timeout, false, nil)
 }
 
 func secureURL(raw string) (*url.URL, error) {

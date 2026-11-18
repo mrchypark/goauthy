@@ -11,6 +11,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/eventlog"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 )
 
 type eventQueryJSON struct {
@@ -50,7 +51,7 @@ func (h *Handler) EventsQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, adminRequestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 || !utf8.Valid(body) || rejectDuplicateJSONFields(body) != nil {
+	if err != nil || len(body) == 0 || !utf8.Valid(body) || jsonstrict.RejectDuplicateKeys(body) != nil {
 		h.badRequest(w)
 		return
 	}

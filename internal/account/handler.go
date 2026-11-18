@@ -21,6 +21,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 	"github.com/mrchypark/goauthy/internal/passkey"
 	"github.com/mrchypark/goauthy/internal/upstreamprovider"
 	"github.com/mrchypark/rhiza"
@@ -1078,80 +1079,13 @@ func decodeStrictJSON[T any](w http.ResponseWriter, r *http.Request, limit int64
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || rejectDuplicateJSONFields(body) != nil {
+	if err != nil {
 		return value, errors.New("json")
 	}
-	d := json.NewDecoder(bytes.NewReader(body))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&value); err != nil {
+	if err := jsonstrict.DecodeStrict(body, &value); err != nil {
 		return value, err
 	}
-	if err := d.Decode(new(any)); err != io.EOF {
-		return value, errors.New("trailing JSON")
-	}
 	return value, nil
-}
-
-// rejectDuplicateJSONFields walks every object before encoding/json decodes it,
-// since the decoder otherwise silently retains the final duplicate key.
-func rejectDuplicateJSONFields(body []byte) error {
-	d := json.NewDecoder(bytes.NewReader(body))
-	if err := walkJSONValue(d); err != nil {
-		return err
-	}
-	if _, err := d.Token(); err != io.EOF {
-		return errors.New("trailing JSON")
-	}
-	return nil
-}
-
-func walkJSONValue(d *json.Decoder) error {
-	token, err := d.Token()
-	if err != nil {
-		return err
-	}
-	delim, ok := token.(json.Delim)
-	if !ok {
-		return nil
-	}
-	switch delim {
-	case '{':
-		seen := map[string]struct{}{}
-		for d.More() {
-			key, err := d.Token()
-			if err != nil {
-				return err
-			}
-			name, ok := key.(string)
-			if !ok {
-				return errors.New("object key")
-			}
-			if _, duplicate := seen[name]; duplicate {
-				return errors.New("duplicate JSON key")
-			}
-			seen[name] = struct{}{}
-			if err := walkJSONValue(d); err != nil {
-				return err
-			}
-		}
-		end, err := d.Token()
-		if err != nil || end != json.Delim('}') {
-			return errors.New("unterminated object")
-		}
-	case '[':
-		for d.More() {
-			if err := walkJSONValue(d); err != nil {
-				return err
-			}
-		}
-		end, err := d.Token()
-		if err != nil || end != json.Delim(']') {
-			return errors.New("unterminated array")
-		}
-	default:
-		return errors.New("invalid JSON delimiter")
-	}
-	return nil
 }
 
 func validPasskeyName(value string) bool {

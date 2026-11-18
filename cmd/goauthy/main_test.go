@@ -393,13 +393,13 @@ func TestWebIDEnabledFromEnv(t *testing.T) {
 		{name: "disabled", env: map[string]string{"GOAUTHY_WEB_ID_ENABLED": "false"}, want: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := webIDEnabledFromEnv(getenv(test.env))
+			got, err := envBool(getenv(test.env), "GOAUTHY_WEB_ID_ENABLED")
 			if err != nil || got != test.want {
 				t.Fatalf("enabled=%v err=%v want=%v", got, err, test.want)
 			}
 		})
 	}
-	if _, err := webIDEnabledFromEnv(getenv(map[string]string{"GOAUTHY_WEB_ID_ENABLED": "yes"})); err == nil {
+	if _, err := envBool(getenv(map[string]string{"GOAUTHY_WEB_ID_ENABLED": "yes"}), "GOAUTHY_WEB_ID_ENABLED"); err == nil {
 		t.Fatal("accepted invalid WebID flag")
 	}
 }
@@ -468,13 +468,13 @@ func TestSelfDeleteEnabledFromEnv(t *testing.T) {
 		{name: "disabled", env: map[string]string{"GOAUTHY_ENABLE_SELF_DELETE": "false"}, want: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := selfDeleteEnabledFromEnv(getenv(test.env))
+			got, err := envBool(getenv(test.env), "GOAUTHY_ENABLE_SELF_DELETE")
 			if err != nil || got != test.want {
 				t.Fatalf("enabled=%v err=%v, want %v", got, err, test.want)
 			}
 		})
 	}
-	if _, err := selfDeleteEnabledFromEnv(getenv(map[string]string{"GOAUTHY_ENABLE_SELF_DELETE": "yes"})); err == nil {
+	if _, err := envBool(getenv(map[string]string{"GOAUTHY_ENABLE_SELF_DELETE": "yes"}), "GOAUTHY_ENABLE_SELF_DELETE"); err == nil {
 		t.Fatal("accepted invalid self-delete flag")
 	}
 }
@@ -1283,7 +1283,7 @@ func TestBootstrapForceMFA(t *testing.T) {
 	}{
 		{"", false, true}, {"false", false, true}, {"true", true, true}, {"TRUE", true, true}, {"invalid", false, false},
 	} {
-		got, err := bootstrapForceMFA(func(string) string { return test.raw })
+		got, err := envBool(func(string) string { return test.raw }, "GOAUTHY_BOOTSTRAP_FORCE_MFA")
 		if got != test.want || (err == nil) != test.ok {
 			t.Fatalf("raw=%q got=%t err=%v", test.raw, got, err)
 		}
@@ -1329,7 +1329,7 @@ func TestCIMDEnabled(t *testing.T) {
 	}{
 		{"", false, true}, {"false", false, true}, {"true", true, true}, {"TRUE", true, true}, {"invalid", false, false},
 	} {
-		got, err := cimdEnabled(func(string) string { return test.raw })
+		got, err := envBool(func(string) string { return test.raw }, "GOAUTHY_CIMD_ENABLED")
 		if got != test.want || (err == nil) != test.ok {
 			t.Fatalf("raw=%q got=%t err=%v", test.raw, got, err)
 		}
@@ -1348,7 +1348,7 @@ func TestIPBlacklistEnabled(t *testing.T) {
 		{raw: "false", want: false},
 		{raw: "yes", err: true},
 	} {
-		got, err := ipBlacklistEnabled(func(string) string { return test.raw })
+		got, err := envBool(func(string) string { return test.raw }, "GOAUTHY_IP_BLACKLIST_ENABLED")
 		if (err != nil) != test.err || got != test.want {
 			t.Fatalf("raw=%q enabled=%v err=%v", test.raw, got, err)
 		}
@@ -1364,7 +1364,7 @@ func TestCIMDIgnoreUnknownAuthFlowsFromEnv(t *testing.T) {
 	}{
 		{"", false, true}, {"false", false, true}, {"true", true, true}, {"TRUE", true, true}, {"invalid", false, false},
 	} {
-		got, err := cimdIgnoreUnknownAuthFlowsFromEnv(func(string) string { return test.raw })
+		got, err := envBool(func(string) string { return test.raw }, "GOAUTHY_CIMD_IGNORE_UNKNOWN_AUTH_FLOWS")
 		if got != test.want || (err == nil) != test.ok {
 			t.Fatalf("raw=%q got=%t err=%v", test.raw, got, err)
 		}
@@ -1380,7 +1380,7 @@ func TestCIMDDangerAllowUnvalidatedResourceFromEnv(t *testing.T) {
 	}{
 		{"", false, true}, {"false", false, true}, {"true", true, true}, {"TRUE", true, true}, {"invalid", false, false},
 	} {
-		got, err := cimdDangerAllowUnvalidatedResourceFromEnv(func(string) string { return test.raw })
+		got, err := envBool(func(string) string { return test.raw }, "GOAUTHY_CIMD_DANGER_ALLOW_UNVALIDATED_RESOURCE")
 		if got != test.want || (err == nil) != test.ok {
 			t.Fatalf("raw=%q got=%t err=%v", test.raw, got, err)
 		}
@@ -1500,13 +1500,13 @@ func TestPasswordRulesFromEnv(t *testing.T) {
 
 func TestPasswordRecoveryConfiguration(t *testing.T) {
 	t.Parallel()
-	if enabled, err := passwordRecoveryEnabled(func(string) string { return "" }); err != nil || enabled {
+	if enabled, err := envBool(func(string) string { return "" }, "GOAUTHY_PASSWORD_RECOVERY_ENABLED"); err != nil || enabled {
 		t.Fatalf("default enabled=%v err=%v", enabled, err)
 	}
-	if enabled, err := passwordRecoveryEnabled(func(string) string { return "true" }); err != nil || !enabled {
+	if enabled, err := envBool(func(string) string { return "true" }, "GOAUTHY_PASSWORD_RECOVERY_ENABLED"); err != nil || !enabled {
 		t.Fatalf("enabled=%v err=%v", enabled, err)
 	}
-	if _, err := passwordRecoveryEnabled(func(string) string { return "yes" }); err == nil {
+	if _, err := envBool(func(string) string { return "yes" }, "GOAUTHY_PASSWORD_RECOVERY_ENABLED"); err == nil {
 		t.Fatal("accepted invalid recovery enabled value")
 	}
 	active, err := passwordRulesFromEnvWithRecovery(func(string) string { return "" }, true)
@@ -1669,13 +1669,13 @@ func TestConfigureCIMD(t *testing.T) {
 
 func TestForwardAuthHeadersFromEnv(t *testing.T) {
 	t.Parallel()
-	if enabled, err := forwardAuthHeadersFromEnv(func(string) string { return "" }); err != nil || enabled {
+	if enabled, err := envBool(func(string) string { return "" }, "GOAUTHY_FORWARD_AUTH_HEADERS"); err != nil || enabled {
 		t.Fatalf("default enabled=%v err=%v", enabled, err)
 	}
-	if enabled, err := forwardAuthHeadersFromEnv(func(string) string { return "true" }); err != nil || !enabled {
+	if enabled, err := envBool(func(string) string { return "true" }, "GOAUTHY_FORWARD_AUTH_HEADERS"); err != nil || !enabled {
 		t.Fatalf("enabled=%v err=%v", enabled, err)
 	}
-	if _, err := forwardAuthHeadersFromEnv(func(string) string { return "yes" }); err == nil {
+	if _, err := envBool(func(string) string { return "yes" }, "GOAUTHY_FORWARD_AUTH_HEADERS"); err == nil {
 		t.Fatal("accepted invalid boolean")
 	}
 }
@@ -2906,7 +2906,7 @@ func TestClientCredentialsMapSubFromEnv(t *testing.T) {
 		{raw: "TRUE", want: true, ok: true},
 		{raw: "invalid", want: false, ok: false},
 	} {
-		got, err := clientCredentialsMapSubFromEnv(func(string) string { return test.raw })
+		got, err := envBool(func(string) string { return test.raw }, "GOAUTHY_CLIENT_CREDENTIALS_MAP_SUB")
 		if got != test.want || (err == nil) != test.ok {
 			t.Fatalf("raw=%q got=%t err=%v", test.raw, got, err)
 		}

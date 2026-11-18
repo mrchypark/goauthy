@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 	"github.com/mrchypark/goauthy/internal/securefile"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
@@ -283,7 +284,7 @@ func parseBootstrapKeys(content []byte) ([]bootstrapKey, error) {
 // unsupported-mode sentinels into hard errors, because no later stage of that
 // path re-checks them.
 func parseBootstrapKeysWithDecrypt(content []byte, decrypt func([]byte) ([]byte, error), allowGenerate, preflight bool) ([]bootstrapKey, error) {
-	if err := rejectDuplicateFields(content); err != nil {
+	if err := jsonstrict.RejectDuplicateKeys(content); err != nil {
 		return nil, errors.New("invalid API-key bootstrap JSON")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(content))
@@ -389,7 +390,7 @@ func (r *Request) UnmarshalJSON(data []byte) error {
 			return errors.New("invalid API-key request field")
 		}
 	}
-	if err := rejectDuplicateFields(data); err != nil {
+	if err := jsonstrict.RejectDuplicateKeys(data); err != nil {
 		return err
 	}
 	if raw, ok := fields["name"]; ok {
@@ -422,7 +423,7 @@ func (k *bootstrapJSONKey) UnmarshalJSON(data []byte) error {
 			return errors.New("invalid API-key bootstrap field")
 		}
 	}
-	if err := rejectDuplicateFields(data); err != nil {
+	if err := jsonstrict.RejectDuplicateKeys(data); err != nil {
 		return err
 	}
 	if raw, ok := fields["name"]; ok {
@@ -462,7 +463,7 @@ func (a *Access) UnmarshalJSON(data []byte) error {
 			return errors.New("invalid API-key access field")
 		}
 	}
-	if err := rejectDuplicateFields(data); err != nil {
+	if err := jsonstrict.RejectDuplicateKeys(data); err != nil {
 		return err
 	}
 	if raw, ok := fields["group"]; ok {
@@ -489,7 +490,7 @@ func (s *bootstrapSecret) UnmarshalJSON(data []byte) error {
 		s.generate = true
 		return nil
 	}
-	if err := rejectDuplicateFields(data); err != nil {
+	if err := jsonstrict.RejectDuplicateKeys(data); err != nil {
 		return errors.New("invalid API-key bootstrap secret")
 	}
 	var values map[string]json.RawMessage

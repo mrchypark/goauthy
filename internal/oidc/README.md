@@ -18,7 +18,7 @@
 
 ## Side Effects
 - Reads and deletes master key files in `Keyring.directory`; caches active signing material under `Keyring.mu`.
-- Reads and mutates `oidc_signing_keys`, `event_log`, and envelope-encrypted columns across Rhiza tables (`managed_clients`, `email_outbox`, `identity_login_revoke_codes`, `bootstrap_*`).
+- Reads and mutates `oidc_signing_keys`, `event_log`, and envelope-encrypted columns across Rhiza tables (`managed_oauth_clients`, `email_outbox`, `identity_login_revoke`, `bootstrap_*`).
 - Serves `/.well-known/*` discovery and `/oidc/jwks.json` HTTP responses with `ETag` and `Cache-Control`.
 
 ## Verification

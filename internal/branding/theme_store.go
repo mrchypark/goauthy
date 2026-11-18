@@ -118,7 +118,7 @@ func (s *ThemeStore) Put(ctx context.Context, theme Theme) error {
 	if err != nil {
 		return err
 	}
-	requestID, err := clientFaviconRequestID("theme-put")
+	requestID, err := brandingRequestID("theme-put")
 	if err != nil {
 		return err
 	}
@@ -127,7 +127,7 @@ func (s *ThemeStore) Put(ctx context.Context, theme Theme) error {
 }
 
 func (s *ThemeStore) Delete(ctx context.Context, clientID string) error {
-	requestID, err := clientFaviconRequestID("theme-delete")
+	requestID, err := brandingRequestID("theme-delete")
 	if err != nil {
 		return err
 	}
@@ -232,7 +232,7 @@ func (s *ThemeStore) putAuthorized(ctx context.Context, theme Theme, keys *apike
 	if err != nil {
 		return err
 	}
-	id, err := clientFaviconRequestID("theme-put")
+	id, err := brandingRequestID("theme-put")
 	if err != nil {
 		return err
 	}
@@ -300,7 +300,7 @@ func (s *ThemeStore) deleteAuthorized(ctx context.Context, clientID string, keys
 	if keys == nil {
 		return apikey.ErrForbidden
 	}
-	id, err := clientFaviconRequestID("theme-delete")
+	id, err := brandingRequestID("theme-delete")
 	if err != nil {
 		return err
 	}

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 )
 
 const (
@@ -134,7 +136,7 @@ func decodeMetadata(raw []byte, client target) (Metadata, error) {
 }
 
 func decodeMetadataWithPolicy(raw []byte, client target, policy Policy) (Metadata, error) {
-	if len(raw) == 0 || !utf8.Valid(raw) || duplicateJSONKeys(raw) {
+	if len(raw) == 0 || !utf8.Valid(raw) || jsonstrict.RejectDuplicateKeys(raw) != nil {
 		return Metadata{}, errInvalidMetadata
 	}
 	var fields map[string]json.RawMessage
@@ -343,56 +345,4 @@ func validAllowedResources(values []string) bool {
 		seen[value] = struct{}{}
 	}
 	return true
-}
-
-// duplicateJSONKeys rejects duplicate object keys at every JSON depth.
-func duplicateJSONKeys(raw []byte) bool {
-	d := json.NewDecoder(bytes.NewReader(raw))
-	if duplicateJSONValue(d) != nil {
-		return true
-	}
-	return d.Decode(new(any)) != io.EOF
-}
-
-func duplicateJSONValue(d *json.Decoder) error {
-	token, err := d.Token()
-	if err != nil {
-		return err
-	}
-	delim, ok := token.(json.Delim)
-	if !ok {
-		return nil
-	}
-	switch delim {
-	case '{':
-		seen := map[string]struct{}{}
-		for d.More() {
-			key, err := d.Token()
-			if err != nil {
-				return err
-			}
-			name, ok := key.(string)
-			if !ok {
-				return errors.New("invalid key")
-			}
-			if _, duplicate := seen[name]; duplicate {
-				return errors.New("duplicate key")
-			}
-			seen[name] = struct{}{}
-			if err := duplicateJSONValue(d); err != nil {
-				return err
-			}
-		}
-		_, err = d.Token()
-		return err
-	case '[':
-		for d.More() {
-			if err := duplicateJSONValue(d); err != nil {
-				return err
-			}
-		}
-		_, err = d.Token()
-		return err
-	}
-	return errors.New("invalid delimiter")
 }

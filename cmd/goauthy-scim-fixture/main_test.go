@@ -19,7 +19,7 @@ import (
 func fixtureClient(t *testing.T, s *state) (*scim.Client, *httptest.Server) {
 	t.Helper()
 	server := httptest.NewTLSServer(s.publicHandler())
-	client, err := scim.New(scim.Config{BaseURL: server.URL + "/scim/v2", Token: "fixture-token", HTTPClient: server.Client()})
+	client, err := scim.New(scim.Config{BaseURL: server.URL + "/scim/v2", Token: "fixture-token", HTTPClient: server.Client(), AllowPrivate: true})
 	if err != nil {
 		server.Close()
 		t.Fatal(err)

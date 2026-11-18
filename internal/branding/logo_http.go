@@ -17,6 +17,9 @@ const (
 	clientLogoCSP               = "connect-src 'none'; script-src 'none'; frame-ancestors 'none'; object-src 'none';"
 )
 
+// BrowserAdministrator authorizes a browser-session administrator request.
+type BrowserAdministrator func(http.ResponseWriter, *http.Request, bool) bool
+
 // ClientLogoHandler serves the public client logo and the Clients.Update
 // mutation boundary. The store owns durable fallback and favicon preservation.
 type ClientLogoHandler struct {

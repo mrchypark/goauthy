@@ -1,8 +1,6 @@
 package rbac
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"io"
 	"mime"
@@ -11,6 +9,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 )
 
 type convertPasswordRequest struct {
@@ -103,15 +102,13 @@ func decodeConvertPassword(w http.ResponseWriter, r *http.Request) (convertPassw
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, adminRequestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 || rejectDuplicateJSONFields(body) != nil {
+	if err != nil || len(body) == 0 {
 		return convertPasswordRequest{}, errors.New("invalid JSON")
 	}
 	var wire struct {
 		PasswordNew *string `json:"password_new"`
 	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&wire); err != nil || decoder.Decode(&struct{}{}) != io.EOF || wire.PasswordNew == nil || *wire.PasswordNew == "" {
+	if err := jsonstrict.DecodeStrict(body, &wire); err != nil || wire.PasswordNew == nil || *wire.PasswordNew == "" {
 		return convertPasswordRequest{}, errors.New("invalid convert password request")
 	}
 	return convertPasswordRequest{PasswordNew: *wire.PasswordNew}, nil

@@ -3,11 +3,13 @@ package loginpolicy
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/apikey"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 )
 
 type LockdownHandler struct {
@@ -118,7 +120,9 @@ func decodeStrictJSON(w http.ResponseWriter, r *http.Request, target any) error 
 		return errors.New("invalid content type")
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	return decoder.Decode(target)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return err
+	}
+	return jsonstrict.DecodeStrict(body, target)
 }

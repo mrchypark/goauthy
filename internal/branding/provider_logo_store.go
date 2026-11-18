@@ -66,7 +66,7 @@ func (s *ProviderLogoStore) ReplaceAuthorized(ctx context.Context, providerID st
 	if err != nil {
 		return err
 	}
-	requestID, err := clientFaviconRequestID("branding-provider-logo-replace")
+	requestID, err := brandingRequestID("branding-provider-logo-replace")
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func (s *ProviderLogoStore) DeleteAuthorized(ctx context.Context, providerID str
 	if keys == nil {
 		return apikey.ErrForbidden
 	}
-	requestID, err := clientFaviconRequestID("branding-provider-logo-delete")
+	requestID, err := brandingRequestID("branding-provider-logo-delete")
 	if err != nil {
 		return err
 	}

@@ -91,6 +91,10 @@ type Config struct {
 	RuntimeVersion        string
 	AutoOnboarding        bool
 	AutoLink              bool
+	// AllowPrivate permits outbound token-exchange and JWKS requests to private
+	// or loopback IP addresses (e.g. internal enterprise IdPs); link-local/metadata
+	// addresses remain blocked.
+	AllowPrivate          bool
 	AdminClaimPath        *string
 	AdminClaimValue       *string
 	MFAClaimPath          *string

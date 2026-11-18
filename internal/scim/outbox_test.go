@@ -215,7 +215,7 @@ func TestOutboxRetriesClientTransportAndServerFailures(t *testing.T) {
 					return transport.RoundTrip(r)
 				})}
 			}
-			scimClient, err := New(Config{BaseURL: server.URL, Token: "token", HTTPClient: client})
+			scimClient, err := New(Config{BaseURL: server.URL, Token: "token", HTTPClient: client, AllowPrivate: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -297,7 +297,7 @@ func TestOutboxDeadLettersClientPermanentFailures(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { response(w) }))
 			defer server.Close()
-			client, err := New(Config{BaseURL: server.URL, Token: "token", HTTPClient: server.Client()})
+			client, err := New(Config{BaseURL: server.URL, Token: "token", HTTPClient: server.Client(), AllowPrivate: true})
 			if err != nil {
 				t.Fatal(err)
 			}
