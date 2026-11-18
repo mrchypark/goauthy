@@ -384,3 +384,54 @@ func TestLoginMetricsAuthorizedSessionSkipsCounters(t *testing.T) {
 		t.Fatalf("AuthFailure=%v, want 0", got)
 	}
 }
+
+func TestRecordSuccessfulAuthenticationDebouncesTimingWrite(t *testing.T) {
+	t.Parallel()
+	h := testHandler(t)
+	now := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	h.now = func() time.Time { return now }
+
+	// Failed write rolls back lastPolicySuccessMs so an immediate retry still runs.
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := h.recordSuccessfulAuthentication(canceled, "192.0.2.10", 50*time.Millisecond, nil); err == nil {
+		t.Fatal("expected canceled context error on first success write")
+	}
+	if got := h.lastPolicySuccessMs.Load(); got != 0 {
+		t.Fatalf("expected rolled-back timestamp 0 after error, got=%d", got)
+	}
+
+	if err := h.recordSuccessfulAuthentication(t.Context(), "192.0.2.10", 50*time.Millisecond, nil); err != nil {
+		t.Fatalf("first success: %v", err)
+	}
+	status1, err := h.policy.Check(t.Context(), "192.0.2.10", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Within policySuccessFlushInterval, the DB write is skipped so Mean stays unchanged.
+	now = now.Add(2 * time.Second)
+	if err := h.recordSuccessfulAuthentication(t.Context(), "192.0.2.10", 400*time.Millisecond, nil); err != nil {
+		t.Fatalf("debounced success: %v", err)
+	}
+	status2, err := h.policy.Check(t.Context(), "192.0.2.10", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status2.Mean != status1.Mean {
+		t.Fatalf("expected debounced write to keep Mean=%v, got=%v", status1.Mean, status2.Mean)
+	}
+
+	// After policySuccessFlushInterval, the DB write runs and updates Mean.
+	now = now.Add(policySuccessFlushInterval)
+	if err := h.recordSuccessfulAuthentication(t.Context(), "192.0.2.10", 400*time.Millisecond, nil); err != nil {
+		t.Fatalf("post-interval success: %v", err)
+	}
+	status3, err := h.policy.Check(t.Context(), "192.0.2.10", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status3.Mean <= status1.Mean {
+		t.Fatalf("expected post-interval write to increase Mean above %v, got=%v", status1.Mean, status3.Mean)
+	}
+}
