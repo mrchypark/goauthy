@@ -1495,6 +1495,10 @@ func (h *Handler) completeBrowserAuthentication(w http.ResponseWriter, r *http.R
 			http.Error(w, "Invalid User-Agent", http.StatusBadRequest)
 			return browser.IssuedSession{}, false
 		}
+		if errors.Is(err, identity.ErrInactiveSubject) || errors.Is(err, identity.ErrInvalidSubject) {
+			http.Error(w, "Invalid login request", http.StatusUnauthorized)
+			return browser.IssuedSession{}, false
+		}
 		http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 		return browser.IssuedSession{}, false
 	}
@@ -2139,11 +2143,12 @@ func (h *Handler) recordAuthStage(ctx context.Context, stage metrics.AuthStage, 
 	tracing.ObserveAuthStage(ctx, string(stage), start)
 }
 
-// recordSuccessfulAuthentication is intentionally a no-op for every
-// authentication error: outages and Argon work-limit failures must neither
-// erase brute-force state nor influence the durable timing floor.
 const policySuccessFlushInterval = 10 * time.Second
 
+// recordSuccessfulAuthentication is intentionally a no-op for every
+// authentication error: outages and Argon work-limit failures must neither
+// erase brute-force state nor influence the durable timing floor. Durable
+// timing-floor writes are debounced per Handler over policySuccessFlushInterval.
 func (h *Handler) recordSuccessfulAuthentication(ctx context.Context, peerIP string, elapsed time.Duration, authErr error) error {
 	if authErr != nil || h.policy == nil {
 		return authErr
@@ -2152,6 +2157,7 @@ func (h *Handler) recordSuccessfulAuthentication(ctx context.Context, peerIP str
 	nowMs := h.now().UTC().UnixMilli()
 	last := h.lastPolicySuccessMs.Load()
 	if last != 0 && nowMs >= last && nowMs-last < policySuccessFlushInterval.Milliseconds() {
+		// Record the stage observation on debounced skips so auth-stage metrics stay complete.
 		h.recordAuthStage(ctx, metrics.AuthStagePolicySuccess, successStart)
 		return nil
 	}
