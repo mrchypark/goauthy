@@ -34,7 +34,7 @@ func (e *OAuth2TokenExchanger) exchangeGitHubUser(ctx context.Context, providerI
 	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
 	req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
 	req.Header.Set("Accept", githubAccept)
-	resp, err := e.client.Do(req)
+	resp, err := e.httpClient(cfg).Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()

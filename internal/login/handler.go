@@ -25,6 +25,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 	"github.com/mrchypark/goauthy/internal/loginpolicy"
 	"github.com/mrchypark/goauthy/internal/metrics"
 	"github.com/mrchypark/goauthy/internal/oauth"
@@ -1975,15 +1976,11 @@ func decodeStrictJSON(w http.ResponseWriter, r *http.Request, limit int64, targe
 		return errors.New("invalid content type")
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		return err
 	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return errors.New("trailing JSON")
-	}
-	return nil
+	return jsonstrict.DecodeStrict(body, target)
 }
 
 // decodeOTPVerify accepts the strict JSON body used by API callers and the

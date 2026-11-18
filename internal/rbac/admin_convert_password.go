@@ -11,6 +11,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 )
 
 type convertPasswordRequest struct {
@@ -103,7 +104,7 @@ func decodeConvertPassword(w http.ResponseWriter, r *http.Request) (convertPassw
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, adminRequestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 || rejectDuplicateJSONFields(body) != nil {
+	if err != nil || len(body) == 0 || jsonstrict.RejectDuplicateKeys(body) != nil {
 		return convertPasswordRequest{}, errors.New("invalid JSON")
 	}
 	var wire struct {

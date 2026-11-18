@@ -11,11 +11,13 @@ import (
 	"time"
 )
 
+// Verifier validates human-verification tokens submitted by callers.
 type Verifier interface {
 	Verify(ctx context.Context, response, remoteIP string) (bool, error)
 	SiteKey() string
 }
 
+// NewVerifier constructs a Turnstile, hCaptcha, or no-op Verifier from getenv.
 func NewVerifier(getenv func(string) string) Verifier {
 	provider := getenv("GOAUTHY_CAPTCHA_PROVIDER")
 	siteKey := getenv("GOAUTHY_CAPTCHA_SITE_KEY")
@@ -89,6 +91,9 @@ func doVerify(req *http.Request) (bool, error) {
 		return false, fmt.Errorf("captcha verification request failed: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false, fmt.Errorf("captcha verification returned HTTP %d", resp.StatusCode)
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return false, fmt.Errorf("read captcha verification response: %w", err)

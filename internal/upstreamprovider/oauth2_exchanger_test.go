@@ -134,11 +134,12 @@ func TestOAuth2TokenExchangerClientPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	transport, ok := defaultClient.client.Transport.(*http.Transport)
+	resolvedDefault := defaultClient.httpClient(configs["provider"])
+	transport, ok := resolvedDefault.Transport.(*http.Transport)
 	if !ok || transport.Proxy != nil || !transport.DisableCompression || transport.TLSClientConfig == nil || transport.TLSClientConfig.MinVersion != tls.VersionTLS12 {
-		t.Fatalf("default transport = %#v", defaultClient.client.Transport)
+		t.Fatalf("default transport = %#v", resolvedDefault.Transport)
 	}
-	if defaultClient.client.Timeout != upstreamTokenExchangeTimeout || defaultClient.client.CheckRedirect(nil, nil) != http.ErrUseLastResponse {
+	if resolvedDefault.Timeout != upstreamTokenExchangeTimeout || resolvedDefault.CheckRedirect(nil, nil) != http.ErrUseLastResponse {
 		t.Fatal("default client does not enforce exchange policy")
 	}
 
@@ -200,7 +201,7 @@ func TestOAuth2TokenExchangerReusesConnectionWithFreshRuntimeSnapshot(t *testing
 	roots := x509.NewCertPool()
 	roots.AddCert(server.Certificate())
 	for _, exchanger := range []*OAuth2TokenExchanger{first, second} {
-		transport, ok := exchanger.client.Transport.(*http.Transport)
+		transport, ok := exchanger.httpClient(exchanger.configs["provider"]).Transport.(*http.Transport)
 		if !ok {
 			t.Fatalf("default transport type = %T", exchanger.client.Transport)
 		}

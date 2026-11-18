@@ -93,7 +93,7 @@ func (h *ThemeHandler) ResolveLegacy(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad Request", http.StatusBadRequest)
 		return
 	}
-	id, err := clientFaviconRequestID("branding-legacy-resolve")
+	id, err := brandingRequestID("branding-legacy-resolve")
 	if err != nil {
 		http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 		return

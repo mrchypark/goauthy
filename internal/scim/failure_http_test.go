@@ -49,7 +49,7 @@ func TestScimRealHTTPGroupFailureTerminalEvent(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
-	client, err := New(Config{BaseURL: server.URL, Token: "token", HTTPClient: server.Client()})
+	client, err := New(Config{BaseURL: server.URL, Token: "token", HTTPClient: server.Client(), AllowPrivate: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestScimRealHTTPGroupCreateFailureTerminalEvent(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
-	client, err := New(Config{BaseURL: server.URL, Token: "token", HTTPClient: server.Client()})
+	client, err := New(Config{BaseURL: server.URL, Token: "token", HTTPClient: server.Client(), AllowPrivate: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestScimRealHTTPTombstoneDeleteFailureTerminalEvent(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
-	client, err := New(Config{BaseURL: server.URL, Token: "token", HTTPClient: server.Client()})
+	client, err := New(Config{BaseURL: server.URL, Token: "token", HTTPClient: server.Client(), AllowPrivate: true})
 	if err != nil {
 		t.Fatal(err)
 	}

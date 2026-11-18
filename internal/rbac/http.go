@@ -545,7 +545,7 @@ func decodeLoginRestriction(w http.ResponseWriter, r *http.Request) (loginRestri
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, adminRequestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 || rejectDuplicateJSONFields(body) != nil {
+	if err != nil || len(body) == 0 || jsonstrict.RejectDuplicateKeys(body) != nil {
 		return loginRestrictionRequest{}, errors.New("invalid JSON")
 	}
 	var wire struct {
@@ -584,7 +584,7 @@ func decodeMembershipPatch(w http.ResponseWriter, r *http.Request) (membershipPa
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, adminRequestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 || rejectDuplicateJSONFields(body) != nil {
+	if err != nil || len(body) == 0 || jsonstrict.RejectDuplicateKeys(body) != nil {
 		return membershipPatch{}, errors.New("invalid JSON")
 	}
 	var wire struct {
@@ -652,11 +652,6 @@ func patchNames(raw json.RawMessage, group bool) ([]string, error) {
 		seen[value] = struct{}{}
 	}
 	return values, nil
-}
-
-// rejectDuplicateJSONFields delegates to jsonstrict.RejectDuplicateKeys.
-func rejectDuplicateJSONFields(body []byte) error {
-	return jsonstrict.RejectDuplicateKeys(body)
 }
 
 func decodeRequest(w http.ResponseWriter, r *http.Request, role bool) (entityRequest, error) {

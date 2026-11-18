@@ -135,7 +135,7 @@ GoAuthy writes Argon2id `v=19` credentials using the OWASP baseline (`m=19456` K
 - Replicated state and schema migrations (`v115`) are persisted in `*rhiza.DB`; mutations requiring authorization or fencing evaluate predicates inside the same linearizable transaction (`internal/storage`, `internal/audit`, `internal/eventlog`, `internal/rbac`, `internal/clients`).
 - Envelope-encrypted secrets (OAuth clients, SaaS providers/credentials, passkey credentials/ceremonies, upstream providers, KV namespaces) are sealed with `*oidc.Keyring` and guarded by master-key retirement writer barriers (`internal/oidc`, `internal/storage`).
 - Outbound HTTP/webhook/CIMD/back-channel/SCIM/SaaS callers enforce HTTPS policies, bounded response sizes, redirect restrictions, and private-IP/DNS-rebinding protections (`internal/backchannel`, `internal/cimd`, `internal/notify`, `internal/saas`, `internal/scim`).
-- Browser-only endpoints enforce session binding, CSRF tokens, `Sec-Fetch-Site` checks, and reject `Authorization` headers; API-key endpoints enforce constant-time SHA-256 verification and narrow resource rights (`internal/browser`, `internal/security`, `internal/apikey`, `internal/admin`, `internal/account`).
+- Browser-only endpoints enforce session binding, CSRF tokens, `Sec-Fetch-Site` checks, and reject `Authorization` headers; API-key endpoints enforce constant-time SHA-256 verification and narrow resource rights (`internal/browser`, `internal/apikey`, `internal/admin`, `internal/account`).
 
 ---
 

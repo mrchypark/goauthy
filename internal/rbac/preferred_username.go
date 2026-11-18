@@ -13,6 +13,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 )
@@ -32,7 +33,7 @@ func decodePreferredUsername(w http.ResponseWriter, r *http.Request) (preferredU
 		return input, ErrInvalid
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, adminRequestLimit))
-	if err != nil || !utf8.Valid(body) || rejectDuplicateJSONFields(body) != nil {
+	if err != nil || !utf8.Valid(body) || jsonstrict.RejectDuplicateKeys(body) != nil {
 		return input, ErrInvalid
 	}
 	var fields map[string]json.RawMessage

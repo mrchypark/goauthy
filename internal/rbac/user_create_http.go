@@ -17,6 +17,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 	"github.com/mrchypark/goauthy/internal/loginpolicy"
 	"github.com/mrchypark/goauthy/internal/recovery"
 )
@@ -205,7 +206,7 @@ func decodeUserCreate(w http.ResponseWriter, r *http.Request, policy *identity.P
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, adminRequestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || !utf8.Valid(body) || rejectDuplicateJSONFields(body) != nil {
+	if err != nil || !utf8.Valid(body) || jsonstrict.RejectDuplicateKeys(body) != nil {
 		return input, ErrInvalid
 	}
 	var fields map[string]json.RawMessage

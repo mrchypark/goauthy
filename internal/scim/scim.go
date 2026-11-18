@@ -20,6 +20,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/mrchypark/goauthy/internal/netsec"
 )
 
 const (
@@ -104,6 +106,8 @@ type Config struct {
 	HTTPClient       *http.Client
 	RootCAs          *x509.CertPool
 	MaxResponseBytes int
+	// AllowPrivate permits dialing private/loopback IPs (e.g. local test or internal SCIM servers); link-local/metadata IPs remain blocked.
+	AllowPrivate bool
 }
 
 // Client performs bounded user-only SCIM operations.
@@ -129,17 +133,17 @@ func New(cfg Config) (*Client, error) {
 	}
 	hc := cfg.HTTPClient
 	if hc == nil {
-		hc = &http.Client{Transport: secureTransport(cfg.RootCAs), Timeout: defaultTimeout}
+		hc = &http.Client{Transport: secureTransport(cfg.RootCAs, cfg.AllowPrivate), Timeout: defaultTimeout}
 	} else {
 		copy := *hc
 		hc = &copy
 		if hc.Transport == nil {
-			hc.Transport = secureTransport(cfg.RootCAs)
+			hc.Transport = secureTransport(cfg.RootCAs, cfg.AllowPrivate)
 		} else if transport, ok := hc.Transport.(*http.Transport); ok {
 			if transport.DialTLS != nil || transport.DialTLSContext != nil {
 				return nil, ErrInvalidConfig
 			}
-			hc.Transport = secureTransportFrom(transport, cfg.RootCAs)
+			hc.Transport = secureTransportFrom(transport, cfg.RootCAs, cfg.AllowPrivate)
 		} else if cfg.RootCAs != nil {
 			return nil, ErrInvalidConfig
 		}
@@ -151,11 +155,11 @@ func New(cfg Config) (*Client, error) {
 	return &Client{baseURL: base, httpClient: hc, token: cfg.Token, maxResponseBytes: limit}, nil
 }
 
-func secureTransport(rootCAs *x509.CertPool) *http.Transport {
-	return secureTransportFrom(http.DefaultTransport.(*http.Transport), rootCAs)
+func secureTransport(rootCAs *x509.CertPool, allowPrivate bool) *http.Transport {
+	return secureTransportFrom(http.DefaultTransport.(*http.Transport), rootCAs, allowPrivate)
 }
 
-func secureTransportFrom(source *http.Transport, rootCAs *x509.CertPool) *http.Transport {
+func secureTransportFrom(source *http.Transport, rootCAs *x509.CertPool, allowPrivate bool) *http.Transport {
 	transport := source.Clone()
 	transport.Proxy = nil
 	transport.DisableCompression = true
@@ -170,6 +174,7 @@ func secureTransportFrom(source *http.Transport, rootCAs *x509.CertPool) *http.T
 	if rootCAs != nil {
 		transport.TLSClientConfig.RootCAs = rootCAs.Clone()
 	}
+	transport.DialContext = netsec.SafeDialContext(defaultTimeout, allowPrivate)
 	return transport
 }
 

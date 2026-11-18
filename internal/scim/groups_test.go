@@ -201,7 +201,7 @@ func TestGroupValidationRejectsDuplicatesMalformedAndOversize(t *testing.T) {
 			}
 		})
 	}
-	oversize, err := New(Config{BaseURL: server.URL + "/scim/v2", Token: "secret", HTTPClient: server.Client(), MaxResponseBytes: 64})
+	oversize, err := New(Config{BaseURL: server.URL + "/scim/v2", Token: "secret", HTTPClient: server.Client(), MaxResponseBytes: 64, AllowPrivate: true})
 	if err != nil {
 		t.Fatal(err)
 	}

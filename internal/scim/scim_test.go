@@ -40,7 +40,7 @@ func (*partialReadCloser) Close() error { return nil }
 func testClient(t *testing.T, handler http.Handler) (*Client, *httptest.Server) {
 	t.Helper()
 	server := httptest.NewTLSServer(handler)
-	client, err := New(Config{BaseURL: server.URL + "/scim/v2", Token: "secret", HTTPClient: server.Client()})
+	client, err := New(Config{BaseURL: server.URL + "/scim/v2", Token: "secret", HTTPClient: server.Client(), AllowPrivate: true})
 	if err != nil {
 		server.Close()
 		t.Fatal(err)
@@ -131,7 +131,7 @@ func TestNewCustomRootCAs(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			client, err := New(Config{BaseURL: server.URL, Token: "token", RootCAs: roots})
+			client, err := New(Config{BaseURL: server.URL, Token: "token", RootCAs: roots, AllowPrivate: true})
 			if err != nil {
 				t.Fatal(err)
 			}

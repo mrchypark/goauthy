@@ -76,20 +76,7 @@ func NewOAuth2TokenExchanger(configs map[string]Config, secrets map[string]strin
 			return nil, ErrInvalidConfig
 		}
 	}
-	if client == nil {
-		allowPrivate := false
-		for _, cfg := range clonedConfigs {
-			if cfg.AllowPrivate {
-				allowPrivate = true
-				break
-			}
-		}
-		if allowPrivate {
-			client = defaultPrivateTokenExchangeClient()
-		} else {
-			client = defaultTokenExchangeClient()
-		}
-	} else {
+	if client != nil {
 		cloned := *client
 		if cloned.Timeout == 0 || cloned.Timeout > upstreamTokenExchangeTimeout {
 			cloned.Timeout = upstreamTokenExchangeTimeout
@@ -98,6 +85,16 @@ func NewOAuth2TokenExchanger(configs map[string]Config, secrets map[string]strin
 		client = &cloned
 	}
 	return &OAuth2TokenExchanger{configs: clonedConfigs, secrets: clonedSecrets, client: client}, nil
+}
+
+func (e *OAuth2TokenExchanger) httpClient(cfg Config) *http.Client {
+	if e.client != nil {
+		return e.client
+	}
+	if cfg.AllowPrivate {
+		return defaultPrivateTokenExchangeClient()
+	}
+	return defaultTokenExchangeClient()
 }
 
 // ExchangeCode exchanges a code and returns the provider's verified input.
@@ -127,7 +124,7 @@ func (e *OAuth2TokenExchanger) ExchangeCode(ctx context.Context, providerID, cal
 }
 
 func (e *OAuth2TokenExchanger) exchangeCodeLegacy(ctx context.Context, providerID string, cfg Config, callbackURI, code, pkceVerifier string) (*TokenExchangeResult, error) {
-	ctx = context.WithValue(ctx, oauth2.HTTPClient, e.client)
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, e.httpClient(cfg))
 	endpoint := oauth2.Endpoint{TokenURL: cfg.TokenEndpoint}
 	if cfg.NormalizedKind() == ProviderKindGitHub {
 		endpoint.AuthStyle = oauth2.AuthStyleInParams
@@ -185,7 +182,7 @@ func (e *OAuth2TokenExchanger) exchangeCodeExplicit(ctx context.Context, provide
 		req.SetBasicAuth(url.QueryEscape(cfg.ClientID), url.QueryEscape(secret))
 	}
 
-	resp, err := e.client.Do(req)
+	resp, err := e.httpClient(cfg).Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()

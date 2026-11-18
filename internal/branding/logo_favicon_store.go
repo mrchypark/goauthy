@@ -10,7 +10,7 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-func clientFaviconRequestID(prefix string) (string, error) {
+func brandingRequestID(prefix string) (string, error) {
 	requestIDBytes := make([]byte, 16)
 	if _, err := rand.Read(requestIDBytes); err != nil {
 		return "", err
@@ -44,7 +44,7 @@ func (s *ClientLogoStore) ReplaceFaviconAuthorized(ctx context.Context, clientID
 	if err := validateFaviconAsset(asset); err != nil {
 		return err
 	}
-	requestID, err := clientFaviconRequestID("branding-favicon-replace")
+	requestID, err := brandingRequestID("branding-favicon-replace")
 	if err != nil {
 		return err
 	}
@@ -88,7 +88,7 @@ func (s *ClientLogoStore) DeleteFaviconAuthorized(ctx context.Context, clientID 
 	if keys == nil {
 		return apikey.ErrForbidden
 	}
-	requestID, err := clientFaviconRequestID("branding-favicon-delete")
+	requestID, err := brandingRequestID("branding-favicon-delete")
 	if err != nil {
 		return err
 	}

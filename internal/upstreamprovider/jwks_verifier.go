@@ -51,18 +51,24 @@ type jwksFetch struct {
 // defaultClient is shared by every verifier created without an explicit client
 // so connection pools and TLS sessions are reused across verifiers instead of
 // being rebuilt per dispatch.
-var defaultClient = sync.OnceValue(func() *http.Client {
-	return newSafeHTTPClient(jwksTimeout, false)
-})
+var (
+	defaultClient = sync.OnceValue(func() *http.Client {
+		return newSafeHTTPClient(jwksTimeout, false)
+	})
+	defaultPrivateClient = sync.OnceValue(func() *http.Client {
+		return newSafeHTTPClient(jwksTimeout, true)
+	})
+)
 
 // JWKSVerifier verifies OIDC ID tokens using configured issuer JWKS endpoints.
 type JWKSVerifier struct {
-	jwksByIssuer map[string]string
-	client       *http.Client
-	now          func() time.Time
-	mu           sync.Mutex
-	entries      map[string]jwksCacheEntry
-	fetching     map[string]*jwksFetch
+	jwksByIssuer         map[string]string
+	allowPrivateByIssuer map[string]bool
+	client               *http.Client
+	now                  func() time.Time
+	mu                   sync.Mutex
+	entries              map[string]jwksCacheEntry
+	fetching             map[string]*jwksFetch
 }
 
 // NewJWKSVerifier creates a verifier from provider configurations. Each
@@ -72,7 +78,13 @@ func NewJWKSVerifier(configs map[string]Config, client *http.Client) (*JWKSVerif
 	if len(configs) == 0 {
 		return nil, ErrInvalidConfig
 	}
-	v := &JWKSVerifier{jwksByIssuer: make(map[string]string, len(configs)), now: time.Now, entries: make(map[string]jwksCacheEntry), fetching: make(map[string]*jwksFetch)}
+	v := &JWKSVerifier{
+		jwksByIssuer:         make(map[string]string, len(configs)),
+		allowPrivateByIssuer: make(map[string]bool, len(configs)),
+		now:                  time.Now,
+		entries:              make(map[string]jwksCacheEntry),
+		fetching:             make(map[string]*jwksFetch),
+	}
 	for _, cfg := range configs {
 		if cfg.Validate() != nil {
 			return nil, ErrInvalidConfig
@@ -86,11 +98,13 @@ func NewJWKSVerifier(configs map[string]Config, client *http.Client) (*JWKSVerif
 		if old, ok := v.jwksByIssuer[cfg.Issuer]; ok && old != cfg.JWKSURI {
 			return nil, ErrInvalidConfig
 		}
+		if oldPrivate, ok := v.allowPrivateByIssuer[cfg.Issuer]; ok && oldPrivate != cfg.AllowPrivate {
+			return nil, ErrInvalidConfig
+		}
 		v.jwksByIssuer[cfg.Issuer] = cfg.JWKSURI
+		v.allowPrivateByIssuer[cfg.Issuer] = cfg.AllowPrivate
 	}
-	if client == nil {
-		v.client = defaultClient()
-	} else {
+	if client != nil {
 		cloned := *client
 		if cloned.Timeout == 0 || cloned.Timeout > jwksTimeout {
 			cloned.Timeout = jwksTimeout
@@ -99,6 +113,16 @@ func NewJWKSVerifier(configs map[string]Config, client *http.Client) (*JWKSVerif
 		v.client = &cloned
 	}
 	return v, nil
+}
+
+func (v *JWKSVerifier) httpClient(issuer string) *http.Client {
+	if v.client != nil {
+		return v.client
+	}
+	if v.allowPrivateByIssuer[issuer] {
+		return defaultPrivateClient()
+	}
+	return defaultClient()
 }
 
 // VerifyIDToken verifies a token before decoding its claims.
@@ -197,7 +221,7 @@ func (v *JWKSVerifier) keys(ctx context.Context, issuer, uri string, force bool)
 
 	go func() {
 		fetchCtx, cancel := context.WithTimeout(context.Background(), jwksTimeout)
-		keys, err := v.fetch(fetchCtx, uri)
+		keys, err := v.fetch(fetchCtx, issuer, uri)
 		cancel()
 		v.mu.Lock()
 		if err == nil {
@@ -227,12 +251,12 @@ func (v *JWKSVerifier) keys(ctx context.Context, issuer, uri string, force bool)
 	}
 }
 
-func (v *JWKSVerifier) fetch(ctx context.Context, uri string) (jose.JSONWebKeySet, error) {
+func (v *JWKSVerifier) fetch(ctx context.Context, issuer, uri string) (jose.JSONWebKeySet, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
 		return jose.JSONWebKeySet{}, err
 	}
-	resp, err := v.client.Do(req)
+	resp, err := v.httpClient(issuer).Do(req)
 	if err != nil {
 		return jose.JSONWebKeySet{}, err
 	}

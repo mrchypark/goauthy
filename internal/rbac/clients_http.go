@@ -12,6 +12,7 @@ import (
 
 	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/clients"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 )
 
 func (h *Handler) Clients(w http.ResponseWriter, r *http.Request) {
@@ -218,7 +219,7 @@ func decodeJSON(r *http.Request, v any, fields map[string]bool, required []strin
 		return errors.New("content type")
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, adminRequestLimit+1))
-	if err != nil || len(body) == 0 || int64(len(body)) > adminRequestLimit || !utf8.Valid(body) || rejectDuplicateJSONFields(body) != nil {
+	if err != nil || len(body) == 0 || int64(len(body)) > adminRequestLimit || !utf8.Valid(body) || jsonstrict.RejectDuplicateKeys(body) != nil {
 		return errors.New("json")
 	}
 	var raw map[string]json.RawMessage

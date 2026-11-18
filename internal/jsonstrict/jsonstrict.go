@@ -11,6 +11,24 @@ import (
 // ErrDuplicateKey indicates a JSON object contained a repeated key.
 var ErrDuplicateKey = errors.New("duplicate JSON object key")
 
+// DecodeStrict validates that data contains a single JSON value without duplicate
+// object keys or trailing tokens, then decodes it into target with
+// DisallowUnknownFields enabled.
+func DecodeStrict(data []byte, target any) error {
+	if err := RejectDuplicateKeys(data); err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+
 // RejectDuplicateKeys verifies that data contains a single valid JSON value
 // with no repeated object keys at any nesting depth and no trailing tokens.
 func RejectDuplicateKeys(data []byte) error {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/mrchypark/goauthy/internal/i18n"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 )
 
 // UserUpdateRequest is the administrator user update wire contract.
@@ -42,7 +43,7 @@ func decodeUserUpdate(w http.ResponseWriter, r *http.Request) (UserUpdateRequest
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, adminRequestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || !utf8.Valid(body) || rejectDuplicateJSONFields(body) != nil {
+	if err != nil || !utf8.Valid(body) || jsonstrict.RejectDuplicateKeys(body) != nil {
 		return input, ErrInvalid
 	}
 	var fields map[string]json.RawMessage

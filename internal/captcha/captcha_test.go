@@ -2,6 +2,8 @@ package captcha
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -85,5 +87,43 @@ func TestHCaptchaVerifierRejectsEmptyResponse(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("expected false for empty response")
+	}
+}
+
+func TestHTTPVerifierVerifyPaths(t *testing.T) {
+	t.Parallel()
+	var status int
+	var payload string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method %s", r.Method)
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(payload))
+	}))
+	defer srv.Close()
+
+	v := &httpVerifier{provider: "turnstile", verifyURL: srv.URL, siteKey: "site", secretKey: "secret"}
+
+	status, payload = http.StatusOK, `{"success":true}`
+	ok, err := v.Verify(context.Background(), "token-1", "192.0.2.1")
+	if err != nil || !ok {
+		t.Fatalf("expected true, nil; got ok=%t err=%v", ok, err)
+	}
+
+	status, payload = http.StatusOK, `{"success":false}`
+	ok, err = v.Verify(context.Background(), "token-2", "")
+	if err != nil || ok {
+		t.Fatalf("expected false, nil; got ok=%t err=%v", ok, err)
+	}
+
+	status, payload = http.StatusBadGateway, `bad gateway`
+	if ok, err = v.Verify(context.Background(), "token-3", ""); err == nil || ok {
+		t.Fatalf("expected error on non-2xx, got ok=%t err=%v", ok, err)
+	}
+
+	status, payload = http.StatusOK, `{not-json`
+	if ok, err = v.Verify(context.Background(), "token-4", ""); err == nil || ok {
+		t.Fatalf("expected error on invalid JSON, got ok=%t err=%v", ok, err)
 	}
 }
