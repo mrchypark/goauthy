@@ -13,9 +13,9 @@ assert.equal(i18n.messages['Common logo'], '공통 로고');
 assert.equal(i18n.messages['Current common logo'], '현재 공통 로고');
 assert.equal(i18n.messages['Remove this common logo?'], '공통 로고를 삭제하시겠습니까?');
 for (const key of [
-  'Creating an account requires password recovery and email delivery. Assign rauthy_admin to grant access to this administration page.',
-  'Creating an account requires password recovery and email delivery. Administrator access requires the rauthy_admin role.'
-]) assert.match(i18n.messages[key], /rauthy_admin/);
+  'Creating an account requires password recovery and email delivery. Assign goauthy_admin to grant access to this administration page.',
+  'Creating an account requires password recovery and email delivery. Administrator access requires the goauthy_admin role.'
+]) assert.match(i18n.messages[key], /goauthy_admin/);
 for (const [key, value] of Object.entries({Operators: '운영자', 'Service users': '서비스 사용자', 'New operator': '새 운영자', 'Create operator': '운영자 만들기', 'Edit operator': '운영자 수정'})) {
   assert.equal(i18n.messages[key], value);
 }
