@@ -16,7 +16,6 @@ Core GoAuthy domain, protocol, security, persistence, and UI packages under `int
 - `backupschedule`: [./backupschedule/README.md](./backupschedule/README.md) - Cron schedule parsing, distributed KV lease acquisition, and CAS-watermark-guarded backup slot execution in `*rhiza.DB`.
 - `branding`: [./branding/README.md](./branding/README.md) - Global and per-client/provider themes, CSS generation, sanitized SVG/raster logos, favicons, brand resolution, and branded error middleware (embeds [./branding/assets/README.md](./branding/assets/README.md)).
 - `browser`: [./browser/README.md](./browser/README.md) - Peer-bound browser sessions, init/reauthentication flows, authorization interactions, issuer-scoped cookies, and session-bound CSRF tokens.
-- `cache`: [./cache/README.md](./cache/README.md) - Generic, concurrent-safe, power-of-2 sharded, TTL-aware in-memory LRU cache with atomic hit/miss metrics.
 - `captcha`: [./captcha/README.md](./captcha/README.md) - Pluggable CAPTCHA verifier supporting Cloudflare Turnstile, hCaptcha, and an unconfigured no-op fallback.
 - `cimd`: [./cimd/README.md](./cimd/README.md) - Validates, fetches, and caches OAuth Client ID Metadata Documents (CIMD) in `*rhiza.DB` with SSRF and policy-digest isolation.
 - `claims`: [./claims/README.md](./claims/README.md) - Manages custom user attributes, custom OIDC scopes, user attribute values, per-client scope policies, and token claim resolution.
@@ -49,7 +48,7 @@ Core GoAuthy domain, protocol, security, persistence, and UI packages under `int
 - `scim`: [./scim/README.md](./scim/README.md) - Stateless bounded outbound SCIM 2.0 client for Users and Groups, Rhiza-backed durable outbox, encrypted SCIM client config store, and immutable user mapping store.
 - `security`: [./security/README.md](./security/README.md) - HTTP security header middleware (OWASP/NIST), CORS middleware, Fetch Metadata/Origin CSRF protection middleware, and header text validation.
 - `smtptransport`: [./smtptransport/README.md](./smtptransport/README.md) - Context-bound SMTP dialer and custom authentication selector for `go-mail` supporting implicit TLS and channel-bound SCRAM.
-- `storage`: [./storage/README.md](./storage/README.md) - Embedded Rhiza database configuration, schema migrations (`v114`), S3/GCS object-store opening, master-key retirement fencing, envelope writer admission, DCR trust fencing, and passkey cookie retention watermarks.
+- `storage`: [./storage/README.md](./storage/README.md) - Embedded Rhiza database configuration, schema migrations (`v115`), S3/GCS object-store opening, master-key retirement fencing, envelope writer admission, DCR trust fencing, and passkey cookie retention watermarks.
 - `testbrowser`: [./testbrowser/README.md](./testbrowser/README.md) - Bounded headless Chrome lifecycle helper for UI and end-to-end browser regression tests via `chromedp`.
 - `tlsconfig`: [./tlsconfig/README.md](./tlsconfig/README.md) - Loads and atomically hot-reloads X.509 server TLS certificates from disk for `tls.Config.GetCertificate`.
 - `tracing`: [./tracing/README.md](./tracing/README.md) - Configures OpenTelemetry OTLP/HTTP tracing, HTTP request tracing middleware without path credential leakage, and allowlisted auth-stage spans.

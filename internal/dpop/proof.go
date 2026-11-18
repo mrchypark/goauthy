@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-jose/go-jose/v4"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 )
 
 const MaxProofSize = 8 << 10
@@ -72,11 +72,11 @@ func Validate(raw string, r *http.Request, options Options) (Proof, error) {
 	}
 	parts := strings.Split(raw, ".")
 	headerJSON, err := decodeSegment(parts[0])
-	if err != nil || hasDuplicateJSONKeys(headerJSON) {
+	if err != nil || jsonstrict.RejectDuplicateKeys(headerJSON) != nil {
 		return Proof{}, ErrInvalidProof
 	}
 	var h header
-	if json.Unmarshal(headerJSON, &h) != nil || h.Typ != "dpop+jwt" || !allowedAlgorithm(h.Alg) || len(h.JWK) == 0 || hasDuplicateJSONKeys(h.JWK) || privateJWK(h.JWK) {
+	if json.Unmarshal(headerJSON, &h) != nil || h.Typ != "dpop+jwt" || !allowedAlgorithm(h.Alg) || len(h.JWK) == 0 || jsonstrict.RejectDuplicateKeys(h.JWK) != nil || privateJWK(h.JWK) {
 		return Proof{}, ErrInvalidProof
 	}
 	var key jose.JSONWebKey
@@ -84,7 +84,7 @@ func Validate(raw string, r *http.Request, options Options) (Proof, error) {
 		return Proof{}, ErrInvalidProof
 	}
 	payload, err := decodeSegment(parts[1])
-	if err != nil || hasDuplicateJSONKeys(payload) {
+	if err != nil || jsonstrict.RejectDuplicateKeys(payload) != nil {
 		return Proof{}, ErrInvalidProof
 	}
 	var c claims
@@ -208,54 +208,4 @@ func canonicalHTU(value string) string {
 	u.Host = strings.ToLower(u.Host)
 	u.RawPath = ""
 	return u.String()
-}
-
-// hasDuplicateJSONKeys rejects duplicate keys at every JSON object depth.
-func hasDuplicateJSONKeys(raw []byte) bool {
-	d := json.NewDecoder(bytes.NewReader(raw))
-	if duplicateJSONValue(d) != nil {
-		return true
-	}
-	return d.Decode(new(any)) != io.EOF
-}
-func duplicateJSONValue(d *json.Decoder) error {
-	token, err := d.Token()
-	if err != nil {
-		return err
-	}
-	switch token := token.(type) {
-	case json.Delim:
-		switch token {
-		case '{':
-			seen := map[string]struct{}{}
-			for d.More() {
-				k, e := d.Token()
-				if e != nil {
-					return e
-				}
-				key, ok := k.(string)
-				if !ok {
-					return errors.New("key")
-				}
-				if _, ok = seen[key]; ok {
-					return errors.New("duplicate")
-				}
-				seen[key] = struct{}{}
-				if e = duplicateJSONValue(d); e != nil {
-					return e
-				}
-			}
-			_, err = d.Token()
-			return err
-		case '[':
-			for d.More() {
-				if err = duplicateJSONValue(d); err != nil {
-					return err
-				}
-			}
-			_, err = d.Token()
-			return err
-		}
-	}
-	return nil
 }

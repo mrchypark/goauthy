@@ -15,6 +15,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/fedcm"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 	"github.com/mrchypark/goauthy/internal/login"
 	"github.com/mrchypark/goauthy/internal/logout"
 	"github.com/mrchypark/goauthy/internal/oidc"
@@ -153,7 +154,7 @@ func loadFedCMConfig(path string) (fedcmFileConfig, error) {
 	if len(data) > maxFedCMConfigFileSize {
 		return fedcmFileConfig{}, fmt.Errorf("FedCM config file exceeds %d bytes", maxFedCMConfigFileSize)
 	}
-	if err := rejectDuplicateJSONNames(data); err != nil {
+	if err := jsonstrict.RejectDuplicateKeys(data); err != nil {
 		return fedcmFileConfig{}, errors.New("FedCM config file contains duplicate JSON fields")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))

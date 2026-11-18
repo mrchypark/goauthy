@@ -134,8 +134,8 @@ func (s *Server) ForwardAuthHandler() http.Handler {
 			}
 			profile, profileErr := s.oidc.ResolveForwardAuthProfile(r.Context(), request.GetSession().GetSubject())
 			passkey, passkeyErr := s.oidc.ResolveForwardAuthPasskeyEnrollment(r.Context(), request.GetSession().GetSubject())
-			if err != nil || profileErr != nil || passkeyErr != nil {
-				if oauthBackendUnavailable(err) || oauthBackendUnavailable(profileErr) || oauthBackendUnavailable(passkeyErr) {
+			if profileErr != nil || passkeyErr != nil {
+				if oauthBackendUnavailable(profileErr) || oauthBackendUnavailable(passkeyErr) {
 					writeOAuthServiceUnavailable(w)
 					if s.metrics != nil {
 						s.metrics.TokenReject()

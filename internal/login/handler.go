@@ -258,22 +258,33 @@ func (h *Handler) SetLockdownStore(store *loginpolicy.LockdownStore) {
 	h.lockdown = store
 }
 
-// SetCaptchaSiteKey is retained for the deployment wiring. The login page no
-// longer renders a CAPTCHA: password login has no challenge verification
-// contract, so a rendered widget could only produce a form the strict login
-// parser rejects. Open registration keeps enforcing CAPTCHA.
-func (h *Handler) SetCaptchaSiteKey(string) {}
-
 // SetOTPHandler attaches the OTP handler for email-based 2FA.
 func (h *Handler) SetOTPHandler(handler *recovery.OTPHandler) {
 	h.otp = handler
 }
 
-func New(issuer string, browserStore *browser.Store, identityStore *identity.Store, oauthServer *oauth.Server) (*Handler, error) {
-	return NewWithRecovery(issuer, browserStore, identityStore, oauthServer, nil)
+// SetPolicy attaches the replicated login rate-limit and brute-force policy store.
+func (h *Handler) SetPolicy(policy *loginpolicy.Store) {
+	h.policy = policy
 }
 
-func NewWithRecovery(issuer string, browserStore *browser.Store, identityStore *identity.Store, oauthServer *oauth.Server, onPasswordExpired func(context.Context, string) error) (*Handler, error) {
+// SetOnPasswordExpired attaches the callback invoked when a password has expired.
+func (h *Handler) SetOnPasswordExpired(fn func(context.Context, string) error) {
+	h.onPasswordExpired = fn
+}
+
+// SetPasskeyService attaches the WebAuthn/passkey service for passwordless and MFA flows.
+func (h *Handler) SetPasskeyService(passkeys *passkey.Service) {
+	h.passkeys = passkeys
+}
+
+// SetTrustedProxies configures trusted proxy prefixes for peer IP resolution.
+func (h *Handler) SetTrustedProxies(proxies []netip.Prefix) {
+	h.trustedProxies = proxies
+}
+
+// New constructs a browser authentication Handler.
+func New(issuer string, browserStore *browser.Store, identityStore *identity.Store, oauthServer *oauth.Server) (*Handler, error) {
 	normalizedIssuer, err := oidc.NormalizeIssuer(issuer)
 	if err != nil {
 		return nil, err
@@ -287,68 +298,10 @@ func NewWithRecovery(issuer string, browserStore *browser.Store, identityStore *
 	return &Handler{
 		issuer: normalizedIssuer, browser: browserStore, identity: identityStore, oauth: oauthServer,
 		now: time.Now, wait: waitContext,
-		onPasswordExpired: onPasswordExpired,
 		deadline: func(w http.ResponseWriter, deadline time.Time) error {
 			return http.NewResponseController(w).SetWriteDeadline(deadline)
 		},
 	}, nil
-}
-
-// NewWithPolicy enables replicated direct-peer login protection. The caller
-// owns runtime wiring so tests and embedders can retain the legacy boundary.
-func NewWithPolicy(issuer string, browserStore *browser.Store, identityStore *identity.Store, oauthServer *oauth.Server, policy *loginpolicy.Store) (*Handler, error) {
-	return NewWithPolicyAndRecovery(issuer, browserStore, identityStore, oauthServer, policy, nil)
-}
-
-// NewWithPolicyAndRecovery enables login protection and the password-expiry
-// recovery callback. The callback runs before any interaction or session state
-// is consumed.
-func NewWithPolicyAndRecovery(issuer string, browserStore *browser.Store, identityStore *identity.Store, oauthServer *oauth.Server, policy *loginpolicy.Store, onPasswordExpired func(context.Context, string) error) (*Handler, error) {
-	h, err := NewWithRecovery(issuer, browserStore, identityStore, oauthServer, onPasswordExpired)
-	if err != nil {
-		return nil, err
-	}
-	if policy == nil {
-		return nil, errors.New("login handler requires login policy")
-	}
-	h.policy = policy
-	return h, nil
-}
-
-// NewWithPolicyRecoveryAndPasskeys enables passwordless WebAuthn login while
-// preserving the existing password-login construction boundary.
-func NewWithPolicyRecoveryAndPasskeys(issuer string, browserStore *browser.Store, identityStore *identity.Store, oauthServer *oauth.Server, policy *loginpolicy.Store, onPasswordExpired func(context.Context, string) error, passkeys *passkey.Service) (*Handler, error) {
-	h, err := NewWithPolicyAndRecovery(issuer, browserStore, identityStore, oauthServer, policy, onPasswordExpired)
-	if err != nil {
-		return nil, err
-	}
-	if passkeys == nil {
-		return nil, errors.New("login handler requires passkey service")
-	}
-	h.passkeys = passkeys
-	return h, nil
-}
-
-// NewWithPolicyRecoveryPasskeysAndTrustedProxies enables passwordless WebAuthn
-// login with trusted-proxy peer IP resolution for session IP binding.
-func NewWithPolicyRecoveryPasskeysAndTrustedProxies(issuer string, browserStore *browser.Store, identityStore *identity.Store, oauthServer *oauth.Server, policy *loginpolicy.Store, onPasswordExpired func(context.Context, string) error, passkeys *passkey.Service, trustedProxies []netip.Prefix) (*Handler, error) {
-	h, err := NewWithPolicyRecoveryAndPasskeys(issuer, browserStore, identityStore, oauthServer, policy, onPasswordExpired, passkeys)
-	if err != nil {
-		return nil, err
-	}
-	h.trustedProxies = trustedProxies
-	return h, nil
-}
-
-// NewWithPolicyAndTrustedProxies enables login protection with trusted-proxy
-// peer IP resolution for session IP binding.
-func NewWithPolicyAndTrustedProxies(issuer string, browserStore *browser.Store, identityStore *identity.Store, oauthServer *oauth.Server, policy *loginpolicy.Store, onPasswordExpired func(context.Context, string) error, trustedProxies []netip.Prefix) (*Handler, error) {
-	h, err := NewWithPolicyAndRecovery(issuer, browserStore, identityStore, oauthServer, policy, onPasswordExpired)
-	if err != nil {
-		return nil, err
-	}
-	h.trustedProxies = trustedProxies
-	return h, nil
 }
 
 // resolvePeerIP returns the canonical peer IP. The middleware resolves this

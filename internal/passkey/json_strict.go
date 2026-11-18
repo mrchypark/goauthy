@@ -8,13 +8,14 @@ import (
 
 	"github.com/go-webauthn/webauthn/protocol"
 	wa "github.com/go-webauthn/webauthn/webauthn"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 )
 
 // decodeStrictJSON rejects duplicate keys, unknown struct fields, and any
 // trailing JSON value. The duplicate-key pass is needed because the standard
 // decoder otherwise keeps the last duplicate silently.
 func decodeStrictJSON(data []byte, target any) error {
-	if err := rejectDuplicateJSON(data); err != nil {
+	if err := jsonstrict.RejectDuplicateKeys(data); err != nil {
 		return err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -30,62 +31,6 @@ func decodeStrictJSON(data []byte, target any) error {
 		return err
 	}
 	return nil
-}
-
-func rejectDuplicateJSON(data []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	if err := walkJSONValue(decoder); err != nil {
-		return err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-
-func walkJSONValue(decoder *json.Decoder) error {
-	token, err := decoder.Token()
-	if err != nil {
-		return err
-	}
-	delim, isDelim := token.(json.Delim)
-	if !isDelim {
-		return nil
-	}
-	switch delim {
-	case '{':
-		seen := make(map[string]struct{})
-		for decoder.More() {
-			key, err := decoder.Token()
-			if err != nil {
-				return err
-			}
-			name, ok := key.(string)
-			if !ok {
-				return io.ErrUnexpectedEOF
-			}
-			if _, exists := seen[name]; exists {
-				return io.ErrUnexpectedEOF
-			}
-			seen[name] = struct{}{}
-			if err := walkJSONValue(decoder); err != nil {
-				return err
-			}
-		}
-		_, err = decoder.Token()
-		return err
-	case '[':
-		for decoder.More() {
-			if err := walkJSONValue(decoder); err != nil {
-				return err
-			}
-		}
-		_, err = decoder.Token()
-		return err
-	default:
-		return io.ErrUnexpectedEOF
-	}
 }
 
 // credentialJSON is an alias so strict decoding does not invoke

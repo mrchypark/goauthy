@@ -181,7 +181,7 @@ func TestOAuth2TokenExchangerReusesConnectionWithFreshRuntimeSnapshot(t *testing
 	makeExchanger := func(path, clientID, secret string) *OAuth2TokenExchanger {
 		exchanger, err := NewOAuth2TokenExchanger(map[string]Config{"provider": {
 			Issuer: "https://issuer.example.test", AuthorizationEndpoint: "https://issuer.example.test/auth",
-			TokenEndpoint: server.URL + path, ClientID: clientID,
+			TokenEndpoint: server.URL + path, ClientID: clientID, AllowPrivate: true,
 		}}, map[string]string{"provider": secret}, nil)
 		if err != nil {
 			t.Fatal(err)

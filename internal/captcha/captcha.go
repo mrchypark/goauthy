@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 )
@@ -26,9 +25,19 @@ func NewVerifier(getenv func(string) string) Verifier {
 	}
 	switch strings.ToLower(provider) {
 	case "turnstile":
-		return &CloudflareTurnstileVerifier{siteKey: siteKey, secretKey: secretKey}
+		return &httpVerifier{
+			provider:  "turnstile",
+			verifyURL: "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+			siteKey:   siteKey,
+			secretKey: secretKey,
+		}
 	case "hcaptcha":
-		return &HCaptchaVerifier{siteKey: siteKey, secretKey: secretKey}
+		return &httpVerifier{
+			provider:  "hcaptcha",
+			verifyURL: "https://api.hcaptcha.com/siteverify",
+			siteKey:   siteKey,
+			secretKey: secretKey,
+		}
 	default:
 		return &noopVerifier{}
 	}
@@ -41,14 +50,16 @@ func (n *noopVerifier) Verify(_ context.Context, _, _ string) (bool, error) {
 }
 func (n *noopVerifier) SiteKey() string { return "" }
 
-type CloudflareTurnstileVerifier struct {
-	siteKey  string
+type httpVerifier struct {
+	provider  string
+	verifyURL string
+	siteKey   string
 	secretKey string
 }
 
-func (v *CloudflareTurnstileVerifier) SiteKey() string { return v.siteKey }
+func (v *httpVerifier) SiteKey() string { return v.siteKey }
 
-func (v *CloudflareTurnstileVerifier) Verify(ctx context.Context, response, remoteIP string) (bool, error) {
+func (v *httpVerifier) Verify(ctx context.Context, response, remoteIP string) (bool, error) {
 	if response == "" {
 		return false, nil
 	}
@@ -59,35 +70,9 @@ func (v *CloudflareTurnstileVerifier) Verify(ctx context.Context, response, remo
 	if remoteIP != "" {
 		data.Set("remoteip", remoteIP)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://challenges.cloudflare.com/turnstile/v0/siteverify", strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, v.verifyURL, strings.NewReader(data.Encode()))
 	if err != nil {
-		return false, fmt.Errorf("create turnstile request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	return doVerify(req)
-}
-
-type HCaptchaVerifier struct {
-	siteKey  string
-	secretKey string
-}
-
-func (v *HCaptchaVerifier) SiteKey() string { return v.siteKey }
-
-func (v *HCaptchaVerifier) Verify(ctx context.Context, response, remoteIP string) (bool, error) {
-	if response == "" {
-		return false, nil
-	}
-	data := url.Values{
-		"secret":   {v.secretKey},
-		"response": {response},
-	}
-	if remoteIP != "" {
-		data.Set("remoteip", remoteIP)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.hcaptcha.com/siteverify", strings.NewReader(data.Encode()))
-	if err != nil {
-		return false, fmt.Errorf("create hcaptcha request: %w", err)
+		return false, fmt.Errorf("create %s request: %w", v.provider, err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	return doVerify(req)
@@ -113,8 +98,4 @@ func doVerify(req *http.Request) (bool, error) {
 		return false, fmt.Errorf("decode captcha verification response: %w", err)
 	}
 	return result.Success, nil
-}
-
-func EnvFromOS(name string) string {
-	return os.Getenv(name)
 }

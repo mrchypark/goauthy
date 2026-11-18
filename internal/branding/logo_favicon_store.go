@@ -2,11 +2,33 @@ package branding
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 
 	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/clients"
 	"github.com/mrchypark/rhiza"
 )
+
+func clientFaviconRequestID(prefix string) (string, error) {
+	requestIDBytes := make([]byte, 16)
+	if _, err := rand.Read(requestIDBytes); err != nil {
+		return "", err
+	}
+	return prefix + "/" + base64.RawURLEncoding.EncodeToString(requestIDBytes), nil
+}
+
+func validClientID(value string) bool {
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for _, c := range value {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
+}
 
 // ReplaceFaviconAuthorized replaces only the unified favicon asset and removes
 // the legacy favicon row in the same guarded mutation. The caller owns any

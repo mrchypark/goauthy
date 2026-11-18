@@ -121,7 +121,3 @@ func derefStr(p *string) string {
 	}
 	return *p
 }
-
-func staticResolveVerified(r *FederatedIdentityResolver) func(ctx context.Context, vi upstreamprovider.VerifiedIdentity) (string, error) {
-	return r.resolveVerified
-}

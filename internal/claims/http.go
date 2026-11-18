@@ -15,6 +15,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/browser"
 	"github.com/mrchypark/goauthy/internal/identity"
+	"github.com/mrchypark/goauthy/internal/jsonstrict"
 )
 
 const requestLimit int64 = 8 << 10
@@ -750,74 +751,13 @@ func strictJSON(w http.ResponseWriter, r *http.Request, value any) error {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, requestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 || rejectDuplicateFields(body) != nil {
+	if err != nil || len(body) == 0 || jsonstrict.RejectDuplicateKeys(body) != nil {
 		return errors.New("json")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(value); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
 		return errors.New("json")
-	}
-	return nil
-}
-
-func rejectDuplicateFields(body []byte) error {
-	d := json.NewDecoder(bytes.NewReader(body))
-	if err := walkJSON(d); err != nil {
-		return err
-	}
-	_, err := d.Token()
-	if err != io.EOF {
-		return errors.New("trailing json")
-	}
-	return nil
-}
-
-func walkJSON(d *json.Decoder) error {
-	token, err := d.Token()
-	if err != nil {
-		return err
-	}
-	delim, ok := token.(json.Delim)
-	if !ok {
-		return nil
-	}
-	switch delim {
-	case '{':
-		seen := map[string]struct{}{}
-		for d.More() {
-			key, err := d.Token()
-			if err != nil {
-				return err
-			}
-			name, ok := key.(string)
-			if !ok {
-				return errors.New("key")
-			}
-			if _, dup := seen[name]; dup {
-				return errors.New("duplicate")
-			}
-			seen[name] = struct{}{}
-			if err := walkJSON(d); err != nil {
-				return err
-			}
-		}
-		end, err := d.Token()
-		if err != nil || end != json.Delim('}') {
-			return errors.New("object")
-		}
-	case '[':
-		for d.More() {
-			if err := walkJSON(d); err != nil {
-				return err
-			}
-		}
-		end, err := d.Token()
-		if err != nil || end != json.Delim(']') {
-			return errors.New("array")
-		}
-	default:
-		return errors.New("delimiter")
 	}
 	return nil
 }

@@ -113,7 +113,7 @@ func upstreamHandlerFromEnv(getenv func(string) string, db *rhiza.DB, keyring up
 			}
 			return subject, nil
 		},
-		ResolveVerified: staticResolveVerified(&FederatedIdentityResolver{IdentityStore: identityStore}),
+		ResolveVerified: (&FederatedIdentityResolver{IdentityStore: identityStore}).resolveVerified,
 		Complete: func(w http.ResponseWriter, r *http.Request, token, interaction, subject string, upstream *upstreamprovider.OIDCSession) {
 			var binding *browser.UpstreamSessionBinding
 			if upstream != nil {

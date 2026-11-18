@@ -91,6 +91,7 @@ type Config struct {
 	RuntimeVersion        string
 	AutoOnboarding        bool
 	AutoLink              bool
+	AllowPrivate          bool
 	AdminClaimPath        *string
 	AdminClaimValue       *string
 	MFAClaimPath          *string

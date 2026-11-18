@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"io"
@@ -53,16 +52,7 @@ type jwksFetch struct {
 // so connection pools and TLS sessions are reused across verifiers instead of
 // being rebuilt per dispatch.
 var defaultClient = sync.OnceValue(func() *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = nil
-	transport.DisableCompression = true
-	if transport.TLSClientConfig == nil {
-		transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-	} else {
-		transport.TLSClientConfig = transport.TLSClientConfig.Clone()
-		transport.TLSClientConfig.MinVersion = tls.VersionTLS12
-	}
-	return &http.Client{Transport: transport, Timeout: jwksTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return newSafeHTTPClient(jwksTimeout, false)
 })
 
 // JWKSVerifier verifies OIDC ID tokens using configured issuer JWKS endpoints.

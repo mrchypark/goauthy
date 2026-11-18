@@ -21,12 +21,6 @@ const (
 	browserSessionLen   = 32
 )
 
-// canonicalSessionDigest returns the persisted browser-canonical digest of a
-// raw session token. It fails closed on malformed tokens.
-func canonicalSessionDigest(rawToken string) (string, error) {
-	return browser.CanonicalTokenDigest(rawToken)
-}
-
 // Handler provides net/http handlers for the upstream OAuth 2.0 start
 // and callback flows. It wires together the package's core transaction
 // and token verification primitives with HTTP transport concerns.
@@ -409,7 +403,7 @@ func (h *Handler) LocalStartHandler() http.Handler {
 			return
 		}
 		rawSessionToken, sessionDigest, interactionDigest, err := h.localLogin.Prepare(r, interactions[0])
-		canonical, canonErr := canonicalSessionDigest(rawSessionToken)
+		canonical, canonErr := browser.CanonicalTokenDigest(rawSessionToken)
 		if err != nil || canonErr != nil || rawSessionToken == "" || ValidateLocalOAuthBinding(sessionDigest, interactionDigest) != nil ||
 			subtle.ConstantTimeCompare([]byte(canonical), []byte(sessionDigest)) != 1 {
 			http.Error(w, "Failed to start upstream flow", http.StatusBadRequest)
@@ -473,7 +467,7 @@ func (h *Handler) LinkStartHandler() http.Handler {
 		}
 		linkSession, err := h.linkHooks.Current(r)
 		sessionDigest := linkSession.Session.ID
-		canonical, canonErr := canonicalSessionDigest(linkSession.RawSessionToken)
+		canonical, canonErr := browser.CanonicalTokenDigest(linkSession.RawSessionToken)
 		if err != nil || canonErr != nil || !linkSession.Session.Authenticated() || !validLinkSubject(linkSession.Session.Subject) || linkSession.RawSessionToken == "" || !validDigest(sessionDigest) || subtle.ConstantTimeCompare([]byte(canonical), []byte(sessionDigest)) != 1 {
 			http.Error(w, "Invalid link request", http.StatusForbidden)
 			return
@@ -635,7 +629,7 @@ func (h *Handler) LocalCallbackHandler() http.Handler {
 			providerID = extractProviderID(r.URL.Path)
 		}
 		rawSessionToken, sessionDigest, err := h.localLogin.Current(r)
-		canonical, canonErr := canonicalSessionDigest(rawSessionToken)
+		canonical, canonErr := browser.CanonicalTokenDigest(rawSessionToken)
 		if err != nil || canonErr != nil || rawSessionToken == "" || !validDigest(sessionDigest) ||
 			subtle.ConstantTimeCompare([]byte(canonical), []byte(sessionDigest)) != 1 {
 			callbackReject(w)
@@ -753,7 +747,7 @@ func (h *Handler) LinkCallbackHandler() http.Handler {
 		linkSession, err := h.linkHooks.Current(r)
 		localSubject := linkSession.Session.Subject
 		rawSessionToken, sessionDigest := linkSession.RawSessionToken, linkSession.Session.ID
-		canonical, canonErr := canonicalSessionDigest(rawSessionToken)
+		canonical, canonErr := browser.CanonicalTokenDigest(rawSessionToken)
 		if err != nil || canonErr != nil || !linkSession.Session.Authenticated() || !validLinkSubject(localSubject) || rawSessionToken == "" || !validDigest(sessionDigest) || subtle.ConstantTimeCompare([]byte(canonical), []byte(sessionDigest)) != 1 {
 			linkReject(w)
 			return

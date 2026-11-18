@@ -71,7 +71,7 @@ go run ./cmd/goauthy config check
 go run ./cmd/goauthy config dump-effective
 ```
 
-`config dump-effective` reports only non-secret values and boolean presence for static object-store credentials. `config check` validates the centralized `applicationConfig` slice, referenced files, and cross-field rules before opening Rhiza or starting listeners; store-dependent admission and default-path master-key material are validated during startup so preflight checks work without mounted secrets. `goauthy-password` reads one password line from stdin and prints its current-policy Argon2id PHC string; the bootstrap identity is created once and never reset on later startups.
+`config dump-effective` reports only non-secret values and boolean presence for static object-store credentials. `config check` validates the centralized `applicationConfig` slice, referenced files (including `GOAUTHY_OAUTH_HMAC_SECRET_FILE` / `./secrets/oauth-hmac` and `GOAUTHY_BOOTSTRAP_CLIENT_SECRET_FILE` / `./secrets/bootstrap-client`), and cross-field rules before opening Rhiza or starting listeners; only store-dependent admission and default-path master-key material (`GOAUTHY_MASTER_KEY_DIR`) are deferred until startup. `goauthy-password` reads one password line from stdin and prints its current-policy Argon2id PHC string; the bootstrap identity is created once and never reset on later startups.
 
 ---
 
@@ -132,7 +132,7 @@ GoAuthy writes Argon2id `v=19` credentials using the OWASP baseline (`m=19456` K
 
 ## Global Invariants
 
-- Replicated state and schema migrations (`v114`) are persisted in `*rhiza.DB`; mutations requiring authorization or fencing evaluate predicates inside the same linearizable transaction (`internal/storage`, `internal/audit`, `internal/eventlog`, `internal/rbac`, `internal/clients`).
+- Replicated state and schema migrations (`v115`) are persisted in `*rhiza.DB`; mutations requiring authorization or fencing evaluate predicates inside the same linearizable transaction (`internal/storage`, `internal/audit`, `internal/eventlog`, `internal/rbac`, `internal/clients`).
 - Envelope-encrypted secrets (OAuth clients, SaaS providers/credentials, passkey credentials/ceremonies, upstream providers, KV namespaces) are sealed with `*oidc.Keyring` and guarded by master-key retirement writer barriers (`internal/oidc`, `internal/storage`).
 - Outbound HTTP/webhook/CIMD/back-channel/SCIM/SaaS callers enforce HTTPS policies, bounded response sizes, redirect restrictions, and private-IP/DNS-rebinding protections (`internal/backchannel`, `internal/cimd`, `internal/notify`, `internal/saas`, `internal/scim`).
 - Browser-only endpoints enforce session binding, CSRF tokens, `Sec-Fetch-Site` checks, and reject `Authorization` headers; API-key endpoints enforce constant-time SHA-256 verification and narrow resource rights (`internal/browser`, `internal/security`, `internal/apikey`, `internal/admin`, `internal/account`).

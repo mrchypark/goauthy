@@ -354,10 +354,11 @@ func TestSaaSIsolation113Measurement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loginHandler, err := login.NewWithPolicy(issuer, sessions, identities, oauthServer, loginpolicy.NewStore(db))
+	loginHandler, err := login.New(issuer, sessions, identities, oauthServer)
 	if err != nil {
 		t.Fatal(err)
 	}
+	loginHandler.SetPolicy(loginpolicy.NewStore(db))
 	mux.Handle("/account/login", loginHandler.AccountLoginHandler(false))
 	provider := saas.IntegrationIsolationTLS(t, http.HandlerFunc(r.provider))
 	defer provider.Close()
