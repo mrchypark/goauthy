@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -154,17 +153,9 @@ func loadFedCMConfig(path string) (fedcmFileConfig, error) {
 	if len(data) > maxFedCMConfigFileSize {
 		return fedcmFileConfig{}, fmt.Errorf("FedCM config file exceeds %d bytes", maxFedCMConfigFileSize)
 	}
-	if err := jsonstrict.RejectDuplicateKeys(data); err != nil {
-		return fedcmFileConfig{}, errors.New("FedCM config file contains duplicate JSON fields")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	var config fedcmFileConfig
-	if err := decoder.Decode(&config); err != nil {
+	if err := jsonstrict.DecodeStrict(data, &config); err != nil {
 		return fedcmFileConfig{}, fmt.Errorf("decode FedCM config file: %w", err)
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return fedcmFileConfig{}, errors.New("FedCM config file must contain exactly one JSON object")
 	}
 	if len(config.ClientOrigins) == 0 || len(config.ClientOrigins) > maxFedCMClients {
 		return fedcmFileConfig{}, fmt.Errorf("FedCM client_origins must contain 1 to %d clients", maxFedCMClients)

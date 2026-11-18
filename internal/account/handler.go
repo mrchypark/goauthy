@@ -1079,16 +1079,11 @@ func decodeStrictJSON[T any](w http.ResponseWriter, r *http.Request, limit int64
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || jsonstrict.RejectDuplicateKeys(body) != nil {
+	if err != nil {
 		return value, errors.New("json")
 	}
-	d := json.NewDecoder(bytes.NewReader(body))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&value); err != nil {
+	if err := jsonstrict.DecodeStrict(body, &value); err != nil {
 		return value, err
-	}
-	if err := d.Decode(new(any)); err != io.EOF {
-		return value, errors.New("trailing JSON")
 	}
 	return value, nil
 }

@@ -751,12 +751,7 @@ func strictJSON(w http.ResponseWriter, r *http.Request, value any) error {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, requestLimit)
 	body, err := io.ReadAll(r.Body)
-	if err != nil || len(body) == 0 || jsonstrict.RejectDuplicateKeys(body) != nil {
-		return errors.New("json")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(value); err != nil || decoder.Decode(&struct{}{}) != io.EOF {
+	if err != nil || len(body) == 0 || jsonstrict.DecodeStrict(body, value) != nil {
 		return errors.New("json")
 	}
 	return nil

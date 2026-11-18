@@ -12,16 +12,18 @@ import (
 	"time"
 
 	"golang.org/x/oauth2"
+
+	"github.com/mrchypark/goauthy/internal/netsec"
 )
 
 const upstreamTokenExchangeTimeout = 10 * time.Second
 
 var (
 	defaultTokenExchangeClient = sync.OnceValue(func() *http.Client {
-		return newSafeHTTPClient(upstreamTokenExchangeTimeout, false)
+		return netsec.NewSafeHTTPClient(upstreamTokenExchangeTimeout, false, nil)
 	})
 	defaultPrivateTokenExchangeClient = sync.OnceValue(func() *http.Client {
-		return newSafeHTTPClient(upstreamTokenExchangeTimeout, true)
+		return netsec.NewSafeHTTPClient(upstreamTokenExchangeTimeout, true, nil)
 	})
 )
 

@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/mrchypark/goauthy/internal/netsec"
 )
 
 func TestSafeHTTPClientBlocksLoopbackAndMetadataDial(t *testing.T) {
@@ -17,7 +19,7 @@ func TestSafeHTTPClientBlocksLoopbackAndMetadataDial(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	blocked := newSafeHTTPClient(time.Second, false)
+	blocked := netsec.NewSafeHTTPClient(time.Second, false, nil)
 	for _, target := range []string{srv.URL, "https://169.254.169.254/latest/meta-data/"} {
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, target, nil)
 		if err != nil {
@@ -28,14 +30,12 @@ func TestSafeHTTPClientBlocksLoopbackAndMetadataDial(t *testing.T) {
 			resp.Body.Close()
 			t.Fatalf("expected safe HTTP client to block %s", target)
 		}
-		if !errors.Is(err, errUnsafeUpstreamHost) {
-			t.Fatalf("target=%s expected errUnsafeUpstreamHost, got %v", target, err)
+		if !errors.Is(err, netsec.ErrUnsafeHost) {
+			t.Fatalf("target=%s expected ErrUnsafeHost, got %v", target, err)
 		}
 	}
 
-	allowed := newSafeHTTPClient(time.Second, true)
-	tr := allowed.Transport.(*http.Transport)
-	tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}
+	allowed := netsec.NewSafeHTTPClient(time.Second, true, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12})
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
 	if err != nil {
 		t.Fatal(err)

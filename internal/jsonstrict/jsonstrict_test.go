@@ -26,3 +26,29 @@ func TestRejectDuplicateKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeStrict(t *testing.T) {
+	t.Parallel()
+	type payload struct {
+		Name  string `json:"name"`
+		Count int    `json:"count"`
+	}
+	var ok payload
+	if err := DecodeStrict([]byte(`{"name":"alice","count":2}`), &ok); err != nil {
+		t.Fatalf("valid payload failed: %v", err)
+	}
+	if ok.Name != "alice" || ok.Count != 2 {
+		t.Fatalf("decoded=%+v", ok)
+	}
+	for _, invalid := range []string{
+		`{"name":"alice","unknown":1}`,
+		`{"name":"alice","name":"bob"}`,
+		`{"name":"alice"}{"count":1}`,
+		`{"name":`,
+	} {
+		var dst payload
+		if err := DecodeStrict([]byte(invalid), &dst); err == nil {
+			t.Fatalf("expected error for %s", invalid)
+		}
+	}
+}

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
+	"github.com/mrchypark/goauthy/internal/netsec"
 )
 
 const (
@@ -53,10 +54,10 @@ type jwksFetch struct {
 // being rebuilt per dispatch.
 var (
 	defaultClient = sync.OnceValue(func() *http.Client {
-		return newSafeHTTPClient(jwksTimeout, false)
+		return netsec.NewSafeHTTPClient(jwksTimeout, false, nil)
 	})
 	defaultPrivateClient = sync.OnceValue(func() *http.Client {
-		return newSafeHTTPClient(jwksTimeout, true)
+		return netsec.NewSafeHTTPClient(jwksTimeout, true, nil)
 	})
 )
 

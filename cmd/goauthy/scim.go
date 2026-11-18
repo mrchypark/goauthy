@@ -170,17 +170,9 @@ func loadSCIMProviders(path string) (map[string]loadedSCIMProvider, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := jsonstrict.RejectDuplicateKeys(data); err != nil {
-		return nil, errors.New("SCIM providers file contains duplicate JSON fields")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	var document scimProvidersDocument
-	if err := decoder.Decode(&document); err != nil {
+	if err := jsonstrict.DecodeStrict(data, &document); err != nil {
 		return nil, fmt.Errorf("decode SCIM providers file: %w", err)
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return nil, errors.New("SCIM providers file must contain exactly one JSON document")
 	}
 	if len(document.Providers) < 1 || len(document.Providers) > maxSCIMProviders {
 		return nil, fmt.Errorf("SCIM providers must contain 1 to %d providers", maxSCIMProviders)
@@ -208,17 +200,9 @@ func loadSCIMProviders(path string) (map[string]loadedSCIMProvider, error) {
 }
 
 func decodeSCIMProvider(data []byte) (scimProviderFileConfig, error) {
-	if err := jsonstrict.RejectDuplicateKeys(data); err != nil {
-		return scimProviderFileConfig{}, errors.New("SCIM provider contains duplicate JSON fields")
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	var config scimProviderFileConfig
-	if err := decoder.Decode(&config); err != nil {
+	if err := jsonstrict.DecodeStrict(data, &config); err != nil {
 		return scimProviderFileConfig{}, errors.New("decode SCIM provider configuration")
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return scimProviderFileConfig{}, errors.New("SCIM provider must contain exactly one JSON object")
 	}
 	if !validSCIMProviderID(config.ID) {
 		return scimProviderFileConfig{}, errors.New("invalid SCIM provider id")
