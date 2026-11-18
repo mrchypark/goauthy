@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -367,8 +368,10 @@ func TestEndpointPolicyAndCancellation(t *testing.T) {
 		{"http://8.8.8.8/logout", false, true, true},
 		{"https://127.0.0.1/logout", false, false, false},
 		{"https://127.0.0.1/logout", true, false, true},
+		{"https://10.0.0.1/logout", false, false, false},
+		{"https://10.0.0.1/logout", true, false, true},
 		{"https://169.254.1.1/logout", false, false, false},
-		{"https://169.254.1.1/logout", true, false, true},
+		{"https://169.254.1.1/logout", true, false, false},
 		{"https://0.0.0.0/logout", true, false, false},
 		{"https://224.0.0.1/logout", true, false, false},
 	} {
@@ -589,4 +592,16 @@ func jwtClaims(t *testing.T, compact string) map[string]any {
 		t.Fatal(err)
 	}
 	return claims
+}
+
+func TestAllowedIPBlocksMetadataAndSpecialUse(t *testing.T) {
+	for _, blocked := range []string{"169.254.169.254", "fe80::1", "198.18.0.1", "64:ff9b::1", "2002::1"} {
+		ip := net.ParseIP(blocked)
+		if allowedIP(ip, false) || allowedIP(ip, true) {
+			t.Fatalf("expected %s to be blocked regardless of allowPrivate", blocked)
+		}
+	}
+	if !allowedIP(net.ParseIP("10.0.0.1"), true) || allowedIP(net.ParseIP("10.0.0.1"), false) {
+		t.Fatal("expected RFC1918 to follow allowPrivate")
+	}
 }

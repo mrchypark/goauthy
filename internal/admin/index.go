@@ -1,4 +1,4 @@
-// Package admin serves the small browser-admin landing page.
+// Package admin serves the browser-admin landing page and administration SPA.
 package admin
 
 import (

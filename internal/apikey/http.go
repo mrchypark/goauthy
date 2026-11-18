@@ -64,9 +64,16 @@ func (h *Handler) Keys(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
 }
+func keyName(r *http.Request) string {
+	if name := r.PathValue("name"); name != "" {
+		return name
+	}
+	return r.URL.Query().Get("name")
+}
+
 func (h *Handler) Key(w http.ResponseWriter, r *http.Request) {
 	h.headers(w)
-	name := r.PathValue("name")
+	name := keyName(r)
 	if r.Method == http.MethodPut {
 		p, ok, wrote := h.principal(w, r, true, Update)
 		if !ok {
@@ -119,7 +126,7 @@ func (h *Handler) Secret(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	v, e := h.store.Rotate(r.Context(), p, r.PathValue("name"))
+	v, e := h.store.Rotate(r.Context(), p, keyName(r))
 	if e != nil {
 		h.error(w, e)
 		return
@@ -140,7 +147,7 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, e := h.store.Authenticate(r.Context(), authorization)
-	if e != nil || p.Name != r.PathValue("name") {
+	if e != nil || p.Name != keyName(r) {
 		h.deny(w, r)
 		return
 	}

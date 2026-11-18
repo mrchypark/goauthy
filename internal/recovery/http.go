@@ -295,6 +295,10 @@ func (s *Service) RegisterOpen(w http.ResponseWriter, r *http.Request) {
 		s.OnUserCreated()
 	}
 	lang, err := s.identity.UserLanguage(r.Context(), result.Subject)
+	if errors.Is(err, identity.ErrInactiveSubject) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if err != nil {
 		unavailable(w)
 		return

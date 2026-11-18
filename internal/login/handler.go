@@ -1936,6 +1936,9 @@ func (h *Handler) OTPVerify(w http.ResponseWriter, r *http.Request) {
 		if h.metrics != nil {
 			h.metrics.AuthFailure()
 		}
+		if errors.Is(verifyErr, recovery.ErrOTPInvalid) && h.policy != nil && peerIP != "" {
+			_, _ = h.policy.Failure(r.Context(), peerIP, h.now().UTC())
+		}
 		if !verified && errors.Is(verifyErr, recovery.ErrOTPInvalid) && len(r.Header.Values("Content-Type")) == 1 {
 			mediaType, _, mediaErr := mime.ParseMediaType(r.Header.Get("Content-Type"))
 			if mediaErr == nil && mediaType == "application/x-www-form-urlencoded" {

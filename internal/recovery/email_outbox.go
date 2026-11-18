@@ -374,6 +374,6 @@ func SMTPSendFunc(sender *SMTPSender) func(ctx context.Context, recipient, subje
 		msg.Subject(subject)
 		msg.SetBodyString(mail.TypeTextPlain, textBody)
 		msg.AddAlternativeString(mail.TypeTextHTML, htmlBody)
-		return sender.send(ctx, msg)
+		return sender.send(context.WithValue(ctx, smtpOutboxSendKey{}, true), msg)
 	}
 }

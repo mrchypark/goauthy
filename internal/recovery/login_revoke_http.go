@@ -81,12 +81,12 @@ var (
 		"en":     {Language: "en", Title: "Revoke Logins", Description: "All Logins and Sessions have been revoked for this user as much as possible.", Warning: "You should immediately renew all your passwords!"},
 		"de":     {Language: "de", Title: "Logins widerrufen", Description: "Sämtliche Logins und Sessions für diesen Benutzer wurden soweit wie möglich widerrufen.", Warning: "Passwörter sollten auf der Stelle erneuert werden!"},
 		"fr":     {Language: "fr", Title: "Révoquer les connexions", Description: "Toutes les connexions et sessions ont été révoquées pour cet utilisateur autant que possible.", Warning: "Vous devez immédiatement renouveler tous vos mots de passe !"},
-		"ko":     {Language: "ko", Title: "Revoke Logins", Description: "All Logins and Sessions have been revoked for this user as much as possible.", Warning: "You should immediately renew all your passwords!"},
+		"ko":     {Language: "ko", Title: "로그인 취소", Description: "이 사용자의 모든 로그인과 세션을 가능한 범위에서 모두 취소했습니다.", Warning: "즉시 모든 비밀번호를 변경해야 합니다!"},
 		"nb":     {Language: "nb", Title: "Tilbakekalling av pålogginger", Description: "Alle pålogginger og økter for denne brukeren har blitt tilbakekalt så langt det er mulig.", Warning: "Passord bør umiddelbart tilbakestilles!"},
 		"nl":     {Language: "nl", Title: "Logins intrekken", Description: "Alle logins en sessies voor deze gebruiker zijn zoveel mogelijk ingetrokken.", Warning: "U moet onmiddellijk al uw wachtwoorden vernieuwen!"},
 		"ru":     {Language: "ru", Title: "Отзыв входов", Description: "Все входы и сеансы были отозваны для этого пользователя насколько это возможно.", Warning: "Вам следует немедленно обновить все свои пароли!"},
 		"uk":     {Language: "uk", Title: "Відкликати сесії", Description: "Усі входи та сесії для цього користувача було відкликано, наскільки це можливо.", Warning: "Вам слід негайно оновити всі ваші паролі!"},
-		"zhhans": {Language: "zhhans", Title: "撤销登录", Description: "已尽可能撤销此用户的所有登录和会话。", Warning: "您应立即更新所有密码！"},
+		"zhhans": {Language: "zh-Hans", Title: "撤销登录", Description: "已尽可能撤销此用户的所有登录和会话。", Warning: "您应立即更新所有密码！"},
 	}
 )
 
@@ -97,7 +97,14 @@ func loginRevokeCopy(r *http.Request, success bool) loginRevokePageData {
 			return copy
 		}
 	}
-	return loginRevokePageData{Language: language, Title: "Code not found", Description: "The requested code could not be found."}
+	htmlLang := language
+	if htmlLang == "zhhans" {
+		htmlLang = "zh-Hans"
+	}
+	if language == "ko" {
+		return loginRevokePageData{Language: htmlLang, Title: "코드를 찾을 수 없습니다", Description: "요청한 코드를 찾을 수 없습니다."}
+	}
+	return loginRevokePageData{Language: htmlLang, Title: "Code not found", Description: "The requested code could not be found."}
 }
 
 func loginRevokeQueryIP(r *http.Request) (netip.Addr, bool) {

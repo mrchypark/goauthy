@@ -291,6 +291,7 @@ type smtpMailTypeKey struct{}
 type smtpSubjectKey struct{}
 type smtpTextBodyKey struct{}
 type smtpHTMLBodyKey struct{}
+type smtpOutboxSendKey struct{}
 
 func (s *SMTPSender) sendRenderedMessage(ctx context.Context, recipient string, emailTemplate EmailTemplate, text, html string) error {
 	ctx, cancel := context.WithTimeout(ctx, s.config.Timeout)
@@ -446,7 +447,7 @@ func (s *SMTPSender) deliver(ctx context.Context, msg *mail.Msg) error {
 		return errors.New("SMTP client configuration failed")
 	}
 	if err := client.DialAndSendWithContext(ctx, msg); err != nil {
-		if s.OnDeliveryFailure != nil {
+		if s.OnDeliveryFailure != nil && ctx.Value(smtpOutboxSendKey{}) == nil {
 			recipient, _ := ctx.Value(smtpRecipientKey{}).(string)
 			mailType, _ := ctx.Value(smtpMailTypeKey{}).(string)
 			subject, _ := ctx.Value(smtpSubjectKey{}).(string)

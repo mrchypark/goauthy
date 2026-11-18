@@ -418,8 +418,8 @@ func run() (err error) {
 		if err != nil {
 			return fmt.Errorf("configure password recovery: %w", err)
 		}
-		recoveryService.OnError = func(error) {
-			slog.Error("account email delivery failed")
+		recoveryService.OnError = func(err error) {
+			slog.Error("account email delivery failed", "error", err)
 		}
 		recoveryService.SetCaptchaVerifier(captchaVerifier)
 		if scimRuntime != nil {
@@ -448,7 +448,7 @@ func run() (err error) {
 	if err != nil {
 		return fmt.Errorf("configure master-key rewrap worker: %w", err)
 	}
-	rewrapWorker.onError = func(error) { slog.Error("master-key rewrap failed") }
+	rewrapWorker.onError = func(err error) { slog.Error("master-key rewrap failed", "error", err) }
 	eventStore, err := eventlog.NewStore(db)
 	if err != nil {
 		return err
@@ -468,7 +468,7 @@ func run() (err error) {
 	}
 	defer func() {
 		if err := closeWithin(backups.Close, backupShutdownTimeout); err != nil {
-			slog.Error("backup object-store client shutdown failed")
+			slog.Error("backup object-store client shutdown failed", "error", err)
 		}
 	}()
 	workerCtx, cancelWorker := context.WithCancel(ctx)
@@ -478,7 +478,7 @@ func run() (err error) {
 		go func() {
 			defer workers.Done()
 			if err := backups.Run(workerCtx, db); err != nil && workerCtx.Err() == nil {
-				slog.Error("scheduled backup worker stopped")
+				slog.Error("scheduled backup worker stopped", "error", err)
 			}
 		}()
 	}
@@ -487,7 +487,7 @@ func run() (err error) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			runGeneratedBootstrapPurge(workerCtx, apiKeyStore, keyring, generatedBootstrap, masterKeyDir, func(error) { slog.Error("generated bootstrap purge failed") })
+			runGeneratedBootstrapPurge(workerCtx, apiKeyStore, keyring, generatedBootstrap, masterKeyDir, func(err error) { slog.Error("generated bootstrap purge failed", "error", err) })
 		}()
 	}
 	if notifications != nil {
@@ -503,7 +503,7 @@ func run() (err error) {
 		if err := runEventCleanup(workerCtx, eventStore, eventCleanupInterval, eventRetention, time.Now, func(err error) {
 			logWorkerFailure("event_cleanup", "cleanup", err)
 		}); err != nil {
-			slog.Error("lifecycle event cleanup stopped")
+			slog.Error("lifecycle event cleanup stopped", "error", err)
 		}
 	}()
 	workers.Add(1)
@@ -512,7 +512,7 @@ func run() (err error) {
 		if err := runUserExpiry(workerCtx, identityStore, userExpiryConfig, time.Now, func(err error) {
 			logWorkerFailure("account_expiry", "expiry", err)
 		}); err != nil {
-			slog.Error("account expiry worker stopped")
+			slog.Error("account expiry worker stopped", "error", err)
 		}
 	}()
 	workers.Add(1)
@@ -529,7 +529,7 @@ func run() (err error) {
 			if err := scimRuntime.Run(workerCtx, scimWorkerInterval, time.Now, func(err error) {
 				logWorkerFailure("scim", "synchronization", err)
 			}); err != nil {
-				slog.Error("SCIM worker stopped")
+				slog.Error("SCIM worker stopped", "error", err)
 			}
 		}()
 	}
@@ -817,7 +817,12 @@ func run() (err error) {
 	adminHandler.SetBrandResolver(commonBrand)
 	adminUI.SetBrandResolver(commonBrand)
 	adminUI.SetCSRFTokenProvider(adminCSRFTokenProvider(issuer))
-	if emailTemplates, tplErr := recovery.LoadEmailTemplates(os.Getenv("GOAUTHY_EMAIL_TEMPLATES_FILE")); tplErr == nil {
+	emailTemplatesFile := os.Getenv("GOAUTHY_EMAIL_TEMPLATES_FILE")
+	emailTemplates, tplErr := recovery.LoadEmailTemplates(emailTemplatesFile)
+	if tplErr != nil && emailTemplatesFile != "" {
+		return fmt.Errorf("load email templates: %w", tplErr)
+	}
+	if tplErr == nil {
 		adminUI.SetTemplateProvider(&emailTemplateAdapter{templates: emailTemplates})
 	}
 	rbacHandler, err := rbac.NewHandler(rbacStore, browserStore, identityStore, issuer, clientID)
@@ -950,7 +955,7 @@ func run() (err error) {
 	if err != nil {
 		return fmt.Errorf("configure master-key retirement worker: %w", err)
 	}
-	retirementWorker.onError = func(error) { slog.Error("master-key retirement attestation failed") }
+	retirementWorker.onError = func(err error) { slog.Error("master-key retirement attestation failed", "error", err) }
 	statusCtx, cancelStatus := context.WithTimeout(workerCtx, 10*time.Second)
 	logMasterKeyStatus(statusCtx, db, keyring, issuer, passkeyService, time.Now().UTC())
 	cancelStatus()
@@ -958,7 +963,7 @@ func run() (err error) {
 	go func() {
 		defer workers.Done()
 		if err := rewrapWorker.Run(workerCtx); err != nil {
-			slog.Error("master-key rewrap worker stopped")
+			slog.Error("master-key rewrap worker stopped", "error", err)
 		}
 	}()
 	workers.Add(1)
@@ -1078,7 +1083,14 @@ func run() (err error) {
 	loginHandler.SetLoginLocationObserver(notifyLoginLocation)
 	loginHandler.SetCaptchaSiteKey(captchaVerifier.SiteKey())
 	var otpHandler *recovery.OTPHandler
-	if emailOTPEnabled(os.Getenv) && recoveryService != nil && loginLocationSender != nil {
+	otpEnabled, err := emailOTPEnabled(os.Getenv)
+	if err != nil {
+		return err
+	}
+	if otpEnabled {
+		if recoveryService == nil || loginLocationSender == nil {
+			return errors.New("GOAUTHY_EMAIL_OTP_ENABLED=true requires GOAUTHY_PASSWORD_RECOVERY_ENABLED=true and GOAUTHY_SMTP_HOST")
+		}
 		otpService, otpErr := recovery.NewOTPService(db)
 		if otpErr != nil {
 			return fmt.Errorf("configure email OTP: %w", otpErr)
@@ -1350,6 +1362,10 @@ func run() (err error) {
 	handler.HandleFunc("GET /auth/v1/users/{subject}/attr", claimsHandler.UserAttributes)
 	handler.HandleFunc("GET /auth/v1/api_keys", apiKeyHandler.Keys)
 	handler.HandleFunc("POST /auth/v1/api_keys", apiKeyHandler.Keys)
+	handler.HandleFunc("PUT /auth/v1/api_keys", apiKeyHandler.Key)
+	handler.HandleFunc("DELETE /auth/v1/api_keys", apiKeyHandler.Key)
+	handler.HandleFunc("PUT /auth/v1/api_keys/secret", apiKeyHandler.Secret)
+	handler.HandleFunc("GET /auth/v1/api_keys/test", apiKeyHandler.Test)
 	handler.HandleFunc("PUT /auth/v1/api_keys/{name}", apiKeyHandler.Key)
 	handler.HandleFunc("DELETE /auth/v1/api_keys/{name}", apiKeyHandler.Key)
 	handler.HandleFunc("PUT /auth/v1/api_keys/{name}/secret", apiKeyHandler.Secret)
@@ -1940,9 +1956,12 @@ func webIDEnabledFromEnv(getenv func(string) string) (bool, error) {
 	return value, nil
 }
 
-func emailOTPEnabled(getenv func(string) string) bool {
+func emailOTPEnabled(getenv func(string) string) (bool, error) {
 	value, err := strconv.ParseBool(envValue(getenv, "GOAUTHY_EMAIL_OTP_ENABLED", "false"))
-	return err == nil && value
+	if err != nil {
+		return false, errors.New("GOAUTHY_EMAIL_OTP_ENABLED must be a boolean")
+	}
+	return value, nil
 }
 
 func argonPolicyFromEnv(getenv func(string) string) (credential.Policy, error) {

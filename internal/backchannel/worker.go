@@ -14,6 +14,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -447,18 +448,42 @@ func resolveEndpoint(ctx context.Context, u *url.URL, allowPrivate bool) (net.IP
 	}
 	for _, ip := range ips {
 		resolved := net.IP(ip.AsSlice())
-		if allowedIP(resolved, allowPrivate) {
-			return resolved, nil
+		if !allowedIP(resolved, allowPrivate) {
+			return nil, errEndpointUnsafe
 		}
 	}
-	return nil, errEndpointUnsafe
+	return net.IP(ips[0].AsSlice()), nil
+}
+
+var specialUsePrefixes = []netip.Prefix{
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001::/32"),
+	netip.MustParsePrefix("2001:2::/48"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
 }
 
 func allowedIP(ip net.IP, allowPrivate bool) bool {
-	if ip.IsUnspecified() || ip.IsMulticast() {
+	if ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return false
 	}
-	if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || isCGNAT(ip) {
+	if addr, ok := netip.AddrFromSlice(ip); ok {
+		addr = addr.Unmap()
+		for _, prefix := range specialUsePrefixes {
+			if prefix.Contains(addr) {
+				return false
+			}
+		}
+	}
+	if ip.IsPrivate() || ip.IsLoopback() || isCGNAT(ip) {
 		return allowPrivate
 	}
 	return ip.IsGlobalUnicast()
