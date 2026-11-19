@@ -209,4 +209,93 @@ func TestConnectionUseExchangeGateAndDPoPResourceAuth(t *testing.T) {
 	if unsetW.Code != http.StatusServiceUnavailable {
 		t.Fatalf("unset resource status=%d body=%s", unsetW.Code, unsetW.Body.String())
 	}
+
+	// 10. AuthorizeConnectionUseHTTP returns 503 on context cancellation / unavailability.
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	canceledReq := dpopReq.Clone(canceledCtx)
+	w = httptest.NewRecorder()
+	if _, _, _, ok := server.AuthorizeConnectionUseHTTP(w, canceledReq, connResource); ok || w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("canceled AuthorizeConnectionUseHTTP ok=%v code=%d", ok, w.Code)
+	}
+
+	// 11. ForceMFA mismatch at exchange returns 403 access_denied before DPoP.
+	nonMFAClient, err := server.store.managedClients.CreateWithGuard(context.Background(), clients.NewRequest{
+		ID:            "non-mfa-human-client",
+		Confidential:  true,
+		RedirectURIs:  []string{"https://consumer.example.test/callback"},
+		Scopes:        []string{"goauthy.connections.use"},
+		DefaultScopes: []string{"goauthy.connections.use"},
+		GrantTypes:    []string{"authorization_code"},
+		Audiences:     []string{connResource},
+		ForceMFA:      false,
+	}, guard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonMFASecret, err := server.store.managedClients.ReadSecretWithGuard(context.Background(), nonMFAClient.ID, guard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid2 := oidcTestSessionID(2)
+	if _, err := db.Execute(context.Background(), rhiza.ExecuteRequest{
+		RequestID: "conn-use-seed-session-2",
+		SQL:       `INSERT INTO browser_sessions(token_digest,subject,auth_method,created_at_unix_ms,expires_at_unix_ms,last_seen_at_unix_ms) VALUES(?, 'alice', 'pwd', ?, ?, ?)`,
+		Args:      []any{sid2, time.Now().UTC().UnixMilli(), time.Now().UTC().Add(time.Hour).UnixMilli(), time.Now().UTC().UnixMilli()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pwdAuthReq := httptest.NewRequest(http.MethodGet, "/oidc/authorize?client_id="+nonMFAClient.ID+"&response_type=code&redirect_uri="+url.QueryEscape("https://consumer.example.test/callback")+"&scope="+url.QueryEscape("goauthy.connections.use")+"&resource="+url.QueryEscape(connResource)+"&state=state-12345678&code_challenge="+challenge+"&code_challenge_method=S256", nil)
+	pwdRec := httptest.NewRecorder()
+	server.CompleteAuthorizationWithSession(pwdRec, pwdAuthReq, "alice", []string{"goauthy.connections.use"}, time.Now().UTC(), sid2, oidcAuthMethodPwd)
+	pwdLoc, err := url.Parse(pwdRec.Header().Get("Location"))
+	if err != nil || pwdLoc.Query().Get("code") == "" {
+		t.Fatalf("pwd authorize redirect=%q err=%v", pwdRec.Header().Get("Location"), err)
+	}
+	pwdTokenReq := httptest.NewRequest(http.MethodPost, "/oidc/token", strings.NewReader(url.Values{
+		"grant_type": {"authorization_code"}, "code": {pwdLoc.Query().Get("code")},
+		"redirect_uri": {"https://consumer.example.test/callback"}, "code_verifier": {verifier},
+	}.Encode()))
+	pwdTokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	pwdTokenReq.SetBasicAuth(nonMFAClient.ID, nonMFASecret)
+	pwdTokenW := httptest.NewRecorder()
+	server.TokenHandler().ServeHTTP(pwdTokenW, pwdTokenReq)
+	if pwdTokenW.Code != http.StatusOK {
+		t.Fatalf("pwd token status=%d body=%s", pwdTokenW.Code, pwdTokenW.Body.String())
+	}
+	pwdToken := decodeToken(t, pwdTokenW)
+	if resp := postConsumer(url.Values{
+		"grant_type": {TokenExchangeGrantType}, "subject_token": {pwdToken.AccessToken},
+		"subject_token_type": {accessTokenType}, "scope": {"goauthy.connections.use"}, "resource": {connResource},
+	}, ""); resp.Code != http.StatusForbidden || tokenError(t, resp) != "access_denied" {
+		t.Fatalf("ForceMFA exchange rejection status=%d err=%q", resp.Code, tokenError(t, resp))
+	}
+
+	// 12. clientGroupPolicy denial at exchange returns 403 access_denied before DPoP.
+	prefix := "eng/"
+	restricted, err := server.store.managedClients.CreateWithGuard(context.Background(), clients.NewRequest{
+		ID:                  "group-restricted-consumer",
+		Confidential:        true,
+		RedirectURIs:        []string{"https://consumer.example.test/callback"},
+		Scopes:              []string{"goauthy.connections.use"},
+		DefaultScopes:       []string{"goauthy.connections.use"},
+		GrantTypes:          []string{TokenExchangeGrantType},
+		Audiences:           []string{connResource},
+		RestrictGroupPrefix: &prefix,
+	}, guard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restrictedSecret, err := server.store.managedClients.ReadSecretWithGuard(context.Background(), restricted.ID, guard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupReq := httptest.NewRequest(http.MethodPost, "/oidc/token", strings.NewReader(exchForm.Encode()))
+	groupReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	groupReq.SetBasicAuth(restricted.ID, restrictedSecret)
+	groupW := httptest.NewRecorder()
+	server.TokenHandler().ServeHTTP(groupW, groupReq)
+	if groupW.Code != http.StatusForbidden || tokenError(t, groupW) != "access_denied" {
+		t.Fatalf("clientGroupPolicy rejection status=%d err=%q", groupW.Code, tokenError(t, groupW))
+	}
 }
