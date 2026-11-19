@@ -1,7 +1,7 @@
 # Storage & Rhiza Persistence (`internal/storage`)
 
 ## Overview
-Owns embedded Rhiza database configuration, schema migrations (`schemaVersion = 115`), object-store opening (S3/GCS), master-key retirement fencing/barrier state machine, envelope writer admission, DCR software-statement trust fencing, and passkey cookie retention watermarks.
+Owns embedded Rhiza database configuration, schema migrations (`schemaVersion = 116`), object-store opening (S3/GCS), master-key retirement fencing/barrier state machine, envelope writer admission, DCR software-statement trust fencing, and passkey cookie retention watermarks.
 
 ## Interface
 - `[config.go:RhizaConfigFromEnv]` — Builds `rhiza.Config` for supported profiles (`RhizaProfileStandalone`, `RhizaProfileStandaloneLocal`, `RhizaProfileDev`, `RhizaProfileCluster`).

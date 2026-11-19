@@ -26,7 +26,7 @@ func TestUseGrantOAuthRefreshAndPolicyFences(t *testing.T) {
 				t.Fatal(err)
 			}
 			const resource = "https://resource.example/api"
-			consumer, err := clients.NewStore(db, s.keys).CreateWithGuard(ctx, clients.NewRequest{ID: "grant-consumer", RedirectURIs: []string{"https://consumer.example/callback"}, Scopes: []string{"goauthy.connections.use"}, DefaultScopes: []string{"goauthy.connections.use"}, GrantTypes: []string{"authorization_code"}, Audiences: []string{resource}}, credentialAuthority())
+			consumer, err := clients.NewStore(db, s.keys).CreateWithGuard(ctx, clients.NewRequest{ID: "grant-consumer", Confidential: true, RedirectURIs: []string{"https://consumer.example/callback"}, Scopes: []string{"goauthy.connections.use"}, DefaultScopes: []string{"goauthy.connections.use"}, GrantTypes: []string{"authorization_code"}, Audiences: []string{resource}}, credentialAuthority())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -37,11 +37,11 @@ func TestUseGrantOAuthRefreshAndPolicyFences(t *testing.T) {
 				}
 				return "1", nil
 			}
-			g, err := s.CreateUseGrant(ctx, b.Owner, b.CollectionID, b.ConnectionID, resource, UseGrantInput{ConsumerClientID: consumer.ID, Mode: "proxy", Purpose: "sync", ExpiresAt: s.now() + 60000}, authority)
+			g, err := s.CreateUseGrant(ctx, b.Owner, b.CollectionID, b.ConnectionID, resource, UseGrantInput{ConsumerClientID: consumer.ID, Mode: "credential_delivery", Purpose: "sync", ExpiresAt: s.now() + 60000}, authority)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, oldGuard, err := s.AuthorizeUseGrant(ctx, b.Owner, consumer.ID, g.ID, resource, "proxy", authority)
+			_, oldGuard, err := s.AuthorizeUseGrant(ctx, b.Owner, consumer.ID, g.ID, resource, "credential_delivery", authority)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -62,7 +62,7 @@ func TestUseGrantOAuthRefreshAndPolicyFences(t *testing.T) {
 				t.Fatal(err)
 			}
 			check(oldGuard, 0)
-			_, guard, err := s.AuthorizeUseGrant(ctx, b.Owner, consumer.ID, g.ID, resource, "proxy", authority)
+			_, guard, err := s.AuthorizeUseGrant(ctx, b.Owner, consumer.ID, g.ID, resource, "credential_delivery", authority)
 			if err != nil {
 				t.Fatalf("refresh invalidated consent: %v", err)
 			}
@@ -79,7 +79,7 @@ func TestUseGrantOAuthRefreshAndPolicyFences(t *testing.T) {
 				}
 			}
 			check(guard, 0)
-			if _, _, err := s.AuthorizeUseGrant(ctx, b.Owner, consumer.ID, g.ID, resource, "proxy", authority); err == nil {
+			if _, _, err := s.AuthorizeUseGrant(ctx, b.Owner, consumer.ID, g.ID, resource, "credential_delivery", authority); err == nil {
 				t.Fatal("stale grant authorized")
 			}
 		})

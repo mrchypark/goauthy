@@ -42,14 +42,14 @@ func TestTokenEndpointInternalErrorResponse(t *testing.T) {
 		status       int
 		code         string
 	}{
-		{"request storage failure", fmt.Errorf("%s: %w", secret, rhiza.ErrCommitUnknown), true, 500, "server_error"},
-		{"response storage failure", fmt.Errorf("%s: %w", secret, rhiza.ErrCommitUnknown), false, 500, "server_error"},
-		{"request cancellation", context.DeadlineExceeded, true, 500, "server_error"},
-		{"wrapped client quorum failure", fosite.ErrInvalidClient.WithWrap(fmt.Errorf("%s: %w", secret, rhiza.ErrQuorumUnavailable)), true, 500, "server_error"},
-		{"wrapped client not ready", fosite.ErrInvalidClient.WithWrap(fmt.Errorf("%s: %w", secret, rhiza.ErrNotReady)), true, 500, "server_error"},
-		{"wrapped client durability failure", fosite.ErrInvalidClient.WithWrap(fmt.Errorf("%s: %w", secret, rhiza.ErrDurabilityUnavailable)), true, 500, "server_error"},
-		{"wrapped client commit unknown", fosite.ErrInvalidClient.WithWrap(fmt.Errorf("%s: %w", secret, rhiza.ErrCommitUnknown)), true, 500, "server_error"},
-		{"wrapped client deadline", fosite.ErrInvalidClient.WithWrap(fmt.Errorf("%s: %w", secret, context.DeadlineExceeded)), true, 500, "server_error"},
+		{"request storage failure", fmt.Errorf("%s: %w", secret, rhiza.ErrCommitUnknown), true, 503, "server_error"},
+		{"response storage failure", fmt.Errorf("%s: %w", secret, rhiza.ErrCommitUnknown), false, 503, "server_error"},
+		{"request cancellation", context.DeadlineExceeded, true, 503, "server_error"},
+		{"wrapped client quorum failure", fosite.ErrInvalidClient.WithWrap(fmt.Errorf("%s: %w", secret, rhiza.ErrQuorumUnavailable)), true, 503, "server_error"},
+		{"wrapped client not ready", fosite.ErrInvalidClient.WithWrap(fmt.Errorf("%s: %w", secret, rhiza.ErrNotReady)), true, 503, "server_error"},
+		{"wrapped client durability failure", fosite.ErrInvalidClient.WithWrap(fmt.Errorf("%s: %w", secret, rhiza.ErrDurabilityUnavailable)), true, 503, "server_error"},
+		{"wrapped client commit unknown", fosite.ErrInvalidClient.WithWrap(fmt.Errorf("%s: %w", secret, rhiza.ErrCommitUnknown)), true, 503, "server_error"},
+		{"wrapped client deadline", fosite.ErrInvalidClient.WithWrap(fmt.Errorf("%s: %w", secret, context.DeadlineExceeded)), true, 503, "server_error"},
 		{"client authentication rejection", fosite.ErrInvalidClient.WithDebug(secret), true, 401, "invalid_client"},
 		{"protocol rejection", fosite.ErrInvalidGrant.WithDebug(secret), false, 400, "invalid_grant"},
 		{"typed serialization conflict", fosite.ErrSerializationFailure.WithDebug(secret), false, 409, "error"},
@@ -133,7 +133,7 @@ func TestTokenEndpointBootstrapScopeAvailabilityUsesServerError(t *testing.T) {
 	if scopeReads.Load() < 2 {
 		t.Fatal("bootstrap scope lookup did not reach the real claims store")
 	}
-	if response.Code != http.StatusInternalServerError || tokenError(t, response) != "server_error" {
+	if response.Code != http.StatusServiceUnavailable || tokenError(t, response) != "server_error" {
 		t.Fatalf("availability status=%d body=%q", response.Code, response.Body.String())
 	}
 	if strings.Contains(response.Body.String(), testClientSecret) || strings.Contains(response.Body.String(), "access_token") {

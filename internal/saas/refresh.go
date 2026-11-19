@@ -7,7 +7,12 @@ import (
 	"time"
 )
 
-var errRefreshUncertain = errors.New("saas refresh outcome uncertain; reconnect required")
+const refreshExchangeTimeout = 20 * time.Second
+
+var (
+	ErrRefreshUncertain = errors.New("saas refresh outcome uncertain; reconnect required")
+	errRefreshUncertain = ErrRefreshUncertain
+)
 
 // refreshCredential never retries the external operation. exchange is a trusted
 // provider adapter, not a callback or destination supplied by an API caller.
@@ -27,13 +32,17 @@ func (s *CredentialStore) refreshCredential(ctx context.Context, b credentialBin
 		return credentialBinding{}, ErrCredentialNotFound
 	}
 	if current.RefreshExpiresAtUnixMS != 0 && current.RefreshExpiresAtUnixMS <= s.now() {
-		return credentialBinding{}, errCredential
+		return credentialBinding{}, ErrCredentialNotFound
 	}
 	claim, err := s.ClaimRefresh(ctx, b, authority)
 	if err != nil {
 		return credentialBinding{}, err
 	}
-	updated, exchangeErr := exchange(ctx, current)
+	// Bound combined upstream Refresh + Identity HTTP work to <=20s so
+	// CompleteRefresh has Raft commit headroom inside the 30s claim lease.
+	exchangeCtx, cancelExchange := context.WithTimeout(ctx, refreshExchangeTimeout)
+	updated, exchangeErr := exchange(exchangeCtx, current)
+	cancelExchange()
 	if exchangeErr == nil {
 		exchangeErr = s.CompleteRefresh(ctx, b, claim, updated, authority)
 	}

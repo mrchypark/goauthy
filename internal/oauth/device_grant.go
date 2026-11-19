@@ -16,9 +16,10 @@ import (
 const DeviceGrantType = "urn:ietf:params:oauth:grant-type:device_code"
 
 const (
-	deviceCodeExtra  = "goauthy_device_code"
-	deviceClaimExtra = "goauthy_device_claim"
-	deviceOIDCExtra  = "goauthy_device_oidc"
+	deviceCodeExtra        = "goauthy_device_code"
+	deviceClaimExtra       = "goauthy_device_claim"
+	deviceOIDCExtra        = "goauthy_device_oidc"
+	deviceMFAVerifiedExtra = "goauthy_device_mfa_verified"
 )
 
 type deviceGrantHandler struct {
@@ -123,7 +124,7 @@ func (h *deviceGrantHandler) HandleTokenEndpointRequest(ctx context.Context, req
 		return h.releaseClaimError(ctx, result.ClaimToken, fosite.ErrServerError)
 	}
 	session.Subject, session.Username = result.Subject, result.Subject
-	session.Extra = map[string]interface{}{deviceCodeExtra: deviceCode, deviceClaimExtra: result.ClaimToken}
+	session.Extra = map[string]interface{}{deviceCodeExtra: deviceCode, deviceClaimExtra: result.ClaimToken, deviceMFAVerifiedExtra: result.MFAVerified}
 	if h.oidcEnabled {
 		// Persist origin, not browser authentication claims, for refresh signing.
 		session.Extra[deviceOIDCExtra] = true

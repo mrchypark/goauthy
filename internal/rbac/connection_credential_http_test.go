@@ -1,7 +1,6 @@
 package rbac
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,8 +16,8 @@ func credentialDeliveryHTTPFixture(t *testing.T) *Handler {
 	if err := h.BindConnectionUseResource("https://resource.example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.BindConnectionUseAuthorizer(func(*http.Request) (string, string, func() (string, []any), error) {
-		return "owner", "consumer", func() (string, []any) { return "1", nil }, nil
+	if err := h.BindConnectionUseAuthorizer(func(http.ResponseWriter, *http.Request) (string, string, func() (string, []any), bool) {
+		return "owner", "consumer", func() (string, []any) { return "1", nil }, true
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -102,8 +101,9 @@ func TestDeliverConnectionCredentialRequiresHTTPSAndConfig(t *testing.T) {
 func TestDeliverConnectionCredentialAuthorizerFailure(t *testing.T) {
 	t.Parallel()
 	h := credentialDeliveryHTTPFixture(t)
-	h.connectionUseAuthorizer = func(*http.Request) (string, string, func() (string, []any), error) {
-		return "", "", nil, errors.New("invalid bearer")
+	h.connectionUseAuthorizer = func(w http.ResponseWriter, _ *http.Request) (string, string, func() (string, []any), bool) {
+		h.genericUnauthorized(w)
+		return "", "", nil, false
 	}
 	r := httptest.NewRequest(http.MethodPost, "/auth/v1/connection-grants/g/credential", nil)
 	r.SetPathValue("grant_id", "grant")

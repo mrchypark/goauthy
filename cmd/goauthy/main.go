@@ -650,6 +650,10 @@ func run() (err error) {
 			return fmt.Errorf("configure passkeys: %w", err)
 		}
 	}
+	connectionsResource, err := resourceFromEnv(os.Getenv, "GOAUTHY_CONNECTIONS_RESOURCE", allowedResources)
+	if err != nil {
+		return err
+	}
 	var expiredRecovery func(context.Context, string) error
 	if recoveryService != nil {
 		expiredRecovery = recoveryService.IssueForSubject
@@ -671,6 +675,9 @@ func run() (err error) {
 		}, ResolvePrincipal: func(ctx context.Context, subject string) (oauth.PrincipalClaims, error) {
 			principal, err := rbacStore.ResolvePrincipal(ctx, subject)
 			if err != nil {
+				if errors.Is(err, rbac.ErrInactiveSubject) {
+					return oauth.PrincipalClaims{}, identity.ErrInactiveSubject
+				}
 				return oauth.PrincipalClaims{}, err
 			}
 			claims := oauth.PrincipalClaims{Roles: make([]string, len(principal.Roles)), Groups: make([]string, len(principal.Groups)), Revision: principal.Revision}
@@ -700,7 +707,7 @@ func run() (err error) {
 				prefix = *policy.RestrictGroupPrefix
 			}
 			return oauth.ClientGroupPolicy{Managed: true, Prefix: prefix, Revision: policy.Revision}, nil
-		}, BrowserSessionIdleTimeout: idleTimeout, ClientCredentialsTokenLifespan: clientCredentialsTokenLifetime, ClientCredentialsMapSub: clientCredentialsMapSub, BootstrapForceMFA: bootstrapForceMFA, RFC8252LoopbackRedirects: loopbackRedirects, CIMD: cimdResolver,
+		}, BrowserSessionIdleTimeout: idleTimeout, ClientCredentialsTokenLifespan: clientCredentialsTokenLifetime, ClientCredentialsMapSub: clientCredentialsMapSub, BootstrapForceMFA: bootstrapForceMFA, ConnectionUseResource: connectionsResource, RFC8252LoopbackRedirects: loopbackRedirects, CIMD: cimdResolver,
 			BackChannelLogoutURI: backchannelURI, BackChannelLogoutAllowPrivate: allowPrivateBackchannel, BackChannelLogoutAllowHTTP: allowHTTPBackchannel},
 	)
 	if err != nil {
@@ -889,10 +896,6 @@ func run() (err error) {
 	if err := rbacHandler.BindSaaSCredentials(saasCredentials); err != nil {
 		return fmt.Errorf("configure SaaS credential HTTP: %w", err)
 	}
-	connectionsResource, err := resourceFromEnv(os.Getenv, "GOAUTHY_CONNECTIONS_RESOURCE", allowedResources)
-	if err != nil {
-		return err
-	}
 	if err := oauthServer.PinBootstrapConnections(ctx, connectionsResource); err != nil {
 		return fmt.Errorf("pin bootstrap connections policy: %w", err)
 	}
@@ -901,8 +904,8 @@ func run() (err error) {
 			return fmt.Errorf("configure connection use resource: %w", err)
 		}
 	}
-	if err := rbacHandler.BindConnectionUseAuthorizer(func(r *http.Request) (string, string, func() (string, []any), error) {
-		return oauthServer.AuthorizeConnectionUse(r, connectionsResource)
+	if err := rbacHandler.BindConnectionUseAuthorizer(func(w http.ResponseWriter, r *http.Request) (string, string, func() (string, []any), bool) {
+		return oauthServer.AuthorizeConnectionUseHTTP(w, r, connectionsResource)
 	}); err != nil {
 		return fmt.Errorf("configure connection use authorization: %w", err)
 	}

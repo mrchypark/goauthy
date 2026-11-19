@@ -61,8 +61,8 @@ func TestBootstrapCredentialBodylessHTTP(t *testing.T) {
 	}
 	// Token verification is the existing injected boundary. This test exercises
 	// the real HTTP handler and Rhiza policy/decryption, not OAuth issuance.
-	if err := h.BindConnectionUseAuthorizer(func(*http.Request) (string, string, func() (string, []any), error) {
-		return "member", clientID, allow, nil
+	if err := h.BindConnectionUseAuthorizer(func(http.ResponseWriter, *http.Request) (string, string, func() (string, []any), bool) {
+		return "member", clientID, allow, true
 	}); err != nil {
 		t.Fatal(err)
 	}

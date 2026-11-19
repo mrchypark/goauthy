@@ -64,7 +64,7 @@ type Handler struct {
 	providerResourceAuthorizer  func(*http.Request, string) (string, func() (string, []any), error)
 	saasCredentials             *saas.CredentialStore
 	connectionUseResource       string
-	connectionUseAuthorizer     func(*http.Request) (string, string, func() (string, []any), error)
+	connectionUseAuthorizer     func(http.ResponseWriter, *http.Request) (string, string, func() (string, []any), bool)
 	connectionHandoffAuthorizer func(*http.Request) (string, string, func() (string, []any), error)
 	adminForceMFA               bool
 	brand                       func(context.Context) (branding.Brand, error)

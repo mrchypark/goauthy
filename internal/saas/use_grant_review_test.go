@@ -91,12 +91,12 @@ func TestUseGrantReviewedConnectorDigestOAuth(t *testing.T) {
 	if err := store.Install(ctx, b, testCredential(), credentialAuthority()); err != nil {
 		t.Fatal(err)
 	}
-	consumer, err := clients.NewStore(db, store.keys).CreateWithGuard(ctx, clients.NewRequest{ID: "review-oauth-consumer", RedirectURIs: []string{"https://consumer.example/callback"}, Scopes: []string{"goauthy.connections.use"}, DefaultScopes: []string{"goauthy.connections.use"}, GrantTypes: []string{"authorization_code"}, Audiences: []string{"https://resource.example"}}, credentialAuthority())
+	consumer, err := clients.NewStore(db, store.keys).CreateWithGuard(ctx, clients.NewRequest{ID: "review-oauth-consumer", Confidential: true, RedirectURIs: []string{"https://consumer.example/callback"}, Scopes: []string{"goauthy.connections.use"}, DefaultScopes: []string{"goauthy.connections.use"}, GrantTypes: []string{"authorization_code"}, Audiences: []string{"https://resource.example"}}, credentialAuthority())
 	if err != nil {
 		t.Fatal(err)
 	}
 	provided := strings.Repeat("A", 43)
-	input := UseGrantInput{ConsumerClientID: consumer.ID, Mode: "proxy", Purpose: "review", ExpiresAt: store.now() + 60000, ReviewedConnectorDigest: &provided}
+	input := UseGrantInput{ConsumerClientID: consumer.ID, Mode: "credential_delivery", Purpose: "review", ExpiresAt: store.now() + 60000, ReviewedConnectorDigest: &provided}
 	if _, err := store.CreateUseGrant(ctx, b.Owner, b.CollectionID, b.ConnectionID, "https://resource.example", input, credentialAuthority()); !errors.Is(err, ErrUseGrantInvalid) {
 		t.Fatalf("oauth reviewed digest err=%v", err)
 	}

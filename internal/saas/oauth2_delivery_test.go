@@ -108,12 +108,8 @@ func TestDeliverOAuth2RequiresKnownFutureTokenExpiry(t *testing.T) {
 func TestDeliverOAuth2ProxyAndReconnectAreDenied(t *testing.T) {
 	t.Parallel()
 	ctx, s, b, consumer, grant := oauth2DeliveryFixture(t)
-	proxy, err := s.CreateUseGrant(ctx, b.Owner, b.CollectionID, b.ConnectionID, "https://consumer.example/resource", UseGrantInput{ConsumerClientID: consumer.ID, Mode: "proxy", Purpose: "proxy", ExpiresAt: s.now() + 120000}, credentialAuthority())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.DeliverOAuth2(ctx, b.Owner, consumer.ID, proxy.ID, proxy.Resource, credentialAuthority()); err == nil || got.AccessToken != "" {
-		t.Fatalf("proxy got=%+v err=%v", got, err)
+	if _, err := s.CreateUseGrant(ctx, b.Owner, b.CollectionID, b.ConnectionID, "https://consumer.example/resource", UseGrantInput{ConsumerClientID: consumer.ID, Mode: "proxy", Purpose: "proxy", ExpiresAt: s.now() + 120000}, credentialAuthority()); !errors.Is(err, ErrUseGrantInvalid) {
+		t.Fatalf("proxy create err=%v; want ErrUseGrantInvalid", err)
 	}
 	if err := s.RevokeOAuth2(ctx, b.Owner, b.CollectionID, b.ConnectionID, 1, credentialAuthority()); err != nil {
 		t.Fatal(err)

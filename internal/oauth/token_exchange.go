@@ -8,10 +8,13 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/clients"
+	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/handler/oauth2"
 )
+
+const connectionUseScope = "goauthy.connections.use"
 
 // TokenExchangeGrantType is RFC 8693's grant type URI.
 const TokenExchangeGrantType = "urn:ietf:params:oauth:grant-type:token-exchange"
@@ -27,17 +30,19 @@ const (
 
 type tokenExchangeHandler struct {
 	*oauth2.HandleHelper
-	store            *Store
-	strategy         oauth2.AccessTokenStrategy
-	config           *fosite.Config
-	allowedResources map[string]struct{}
-	defaultAudiences map[string]string
+	store                 *Store
+	strategy              oauth2.AccessTokenStrategy
+	config                *fosite.Config
+	allowedResources      map[string]struct{}
+	defaultAudiences      map[string]string
+	connectionUseResource string
+	server                *Server
 }
 
 var _ fosite.TokenEndpointHandler = (*tokenExchangeHandler)(nil)
 
-func newTokenExchangeHandler(store *Store, strategy oauth2.AccessTokenStrategy, config *fosite.Config, allowedResources map[string]struct{}, defaultAudiences map[string]string) *tokenExchangeHandler {
-	return &tokenExchangeHandler{HandleHelper: &oauth2.HandleHelper{AccessTokenStrategy: strategy, AccessTokenStorage: store, Config: config}, store: store, strategy: strategy, config: config, allowedResources: allowedResources, defaultAudiences: defaultAudiences}
+func newTokenExchangeHandler(store *Store, strategy oauth2.AccessTokenStrategy, config *fosite.Config, allowedResources map[string]struct{}, defaultAudiences map[string]string, connectionUseResource string) *tokenExchangeHandler {
+	return &tokenExchangeHandler{HandleHelper: &oauth2.HandleHelper{AccessTokenStrategy: strategy, AccessTokenStorage: store, Config: config}, store: store, strategy: strategy, config: config, allowedResources: allowedResources, defaultAudiences: defaultAudiences, connectionUseResource: connectionUseResource}
 }
 
 func (h *tokenExchangeHandler) CanHandleTokenEndpointRequest(_ context.Context, request fosite.AccessRequester) bool {
@@ -59,6 +64,29 @@ func (h *tokenExchangeHandler) HandleTokenEndpointRequest(ctx context.Context, r
 	if !onlyExchangeFields(form) {
 		return fosite.ErrInvalidRequest
 	}
+	requestedScopes := splitScopes(form.Get("scope"))
+	isConnUse := containsScope(requestedScopes, connectionUseScope) ||
+		(h.connectionUseResource != "" && (form.Get("resource") == h.connectionUseResource || form.Get("audience") == h.connectionUseResource))
+	if isConnUse {
+		if h.connectionUseResource == "" {
+			return errServiceUnavailable
+		}
+		if _, hasAudience := form["audience"]; hasAudience {
+			return errInvalidTarget
+		}
+		if !request.GetClient().GetScopes().Has(connectionUseScope) {
+			return fosite.ErrInvalidScope
+		}
+		if scopes, found := form["scope"]; !found || len(scopes) != 1 || len(requestedScopes) != 1 || requestedScopes[0] != connectionUseScope {
+			return fosite.ErrInvalidScope
+		}
+		if resVals, found := form["resource"]; !found || len(resVals) != 1 || resVals[0] != h.connectionUseResource {
+			return errInvalidTarget
+		}
+		if form.Has("actor_token") || form.Has("actor_token_type") {
+			return fosite.ErrInvalidGrant
+		}
+	}
 	subjectToken, ok := exactlyOne(form, "subject_token")
 	if !ok {
 		return fosite.ErrInvalidRequest
@@ -78,12 +106,60 @@ func (h *tokenExchangeHandler) HandleTokenEndpointRequest(ctx context.Context, r
 	if err != nil {
 		return err
 	}
-	if sourceExpiry, err = h.store.accessTokenExpiry(ctx, signature); err != nil || !sourceExpiry.After(now) {
+	if sourceExpiry, err = h.store.accessTokenExpiry(ctx, signature); err != nil {
+		if isUnavailableErr(err) {
+			return err
+		}
+		return fosite.ErrInvalidGrant
+	} else if !sourceExpiry.After(now) {
 		return fosite.ErrInvalidGrant
 	}
 	remaining := sourceExpiry.Sub(now)
 	if remaining <= 0 {
 		return fosite.ErrInvalidGrant
+	}
+	var connUseDeviceMFAVerified bool
+	if isConnUse {
+		if source.GetRequestForm().Get("grant_type") == TokenExchangeGrantType || (sourceSession.Extra != nil && sourceSession.Extra["act"] != nil) {
+			return fosite.ErrInvalidGrant
+		}
+		if _, machine, err := machineTokenSubject(source); err != nil || machine {
+			return fosite.ErrInvalidGrant
+		}
+		sourceAudiences, audErr := accessResourceAudiences(source)
+		if audErr != nil || !source.GetGrantedScopes().Has(connectionUseScope) || !containsAccessAudience(sourceAudiences, h.connectionUseResource) {
+			return fosite.ErrInvalidGrant
+		}
+		if h.server != nil {
+			policy, _, policyErr := h.server.clientGroupPolicy(ctx, request.GetClient().GetID())
+			if policyErr != nil {
+				return policyErr
+			}
+			if policy.Prefix != "" {
+				principal, principalErr := h.server.currentPrincipal(ctx, sourceSession.Subject)
+				if principalErr != nil {
+					if errors.Is(principalErr, identity.ErrInactiveSubject) {
+						return fosite.ErrInvalidGrant
+					}
+					return principalErr
+				}
+				if enforceClientGroupPolicy(principal, policy) != nil {
+					return fosite.ErrAccessDenied
+				}
+			}
+			if h.store.forceMFA(request.GetClient()) {
+				mfaOK, mfaErr := h.server.hasConnectionUseMFA(ctx, source, sourceSession)
+				if mfaErr != nil {
+					return mfaErr
+				}
+				if !mfaOK {
+					return fosite.ErrAccessDenied
+				}
+				if isDevice, _ := sourceSession.Extra[deviceOIDCExtra].(bool); isDevice {
+					connUseDeviceMFAVerified = true
+				}
+			}
+		}
 	}
 	actorSignature, actorExpiry := "", time.Time{}
 	var actorClaims *oidc.ActorClaims
@@ -122,7 +198,12 @@ func (h *tokenExchangeHandler) HandleTokenEndpointRequest(ctx context.Context, r
 		if parseErr != nil {
 			return fosite.ErrInvalidGrant
 		}
-		if actorExpiry, actorErr = h.store.accessTokenExpiry(ctx, actorSignature); actorErr != nil || !actorExpiry.After(now) {
+		if actorExpiry, actorErr = h.store.accessTokenExpiry(ctx, actorSignature); actorErr != nil {
+			if isUnavailableErr(actorErr) {
+				return actorErr
+			}
+			return fosite.ErrInvalidGrant
+		} else if !actorExpiry.After(now) {
 			return fosite.ErrInvalidGrant
 		}
 		if actorExpiry.Sub(now) < remaining {
@@ -134,8 +215,10 @@ func (h *tokenExchangeHandler) HandleTokenEndpointRequest(ctx context.Context, r
 	audiences := fosite.Arguments{}
 	// Managed defaults are captured by the shared signing strategy, separately
 	// from explicit resource grants. Legacy stored exchange grants stay intact.
-	if value := h.defaultAudiences[request.GetClient().GetID()]; !isManaged && value != "" {
-		audiences = append(audiences, value)
+	if !isConnUse {
+		if value := h.defaultAudiences[request.GetClient().GetID()]; !isManaged && value != "" {
+			audiences = append(audiences, value)
+		}
 	}
 	_, hasResource := form["resource"]
 	_, hasAudience := form["audience"]
@@ -198,6 +281,15 @@ func (h *tokenExchangeHandler) HandleTokenEndpointRequest(ctx context.Context, r
 		return fosite.ErrInvalidGrant
 	} else if machine {
 		targetSession.Extra[machineSubjectExtra] = ""
+	} else if sourceSession.Extra != nil {
+		for _, key := range []string{oidcSessionIDExtra, oidcAuthMethodExtra, oidcAuthTimeExtra, deviceOIDCExtra, deviceMFAVerifiedExtra} {
+			if val, exists := sourceSession.Extra[key]; exists {
+				targetSession.Extra[key] = val
+			}
+		}
+		if connUseDeviceMFAVerified {
+			targetSession.Extra[deviceMFAVerifiedExtra] = true
+		}
 	}
 	form.Set(exchangeSourceSignatureForm, signature)
 	form.Set(exchangeSourceExpiryForm, strconv.FormatInt(sourceExpiry.UnixMilli(), 10))
@@ -253,6 +345,9 @@ func (h *tokenExchangeHandler) PopulateTokenEndpointResponse(ctx context.Context
 		txCtx, err = h.store.BeginTokenExchangeTX(ctx, sourceSignature, sourceExpiry)
 	}
 	if err != nil {
+		if isUnavailableErr(err) {
+			return err
+		}
 		return fosite.ErrServerError
 	}
 	if hasActor && time.Until(actorExpiry) < remaining {
@@ -265,11 +360,17 @@ func (h *tokenExchangeHandler) PopulateTokenEndpointResponse(ctx context.Context
 	}
 	if _, err := h.IssueAccessToken(txCtx, lifespan, request, response); err != nil {
 		_ = h.store.Rollback(txCtx)
+		if isUnavailableErr(err) {
+			return err
+		}
 		return fosite.ErrServerError
 	}
 	if err := h.store.Commit(txCtx); err != nil {
 		if errors.Is(err, fosite.ErrSerializationFailure) {
 			return fosite.ErrInvalidGrant
+		}
+		if isUnavailableErr(err) {
+			return err
 		}
 		return fosite.ErrServerError
 	}
@@ -292,11 +393,23 @@ func splitScopes(value string) []string { return strings.Fields(value) }
 func (h *tokenExchangeHandler) exchangePrincipal(ctx context.Context, raw string, now time.Time) (fosite.Requester, string, *fosite.DefaultSession, time.Time, error) {
 	signature := h.strategy.AccessTokenSignature(ctx, raw)
 	principal, err := h.store.GetAccessTokenSession(ctx, signature, &fosite.DefaultSession{})
-	if err != nil || h.strategy.ValidateAccessToken(ctx, principal, raw) != nil || sessionDPoPJKT(principal.GetSession()) != "" {
+	if err != nil {
+		if isUnavailableErr(err) {
+			return nil, "", nil, time.Time{}, err
+		}
+		return nil, "", nil, time.Time{}, fosite.ErrInvalidGrant
+	}
+	if h.strategy.ValidateAccessToken(ctx, principal, raw) != nil || sessionDPoPJKT(principal.GetSession()) != "" {
 		return nil, "", nil, time.Time{}, fosite.ErrInvalidGrant
 	}
 	session, ok := principal.GetSession().(*fosite.DefaultSession)
-	if !ok || h.store.validateTokenAccounts(ctx, principal) != nil {
+	if !ok {
+		return nil, "", nil, time.Time{}, fosite.ErrInvalidGrant
+	}
+	if err := h.store.validateTokenAccounts(ctx, principal); err != nil {
+		if isUnavailableErr(err) {
+			return nil, "", nil, time.Time{}, err
+		}
 		return nil, "", nil, time.Time{}, fosite.ErrInvalidGrant
 	}
 	expires := session.GetExpiresAt(fosite.AccessToken).UTC()

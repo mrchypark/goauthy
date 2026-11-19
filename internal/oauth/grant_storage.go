@@ -276,7 +276,7 @@ func (s *Store) Commit(ctx context.Context) error {
 	tx.done = true
 	_, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: tx.requestID, Statements: tx.statements})
 	if err != nil {
-		if tx.kind == "device" && strings.Contains(err.Error(), "error_code="+string(rhiza.MutationErrorCodePreconditionFailed)) {
+		if (tx.kind == "device" || tx.kind == "exchange") && strings.Contains(err.Error(), "error_code="+string(rhiza.MutationErrorCodePreconditionFailed)) {
 			return fosite.ErrSerializationFailure
 		}
 		if errors.Is(err, rhiza.ErrRequestConflict) && (tx.kind == "code" || tx.kind == "refresh") {
@@ -1072,6 +1072,12 @@ func (s *Store) CreateAccessTokenSession(ctx context.Context, signature string, 
 		principalGuard, principalArgs := tx.principalGuard()
 		condition += principalGuard
 		args = append(args, principalArgs...)
+		if session, ok := request.GetSession().(*fosite.DefaultSession); ok && session.Extra != nil {
+			if sid, ok := session.Extra[oidcSessionIDExtra].(string); ok && sid != "" {
+				condition += ` AND EXISTS (SELECT 1 FROM browser_sessions bs WHERE bs.token_digest = ? AND bs.subject = ? AND bs.revoked_at_unix_ms IS NULL AND bs.expires_at_unix_ms > ?)`
+				args = append(args, sid, session.Subject, accountExpiryCutoff{})
+			}
+		}
 		insertSQL = `INSERT INTO oauth_access_tokens
 			(signature, request_id, client_id, requested_at_unix_ms, expires_at_unix_ms,
 			 requested_scopes, granted_scopes, requested_audience, granted_audience)
@@ -1138,7 +1144,7 @@ func (s *Store) CreateAccessTokenSession(ctx context.Context, signature string, 
 	// rejected issuance INSERT. The exact success of each intended insert is
 	// therefore a statement precondition rather than an aggregate row count.
 	var exactIssue *int64
-	if clientCredentialsGuarded || tx != nil && tx.kind == "device" {
+	if clientCredentialsGuarded || (tx != nil && (tx.kind == "device" || tx.kind == "exchange")) {
 		one := int64(1)
 		exactIssue = &one
 	}
@@ -1173,6 +1179,11 @@ func (s *Store) CreateAccessTokenSession(ctx context.Context, signature string, 
 		}
 		_, principalArgs := tx.principalGuard()
 		requestArgs = append(requestArgs, principalArgs...)
+		if session, ok := request.GetSession().(*fosite.DefaultSession); ok && session.Extra != nil {
+			if sid, ok := session.Extra[oidcSessionIDExtra].(string); ok && sid != "" {
+				requestArgs = append(requestArgs, sid, session.Subject, accountExpiryCutoff{})
+			}
+		}
 	}
 	requestArgs = append(requestArgs, dpopArgs...)
 	if managedGuard != "" {

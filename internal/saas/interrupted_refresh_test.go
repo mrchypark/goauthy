@@ -30,7 +30,7 @@ func TestAbandonedRefreshClaimRequiresOwnerRecovery(t *testing.T) {
 		t.Fatalf("abandoned claim retried: calls=%d err=%v", calls, err)
 	}
 	status, err := next.OAuth2Status(ctx, old.Owner, old.CollectionID, old.ConnectionID, credentialAuthority())
-	if err != nil || status.State != "refreshing" || status.Connected || status.Version != old.TokenVersion {
+	if err != nil || status.State != "uncertain" || status.Connected || status.Version != old.TokenVersion {
 		t.Fatalf("status=%+v err=%v", status, err)
 	}
 	if err := next.RevokeOAuth2(ctx, old.Owner, old.CollectionID, old.ConnectionID, old.TokenVersion, credentialAuthority()); err != nil {

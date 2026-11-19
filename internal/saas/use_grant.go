@@ -202,6 +202,9 @@ func (s *CredentialStore) createUseGrant(ctx context.Context, owner, collection,
 		return UseGrant{}, e
 	}
 	method, _ := r[6].(string)
+	if method == "oauth2" && in.Mode == "proxy" {
+		return UseGrant{}, ErrUseGrantInvalid
+	}
 	if in.AllowRefresh && (method != "oauth2" || in.Mode != "credential_delivery") {
 		return UseGrant{}, ErrUseGrantInvalid
 	}
@@ -341,6 +344,10 @@ func (s *CredentialStore) authorizeUseGrantWithProof(ctx context.Context, o, con
 	if e != nil {
 		return UseGrant{}, nil, apiKeyDispatchSnapshot{}, e
 	}
+	return s.authorizeUseGrantLoaded(ctx, g, auth, aa, authority, captureAPIKeyProof)
+}
+
+func (s *CredentialStore) authorizeUseGrantLoaded(ctx context.Context, g UseGrant, auth string, aa []any, authority func() (string, []any), captureAPIKeyProof bool) (UseGrant, func() (string, []any), apiKeyDispatchSnapshot, error) {
 	policy, pa := s.usePolicy(g, 0)
 	q, e := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT x.token_version,x.credential,d.auth_method,p.connector_json FROM saas_connection_credentials x JOIN auth_collection_definitions d ON d.id=x.collection_id LEFT JOIN saas_providers p ON p.id=x.provider_id WHERE x.connection_id=? AND ` + policy + ` AND (` + auth + `)`, Args: append(append([]any{g.ConnectionID}, pa...), aa...), Consistency: rhiza.ConsistencyLinearizable})
 	if e != nil {

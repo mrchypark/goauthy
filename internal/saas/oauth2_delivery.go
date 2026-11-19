@@ -33,6 +33,10 @@ func (s *CredentialStore) DeliverOAuth2(ctx context.Context, owner, consumer, gr
 	if err != nil {
 		return OAuth2Delivery{}, err
 	}
+	return s.deliverOAuth2WithGrant(ctx, g, guard, authority)
+}
+
+func (s *CredentialStore) deliverOAuth2WithGrant(ctx context.Context, g UseGrant, guard func() (string, []any), authority func() (string, []any)) (OAuth2Delivery, error) {
 	if g.ConnectorDigest != "" || g.ProviderRevision < 1 {
 		return OAuth2Delivery{}, ErrUseGrantNotFound
 	}
