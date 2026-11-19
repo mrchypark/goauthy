@@ -28,15 +28,15 @@ func TestUseGrantStatusReturnsStoredStateAndCurrentConnectionGeneration(t *testi
 	if _, err := consumer.CreateWithGuard(ctx, clients.NewRequest{ID: "status-consumer", Confidential: true, RedirectURIs: []string{"https://consumer.example/callback"}, Scopes: []string{"goauthy.connections.use"}, DefaultScopes: []string{"goauthy.connections.use"}, GrantTypes: []string{"authorization_code"}, Audiences: []string{"https://status.example/active", "https://status.example/revoked", "https://status.example/expired"}}, credentialAuthority()); err != nil {
 		t.Fatal(err)
 	}
-	active, err := store.CreateUseGrant(ctx, b.Owner, b.CollectionID, b.ConnectionID, "https://status.example/active", UseGrantInput{ConsumerClientID: "status-consumer", Mode: "proxy", Purpose: "active", ExpiresAt: store.now() + 60_000}, credentialAuthority())
+	active, err := store.CreateUseGrant(ctx, b.Owner, b.CollectionID, b.ConnectionID, "https://status.example/active", UseGrantInput{ConsumerClientID: "status-consumer", Mode: "credential_delivery", Purpose: "active", ExpiresAt: store.now() + 60_000}, credentialAuthority())
 	if err != nil {
 		t.Fatal(err)
 	}
-	revoked, err := store.CreateUseGrant(ctx, b.Owner, b.CollectionID, b.ConnectionID, "https://status.example/revoked", UseGrantInput{ConsumerClientID: "status-consumer", Mode: "proxy", Purpose: "revoked", ExpiresAt: store.now() + 60_000}, credentialAuthority())
+	revoked, err := store.CreateUseGrant(ctx, b.Owner, b.CollectionID, b.ConnectionID, "https://status.example/revoked", UseGrantInput{ConsumerClientID: "status-consumer", Mode: "credential_delivery", Purpose: "revoked", ExpiresAt: store.now() + 60_000}, credentialAuthority())
 	if err != nil {
 		t.Fatal(err)
 	}
-	expired, err := store.CreateUseGrant(ctx, b.Owner, b.CollectionID, b.ConnectionID, "https://status.example/expired", UseGrantInput{ConsumerClientID: "status-consumer", Mode: "proxy", Purpose: "expired", ExpiresAt: store.now() + 60_000}, credentialAuthority())
+	expired, err := store.CreateUseGrant(ctx, b.Owner, b.CollectionID, b.ConnectionID, "https://status.example/expired", UseGrantInput{ConsumerClientID: "status-consumer", Mode: "credential_delivery", Purpose: "expired", ExpiresAt: store.now() + 60_000}, credentialAuthority())
 	if err != nil {
 		t.Fatal(err)
 	}

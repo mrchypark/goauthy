@@ -14,8 +14,8 @@ func TestRefreshConnectionCredentialHTTPBoundary(t *testing.T) {
 	if err := h.BindConnectionUseResource("https://resource.example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.BindConnectionUseAuthorizer(func(*http.Request) (string, string, func() (string, []any), error) {
-		return "admin", "consumer", func() (string, []any) { return "1", nil }, nil
+	if err := h.BindConnectionUseAuthorizer(func(http.ResponseWriter, *http.Request) (string, string, func() (string, []any), bool) {
+		return "admin", "consumer", func() (string, []any) { return "1", nil }, true
 	}); err != nil {
 		t.Fatal(err)
 	}

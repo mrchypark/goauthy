@@ -22,8 +22,8 @@ func TestBindConnectionUseAuthorizerRejectsNil(t *testing.T) {
 		t.Fatal("nil authorizer accepted")
 	}
 	var nilHandler *Handler
-	if err := nilHandler.BindConnectionUseAuthorizer(func(*http.Request) (string, string, func() (string, []any), error) {
-		return "", "", nil, nil
+	if err := nilHandler.BindConnectionUseAuthorizer(func(http.ResponseWriter, *http.Request) (string, string, func() (string, []any), bool) {
+		return "", "", nil, true
 	}); err == nil {
 		t.Fatal("nil handler accepted")
 	}
@@ -64,6 +64,7 @@ func TestInvokeConnectionGrantAuthorizationFailureIsRedactedAndUnauthorized(t *t
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
 	h, store, _, _ := membershipHTTPFixture(t)
+	h.issuer = "https://issuer.example.test"
 	if err := h.BindSaaSCredentials(oauthCredentialHTTPStore(t, store)); err != nil {
 		t.Fatal(err)
 	}
@@ -71,8 +72,10 @@ func TestInvokeConnectionGrantAuthorizationFailureIsRedactedAndUnauthorized(t *t
 		t.Fatal(err)
 	}
 	const secret = "private-auth-storage-detail"
-	if err := h.BindConnectionUseAuthorizer(func(*http.Request) (string, string, func() (string, []any), error) {
-		return "", "", nil, fmt.Errorf("%s: %w", secret, rhiza.ErrDurabilityUnavailable)
+	if err := h.BindConnectionUseAuthorizer(func(w http.ResponseWriter, _ *http.Request) (string, string, func() (string, []any), bool) {
+		logConnectionUseFailure("resource_authorization", fmt.Errorf("%s: %w", secret, rhiza.ErrDurabilityUnavailable))
+		h.genericUnauthorized(w)
+		return "", "", nil, false
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -84,13 +87,13 @@ func TestInvokeConnectionGrantAuthorizationFailureIsRedactedAndUnauthorized(t *t
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d want=%d", response.Code, http.StatusUnauthorized)
 	}
-	if got := output.String(); !strings.Contains(got, "stage=resource_authorization") || !strings.Contains(got, "error_class=durability_unavailable") || strings.Contains(got, secret) {
+	if got := output.String(); !strings.Contains(got, "error_class=durability_unavailable") || strings.Contains(got, secret) {
 		t.Fatalf("unexpected authorization diagnostic: %s", got)
 	}
 
 	output.Reset()
-	if err := h.BindConnectionUseAuthorizer(func(*http.Request) (string, string, func() (string, []any), error) {
-		return "owner", "consumer", nil, nil
+	if err := h.BindConnectionUseAuthorizer(func(http.ResponseWriter, *http.Request) (string, string, func() (string, []any), bool) {
+		return "owner", "consumer", nil, true
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +113,7 @@ func TestInvokeConnectionGrantAuthorizationFailureIsRedactedAndUnauthorized(t *t
 	request.Header.Set("Cookie", secret)
 	response = httptest.NewRecorder()
 	h.InvokeConnectionGrant(response, request)
-	if response.Code != http.StatusUnauthorized || !strings.Contains(output.String(), "stage=cookie_header") || strings.Contains(output.String(), secret) {
+	if response.Code != http.StatusUnauthorized || strings.Contains(output.String(), secret) {
 		t.Fatalf("pre-grant denial status=%d diagnostics=%s", response.Code, output.String())
 	}
 }
@@ -118,14 +121,15 @@ func TestInvokeConnectionGrantAuthorizationFailureIsRedactedAndUnauthorized(t *t
 func TestInvokeConnectionGrantHTTPBoundary(t *testing.T) {
 	t.Parallel()
 	h, store, _, _ := membershipHTTPFixture(t)
+	h.issuer = "https://issuer.example.test"
 	if err := h.BindSaaSCredentials(oauthCredentialHTTPStore(t, store)); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.BindConnectionUseResource("https://resource.example.test"); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.BindConnectionUseAuthorizer(func(*http.Request) (string, string, func() (string, []any), error) {
-		return "owner", "consumer", func() (string, []any) { return "1", nil }, nil
+	if err := h.BindConnectionUseAuthorizer(func(http.ResponseWriter, *http.Request) (string, string, func() (string, []any), bool) {
+		return "owner", "consumer", func() (string, []any) { return "1", nil }, true
 	}); err != nil {
 		t.Fatal(err)
 	}

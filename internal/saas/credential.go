@@ -10,7 +10,10 @@ import (
 	"github.com/mrchypark/goauthy/internal/oidc"
 )
 
-var errCredential = errors.New("saas: invalid credential envelope")
+var (
+	ErrCredentialCorrupted = errors.New("saas: invalid credential envelope")
+	errCredential          = ErrCredentialCorrupted
+)
 
 // This package-private payload is never a record/API response. Expiry values
 // are absolute timestamps; zero means the provider supplied no expiry.

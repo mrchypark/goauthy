@@ -37,10 +37,12 @@ func TestOAuth2UseGrantStatusShowsMetadataForEveryCredentialState(t *testing.T) 
 		t.Run(state, func(t *testing.T) {
 			f, consumer, grant := credentialStatusFixture(t)
 			claim := any(nil)
+			claimedAt := any(nil)
 			if state == "refreshing" {
 				claim = "status-claim"
+				claimedAt = f.s.now()
 			}
-			if _, err := storage.Execute(f.ctx, f.s.db, rhiza.ExecuteRequest{RequestID: "status-state-" + state, SQL: `UPDATE saas_connection_credentials SET state=?,refresh_claim=? WHERE connection_id=?`, Args: []any{state, claim, f.b.ConnectionID}}); err != nil {
+			if _, err := storage.Execute(f.ctx, f.s.db, rhiza.ExecuteRequest{RequestID: "status-state-" + state, SQL: `UPDATE saas_connection_credentials SET state=?,refresh_claim=?,refresh_claimed_at_unix_ms=? WHERE connection_id=?`, Args: []any{state, claim, claimedAt, f.b.ConnectionID}}); err != nil {
 				t.Fatal(err)
 			}
 			before := credentialStatusRow(t, f)

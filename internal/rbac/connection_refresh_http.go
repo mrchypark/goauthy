@@ -3,34 +3,13 @@ package rbac
 import (
 	"encoding/json"
 	"net/http"
-	"net/url"
 )
 
 // RefreshConnectionCredential refreshes an OAuth credential only when the
 // consented grant explicitly delegates refresh-token use.
 func (h *Handler) RefreshConnectionCredential(w http.ResponseWriter, r *http.Request) {
-	h.securityHeaders(w)
-	issuer, err := url.Parse(h.issuer)
-	if err != nil || issuer.Scheme != "https" || h.saasCredentials == nil || h.saasProviderStore == nil || h.connectionUseAuthorizer == nil || h.connectionUseResource == "" {
-		h.unavailable(w)
-		return
-	}
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		h.methodNotAllowed(w)
-		return
-	}
-	if r.URL.RawQuery != "" || r.URL.ForceQuery || len(r.Header.Values("Cookie")) != 0 || len(r.Header.Values("Origin")) != 0 || len(r.Header.Values("Sec-Fetch-Site")) != 0 || len(r.Header.Values("Authorization")) != 1 {
-		h.genericUnauthorized(w)
-		return
-	}
-	if len(r.Header.Values("If-Match")) != 0 || len(r.Header.Values("X-CSRF-Token")) != 0 {
-		h.badRequest(w)
-		return
-	}
-	owner, consumer, authority, err := h.connectionUseAuthorizer(r)
-	if err != nil || authority == nil {
-		h.genericUnauthorized(w)
+	owner, consumer, authority, ok := h.authorizeConnectionUseBoundary(w, r, http.MethodPost, false, true, false)
+	if !ok {
 		return
 	}
 	var in struct {

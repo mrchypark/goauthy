@@ -24,11 +24,11 @@ func (s *CredentialStore) OAuth2Status(ctx context.Context, owner, collection, c
 	if err != nil {
 		return OAuth2Status{}, err
 	}
-	q, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT c.owner_subject,c.collection_id,c.id,c.generation,COALESCE(x.provider_id,''),COALESCE(x.token_version,0),COALESCE(x.state,'draft'),x.credential,COALESCE(x.generation,'') FROM auth_collection_connections c JOIN auth_collection_definitions d ON d.id=c.collection_id JOIN identity_users u ON u.subject=c.owner_subject LEFT JOIN saas_connection_credentials x ON x.connection_id=c.id WHERE c.owner_subject=? AND c.collection_id=? AND c.id=? AND d.auth_method='oauth2' AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?) AND (` + g + `)`, Args: append([]any{owner, collection, connection, s.now()}, ga...), Consistency: rhiza.ConsistencyLinearizable})
+	q, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT c.owner_subject,c.collection_id,c.id,c.generation,COALESCE(x.provider_id,''),COALESCE(x.token_version,0),COALESCE(x.state,'draft'),x.credential,COALESCE(x.generation,''),x.refresh_claimed_at_unix_ms FROM auth_collection_connections c JOIN auth_collection_definitions d ON d.id=c.collection_id JOIN identity_users u ON u.subject=c.owner_subject LEFT JOIN saas_connection_credentials x ON x.connection_id=c.id WHERE c.owner_subject=? AND c.collection_id=? AND c.id=? AND d.auth_method='oauth2' AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?) AND (` + g + `)`, Args: append([]any{owner, collection, connection, s.now()}, ga...), Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil {
 		return OAuth2Status{}, err
 	}
-	if len(q.Rows) != 1 || len(q.Rows[0]) != 9 {
+	if len(q.Rows) != 1 || len(q.Rows[0]) != 10 {
 		return OAuth2Status{}, ErrCredentialNotFound
 	}
 	row := q.Rows[0]
@@ -84,6 +84,13 @@ func (s *CredentialStore) OAuth2Status(ctx context.Context, owner, collection, c
 	if err != nil {
 		return OAuth2Status{}, err
 	}
+	if state == "refreshing" {
+		claimedAt, hasClaimedAt := row[9].(int64)
+		if !hasClaimedAt || claimedAt+refreshClaimLeaseMS <= s.now() {
+			state = "uncertain"
+			status.State = "uncertain"
+		}
+	}
 	status.AccountID = value.AccountID
 	status.Scopes = append([]string{}, value.Scopes...)
 	status.Connected = state == "ready"
@@ -128,7 +135,7 @@ func (s *CredentialStore) RevokeOAuth2(ctx context.Context, owner, collection, c
 	if claim == "" {
 		return errCredential
 	}
-	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "saas-oauth2-revoke-" + claim, SQL: `UPDATE saas_connection_credentials SET state='revoked',refresh_claim=NULL WHERE connection_id=? AND owner_subject=? AND collection_id=? AND generation=(SELECT generation FROM auth_collection_connections WHERE id=? AND owner_subject=? AND collection_id=?) AND token_version=? AND state IN ('ready','refreshing','uncertain') AND EXISTS (SELECT 1 FROM auth_collection_connections c JOIN auth_collection_definitions d ON d.id=c.collection_id JOIN identity_users u ON u.subject=c.owner_subject WHERE c.id=? AND c.owner_subject=? AND c.collection_id=? AND d.auth_method='oauth2' AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?) AND (` + g + `))`, Args: append([]any{connection, owner, collection, connection, owner, collection, expectedVersion, connection, owner, collection, now}, ga...)})
+	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "saas-oauth2-revoke-" + claim, SQL: `UPDATE saas_connection_credentials SET state='revoked',refresh_claim=NULL,refresh_claimed_at_unix_ms=NULL WHERE connection_id=? AND owner_subject=? AND collection_id=? AND generation=(SELECT generation FROM auth_collection_connections WHERE id=? AND owner_subject=? AND collection_id=?) AND token_version=? AND state IN ('ready','refreshing','uncertain') AND EXISTS (SELECT 1 FROM auth_collection_connections c JOIN auth_collection_definitions d ON d.id=c.collection_id JOIN identity_users u ON u.subject=c.owner_subject WHERE c.id=? AND c.owner_subject=? AND c.collection_id=? AND d.auth_method='oauth2' AND u.disabled=0 AND (u.user_expires_at_unix_ms IS NULL OR u.user_expires_at_unix_ms > ?) AND (` + g + `))`, Args: append([]any{connection, owner, collection, connection, owner, collection, expectedVersion, connection, owner, collection, now}, ga...)})
 	if err != nil {
 		return err
 	}

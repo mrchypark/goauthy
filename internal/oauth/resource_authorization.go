@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,8 +22,9 @@ func (s *Server) AuthorizeUserResource(r *http.Request, requiredScope, requiredA
 	return subject, authority, err
 }
 
-// AuthorizeConnectionUse validates a human bearer token for a connection use
-// operation and returns the authenticated subject, client, and SQL guard.
+// AuthorizeConnectionUse validates a human bearer or DPoP-bound token-exchange
+// token for a connection use operation and returns the authenticated subject,
+// client, and SQL guard.
 func (s *Server) AuthorizeConnectionUse(r *http.Request, requiredAudience string) (string, string, func() (string, []any), error) {
 	if r == nil {
 		logConnectionUseAuthorizationFailure("request", nil)
@@ -32,7 +34,52 @@ func (s *Server) AuthorizeConnectionUse(r *http.Request, requiredAudience string
 		logConnectionUseAuthorizationFailure("cookie_header", nil)
 		return "", "", nil, ErrResourceAuthorization
 	}
-	return s.authorizeResource(r, "goauthy.connections.use", requiredAudience, true)
+	subject, clientID, authority, _, err := s.authorizeResourceWithStatus(r, "goauthy.connections.use", requiredAudience, true)
+	return subject, clientID, authority, err
+}
+
+// AuthorizeConnectionUseHTTP validates connection-use authorization and writes
+// RFC 9449 / RFC 6750 401 or 503 responses directly on failure.
+func (s *Server) AuthorizeConnectionUseHTTP(w http.ResponseWriter, r *http.Request, requiredAudience string) (string, string, func() (string, []any), bool) {
+	if r == nil {
+		logConnectionUseAuthorizationFailure("request", nil)
+		writeConnectionUseAuthError(w, http.StatusUnauthorized, "Bearer", "unauthorized")
+		return "", "", nil, false
+	}
+	if len(r.Header.Values("Cookie")) != 0 {
+		logConnectionUseAuthorizationFailure("cookie_header", nil)
+		writeConnectionUseAuthError(w, http.StatusUnauthorized, "Bearer", "unauthorized")
+		return "", "", nil, false
+	}
+	subject, clientID, authority, authErr, err := s.authorizeResourceWithStatus(r, "goauthy.connections.use", requiredAudience, true)
+	if err == nil {
+		return subject, clientID, authority, true
+	}
+	if isUnavailableErr(authErr) {
+		writeConnectionUseAuthError(w, http.StatusServiceUnavailable, "", "temporarily_unavailable")
+		return "", "", nil, false
+	}
+	switch {
+	case errors.Is(authErr, errDPoPInvalidProof), errors.Is(authErr, errDPoPReplay):
+		writeConnectionUseAuthError(w, http.StatusUnauthorized, `DPoP algs="ES256" error="invalid_dpop_proof"`, "unauthorized")
+	case errors.Is(authErr, errDPoPInvalidToken):
+		writeConnectionUseAuthError(w, http.StatusUnauthorized, `DPoP algs="ES256" error="invalid_token"`, "unauthorized")
+	default:
+		writeConnectionUseAuthError(w, http.StatusUnauthorized, "Bearer", "unauthorized")
+	}
+	return "", "", nil, false
+}
+
+func writeConnectionUseAuthError(w http.ResponseWriter, status int, wwwAuthenticate, code string) {
+	if w == nil {
+		return
+	}
+	if wwwAuthenticate != "" {
+		w.Header().Set("WWW-Authenticate", wwwAuthenticate)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
 }
 
 func logConnectionUseAuthorizationFailure(stage string, err error) {
@@ -70,18 +117,23 @@ func (s *Server) AuthorizeConnectionHandoff(r *http.Request, requiredAudience st
 }
 
 func (s *Server) authorizeResource(r *http.Request, requiredScope, requiredAudience string, connectionUse bool) (string, string, func() (string, []any), error) {
-	reject := func(stage string, cause error) (string, string, func() (string, []any), error) {
+	subject, clientID, authority, _, err := s.authorizeResourceWithStatus(r, requiredScope, requiredAudience, connectionUse)
+	return subject, clientID, authority, err
+}
+
+func (s *Server) authorizeResourceWithStatus(r *http.Request, requiredScope, requiredAudience string, connectionUse bool) (string, string, func() (string, []any), error, error) {
+	reject := func(stage string, cause error) (string, string, func() (string, []any), error, error) {
 		if connectionUse {
 			logConnectionUseAuthorizationFailure(stage, cause)
 		}
-		return "", "", nil, ErrResourceAuthorization
+		return "", "", nil, cause, ErrResourceAuthorization
 	}
 	if s == nil || s.store == nil || s.accessTokens == nil || r == nil || requiredAudience == "" || (!connectionUse && !resourceScopeAllowed(requiredScope)) || (connectionUse && requiredScope != "goauthy.connections.use") {
 		return reject("configuration", nil)
 	}
 	scheme, raw, ok := authorizationToken(r)
-	if !ok || !sameAuthorizationScheme(scheme, "Bearer") {
-		return reject("bearer_header", nil)
+	if !ok || (!sameAuthorizationScheme(scheme, "Bearer") && !(connectionUse && sameAuthorizationScheme(scheme, "DPoP"))) {
+		return reject("bearer_header", errDPoPInvalidToken)
 	}
 	signature := s.accessTokens.AccessTokenSignature(r.Context(), raw)
 	if signature == "" {
@@ -95,18 +147,43 @@ func (s *Server) authorizeResource(r *http.Request, requiredScope, requiredAudie
 		return reject("token_validation", err)
 	}
 	audiences, audienceErr := accessResourceAudiences(request)
-	if audienceErr != nil || request.GetSession() == nil || request.GetSession().GetSubject() == "" || sessionDPoPJKT(request.GetSession()) != "" || request.GetGrantedScopes().Has(requiredScope) == false || !containsAccessAudience(audiences, requiredAudience) {
+	jkt := sessionDPoPJKT(request.GetSession())
+	if audienceErr != nil || request.GetSession() == nil || request.GetSession().GetSubject() == "" || request.GetGrantedScopes().Has(requiredScope) == false || !containsAccessAudience(audiences, requiredAudience) {
 		return reject("token_claims", audienceErr)
 	}
 	grantType := request.GetRequestForm().Get("grant_type")
-	if grantType == "client_credentials" || grantType == TokenExchangeGrantType {
+	if grantType == "client_credentials" || (!connectionUse && grantType == TokenExchangeGrantType) {
 		return reject("grant_type", nil)
 	}
-	if session, ok := request.GetSession().(*fosite.DefaultSession); !ok || session.Extra != nil && session.Extra["act"] != nil {
+	if connectionUse {
+		if grantType == TokenExchangeGrantType {
+			if jkt == "" || !sameAuthorizationScheme(scheme, "DPoP") {
+				return reject("dpop_binding", errDPoPInvalidToken)
+			}
+		} else if jkt != "" || !sameAuthorizationScheme(scheme, "Bearer") {
+			return reject("bearer_binding", errDPoPInvalidToken)
+		}
+		if dpopErr := s.verifyDPoPResourceRequestWithOptions(r.Context(), r, request, raw, false); dpopErr != nil {
+			return reject("dpop_resource", dpopErr)
+		}
+	} else if jkt != "" {
+		return reject("token_claims", nil)
+	}
+	session, ok := request.GetSession().(*fosite.DefaultSession)
+	if !ok || session.Extra != nil && session.Extra["act"] != nil {
 		return reject("actor_claim", nil)
 	}
 	if err := s.store.validateTokenAccounts(r.Context(), request); err != nil {
 		return reject("token_accounts", err)
+	}
+	if connectionUse && s.store.forceMFA(request.GetClient()) {
+		mfaOK, mfaErr := s.hasConnectionUseMFA(r.Context(), request, session)
+		if mfaErr != nil {
+			return reject("force_mfa_lookup", mfaErr)
+		}
+		if !mfaOK {
+			return reject("force_mfa", nil)
+		}
 	}
 	clientID, subject := request.GetClient().GetID(), request.GetSession().GetSubject()
 	policy, policySet, err := s.clientGroupPolicy(r.Context(), clientID)
@@ -169,7 +246,32 @@ func (s *Server) authorizeResource(r *http.Request, requiredScope, requiredAudie
 		args = append(args, policyArgs...)
 		args = append(args, s.store.client.GetID(), managedGeneration)
 		return guard, args
-	}, nil
+	}, nil, nil
+}
+
+func (s *Server) hasConnectionUseMFA(ctx context.Context, request fosite.Requester, session *fosite.DefaultSession) (bool, error) {
+	if session == nil || session.Extra == nil {
+		return false, nil
+	}
+	if isDevice, _ := session.Extra[deviceOIDCExtra].(bool); isDevice {
+		if mfa, ok := session.Extra[deviceMFAVerifiedExtra].(bool); ok {
+			return mfa, nil
+		}
+		if s == nil || s.store == nil || s.store.db == nil {
+			return false, nil
+		}
+		q, err := s.store.db.Query(ctx, rhiza.QueryRequest{
+			SQL:         `SELECT mfa_verified FROM oauth_device_grants WHERE token_request_id=? AND client_id=?`,
+			Args:        []any{request.GetID(), request.GetClient().GetID()},
+			Consistency: rhiza.ConsistencyLinearizable,
+		})
+		if err != nil {
+			return false, err
+		}
+		return len(q.Rows) == 1 && len(q.Rows[0]) == 1 && q.Rows[0][0] == int64(1), nil
+	}
+	authMethod, _ := session.Extra[oidcAuthMethodExtra].(string)
+	return oidcAMR(authMethod) == oidcAuthMethodMFA, nil
 }
 
 func resourceScopeAllowed(scope string) bool {

@@ -98,7 +98,7 @@ func (s *Store) MarkReplay(ctx context.Context, jkt, jti string, now, expiresAt 
 		return ErrInvalid
 	}
 	now, expiresAt = canonicalTime(now), canonicalTime(expiresAt)
-	if !expiresAt.After(now) {
+	if expiresAt.Before(now) {
 		return ErrInvalid
 	}
 	digest := replayDigest(jkt, jti)
@@ -180,7 +180,10 @@ func (s *Store) nonceConsumedBy(ctx context.Context, digest, clientID, jkt, atte
 
 func (s *Store) nonceFailure(ctx context.Context, digest, clientID, jkt string, now time.Time) error {
 	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT client_id,jkt,expires_at_unix_ms,consumed_attempt FROM dpop_nonces WHERE nonce_digest = ?`, Args: []any{digest}, Consistency: rhiza.ConsistencyLinearizable})
-	if err != nil || len(result.Rows) != 1 || len(result.Rows[0]) != 4 {
+	if err != nil {
+		return err
+	}
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 4 {
 		return ErrInvalid
 	}
 	row := result.Rows[0]

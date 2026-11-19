@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 
 	"github.com/mrchypark/goauthy/internal/saas"
 	"github.com/mrchypark/rhiza"
@@ -14,7 +15,7 @@ import (
 
 // BindConnectionUseAuthorizer wires the OAuth resource-server adapter used by
 // the public connection-use boundary.
-func (h *Handler) BindConnectionUseAuthorizer(authorizer func(*http.Request) (string, string, func() (string, []any), error)) error {
+func (h *Handler) BindConnectionUseAuthorizer(authorizer func(http.ResponseWriter, *http.Request) (string, string, func() (string, []any), bool)) error {
 	if h == nil || authorizer == nil {
 		return errors.New("connection use authorizer required")
 	}
@@ -22,49 +23,59 @@ func (h *Handler) BindConnectionUseAuthorizer(authorizer func(*http.Request) (st
 	return nil
 }
 
-// InvokeConnectionGrant executes one allowlisted operation using a consented
-// connection. The request body contains no actor, URL, headers, or secret.
-func (h *Handler) InvokeConnectionGrant(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) authorizeConnectionUseBoundary(w http.ResponseWriter, r *http.Request, allowMethod string, allowSameOriginProxy bool, requireProviderStore bool, requireEmptyBody bool) (string, string, func() (string, []any), bool) {
 	h.securityHeaders(w)
-	if h.saasCredentials == nil || h.connectionUseAuthorizer == nil || h.connectionUseResource == "" {
+	w.Header().Set("Cache-Control", "no-store")
+	issuer, err := url.Parse(h.issuer)
+	if err != nil || issuer.Scheme != "https" {
+		slog.Error("connection use unavailable", "stage", "issuer_configuration")
+		h.unavailable(w)
+		return "", "", nil, false
+	}
+	if h.saasCredentials == nil || h.connectionUseAuthorizer == nil || h.connectionUseResource == "" || (requireProviderStore && h.saasProviderStore == nil) {
 		slog.Error("connection use unavailable", "stage", "handler_configuration")
 		h.unavailable(w)
-		return
+		return "", "", nil, false
 	}
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
+	if r.Method != allowMethod {
+		w.Header().Set("Allow", allowMethod)
 		h.methodNotAllowed(w)
-		return
+		return "", "", nil, false
 	}
-	if r.URL.RawQuery != "" || r.URL.ForceQuery {
-		slog.Error("connection use request rejected", "stage", "request_query")
+	if r.URL.RawQuery != "" || r.URL.ForceQuery || len(r.Header.Values("Cookie")) != 0 || len(r.Header.Values("Authorization")) != 1 {
 		h.genericUnauthorized(w)
-		return
+		return "", "", nil, false
 	}
-	if h.crossSite(r) {
-		slog.Error("connection use request rejected", "stage", "cross_site")
+	if allowSameOriginProxy {
+		if h.crossSite(r) {
+			h.genericUnauthorized(w)
+			return "", "", nil, false
+		}
+	} else if len(r.Header.Values("Origin")) != 0 || len(r.Header.Values("Sec-Fetch-Site")) != 0 {
 		h.genericUnauthorized(w)
-		return
+		return "", "", nil, false
 	}
-	if len(r.Header.Values("Cookie")) != 0 {
-		slog.Error("connection use request rejected", "stage", "cookie_header")
-		h.genericUnauthorized(w)
-		return
+	if !allowSameOriginProxy && (len(r.Header.Values("If-Match")) != 0 || len(r.Header.Values("X-CSRF-Token")) != 0 || (requireEmptyBody && !emptyBody(r))) {
+		h.badRequest(w)
+		return "", "", nil, false
 	}
-	if len(r.Header.Values("Authorization")) != 1 {
-		slog.Error("connection use request rejected", "stage", "authorization_header_count")
-		h.genericUnauthorized(w)
-		return
-	}
-	owner, consumer, authority, err := h.connectionUseAuthorizer(r)
-	if err != nil {
-		slog.Error("connection use request rejected", "stage", "resource_authorization", "error_class", connectionUseErrorClass(err))
-		h.genericUnauthorized(w)
-		return
+	owner, consumer, authority, ok := h.connectionUseAuthorizer(w, r)
+	if !ok {
+		return "", "", nil, false
 	}
 	if authority == nil {
 		slog.Error("connection use request rejected", "stage", "authorizer_contract")
 		h.genericUnauthorized(w)
+		return "", "", nil, false
+	}
+	return owner, consumer, authority, true
+}
+
+// InvokeConnectionGrant executes one allowlisted operation using a consented
+// connection. The request body contains no actor, URL, headers, or secret.
+func (h *Handler) InvokeConnectionGrant(w http.ResponseWriter, r *http.Request) {
+	owner, consumer, authority, ok := h.authorizeConnectionUseBoundary(w, r, http.MethodPost, true, false, false)
+	if !ok {
 		return
 	}
 	var in struct {
@@ -165,8 +176,10 @@ func (h *Handler) writeInvokeError(w http.ResponseWriter, err error) {
 		h.badRequest(w)
 	case errors.Is(err, saas.ErrUseGrantNotFound), errors.Is(err, saas.ErrCredentialNotFound):
 		h.notFound(w)
-	case errors.Is(err, saas.ErrUseGrantConflict), errors.Is(err, saas.ErrCredentialConflict), errors.Is(err, saas.ErrCredentialUnauthorized):
+	case errors.Is(err, saas.ErrUseGrantConflict), errors.Is(err, saas.ErrCredentialConflict):
 		h.error(w, http.StatusConflict, "Conflict")
+	case errors.Is(err, saas.ErrCredentialUnauthorized), errors.Is(err, saas.ErrCredentialCorrupted):
+		h.error(w, http.StatusInternalServerError, "Internal Server Error")
 	case errors.Is(err, saas.ErrAPIKeyRequest):
 		h.error(w, http.StatusBadGateway, "Bad Gateway")
 	default:

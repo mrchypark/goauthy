@@ -12,7 +12,7 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
-const schemaVersion = 115
+const schemaVersion = 116
 
 // migrateThroughV97 applies schema versions v1 through v97. It is the
 // unchanged prefix of Migrate, extracted so tests can reach a clean v97
@@ -438,6 +438,9 @@ func Migrate(ctx context.Context, db *rhiza.DB) error {
 	}
 	if err := migrateOTPVerificationLimits(ctx, db); err != nil {
 		return fmt.Errorf("migrate schema v115: %w", err)
+	}
+	if err := migrateRefreshClaimLease(ctx, db); err != nil {
+		return fmt.Errorf("migrate schema v116: %w", err)
 	}
 	return nil
 }
@@ -3998,6 +4001,26 @@ func migrateSchemaV111(ctx context.Context, db *rhiza.DB) error {
 		{SQL: `DROP TABLE identity_email_otp`},
 		{SQL: `ALTER TABLE identity_email_otp_v111 RENAME TO identity_email_otp`},
 		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(111)`},
+	}})
+	return err
+}
+
+// migrateRefreshClaimLease adds refresh_claimed_at_unix_ms to saas_connection_credentials
+// so stale refreshing claims expire fail-closed after the 30s lease window.
+func migrateRefreshClaimLease(ctx context.Context, db *rhiza.DB) error {
+	state, err := db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT EXISTS(SELECT 1 FROM goauthy_schema_migrations WHERE version=116)`, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return err
+	}
+	if len(state.Rows) != 1 || len(state.Rows[0]) != 1 {
+		return errors.New("invalid schema 116 inspection")
+	}
+	if state.Rows[0][0] == int64(1) {
+		return nil
+	}
+	_, err = Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "goauthy-schema-v116", Statements: []rhiza.SQLStatement{
+		{SQL: `ALTER TABLE saas_connection_credentials ADD COLUMN refresh_claimed_at_unix_ms INTEGER`},
+		{SQL: `INSERT INTO goauthy_schema_migrations(version) VALUES(116)`},
 	}})
 	return err
 }

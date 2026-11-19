@@ -14,6 +14,8 @@ import (
 	"github.com/mrchypark/rhiza"
 )
 
+const refreshClaimLeaseMS int64 = 30_000
+
 var (
 	ErrCredentialNotFound     = errors.New("saas credential not found")
 	ErrCredentialConflict     = errors.New("saas credential conflict")
@@ -80,7 +82,7 @@ func (s *CredentialStore) Install(ctx context.Context, b credentialBinding, valu
 	args = append(args, ga...)
 	args = append(args, b.TokenVersion, b.ConnectionID, b.ConnectionID, b.Owner, b.CollectionID, b.Generation, b.TokenVersion-1)
 	r, err := s.executeEnvelope(ctx, "saas-credential-install", `INSERT INTO saas_connection_credentials(connection_id,owner_subject,collection_id,provider_id,generation,token_version,state,credential)
-		SELECT ?,?,?,?,?,?,?,? WHERE `+parent+` AND (`+g+`) AND ((?=1 AND NOT EXISTS(SELECT 1 FROM saas_connection_credentials old0 WHERE old0.connection_id=?)) OR EXISTS(SELECT 1 FROM saas_connection_credentials old WHERE old.connection_id=? AND old.owner_subject=? AND old.collection_id=? AND old.state='revoked' AND old.generation<>? AND old.token_version=?)) ON CONFLICT(connection_id) DO UPDATE SET owner_subject=excluded.owner_subject,collection_id=excluded.collection_id,provider_id=excluded.provider_id,generation=excluded.generation,token_version=excluded.token_version,state=excluded.state,credential=excluded.credential,refresh_claim=NULL WHERE saas_connection_credentials.state='revoked' AND saas_connection_credentials.owner_subject=excluded.owner_subject AND saas_connection_credentials.collection_id=excluded.collection_id AND saas_connection_credentials.generation<>excluded.generation AND saas_connection_credentials.token_version+1=excluded.token_version`, args)
+		SELECT ?,?,?,?,?,?,?,? WHERE `+parent+` AND (`+g+`) AND ((?=1 AND NOT EXISTS(SELECT 1 FROM saas_connection_credentials old0 WHERE old0.connection_id=?)) OR EXISTS(SELECT 1 FROM saas_connection_credentials old WHERE old.connection_id=? AND old.owner_subject=? AND old.collection_id=? AND old.state='revoked' AND old.generation<>? AND old.token_version=?)) ON CONFLICT(connection_id) DO UPDATE SET owner_subject=excluded.owner_subject,collection_id=excluded.collection_id,provider_id=excluded.provider_id,generation=excluded.generation,token_version=excluded.token_version,state=excluded.state,credential=excluded.credential,refresh_claim=NULL,refresh_claimed_at_unix_ms=NULL WHERE saas_connection_credentials.state='revoked' AND saas_connection_credentials.owner_subject=excluded.owner_subject AND saas_connection_credentials.collection_id=excluded.collection_id AND saas_connection_credentials.generation<>excluded.generation AND saas_connection_credentials.token_version+1=excluded.token_version`, args)
 	if err != nil {
 		return err
 	}
@@ -126,10 +128,11 @@ func (s *CredentialStore) ClaimRefresh(ctx context.Context, b credentialBinding,
 		return "", err
 	}
 	parent, pa := s.parentGuard(b)
-	args := []any{"refreshing", claim, b.ConnectionID, b.Owner, b.CollectionID, b.ProviderID, b.Generation, b.TokenVersion}
+	claimedAt := s.now()
+	args := []any{"refreshing", claim, claimedAt, b.ConnectionID, b.Owner, b.CollectionID, b.ProviderID, b.Generation, b.TokenVersion}
 	args = append(args, pa...)
 	args = append(args, ga...)
-	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "saas-credential-claim-" + claim, SQL: `UPDATE saas_connection_credentials SET state=?,refresh_claim=? WHERE connection_id=? AND owner_subject=? AND collection_id=? AND provider_id=? AND generation=? AND token_version=? AND state='ready' AND ` + parent + ` AND ` + g, Args: args})
+	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "saas-credential-claim-" + claim, SQL: `UPDATE saas_connection_credentials SET state=?,refresh_claim=?,refresh_claimed_at_unix_ms=? WHERE connection_id=? AND owner_subject=? AND collection_id=? AND provider_id=? AND generation=? AND token_version=? AND state='ready' AND ` + parent + ` AND ` + g, Args: args})
 	if err != nil {
 		return "", err
 	}
@@ -150,7 +153,7 @@ func (s *CredentialStore) CompleteRefresh(ctx context.Context, b credentialBindi
 	parent, pa := s.parentGuard(b)
 	// Refresh rotates tokens within one authorized account. A different account
 	// requires reconnect (new generation), not silent reuse of existing consent.
-	current, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT credential FROM saas_connection_credentials WHERE connection_id=? AND owner_subject=? AND collection_id=? AND provider_id=? AND generation=? AND token_version=? AND refresh_claim=? AND state='refreshing' AND ` + parent + ` AND (` + g + `)`, Args: append([]any{b.ConnectionID, b.Owner, b.CollectionID, b.ProviderID, b.Generation, b.TokenVersion, claim}, append(pa, ga...)...), Consistency: rhiza.ConsistencyLinearizable})
+	current, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT credential FROM saas_connection_credentials WHERE connection_id=? AND owner_subject=? AND collection_id=? AND provider_id=? AND generation=? AND token_version=? AND refresh_claim=? AND state='refreshing' AND refresh_claimed_at_unix_ms IS NOT NULL AND refresh_claimed_at_unix_ms + ? > ? AND ` + parent + ` AND (` + g + `)`, Args: append([]any{b.ConnectionID, b.Owner, b.CollectionID, b.ProviderID, b.Generation, b.TokenVersion, claim, refreshClaimLeaseMS, s.now()}, append(pa, ga...)...), Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil {
 		return err
 	}
@@ -188,10 +191,10 @@ func (s *CredentialStore) CompleteRefresh(ctx context.Context, b credentialBindi
 		return err
 	}
 	parent, pa = s.parentGuard(b)
-	args := []any{envelope, next.TokenVersion, b.ConnectionID, b.Owner, b.CollectionID, b.ProviderID, b.Generation, b.TokenVersion, claim}
+	args := []any{envelope, next.TokenVersion, b.ConnectionID, b.Owner, b.CollectionID, b.ProviderID, b.Generation, b.TokenVersion, claim, refreshClaimLeaseMS, s.now()}
 	args = append(args, pa...)
 	args = append(args, ga...)
-	r, err := s.executeEnvelope(ctx, "saas-credential-complete", `UPDATE saas_connection_credentials SET credential=?,token_version=?,state='ready',refresh_claim=NULL WHERE connection_id=? AND owner_subject=? AND collection_id=? AND provider_id=? AND generation=? AND token_version=? AND refresh_claim=? AND state='refreshing' AND `+parent+` AND `+g, args)
+	r, err := s.executeEnvelope(ctx, "saas-credential-complete", `UPDATE saas_connection_credentials SET credential=?,token_version=?,state='ready',refresh_claim=NULL,refresh_claimed_at_unix_ms=NULL WHERE connection_id=? AND owner_subject=? AND collection_id=? AND provider_id=? AND generation=? AND token_version=? AND refresh_claim=? AND state='refreshing' AND refresh_claimed_at_unix_ms IS NOT NULL AND refresh_claimed_at_unix_ms + ? > ? AND `+parent+` AND `+g, args)
 	if err != nil {
 		return err
 	}
@@ -208,7 +211,7 @@ func (s *CredentialStore) MarkRefreshUncertain(ctx context.Context, b credential
 	parent, pa := s.parentGuard(b)
 	args := []any{b.ConnectionID, b.Owner, b.CollectionID, b.ProviderID, b.Generation, b.TokenVersion, claim}
 	args = append(args, pa...)
-	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "saas-credential-uncertain-" + claim, SQL: `UPDATE saas_connection_credentials SET state='uncertain',refresh_claim=NULL WHERE connection_id=? AND owner_subject=? AND collection_id=? AND provider_id=? AND generation=? AND token_version=? AND refresh_claim=? AND state='refreshing' AND ` + parent, Args: args})
+	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "saas-credential-uncertain-" + claim, SQL: `UPDATE saas_connection_credentials SET state='uncertain',refresh_claim=NULL,refresh_claimed_at_unix_ms=NULL WHERE connection_id=? AND owner_subject=? AND collection_id=? AND provider_id=? AND generation=? AND token_version=? AND refresh_claim=? AND state='refreshing' AND ` + parent, Args: args})
 	if err != nil {
 		return err
 	}
@@ -234,7 +237,7 @@ func (s *CredentialStore) Revoke(ctx context.Context, b credentialBinding, autho
 	args := []any{b.ConnectionID, b.Owner, b.CollectionID, b.ProviderID, b.Generation, b.TokenVersion}
 	args = append(args, pa...)
 	args = append(args, ga...)
-	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "saas-credential-revoke-" + requestEntropy, SQL: `UPDATE saas_connection_credentials SET state='revoked',refresh_claim=NULL WHERE connection_id=? AND owner_subject=? AND collection_id=? AND provider_id=? AND generation=? AND token_version=? AND ` + parent + ` AND ` + g, Args: args})
+	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "saas-credential-revoke-" + requestEntropy, SQL: `UPDATE saas_connection_credentials SET state='revoked',refresh_claim=NULL,refresh_claimed_at_unix_ms=NULL WHERE connection_id=? AND owner_subject=? AND collection_id=? AND provider_id=? AND generation=? AND token_version=? AND ` + parent + ` AND ` + g, Args: args})
 	if err != nil {
 		return err
 	}

@@ -41,8 +41,15 @@ func (s *CredentialStore) OAuth2UseGrantStatus(ctx context.Context, owner, consu
 	// Decryption is outside the query snapshot. Recheck authority and the exact
 	// observed state/version before publishing metadata, without making a claim.
 	check, args := guard()
-	args = append(args, g.ConnectionID, status.Version, status.State)
-	q, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT 1 WHERE ` + check + ` AND EXISTS(SELECT 1 FROM saas_connection_credentials WHERE connection_id=? AND token_version=? AND state=?)`, Args: args, Consistency: rhiza.ConsistencyLinearizable})
+	var statePredicate string
+	if status.State == "uncertain" {
+		args = append(args, g.ConnectionID, status.Version, refreshClaimLeaseMS, s.now())
+		statePredicate = `EXISTS(SELECT 1 FROM saas_connection_credentials WHERE connection_id=? AND token_version=? AND (state='uncertain' OR (state='refreshing' AND (refresh_claimed_at_unix_ms IS NULL OR refresh_claimed_at_unix_ms + ? <= ?))))`
+	} else {
+		args = append(args, g.ConnectionID, status.Version, status.State)
+		statePredicate = `EXISTS(SELECT 1 FROM saas_connection_credentials WHERE connection_id=? AND token_version=? AND state=?)`
+	}
+	q, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT 1 WHERE ` + check + ` AND ` + statePredicate, Args: args, Consistency: rhiza.ConsistencyLinearizable})
 	if err != nil {
 		return OAuth2Status{}, err
 	}

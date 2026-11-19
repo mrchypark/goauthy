@@ -105,8 +105,14 @@ func TestReplayConcurrentTwoStoresExactlyOneAndTTL(t *testing.T) {
 	if err != nil || len(rows.Rows) != 1 || rows.Rows[0][0] == "jkt" || rows.Rows[0][0] == "jti" || rows.Rows[0][1] != expires.UnixMilli() {
 		t.Fatalf("replay rows=%#v err=%v", rows.Rows, err)
 	}
-	if err := first.MarkReplay(ctx, "jkt", "jti", now, now); !errors.Is(err, ErrInvalid) {
+	if err := first.MarkReplay(ctx, "jkt", "jti", now, now.Add(-time.Millisecond)); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("expired replay input err=%v", err)
+	}
+	if err := first.MarkReplay(ctx, "jkt", "jti", now, expires); !errors.Is(err, ErrReplay) {
+		t.Fatalf("active replay err=%v; want ErrReplay", err)
+	}
+	if err := first.MarkReplay(ctx, "jkt", "jti-exact", expires, expires); err != nil {
+		t.Fatalf("exact-second fresh replay err=%v; want nil", err)
 	}
 	if err := first.MarkReplay(ctx, "jkt", "jti", expires, expires.Add(time.Minute)); err != nil {
 		t.Fatalf("expired replay was not reclaimed: %v", err)

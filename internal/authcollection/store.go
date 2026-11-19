@@ -197,8 +197,8 @@ func (s *Store) UpdateDefinition(ctx context.Context, id string, revision int64,
 	}
 	fields, _ := json.Marshal(in.Fields)
 	providers, _ := json.Marshal(in.ProviderIDs)
-	q := append([]any{in.Name, in.AuthMethod, boolInt(in.Enabled), revision + 1, string(fields), string(providers), id, revision, in.AuthMethod, string(fields)}, a...)
-	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "auth-collection-definition-update-" + randomID(), SQL: `UPDATE auth_collection_definitions SET name=?,auth_method=?,enabled=?,revision=?,fields_json=?,providers_json=? WHERE id=? AND revision=? AND deleted=0 AND (NOT EXISTS(SELECT 1 FROM auth_collection_connections c WHERE c.collection_id=auth_collection_definitions.id) OR (auth_method=? AND fields_json=?)) AND (` + g + `)`, Args: q})
+	q := append([]any{in.Name, in.AuthMethod, boolInt(in.Enabled), revision + 1, string(fields), string(providers), id, revision, in.AuthMethod, string(fields), string(providers)}, a...)
+	r, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{RequestID: "auth-collection-definition-update-" + randomID(), SQL: `UPDATE auth_collection_definitions SET name=?,auth_method=?,enabled=?,revision=?,fields_json=?,providers_json=? WHERE id=? AND revision=? AND deleted=0 AND (NOT EXISTS(SELECT 1 FROM auth_collection_connections c WHERE c.collection_id=auth_collection_definitions.id) OR (auth_method=? AND fields_json=?)) AND NOT EXISTS(SELECT 1 FROM saas_connection_credentials s WHERE s.collection_id=auth_collection_definitions.id AND s.state IN ('ready','refreshing','uncertain') AND NOT EXISTS(SELECT 1 FROM json_each(?) p WHERE p.type='text' AND p.value=s.provider_id)) AND (` + g + `)`, Args: q})
 	if err != nil {
 		return Definition{}, err
 	}

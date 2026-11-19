@@ -268,6 +268,9 @@ type OIDCConfig struct {
 	// BootstrapForceMFA requires an MFA-authenticated browser session for the
 	// bootstrap client. Dynamic clients are always unforced.
 	BootstrapForceMFA bool
+	// ConnectionUseResource is the configured resource URI for
+	// goauthy.connections.use delegation exchanges.
+	ConnectionUseResource string
 	// ClientGroupPolicy returns the static client group-admission policy. It
 	// must return Managed=false for dynamic and CIMD clients. A managed policy
 	// is bound to every authorization and token mutation by its revision.
@@ -481,8 +484,10 @@ func newServer(ctx context.Context, db *rhiza.DB, hmacSecret []byte, clientID, c
 		return customUserScope(ctx, oidcConfig, clientID, scope)
 	}, oidcConfig != nil)
 	config.TokenEndpointHandlers.Append(deviceHandler)
+	var exchangeHandler *tokenExchangeHandler
 	if oidcConfig != nil {
-		config.TokenEndpointHandlers.Append(newTokenExchangeHandler(store, accessTokens, config, resources, defaults))
+		exchangeHandler = newTokenExchangeHandler(store, accessTokens, config, resources, defaults, oidcConfig.ConnectionUseResource)
+		config.TokenEndpointHandlers.Append(exchangeHandler)
 		if oidcConfig.PasswordUsers != nil {
 			passwordHandler := newPasswordGrantHandler(store, oidcConfig.PasswordUsers, accessTokens, config)
 			passwordHandler.onPasswordExpired = oidcConfig.PasswordExpired
@@ -507,7 +512,22 @@ func newServer(ctx context.Context, db *rhiza.DB, hmacSecret []byte, clientID, c
 	dangerResource := oidcConfig != nil && oidcConfig.CIMDDangerAllowUnvalidatedResource
 	server := &Server{provider: provider, store: store, accessTokens: accessTokens, authorizeCodes: accessTokens, allowedResources: resources, defaultAudiences: defaults, ephemeralDangerAllowUnvalidatedResource: dangerResource, redirectPolicy: policy, oidc: oidcConfig, dpop: dpop.NewStore(db)}
 	deviceHandler.validateResource = server.validateDeviceResource
+	if exchangeHandler != nil {
+		exchangeHandler.server = server
+	}
 	return server, nil
+}
+
+var errServiceUnavailable = &fosite.RFC6749Error{
+	ErrorField:       "server_error",
+	DescriptionField: "The authorization server is temporarily unavailable.",
+	CodeField:        http.StatusServiceUnavailable,
+}
+
+func isUnavailableErr(err error) bool {
+	return errors.Is(err, rhiza.ErrQuorumUnavailable) || errors.Is(err, rhiza.ErrNotReady) ||
+		errors.Is(err, rhiza.ErrDurabilityUnavailable) || errors.Is(err, rhiza.ErrCommitUnknown) ||
+		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }
 
 // Internal storage/transport failures are not OAuth protocol errors. Fosite's
@@ -515,10 +535,8 @@ func newServer(ctx context.Context, db *rhiza.DB, hmacSecret []byte, clientID, c
 func (s *Server) writeTokenError(ctx context.Context, w http.ResponseWriter, request fosite.AccessRequester, err error) {
 	// Fosite wraps client lookup failures in invalid_client. Preserve availability
 	// semantics using the underlying typed cause, never error-message matching.
-	if errors.Is(err, rhiza.ErrQuorumUnavailable) || errors.Is(err, rhiza.ErrNotReady) ||
-		errors.Is(err, rhiza.ErrDurabilityUnavailable) || errors.Is(err, rhiza.ErrCommitUnknown) ||
-		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		err = fosite.ErrServerError
+	if isUnavailableErr(err) {
+		err = errServiceUnavailable
 	}
 	publicError := fosite.ErrorToRFC6749Error(err)
 	if publicError.ErrorField == "error" && publicError.CodeField == http.StatusInternalServerError {
@@ -691,6 +709,9 @@ func (s *Server) TokenHandler() http.Handler {
 				s.writeTokenError(r.Context(), sw, request, fosite.ErrServerError)
 				return
 			}
+		} else if request.GetGrantTypes().ExactOne(TokenExchangeGrantType) && request.GetGrantedScopes().Has("goauthy.connections.use") {
+			s.writeTokenError(r.Context(), sw, request, fosite.ErrInvalidRequest)
+			return
 		}
 		_, machine, machineErr := machineTokenSubject(request)
 		if machineErr != nil {
@@ -729,11 +750,15 @@ func (s *Server) TokenHandler() http.Handler {
 		}
 		var policy ClientGroupPolicy
 		var policySet bool
-		if request.GetGrantTypes().ExactOne("authorization_code") || request.GetGrantTypes().ExactOne("refresh_token") || request.GetGrantTypes().ExactOne(DeviceGrantType) || request.GetGrantTypes().ExactOne("password") {
+		if request.GetGrantTypes().ExactOne("authorization_code") || request.GetGrantTypes().ExactOne("refresh_token") || request.GetGrantTypes().ExactOne(DeviceGrantType) || request.GetGrantTypes().ExactOne("password") || (request.GetGrantTypes().ExactOne(TokenExchangeGrantType) && !machine) {
 			policy, policySet, err = s.clientGroupPolicy(r.Context(), request.GetClient().GetID())
 			if err != nil {
 				slog.Error("OAuth client group policy resolution failed", "error", err)
-				s.writeTokenError(r.Context(), sw, request, fosite.ErrServerError)
+				if isUnavailableErr(err) {
+					s.writeTokenError(r.Context(), sw, request, err)
+				} else {
+					s.writeTokenError(r.Context(), sw, request, fosite.ErrServerError)
+				}
 				return
 			}
 			admissionClaims := principal
@@ -746,7 +771,11 @@ func (s *Server) TokenHandler() http.Handler {
 				admissionClaims, err = s.currentPrincipal(r.Context(), session.Subject)
 				if err != nil {
 					slog.Error("OAuth principal admission resolution failed", "error", err)
-					s.writeTokenError(r.Context(), sw, request, fosite.ErrServerError)
+					if isUnavailableErr(err) {
+						s.writeTokenError(r.Context(), sw, request, err)
+					} else {
+						s.writeTokenError(r.Context(), sw, request, fosite.ErrServerError)
+					}
 					return
 				}
 				principal = admissionClaims
@@ -1402,6 +1431,12 @@ func (s *Server) completeAuthorization(w http.ResponseWriter, r *http.Request, s
 			return
 		}
 		session.Extra = map[string]interface{}{oidcSessionIDExtra: sessionID}
+	}
+	if validOIDCAuthMethod(authMethod) {
+		if session.Extra == nil {
+			session.Extra = map[string]interface{}{}
+		}
+		session.Extra[oidcAuthMethodExtra] = authMethod
 	}
 	// Enforce the authentication strength against the client snapshot Fosite
 	// just resolved for this issuance, not the view the login layer rendered.

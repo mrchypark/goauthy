@@ -25,6 +25,27 @@ type APIKeyDelivery struct {
 func (APIKeyDelivery) String() string   { return "[redacted SaaS credential delivery]" }
 func (APIKeyDelivery) GoString() string { return "[redacted SaaS credential delivery]" }
 
+// DeliverUseGrantCredential dispatches either OAuth2 or API-key credential
+// delivery after a single AuthorizeUseGrant pass.
+func (s *CredentialStore) DeliverUseGrantCredential(ctx context.Context, owner, consumer, grantID, resource string, authority func() (string, []any)) (any, error) {
+	g, auth, aa, err := s.loadUseGrant(ctx, owner, consumer, grantID, resource, "credential_delivery", authority)
+	if err != nil {
+		return nil, err
+	}
+	if g.ConnectorDigest == "" {
+		g, guard, _, err := s.authorizeUseGrantLoaded(ctx, g, auth, aa, authority, false)
+		if err != nil {
+			return nil, err
+		}
+		return s.deliverOAuth2WithGrant(ctx, g, guard, authority)
+	}
+	g, guard, proof, err := s.authorizeUseGrantLoaded(ctx, g, auth, aa, authority, true)
+	if err != nil {
+		return nil, err
+	}
+	return s.deliverAPIKeyWithGrant(ctx, owner, g, guard, proof, authority)
+}
+
 // DeliverAPIKey requires distinct credential_delivery consent. Proxy consent can
 // never export a key. The existing policy requires a current confidential client.
 func (s *CredentialStore) DeliverAPIKey(ctx context.Context, owner, consumer, grantID, resource string, authority func() (string, []any)) (APIKeyDelivery, error) {
@@ -32,6 +53,10 @@ func (s *CredentialStore) DeliverAPIKey(ctx context.Context, owner, consumer, gr
 	if err != nil {
 		return APIKeyDelivery{}, err
 	}
+	return s.deliverAPIKeyWithGrant(ctx, owner, g, guard, proof, authority)
+}
+
+func (s *CredentialStore) deliverAPIKeyWithGrant(ctx context.Context, owner string, g UseGrant, guard func() (string, []any), proof apiKeyDispatchSnapshot, _ func() (string, []any)) (APIKeyDelivery, error) {
 	if g.ProviderRevision < 1 || g.ConnectorDigest == "" {
 		return APIKeyDelivery{}, ErrUseGrantNotFound
 	}

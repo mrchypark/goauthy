@@ -25,6 +25,12 @@ var errUseDPoPNonce = &fosite.RFC6749Error{
 	CodeField:        http.StatusBadRequest,
 }
 
+var (
+	errDPoPInvalidToken = errors.New("invalid dpop token")
+	errDPoPInvalidProof = errors.New("invalid dpop resource proof")
+	errDPoPReplay       = errors.New("dpop proof replay")
+)
+
 // RFC 9449 section 5 distinguishes invalid proofs from nonce challenges.
 var errInvalidDPoPProof = &fosite.RFC6749Error{
 	ErrorField:       "invalid_dpop_proof",
@@ -114,66 +120,87 @@ func (s *Server) verifyDPoPTokenRequest(ctx context.Context, r *http.Request, re
 		if errors.Is(err, dpop.ErrInvalid) || errors.Is(err, dpop.ErrReplay) {
 			nonce, issueErr := s.dpop.IssueNonce(ctx, clientID, proof.JKT, now)
 			if issueErr != nil {
-				return "", fosite.ErrServerError
+				return "", issueErr
 			}
 			return "", &dpopNonceError{nonce: nonce}
 		}
-		return "", fosite.ErrServerError
+		return "", err
 	}
 	if err := s.dpop.MarkReplay(ctx, proof.JKT, proof.JTI, now, proof.IssuedAt.Add(dpopProofMaxAge)); err != nil {
 		if errors.Is(err, dpop.ErrReplay) {
 			nonce, issueErr := s.dpop.IssueNonce(ctx, clientID, proof.JKT, now)
 			if issueErr != nil {
-				return "", fosite.ErrServerError
+				return "", issueErr
 			}
 			return "", &dpopNonceError{nonce: nonce}
 		}
-		return "", fosite.ErrServerError
+		return "", err
 	}
 	return proof.JKT, nil
 }
 
 func (s *Server) verifyDPoPResourceRequest(ctx context.Context, r *http.Request, request fosite.Requester, accessToken string) error {
+	return s.verifyDPoPResourceRequestWithOptions(ctx, r, request, accessToken, true)
+}
+
+func (s *Server) verifyDPoPResourceRequestWithOptions(ctx context.Context, r *http.Request, request fosite.Requester, accessToken string, requireNonce bool) error {
+	invalidTokenErr := errDPoPInvalidToken
+	invalidProofErr := errDPoPInvalidProof
+	if requireNonce {
+		invalidTokenErr = fosite.ErrInvalidRequest
+		invalidProofErr = fosite.ErrInvalidRequest
+	}
 	boundJKT := sessionDPoPJKT(request.GetSession())
 	scheme, token, authorizationOK := authorizationToken(r)
 	if boundJKT == "" {
 		if !authorizationOK || !sameAuthorizationScheme(scheme, "Bearer") || token != accessToken {
-			return fosite.ErrInvalidRequest
+			return invalidTokenErr
 		}
 		return nil
 	}
-	if !authorizationOK || !sameAuthorizationScheme(scheme, "DPoP") || token != accessToken || s.oidc == nil || s.dpop == nil {
-		return fosite.ErrInvalidRequest
+	if !authorizationOK || !sameAuthorizationScheme(scheme, "DPoP") || token != accessToken {
+		return invalidTokenErr
+	}
+	if s.oidc == nil || s.dpop == nil {
+		if requireNonce {
+			return fosite.ErrInvalidRequest
+		}
+		return fosite.ErrServerError
 	}
 	raw, present, valid := dpopHeader(r)
 	if !present || !valid {
-		return fosite.ErrInvalidRequest
+		return invalidProofErr
 	}
 	now := time.Now().UTC()
 	proof, err := dpop.Validate(raw, r, dpop.Options{Issuer: s.oidc.Issuer, Now: now, MaxAge: dpopProofMaxAge, FutureSkew: dpopProofFutureSkew, AccessToken: accessToken})
 	if err != nil || !sameDPoPJKT(boundJKT, proof.JKT) {
-		return fosite.ErrInvalidRequest
+		return invalidProofErr
 	}
 	clientID := request.GetClient().GetID()
-	if err := s.dpop.ConsumeNonce(ctx, proof.Nonce, clientID, proof.JKT, now); err != nil {
-		if errors.Is(err, dpop.ErrInvalid) || errors.Is(err, dpop.ErrReplay) {
-			nonce, issueErr := s.dpop.IssueNonce(ctx, clientID, proof.JKT, now)
-			if issueErr != nil {
-				return fosite.ErrServerError
+	if requireNonce {
+		if err := s.dpop.ConsumeNonce(ctx, proof.Nonce, clientID, proof.JKT, now); err != nil {
+			if errors.Is(err, dpop.ErrInvalid) || errors.Is(err, dpop.ErrReplay) {
+				nonce, issueErr := s.dpop.IssueNonce(ctx, clientID, proof.JKT, now)
+				if issueErr != nil {
+					return issueErr
+				}
+				return &dpopNonceError{nonce: nonce}
 			}
-			return &dpopNonceError{nonce: nonce}
+			return err
 		}
-		return fosite.ErrServerError
 	}
 	if err := s.dpop.MarkReplay(ctx, proof.JKT, proof.JTI, now, proof.IssuedAt.Add(dpopProofMaxAge)); err != nil {
-		if errors.Is(err, dpop.ErrReplay) {
-			nonce, issueErr := s.dpop.IssueNonce(ctx, clientID, proof.JKT, now)
-			if issueErr != nil {
-				return fosite.ErrServerError
+		if errors.Is(err, dpop.ErrReplay) || errors.Is(err, dpop.ErrInvalid) {
+			if requireNonce {
+				nonce, issueErr := s.dpop.IssueNonce(ctx, clientID, proof.JKT, now)
+				if issueErr != nil {
+					return issueErr
+				}
+				return &dpopNonceError{nonce: nonce}
 			}
-			return &dpopNonceError{nonce: nonce}
+			return errDPoPReplay
 		}
-		return fosite.ErrServerError
+		return err
 	}
 	return nil
 }

@@ -73,6 +73,19 @@ func TestMigrationV113PreservesExistingClients(t *testing.T) {
 	if err != nil || len(q.Rows) != 1 || !reflect.DeepEqual(q.Rows[0], []any{int64(0), int64(3)}) {
 		t.Fatalf("v115 migration state=%v err=%v", q.Rows, err)
 	}
+	if err := Ready(ctx, db); err == nil {
+		t.Fatal("v115 state must not satisfy v116 readiness")
+	}
+	if _, err := Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "v116-cred-table-fixture", Statements: []rhiza.SQLStatement{
+		{SQL: `CREATE TABLE IF NOT EXISTS saas_connection_credentials(connection_id TEXT PRIMARY KEY NOT NULL, state TEXT NOT NULL, refresh_claim TEXT) STRICT`},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := migrateRefreshClaimLease(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := Ready(ctx, db); err != nil {
 		t.Fatal(err)
 	}

@@ -368,8 +368,8 @@ func TestSaaSIsolation113Measurement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, err := range []error{h.BindSaaSProviderStore(f.Providers), h.BindSaaSCredentials(f.Credentials), h.BindAuthCollections(authcollection.NewStore(db)), h.BindConnectionUseResource(isolationResource), h.BindConnectionUseAuthorizer(func(req *http.Request) (string, string, func() (string, []any), error) {
-		return oauthServer.AuthorizeConnectionUse(req, isolationResource)
+	for _, err := range []error{h.BindSaaSProviderStore(f.Providers), h.BindSaaSCredentials(f.Credentials), h.BindAuthCollections(authcollection.NewStore(db)), h.BindConnectionUseResource(isolationResource), h.BindConnectionUseAuthorizer(func(w http.ResponseWriter, req *http.Request) (string, string, func() (string, []any), bool) {
+		return oauthServer.AuthorizeConnectionUseHTTP(w, req, isolationResource)
 	})} {
 		if err != nil {
 			t.Fatal(err)
