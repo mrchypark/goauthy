@@ -35,6 +35,7 @@ async function catalogList(kind, endpoint, label, attribute, t = key => key) {
 
 function catalogForm(kind, id, value, t = key => key) {
   const h = (key, values) => esc(t(key, values));
+  const split = raw => String(raw || '').split(',').map(v => v.trim()).filter(Boolean);
   const attribute = kind === 'attributes', label = attribute ? 'attribute' : 'scope', editing = id != null;
   const name = attribute ? value.name : value.scope;
   const nameInput = '<label for="catalog-name">' + h('Name') + '<input id="catalog-name" required value="' + esc(name) + '"></label>';

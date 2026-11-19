@@ -41,4 +41,8 @@ Object.assign(globalThis.GoAuthyI18n.messages, {
   ,'Confirm reset':'복원 확인'
   ,'Login text':'로그인 문구','Copy language':'문구 언어','Title':'제목','Description':'설명','Button text':'버튼 문구','Login layout':'로그인 레이아웃','Logo alignment':'로고 정렬','Card width (0 for default)':'카드 너비 (기본값은 0)','Default':'기본값','Start':'왼쪽','Center':'가운데','Colors and advanced appearance':'색상 및 고급 표시 설정','Client logo':'클라이언트 로고','Logo changes save immediately and are separate from theme settings.':'로고 변경은 즉시 저장되며 테마 설정과 별도로 적용됩니다.','Current client logo':'현재 클라이언트 로고','Upload logo (PNG, JPEG, or SVG; up to 10 MiB)':'로고 업로드 (PNG, JPEG, SVG, 최대 10MiB)','Remove client logo':'클라이언트 로고 삭제','Logo file must be 10 MiB or smaller.':'로고 파일은 10MiB 이하여야 합니다.','Saving logo…':'로고 저장 중…','Logo saved.':'로고를 저장했습니다.','Remove this client logo?':'이 클라이언트 로고를 삭제하시겠습니까?','Removing logo…':'로고 삭제 중…','Logo removed.':'로고를 삭제했습니다.'
   ,'Confirm removal':'삭제 확인'
+  ,'Resolve legacy branding before editing this client.':'이 클라이언트를 편집하기 전에 기존 브랜딩 설정을 먼저 정리하세요.'
+  ,'Reload the common theme before saving.':'저장하기 전에 공통 테마를 다시 불러오세요.'
+  ,'Reload the common theme before resetting.':'복원하기 전에 공통 테마를 다시 불러오세요.'
+  ,'Sign in again':'다시 로그인'
 });

@@ -43,7 +43,7 @@ func (d connectionHandoffPageData) Text(english, korean string) string {
 func (h *Handler) ConnectionHandoffPage(w http.ResponseWriter, r *http.Request) {
 	h.securityHeaders(w)
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
 	render := func(status int, data connectionHandoffPageData) {
 		issuerURL, _ := url.Parse(h.issuer)
 		data.BasePath = strings.TrimRight(issuerURL.Path, "/")

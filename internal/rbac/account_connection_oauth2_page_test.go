@@ -57,7 +57,7 @@ func TestRenderOAuth2CompletionPageEscapesFixedAccountPath(t *testing.T) {
 	if got := w.Header().Get("X-Frame-Options"); got != "DENY" {
 		t.Fatalf("frame policy=%q", got)
 	}
-	if got := w.Header().Get("Content-Security-Policy"); got != "default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" {
+	if got := w.Header().Get("Content-Security-Policy"); got != "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" {
 		t.Fatalf("csp=%q", got)
 	}
 }
@@ -104,7 +104,7 @@ func TestElyOAuth2CompletionUsesIssuerAssetsWithoutScripts(t *testing.T) {
 			t.Errorf("unexpected %s", forbidden)
 		}
 	}
-	if w.Header().Get("Content-Security-Policy") != "default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" {
+	if w.Header().Get("Content-Security-Policy") != "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" {
 		t.Fatal("completion CSP changed")
 	}
 }

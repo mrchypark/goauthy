@@ -100,7 +100,7 @@
       if (!csrf || !p) throw new Error(words('The link could not be verified.', '링크를 확인하지 못했습니다.'));
       $('#password-policy').textContent = words(`Use ${p.length_min}–${p.length_max} characters; at least ${p.lower_case} lowercase, ${p.upper_case} uppercase, ${p.digits} digits and ${p.special} special characters. Previously used passwords may be rejected.`, `${p.length_min}~${p.length_max}자, 소문자 ${p.lower_case}개·대문자 ${p.upper_case}개·숫자 ${p.digits}개·특수문자 ${p.special}개 이상을 사용하세요. 이전 비밀번호는 거부될 수 있습니다.`);
       start.hidden = true; reset.hidden = false; reset.elements.password.focus();
-    } catch (error) { status(words('Unable to verify this link.', '이 링크를 확인할 수 없습니다.'), error.message, true); } finally { globalThis.GoAuthyI18n?.setBusy?.(false); }
+    } catch (error) { start.disabled = false; status(words('Unable to verify this link.', '이 링크를 확인할 수 없습니다.'), error.message, true); } finally { globalThis.GoAuthyI18n?.setBusy?.(false); }
   });
   if (reset) reset.addEventListener('submit', async (event) => {
     event.preventDefault(); const button = reset.querySelector('button'); if (button.disabled) return;
