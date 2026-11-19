@@ -39,13 +39,7 @@
     return text.replace(/\{(\w+)\}/g, (match, name) => Object.hasOwn(values, name) ? String(values[name]) : match);
   }
   function translate(root = document) {
-    root.querySelectorAll('[data-i18n]').forEach(el => {
-      if (el.hasAttribute('data-brand-en') || el.hasAttribute('data-brand-ko')) {
-        el.textContent = el.getAttribute('data-brand-' + language) || el.getAttribute('data-brand-en') || el.getAttribute('data-brand-ko') || '';
-        return;
-      }
-      el.textContent = t(el.getAttribute('data-i18n'));
-    });
+    root.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = el.getAttribute('data-brand-' + language) || el.getAttribute('data-brand-en') || t(el.getAttribute('data-i18n')); });
     root.querySelectorAll('[data-i18n-label]').forEach(el => { el.setAttribute('aria-label', t(el.getAttribute('data-i18n-label'))); });
   }
   let pending = 0;
