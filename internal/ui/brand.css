@@ -4,17 +4,23 @@
     --text: 150 8% 32%; --text-high: 150 16% 13%;
     --bg: 45 23% 96%; --bg-high: 42 17% 89%;
     --action: 153 28% 25%; --accent: 18 88% 60%; --error: 0 60% 40%;
+    --approved: hsl(153 45% 28%); --approved-tint: hsl(153 45% 28% / .1);
+    --warning: hsl(34 80% 34%); --warning-tint: hsl(34 80% 34% / .12);
     --btn-text: #faf9f5; --border-radius: 10px;
   }
   @media (prefers-color-scheme: dark) {
-    body { --text: 150 8% 75%; --text-high: 150 12% 92%; --bg: 150 12% 9%; --bg-high: 150 10% 17%; --action: 153 32% 66%; --error: 0 70% 72%; --btn-text: #10231b; }
+    body {
+      --text: 150 8% 75%; --text-high: 150 12% 92%; --bg: 150 12% 9%; --bg-high: 150 10% 17%; --action: 153 32% 66%; --error: 0 70% 72%; --btn-text: #10231b;
+      --approved: hsl(153 40% 62%); --approved-tint: hsl(153 40% 62% / .14);
+      --warning: hsl(38 85% 66%); --warning-tint: hsl(38 85% 66% / .14);
+    }
   }
 }
 /* Resolve aliases on body, where server-managed brand variables are defined. */
 body {
   --color-paper: hsl(var(--bg)); --surface: hsl(var(--bg));
   --color-ink: hsl(var(--text-high)); --color-muted: hsl(var(--text));
-  --color-line: hsl(var(--text) / .22); --border: hsl(var(--text) / .4);
+  --color-line: hsl(var(--text) / .22); --line: var(--color-line); --border: hsl(var(--text) / .4);
   --color-accent: hsl(var(--action)); --focus: hsl(var(--action));
   --accent-hover: color-mix(in srgb, hsl(var(--action)), hsl(var(--text-high)) 15%);
   --accent-tint: hsl(var(--bg-high)); --on-accent: var(--btn-text);

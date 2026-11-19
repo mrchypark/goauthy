@@ -138,7 +138,7 @@ pre { overflow-x: auto; max-width: 100%; padding: 16px; background: var(--accent
 @media(max-width:540px){#session-filter{grid-template-columns:1fr 1fr}#session-status{justify-self:start}}
 
 #event-filter{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 12px}
-#event-filter #ev-status{grid-column:auto;align-self:center}
+#event-filter #ev-status{grid-column:1 / -1;align-self:center}
 #ev-table th,#ev-table td{padding:8px 10px}
 #ev-table td:nth-child(2),#ev-table td:nth-child(4){min-width:0;white-space:nowrap}
 @media(max-width:1000px){.nav-footer{display:flex;margin:0;padding:0 0 12px;border:0}.nav-footer a{display:inline-flex;align-items:center;min-height:36px}}
@@ -177,7 +177,7 @@ pre { overflow-x: auto; max-width: 100%; padding: 16px; background: var(--accent
 #app [data-slot=button][data-variant=primary] { background:var(--color-accent); color:var(--btn-text,#f6f8f0); }
 #app [data-slot=button][data-variant=secondary] { background:transparent; color:var(--color-ink); border-color:var(--border); }
 #app [data-slot=button]:focus-visible, #app [data-slot=input]:focus-visible, #app [data-slot=select]:focus-visible, #app [data-slot=textarea]:focus-visible { outline:2px solid var(--color-accent); outline-offset:3px; }
-#app .ui-table th, #app .ui-table td { padding:8px 10px; border-color:var(--line); }
+#app .ui-table th, #app .ui-table td { padding:8px 10px; border-color:var(--color-line); }
 #app .ui-table th { background:var(--accent-tint); }
 #app :is(#user, #client-form, #collection-form, #catalog-form) { grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; }
 #app :is(#user, #client-form, #collection-form, #catalog-form) > :not(label) { grid-column:1 / -1; }

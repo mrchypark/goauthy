@@ -14,7 +14,7 @@ import (
 )
 
 var oauth2CompletionPage = template.Must(template.Must(ui.NewTemplates("oauth2-complete")).Parse(`<!doctype html>
-<html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{if eq .Language "ko"}}연결 저장됨{{else}}Connection saved{{end}} · {{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}}</title>{{template "goauthy-head" .BasePath}}<link rel="stylesheet" href="{{.CSS}}">{{if .Brand.ThemeURL}}<link rel="stylesheet" href="{{.BasePath}}{{.Brand.ThemeURL}}">{{end}}</head>
+<html lang="{{.Language}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{if eq .Language "ko"}}연결 저장됨{{else}}Connection saved{{end}} · {{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}}</title>{{template "goauthy-head" .BasePath}}<link rel="stylesheet" href="{{.BasePath}}/auth/v1/branding/brand.css"><link rel="stylesheet" href="{{.CSS}}">{{if .Brand.ThemeURL}}<link rel="stylesheet" href="{{.BasePath}}{{.Brand.ThemeURL}}">{{end}}</head>
 <body><main id="oauth2-complete"><p class="eyebrow">{{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}}</p><h1>{{if eq .Language "ko"}}연결 저장됨{{else}}Connection saved{{end}}</h1>{{$message := "Your connection was saved. Using this service requires separate explicit approval."}}{{if eq .Language "ko"}}{{$message = "연결이 저장되었습니다. 이 서비스를 사용하려면 별도의 명시적 승인이 필요합니다."}}{{end}}{{template "alert" (dict "Content" $message)}}<p>{{if eq .Language "ko"}}원래 탭으로 돌아가거나 계정으로 계속하세요.{{else}}Return to the original tab, or continue to your account.{{end}}</p><a id="oauth2-account-link" class="button" rel="noreferrer" href="{{.Account}}">{{if eq .Language "ko"}}계정으로 돌아가기{{else}}Return to account{{end}}</a></main></body></html>`))
 
 type oauth2CompletionPageData struct {
@@ -31,7 +31,7 @@ func wantsOAuth2CompletionPage(r *http.Request) bool {
 func (h *Handler) renderOAuth2CompletionPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 	language := i18n.UILanguageFromRequest(r)
 	w.Header().Set("Content-Language", language)
 	w.Header().Add("Vary", "Accept-Language")

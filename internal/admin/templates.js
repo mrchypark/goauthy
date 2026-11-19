@@ -13,7 +13,7 @@ async function templates() {
     langSelect.onchange = () => {
       const type = typeSelect.value, language = langSelect.value;
       if (!type || !language) { document.getElementById('template-preview').innerHTML = ''; return; }
-      document.getElementById('template-preview').innerHTML = '<iframe src="/auth/v1/admin/email-templates/preview?type=' + encodeURIComponent(type) + '&lang=' + encodeURIComponent(language) + '" title="' + esc(t('Email template preview')) + '"></iframe>';
+      document.getElementById('template-preview').innerHTML = '<iframe sandbox="" src="/auth/v1/admin/email-templates/preview?type=' + encodeURIComponent(type) + '&lang=' + encodeURIComponent(language) + '" title="' + esc(t('Email template preview')) + '"></iframe>';
     };
   } catch (error) { document.getElementById('template-status').innerHTML = '<p class="error">' + esc(error.message) + '</p>'; }
 }

@@ -141,7 +141,9 @@ async function clientTheme(id, common = false) {
     const selected = theme[mode];
     let invalidCSS = false;
     const setCSS = (name, value) => {
-      if (/^[a-z0-9-,.#()%/\s]+$/.test(String(value ?? ''))) body.style.setProperty(name, String(value));
+      const text = String(value ?? '').trim();
+      if (!text) { body.style.removeProperty(name); return; }
+      if (/^[a-zA-Z0-9-,.#()%/\s]+$/.test(text)) body.style.setProperty(name, text);
       else { body.style.removeProperty(name); invalidCSS = true; }
     };
     for (const field of colorFields) setCSS('--' + field.replace('_', '-'), (selected[field] || []).join(' '));

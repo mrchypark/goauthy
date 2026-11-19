@@ -323,6 +323,7 @@ func (h *Handler) renderConfirmation(w http.ResponseWriter, r *http.Request, coo
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy", logoutConfirmationCSP(payload.RedirectURI))
 	messages := i18n.MessagesFor(i18n.UILanguageFromRequest(r))
 	localizedLogoutHTMLHeaders(w, messages.Language)
 	issuerURL, _ := url.Parse(h.issuer)
@@ -422,8 +423,16 @@ func logoutSecurityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", logoutConfirmationCSP(""))
 	w.Header().Set("X-Frame-Options", "DENY")
+}
+
+func logoutConfirmationCSP(redirectURI string) string {
+	formAction := "'self'"
+	if u, err := url.Parse(redirectURI); err == nil && (strings.EqualFold(u.Scheme, "https") || strings.EqualFold(u.Scheme, "http")) && u.Host != "" {
+		formAction += " " + strings.ToLower(u.Scheme) + "://" + u.Host
+	}
+	return "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; form-action " + formAction + "; frame-ancestors 'none'"
 }
 
 func localizedLogoutHTMLHeaders(w http.ResponseWriter, language string) {

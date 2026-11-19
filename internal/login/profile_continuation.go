@@ -165,8 +165,9 @@ func (h *Handler) profileGET(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	fields := buildProfileFields(policy, claims)
-	h.renderProfilePage(w, r, http.StatusOK, request.RedirectURI, request.ClientID, interactionToken, csrf, i18n.UILanguageFromRequest(r), "", fields)
+	language := i18n.UILanguageFromRequest(r)
+	fields := buildProfileFields(policy, claims, language)
+	h.renderProfilePage(w, r, http.StatusOK, request.RedirectURI, request.ClientID, interactionToken, csrf, language, "", fields)
 }
 
 // profilePOST handles POST /auth/profile
@@ -309,14 +310,21 @@ func (h *Handler) profilePOST(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 				return
 			}
-			fields := buildProfileFields(policy, claims)
+			language := i18n.UILanguageFromRequest(r)
+			fields := buildProfileFields(policy, claims, language)
 			errMsg := err.Error()
 			if errors.Is(err, identity.ErrPreferredUsernameUnavailable) {
 				errMsg = "preferred username unavailable"
 			}
-			language := i18n.UILanguageFromRequest(r)
-			if language == "ko" && errors.Is(err, identity.ErrPreferredUsernameUnavailable) {
-				errMsg = "선호 사용자 이름을 사용할 수 없습니다"
+			if language == "ko" {
+				switch {
+				case errors.Is(err, identity.ErrPreferredUsernameUnavailable):
+					errMsg = "선호 사용자 이름을 사용할 수 없습니다"
+				case errors.Is(err, identity.ErrRequiredUserValue):
+					errMsg = "필수 프로필 항목을 모두 입력하세요"
+				case errors.Is(err, identity.ErrSelfProfileInvalid), errors.Is(err, identity.ErrUserValuesPolicy):
+					errMsg = "입력한 프로필 값이 서비스 정책에 맞지 않습니다"
+				}
 			}
 			h.renderProfilePage(w, r, http.StatusBadRequest, request.RedirectURI, request.ClientID, interactionToken, csrf, language, errMsg, fields)
 			return
@@ -374,11 +382,17 @@ func optionalFormValue(r *http.Request, key string) *string {
 	return &v
 }
 
-func buildProfileFields(policy identity.UserValuesPolicy, claims identity.ProfileClaims) []profileField {
+func buildProfileFields(policy identity.UserValuesPolicy, claims identity.ProfileClaims, language string) []profileField {
 	cfg := policy.ConfigResponse()
 	var fields []profileField
-	addField := func(name, label, mode string, current *string, immutable bool) {
-		f := profileField{Name: name, Label: label, Required: mode == "required", Hidden: mode == "hidden"}
+	label := func(en, ko string) string {
+		if language == "ko" {
+			return ko
+		}
+		return en
+	}
+	addField := func(name, fieldLabel, mode string, current *string, immutable bool) {
+		f := profileField{Name: name, Label: fieldLabel, Required: mode == "required", Hidden: mode == "hidden"}
 		if immutable && current != nil {
 			f.Readonly = true
 		}
@@ -387,16 +401,16 @@ func buildProfileFields(policy identity.UserValuesPolicy, claims identity.Profil
 		}
 		fields = append(fields, f)
 	}
-	addField("given_name", "Given Name", cfg.GivenName, claims.GivenName, false)
-	addField("family_name", "Family Name", cfg.FamilyName, claims.FamilyName, false)
-	addField("preferred_username", "Preferred Username", cfg.PreferredUsername.Mode, claims.PreferredUsername, cfg.PreferredUsername.Immutable && claims.PreferredUsername != nil)
-	addField("birthdate", "Birthdate", cfg.Birthdate, claims.Birthdate, false)
-	addField("phone", "Phone", cfg.Phone, claims.Phone, false)
-	addField("street", "Street", cfg.Street, claims.Street, false)
-	addField("zip", "ZIP", cfg.ZIP, claims.ZIP, false)
-	addField("city", "City", cfg.City, claims.City, false)
-	addField("country", "Country", cfg.Country, claims.Country, false)
-	addField("tz", "Timezone", cfg.Timezone, claims.Timezone, false)
+	addField("given_name", label("Given Name", "이름"), cfg.GivenName, claims.GivenName, false)
+	addField("family_name", label("Family Name", "성"), cfg.FamilyName, claims.FamilyName, false)
+	addField("preferred_username", label("Preferred Username", "선호 사용자 이름"), cfg.PreferredUsername.Mode, claims.PreferredUsername, cfg.PreferredUsername.Immutable && claims.PreferredUsername != nil)
+	addField("birthdate", label("Birthdate", "생년월일"), cfg.Birthdate, claims.Birthdate, false)
+	addField("phone", label("Phone", "전화번호"), cfg.Phone, claims.Phone, false)
+	addField("street", label("Street", "도로명 주소"), cfg.Street, claims.Street, false)
+	addField("zip", label("ZIP", "우편번호"), cfg.ZIP, claims.ZIP, false)
+	addField("city", label("City", "도시"), cfg.City, claims.City, false)
+	addField("country", label("Country", "국가"), cfg.Country, claims.Country, false)
+	addField("tz", label("Timezone", "시간대"), cfg.Timezone, claims.Timezone, false)
 	return fields
 }
 
