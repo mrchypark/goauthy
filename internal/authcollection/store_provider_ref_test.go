@@ -42,4 +42,23 @@ func TestUpdateDefinitionBlocksRemovingReferencedProviderUnlessRevoked(t *testin
 	if err != nil || len(updated.ProviderIDs) != 1 || updated.ProviderIDs[0] != "prov-2" {
 		t.Fatalf("remove revoked provider updated=%+v err=%v", updated, err)
 	}
+
+	// Legacy api_key collection with providers_json=[] and active provider_id='api-key' must still allow updates.
+	legacy, err := s.CreateDefinition(ctx, DefinitionInput{
+		ID: "coll-legacy-apikey", Name: "Legacy", AuthMethod: "api_key", Enabled: true, ProviderIDs: []string{},
+	}, func() (string, []any) { return "1", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Execute(ctx, rhiza.ExecuteRequest{
+		RequestID: "seed-legacy-apikey-cred",
+		SQL:       `INSERT INTO saas_connection_credentials(connection_id,owner_subject,collection_id,provider_id,generation,token_version,state,credential) VALUES('c-legacy','alice','coll-legacy-apikey','api-key','g1',1,'ready',x'01')`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if updatedLegacy, err := s.UpdateDefinition(ctx, legacy.ID, legacy.Revision, DefinitionInput{
+		Name: "Legacy Renamed", AuthMethod: "api_key", Enabled: false, ProviderIDs: []string{},
+	}, func() (string, []any) { return "1", nil }); err != nil || updatedLegacy.Name != "Legacy Renamed" || updatedLegacy.Enabled {
+		t.Fatalf("legacy api_key update err=%v updated=%+v", err, updatedLegacy)
+	}
 }

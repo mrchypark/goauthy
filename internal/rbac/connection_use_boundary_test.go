@@ -23,7 +23,8 @@ func TestWriteInvokeErrorMappings(t *testing.T) {
 		{"grant_not_found", saas.ErrUseGrantNotFound, http.StatusNotFound},
 		{"conflict", saas.ErrUseGrantConflict, http.StatusConflict},
 		{"invalid", saas.ErrUseGrantInvalid, http.StatusBadRequest},
-		{"gateway", saas.ErrAPIKeyRequest, http.StatusBadGateway},
+		{"gateway_apikey", saas.ErrAPIKeyRequest, http.StatusBadGateway},
+		{"gateway_refresh_uncertain", saas.ErrRefreshUncertain, http.StatusBadGateway},
 		{"other", errors.New("backend down"), http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

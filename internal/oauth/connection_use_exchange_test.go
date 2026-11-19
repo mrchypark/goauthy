@@ -174,4 +174,39 @@ func TestConnectionUseExchangeGateAndDPoPResourceAuth(t *testing.T) {
 	if _, _, _, ok := server.AuthorizeConnectionUseHTTP(w, dpopReq, connResource); ok || w.Code != http.StatusUnauthorized || !strings.Contains(w.Header().Get("WWW-Authenticate"), `error="invalid_dpop_proof"`) {
 		t.Fatalf("replay ok=%v code=%d www=%q", ok, w.Code, w.Header().Get("WWW-Authenticate"))
 	}
+
+	// 8. Revoking browser_sessions fails exchange commit with 400 invalid_grant.
+	if _, err := db.Execute(context.Background(), rhiza.ExecuteRequest{
+		RequestID: "conn-use-revoke-session",
+		SQL:       `UPDATE browser_sessions SET revoked_at_unix_ms = ? WHERE token_digest = ?`,
+		Args:      []any{time.Now().UTC().UnixMilli(), sid},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	chal2 := postConsumer(exchForm, dpopTestProof(t, priv, http.MethodPost, "/oidc/token", "conn-use-chal-revoked", "", ""))
+	if chal2.Code != http.StatusBadRequest || tokenError(t, chal2) != "use_dpop_nonce" {
+		t.Fatalf("revoked challenge status=%d err=%q", chal2.Code, tokenError(t, chal2))
+	}
+	revokedResp := postConsumer(exchForm, dpopTestProof(t, priv, http.MethodPost, "/oidc/token", "conn-use-exch-revoked", chal2.Header().Get("DPoP-Nonce"), ""))
+	if revokedResp.Code != http.StatusBadRequest || tokenError(t, revokedResp) != "invalid_grant" {
+		t.Fatalf("revoked browser session exchange status=%d err=%q", revokedResp.Code, tokenError(t, revokedResp))
+	}
+
+	// 9. Unset GOAUTHY_CONNECTIONS_RESOURCE returns 503 for scope=goauthy.connections.use.
+	unsetServer, err := NewServerWithOIDC(context.Background(), db, randomSecret(t), testClientID, testClientSecret, testRedirectURI, nil, OIDCConfig{
+		Issuer:         oidcTestIssuer,
+		LoadSigningKey: func(context.Context) (oidc.SigningKey, error) { return oidcTestKey(t), nil },
+		ManagedClients: server.store.managedClients,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unsetReq := httptest.NewRequest(http.MethodPost, "/oidc/token", strings.NewReader(exchForm.Encode()))
+	unsetReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	unsetReq.SetBasicAuth(consumer.ID, consumerSecret)
+	unsetW := httptest.NewRecorder()
+	unsetServer.TokenHandler().ServeHTTP(unsetW, unsetReq)
+	if unsetW.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unset resource status=%d body=%s", unsetW.Code, unsetW.Body.String())
+	}
 }

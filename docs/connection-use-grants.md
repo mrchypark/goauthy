@@ -45,7 +45,7 @@ Currently, consumer endpoints under `/auth/v1/connection-grants/{grant_id}/*` re
 - One-use consent handoffs & bootstrap policy pinning: [`connection-use-handoffs.md`](connection-use-handoffs.md#request-and-approval), [`connection-use-handoffs.md`](connection-use-handoffs.md#bootstrap-client-policy)
 - Consumer HTTP contract & schema `v74`: [`external-credential-consumer-contract.md`](external-credential-consumer-contract.md#사용자-oauth-연결-runtime-schema-v74) (Korean reference)
 - Maturity matrix (`Preview` vs `Experimental`): [`capabilities.md`](capabilities.md#external-user-owned-connections)
-- Qualification ledger (`2026-09-17`, schema `v102` baseline; `status.md` header notes `v114`, codebase is at `schemaVersion = 115`): [`status.md`](status.md#current-qualification-ledger-verified-2026-09-17)
+- Qualification ledger (`2026-09-17`, schema `v102` baseline; `status.md` header notes `v114`, runtime is at `schemaVersion = 116`): [`status.md`](status.md#current-qualification-ledger-verified-2026-09-17)
 - Package docs: [`internal/authcollection`](../internal/authcollection/README.md), [`internal/saas`](../internal/saas/README.md), [`internal/rbac`](../internal/rbac/README.md), [`internal/oauth`](../internal/oauth/README.md), [`internal/dpop`](../internal/dpop/README.md), [`internal/clients`](../internal/clients/README.md), [`internal/claims`](../internal/claims/README.md), [`internal/netsec`](../internal/netsec/README.md), [`internal/storage`](../internal/storage/README.md), [`cmd/goauthy`](../cmd/goauthy/README.md)
 
 ---
@@ -210,7 +210,7 @@ To support asynchronous/queued confidential Execution Consumers without storing 
 
 ### Current Regression Baseline
 
-Qualification in [`status.md`](status.md#current-qualification-ledger-verified-2026-09-17) verified schema `v102` on `2026-09-17` (runtime is now at `schemaVersion = 115` on Rhiza `v0.24.0`). Run package tests covering `Scope` (`internal/storage` uses `-p=2` per ledger):
+Qualification in [`status.md`](status.md#current-qualification-ledger-verified-2026-09-17) verified schema `v102` on `2026-09-17` (runtime is now at `schemaVersion = 116` on Rhiza `v0.24.0`). Run package tests covering `Scope` (`internal/storage` uses `-p=2` per ledger):
 
 ```sh
 go test -count=1 -p=3 -timeout=60m ./internal/authcollection ./internal/clients ./internal/claims ./internal/dpop ./internal/netsec ./internal/saas ./internal/rbac ./internal/oauth ./cmd/goauthy

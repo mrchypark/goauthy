@@ -150,6 +150,10 @@ func connectionUseErrorClass(err error) string {
 		return "not_found"
 	case errors.Is(err, saas.ErrCredentialUnauthorized):
 		return "unauthorized"
+	case errors.Is(err, saas.ErrCredentialCorrupted):
+		return "corrupted"
+	case errors.Is(err, saas.ErrRefreshUncertain):
+		return "refresh_uncertain"
 	case errors.Is(err, saas.ErrUseGrantInvalid):
 		return "invalid"
 	default:
@@ -180,7 +184,7 @@ func (h *Handler) writeInvokeError(w http.ResponseWriter, err error) {
 		h.error(w, http.StatusConflict, "Conflict")
 	case errors.Is(err, saas.ErrCredentialUnauthorized), errors.Is(err, saas.ErrCredentialCorrupted):
 		h.error(w, http.StatusInternalServerError, "Internal Server Error")
-	case errors.Is(err, saas.ErrAPIKeyRequest):
+	case errors.Is(err, saas.ErrAPIKeyRequest), errors.Is(err, saas.ErrRefreshUncertain):
 		h.error(w, http.StatusBadGateway, "Bad Gateway")
 	default:
 		h.unavailable(w)

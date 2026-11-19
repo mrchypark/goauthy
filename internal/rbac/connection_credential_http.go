@@ -2,10 +2,7 @@ package rbac
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
-
-	"github.com/mrchypark/goauthy/internal/saas"
 )
 
 // DeliverConnectionCredential returns a consented credential to an
@@ -17,10 +14,6 @@ func (h *Handler) DeliverConnectionCredential(w http.ResponseWriter, r *http.Req
 	}
 	delivery, err := h.saasCredentials.DeliverUseGrantCredential(r.Context(), owner, consumer, r.PathValue("grant_id"), h.connectionUseResource, authority)
 	if err != nil {
-		if errors.Is(err, saas.ErrUseGrantInvalid) {
-			h.badRequest(w)
-			return
-		}
 		h.writeInvokeError(w, err)
 		return
 	}

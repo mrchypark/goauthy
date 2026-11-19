@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mrchypark/goauthy/internal/clients"
+	"github.com/mrchypark/goauthy/internal/identity"
 	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/ory/fosite"
 	"github.com/ory/fosite/handler/oauth2"
@@ -70,9 +71,6 @@ func (h *tokenExchangeHandler) HandleTokenEndpointRequest(ctx context.Context, r
 		if h.connectionUseResource == "" {
 			return errServiceUnavailable
 		}
-		if !isManaged && (h.store.client == nil || request.GetClient().GetID() != h.store.client.GetID()) {
-			return fosite.ErrUnauthorizedClient
-		}
 		if _, hasAudience := form["audience"]; hasAudience {
 			return errInvalidTarget
 		}
@@ -120,6 +118,7 @@ func (h *tokenExchangeHandler) HandleTokenEndpointRequest(ctx context.Context, r
 	if remaining <= 0 {
 		return fosite.ErrInvalidGrant
 	}
+	var connUseDeviceMFAVerified bool
 	if isConnUse {
 		if source.GetRequestForm().Get("grant_type") == TokenExchangeGrantType || (sourceSession.Extra != nil && sourceSession.Extra["act"] != nil) {
 			return fosite.ErrInvalidGrant
@@ -139,6 +138,9 @@ func (h *tokenExchangeHandler) HandleTokenEndpointRequest(ctx context.Context, r
 			if policy.Prefix != "" {
 				principal, principalErr := h.server.currentPrincipal(ctx, sourceSession.Subject)
 				if principalErr != nil {
+					if errors.Is(principalErr, identity.ErrInactiveSubject) {
+						return fosite.ErrInvalidGrant
+					}
 					return principalErr
 				}
 				if enforceClientGroupPolicy(principal, policy) != nil {
@@ -152,6 +154,9 @@ func (h *tokenExchangeHandler) HandleTokenEndpointRequest(ctx context.Context, r
 				}
 				if !mfaOK {
 					return fosite.ErrAccessDenied
+				}
+				if isDevice, _ := sourceSession.Extra[deviceOIDCExtra].(bool); isDevice {
+					connUseDeviceMFAVerified = true
 				}
 			}
 		}
@@ -281,6 +286,9 @@ func (h *tokenExchangeHandler) HandleTokenEndpointRequest(ctx context.Context, r
 			if val, exists := sourceSession.Extra[key]; exists {
 				targetSession.Extra[key] = val
 			}
+		}
+		if connUseDeviceMFAVerified {
+			targetSession.Extra[deviceMFAVerifiedExtra] = true
 		}
 	}
 	form.Set(exchangeSourceSignatureForm, signature)

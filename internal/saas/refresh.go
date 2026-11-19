@@ -9,7 +9,10 @@ import (
 
 const refreshExchangeTimeout = 20 * time.Second
 
-var errRefreshUncertain = errors.New("saas refresh outcome uncertain; reconnect required")
+var (
+	ErrRefreshUncertain = errors.New("saas refresh outcome uncertain; reconnect required")
+	errRefreshUncertain = ErrRefreshUncertain
+)
 
 // refreshCredential never retries the external operation. exchange is a trusted
 // provider adapter, not a callback or destination supplied by an API caller.

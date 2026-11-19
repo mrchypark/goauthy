@@ -14,7 +14,7 @@ GoAuthy is a pre-alpha Go OAuth 2.0 / OIDC identity provider targeting behaviora
 
 GoAuthy runs as a single binary (`cmd/goauthy`) with no external database server in the default deployment topology ("no GoAuthy PVC"):
 
-- **Storage & replication (`Rhiza v0.24.0`, `latticedb-go v0.13.0`, schema `v115`)**: State is stored in an embedded `*rhiza.DB` SQLite/consensus engine (`github.com/mrchypark/rhiza`, commit [`e9cefbbb260d2f62b2a47971de3f091720b42a68`](https://github.com/mrchypark/rhiza/commit/e9cefbbb260d2f62b2a47971de3f091720b42a68)) using `emptyDir` local storage paired with synchronous `before-ack` object-store publication (S3 or GCS) for disaster recovery.
+- **Storage & replication (`Rhiza v0.24.0`, `latticedb-go v0.13.0`, schema `v116`)**: State is stored in an embedded `*rhiza.DB` SQLite/consensus engine (`github.com/mrchypark/rhiza`, commit [`e9cefbbb260d2f62b2a47971de3f091720b42a68`](https://github.com/mrchypark/rhiza/commit/e9cefbbb260d2f62b2a47971de3f091720b42a68)) using `emptyDir` local storage paired with synchronous `before-ack` object-store publication (S3 or GCS) for disaster recovery.
 - **OAuth 2.0 / OIDC core (`ory/fosite` fork `v0.49.0-goauthy.1`)**: Uses a minimally patched `github.com/mrchypark/fosite` fork for security fixes and compatibility; the policy is to return to upstream once published and qualified.
 - **Cryptography & WebAuthn**: `go-jose/v4` for EdDSA JWT/JWKS signing, `go-webauthn` for passkeys, Argon2id for password hashing, and `*oidc.Keyring` with **GAOP** (GoAuthy Authenticated Object Protection) AES-256-GCM envelope encryption.
 - **Runtime requirement**: Go `1.27.4` minimum (also enforced by the root `Dockerfile`).
@@ -132,7 +132,7 @@ GoAuthy writes Argon2id `v=19` credentials using the OWASP baseline (`m=19456` K
 
 ## Global Invariants
 
-- Replicated state and schema migrations (`v115`) are persisted in `*rhiza.DB`; mutations requiring authorization or fencing evaluate predicates inside the same linearizable transaction (`internal/storage`, `internal/audit`, `internal/eventlog`, `internal/rbac`, `internal/clients`).
+- Replicated state and schema migrations (`v116`) are persisted in `*rhiza.DB`; mutations requiring authorization or fencing evaluate predicates inside the same linearizable transaction (`internal/storage`, `internal/audit`, `internal/eventlog`, `internal/rbac`, `internal/clients`).
 - Envelope-encrypted secrets (OAuth clients, SaaS providers/credentials, passkey credentials/ceremonies, upstream providers, KV namespaces) are sealed with `*oidc.Keyring` and guarded by master-key retirement writer barriers (`internal/oidc`, `internal/storage`).
 - Outbound HTTP/webhook/CIMD/back-channel/SCIM/SaaS callers enforce HTTPS policies, bounded response sizes, redirect restrictions, and private-IP/DNS-rebinding protections (`internal/backchannel`, `internal/cimd`, `internal/notify`, `internal/saas`, `internal/scim`).
 - Browser-only endpoints enforce session binding, CSRF tokens, `Sec-Fetch-Site` checks, and reject `Authorization` headers; API-key endpoints enforce constant-time SHA-256 verification and narrow resource rights (`internal/browser`, `internal/apikey`, `internal/admin`, `internal/account`).

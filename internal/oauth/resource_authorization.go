@@ -163,9 +163,6 @@ func (s *Server) authorizeResourceWithStatus(r *http.Request, requiredScope, req
 		} else if jkt != "" || !sameAuthorizationScheme(scheme, "Bearer") {
 			return reject("bearer_binding", errDPoPInvalidToken)
 		}
-		if dpopErr := s.verifyDPoPResourceRequestWithOptions(r.Context(), r, request, raw, false); dpopErr != nil {
-			return reject("dpop_resource", dpopErr)
-		}
 	} else if jkt != "" {
 		return reject("token_claims", nil)
 	}
@@ -197,6 +194,11 @@ func (s *Server) authorizeResourceWithStatus(r *http.Request, requiredScope, req
 		}
 		if enforceClientGroupPolicy(principal, policy) != nil {
 			return reject("client_group_membership", nil)
+		}
+	}
+	if connectionUse {
+		if dpopErr := s.verifyDPoPResourceRequestWithOptions(r.Context(), r, request, raw, false); dpopErr != nil {
+			return reject("dpop_resource", dpopErr)
 		}
 	}
 	managed, managedOK := request.GetClient().(*clients.Client)
@@ -240,11 +242,15 @@ func (s *Server) authorizeResourceWithStatus(r *http.Request, requiredScope, req
 		policySQL += " AND "
 	}
 	guard = fmt.Sprintf(guard, policySQL)
+	bootstrapID := ""
+	if s.store.client != nil {
+		bootstrapID = s.store.client.GetID()
+	}
 	return subject, clientID, func() (string, []any) {
 		now := s.store.now().UTC().UnixMilli()
 		args := []any{signature, clientID, now, subject, subject, now, requiredScope, requiredAudience, subject, now}
 		args = append(args, policyArgs...)
-		args = append(args, s.store.client.GetID(), managedGeneration)
+		args = append(args, bootstrapID, managedGeneration)
 		return guard, args
 	}, nil, nil
 }

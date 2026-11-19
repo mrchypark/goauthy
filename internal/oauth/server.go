@@ -727,14 +727,26 @@ func (s *Server) TokenHandler() http.Handler {
 		principal, err := s.applyCurrentPrincipalClaims(r.Context(), request)
 		if err != nil {
 			slog.Error("OAuth principal resolution failed", "error", err)
-			s.writeTokenError(r.Context(), sw, request, fosite.ErrServerError)
+			if isUnavailableErr(err) {
+				s.writeTokenError(r.Context(), sw, request, err)
+			} else {
+				s.writeTokenError(r.Context(), sw, request, fosite.ErrServerError)
+			}
 			return
 		}
 		custom := customClaimsSnapshot{}
 		if request.GetGrantTypes().ExactOne("authorization_code") || request.GetGrantTypes().ExactOne("refresh_token") || request.GetGrantTypes().ExactOne(DeviceGrantType) || request.GetGrantTypes().ExactOne("password") || (request.GetGrantTypes().ExactOne(TokenExchangeGrantType) && !machine) {
 			custom, err = s.currentCustomClaims(r.Context(), request.GetSession().GetSubject(), request.GetGrantedScopes())
 		}
-		if err != nil || setCustomAccessClaims(request, custom.access) != nil {
+		if err != nil {
+			if isUnavailableErr(err) {
+				s.writeTokenError(r.Context(), sw, request, err)
+			} else {
+				s.writeTokenError(r.Context(), sw, request, fosite.ErrServerError)
+			}
+			return
+		}
+		if setCustomAccessClaims(request, custom.access) != nil {
 			s.writeTokenError(r.Context(), sw, request, fosite.ErrServerError)
 			return
 		}
@@ -822,7 +834,11 @@ func (s *Server) TokenHandler() http.Handler {
 		}
 		issueContext, err := s.store.issuanceAccounts(r.Context(), request)
 		if err != nil {
-			s.writeTokenError(r.Context(), sw, request, fosite.ErrInvalidGrant)
+			if isUnavailableErr(err) {
+				s.writeTokenError(r.Context(), sw, request, err)
+			} else {
+				s.writeTokenError(r.Context(), sw, request, fosite.ErrInvalidGrant)
+			}
 			return
 		}
 		r = r.WithContext(issueContext)
@@ -872,7 +888,11 @@ func (s *Server) TokenHandler() http.Handler {
 			response.SetExtra(dpopCNFExtra, map[string]string{dpopJKTClaim: jkt})
 		}
 		if err := s.store.validateIssuanceAccounts(r.Context()); err != nil {
-			s.writeTokenError(r.Context(), sw, request, fosite.ErrInvalidGrant)
+			if isUnavailableErr(err) {
+				s.writeTokenError(r.Context(), sw, request, err)
+			} else {
+				s.writeTokenError(r.Context(), sw, request, fosite.ErrInvalidGrant)
+			}
 			return
 		}
 		if accounts, _ := r.Context().Value(accountExpiryContextKey{}).([]accountExpiry); len(accounts) != 0 {
