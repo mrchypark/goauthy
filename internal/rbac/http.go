@@ -63,6 +63,7 @@ type Handler struct {
 	saasProviderStore           *saas.ProviderStore
 	providerResourceAuthorizer  func(*http.Request, string) (string, func() (string, []any), error)
 	saasCredentials             *saas.CredentialStore
+	oauth2Refresh               oauth2RefreshFunc
 	connectionUseResource       string
 	connectionUseAuthorizer     func(http.ResponseWriter, *http.Request) (string, string, func() (string, []any), bool)
 	connectionHandoffAuthorizer func(*http.Request) (string, string, func() (string, []any), error)

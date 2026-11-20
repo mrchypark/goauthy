@@ -1,6 +1,8 @@
 package oauth
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/mrchypark/goauthy/internal/clients"
 	"github.com/mrchypark/goauthy/internal/device"
+	"github.com/mrchypark/goauthy/internal/oidc"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 	"github.com/ory/fosite"
@@ -162,6 +165,104 @@ func TestDeviceMFAApprovalIssuanceAndRefresh(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestLegacyDeviceMFAThroughConnectionUseAuthorization(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		mfa  bool
+		want bool
+	}{
+		{"verified", true, true},
+		{"unverified", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := oauthTestDB(t)
+			managed := clients.NewStore(db, nil)
+			server, err := NewServerWithOIDC(context.Background(), db, randomSecret(t), testClientID, testClientSecret, testRedirectURI, nil, OIDCConfig{
+				Issuer: oidcTestIssuer, LoadSigningKey: func(context.Context) (oidc.SigningKey, error) { return oidcTestKey(t), nil }, ManagedClients: managed,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			const clientID, connResource = "legacy-device-client", "https://connections.example.test/api"
+			server.allowedResources[connResource] = struct{}{}
+			metadata, err := json.Marshal(map[string]any{
+				"confidential": false, "redirect_uris": []string{}, "scopes": []string{"goauthy.connections.use", "offline_access"},
+				"default_scopes": []string{"goauthy.connections.use"}, "enabled_flows": []string{DeviceGrantType, "refresh_token"},
+				"audience": []string{connResource}, "default_aud": []string{connResource},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{
+				RequestID: "legacy-device-client-" + tc.name,
+				SQL:       `INSERT INTO managed_oauth_clients(id,generation,revision,enabled,deleted,metadata_json,force_mfa) VALUES(?,'generation-1',1,1,0,?,0)`,
+				Args:      []any{clientID, string(metadata)},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			seedDeviceUser(t, db, "legacy-device-user", nil)
+			h, err := device.NewHandler(device.NewStore(db), "https://id.example.test", server.AuthenticateDeviceClient, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			deviceRequest := httptest.NewRequest(http.MethodPost, "/oidc/device", strings.NewReader(url.Values{
+				"client_id": {clientID}, "scope": {"goauthy.connections.use offline_access"}, "resource": {connResource},
+			}.Encode()))
+			deviceRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			deviceResponse := httptest.NewRecorder()
+			h.ServeHTTP(deviceResponse, deviceRequest)
+			if deviceResponse.Code != http.StatusOK {
+				t.Fatalf("device authorization status=%d body=%s", deviceResponse.Code, deviceResponse.Body.String())
+			}
+			var authorization struct {
+				DeviceCode string `json:"device_code"`
+				UserCode   string `json:"user_code"`
+			}
+			if err := json.Unmarshal(deviceResponse.Body.Bytes(), &authorization); err != nil {
+				t.Fatal(err)
+			}
+			if err := device.NewStore(db).ApproveWithMFA(t.Context(), authorization.UserCode, "legacy-device-user", tc.mfa, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+			tokenRequest := httptest.NewRequest(http.MethodPost, "/oidc/token", strings.NewReader(url.Values{
+				"grant_type": {DeviceGrantType}, "device_code": {authorization.DeviceCode}, "client_id": {clientID},
+			}.Encode()))
+			tokenRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			tokenResponse := httptest.NewRecorder()
+			server.TokenHandler().ServeHTTP(tokenResponse, tokenRequest)
+			issued := decodeToken(t, tokenResponse)
+			signature := server.accessTokens.AccessTokenSignature(t.Context(), issued.AccessToken)
+			if _, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{
+				RequestID: "legacy-device-strip-mfa-" + tc.name,
+				SQL:       `UPDATE oauth_token_requests SET request_json=json_remove(request_json,'$.extra.goauthy_device_mfa_verified') WHERE signature=?`,
+				Args:      []any{signature},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			rows, err := db.Query(t.Context(), rhiza.QueryRequest{
+				SQL: `SELECT json_type(request_json,'$.extra.goauthy_device_mfa_verified') FROM oauth_token_requests WHERE signature=?`, Args: []any{signature}, Consistency: rhiza.ConsistencyLinearizable,
+			})
+			if err != nil || len(rows.Rows) != 1 || len(rows.Rows[0]) != 1 || rows.Rows[0][0] != nil {
+				t.Fatalf("legacy token retained new MFA extra: rows=%v err=%v", rows.Rows, err)
+			}
+			if _, err := storage.Execute(t.Context(), db, rhiza.ExecuteRequest{
+				RequestID: "legacy-device-force-mfa-" + tc.name,
+				SQL:       `UPDATE managed_oauth_clients SET force_mfa=1,revision=revision+1 WHERE id=?`, Args: []any{clientID},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			resourceRequest := httptest.NewRequest(http.MethodPost, "/auth/v1/connection-grants/g/credential", nil)
+			resourceRequest.Header.Set("Authorization", "Bearer "+issued.AccessToken)
+			w := httptest.NewRecorder()
+			_, _, _, ok := server.AuthorizeConnectionUseHTTP(w, resourceRequest, connResource)
+			if ok != tc.want || (tc.want && w.Code != http.StatusOK) || (!tc.want && w.Code != http.StatusUnauthorized) {
+				t.Fatalf("authorized=%t want=%t status=%d body=%s", ok, tc.want, w.Code, w.Body.String())
+			}
+		})
 	}
 }
 

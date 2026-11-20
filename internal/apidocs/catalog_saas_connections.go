@@ -57,6 +57,7 @@ func addSaaSConnectionOperations(doc *openapi3.T) error {
 		"version": openapi3.NewInt64Schema().WithMin(1),
 	}).WithRequired([]string{"version"})
 	add(http.MethodPost, statusPath+"/refresh", "refreshAccountConnectionOAuth2", postSecurity, refreshBody, connectionStatus, statusParams...)
+	doc.Paths.Value(statusPath+"/refresh").Post.AddResponse(http.StatusBadGateway, openapi3.NewResponse().WithDescription(http.StatusText(http.StatusBadGateway)))
 	doc.Paths.Value(statusPath + "/refresh").Post.Description = "Refreshes the registered HTTPS OAuth2 provider connection using the caller-supplied current version as a CAS fence. Requires an HTTPS issuer, owner browser session and CSRF; Bearer/API-key authentication, query parameters and If-Match are rejected. The provider and stored account identity must match, and refreshed scopes must remain a subset of the stored scopes. This is one durable exchange with no automatic retry or background refresh; an uncertain outcome requires reconnect. The endpoint returns metadata only, never tokens or credential material, and is not an SDK credential-receipt API. Unknown access-token expiry is preserved as unknown and is not eligible for credential delivery."
 	revokeBody := openapi3.NewObjectSchema().WithoutAdditionalProperties().WithProperties(map[string]*openapi3.Schema{
 		"version": openapi3.NewInt64Schema().WithMin(1),

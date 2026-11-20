@@ -17,25 +17,32 @@ func TestUpdateDefinitionBlocksRemovingReferencedProviderUnlessRevoked(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.db.Execute(ctx, rhiza.ExecuteRequest{
-		RequestID: "seed-cred-ref",
-		SQL:       `INSERT INTO saas_connection_credentials(connection_id,owner_subject,collection_id,provider_id,generation,token_version,state,credential) VALUES('c1','alice','coll-ref','prov-1','g1',1,'ready',x'01')`,
-	}); err != nil {
-		t.Fatal(err)
+	for _, state := range []string{"ready", "refreshing", "uncertain"} {
+		claim := any(nil)
+		if state == "refreshing" {
+			claim = "claim-" + state
+		}
+		if _, err := s.db.Execute(ctx, rhiza.ExecuteRequest{
+			RequestID: "seed-cred-ref-" + state,
+			SQL:       `INSERT INTO saas_connection_credentials(connection_id,owner_subject,collection_id,provider_id,generation,token_version,state,credential,refresh_claim) VALUES(?,'alice','coll-ref','prov-1','g1',1,?,x'01',?)`,
+			Args:      []any{"c-" + state, state, claim},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.UpdateDefinition(ctx, def.ID, def.Revision, DefinitionInput{
+			Name: "Ref", AuthMethod: "oauth2", Enabled: true, ProviderIDs: []string{"prov-2"},
+		}, func() (string, []any) { return "1", nil }); !errors.Is(err, ErrConflict) {
+			t.Fatalf("remove %s provider reference err=%v; want ErrConflict", state, err)
+		}
+		if _, err := s.db.Execute(ctx, rhiza.ExecuteRequest{
+			RequestID: "revoke-cred-ref-" + state,
+			SQL:       `UPDATE saas_connection_credentials SET state='revoked',refresh_claim=NULL WHERE collection_id='coll-ref' AND connection_id=?`,
+			Args:      []any{"c-" + state},
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	// Removing prov-1 while state='ready' must fail with ErrConflict.
-	if _, err := s.UpdateDefinition(ctx, def.ID, def.Revision, DefinitionInput{
-		Name: "Ref", AuthMethod: "oauth2", Enabled: true, ProviderIDs: []string{"prov-2"},
-	}, func() (string, []any) { return "1", nil }); !errors.Is(err, ErrConflict) {
-		t.Fatalf("remove active provider err=%v; want ErrConflict", err)
-	}
-	// Transition credential to revoked; removing prov-1 must now succeed.
-	if _, err := s.db.Execute(ctx, rhiza.ExecuteRequest{
-		RequestID: "revoke-cred-ref",
-		SQL:       `UPDATE saas_connection_credentials SET state='revoked' WHERE connection_id='c1'`,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	// Removing prov-1 after all staged states are revoked must now succeed.
 	updated, err := s.UpdateDefinition(ctx, def.ID, def.Revision, DefinitionInput{
 		Name: "Ref", AuthMethod: "oauth2", Enabled: true, ProviderIDs: []string{"prov-2"},
 	}, func() (string, []any) { return "1", nil })

@@ -97,15 +97,20 @@ func TestSaaSConnectionCatalog(t *testing.T) {
 			t.Fatalf("refresh status exposes secret field %s", secret)
 		}
 	}
-	for _, statusCode := range []int{400, 401, 404, 409, 503} {
+	for _, statusCode := range []int{400, 401, 404, 409, 502, 503} {
 		if refresh.Responses.Status(statusCode) == nil {
 			t.Fatalf("refresh missing documented error %d", statusCode)
+		}
+	}
+	callback := doc.Paths.Value("/auth/v1/saas/callback/{provider_id}").Get
+	for name, op := range map[string]*openapi3.Operation{"start": start, "status": status, "revoke": revoke, "reconnect": reconnect, "completeAccountConnectionOAuth2": callback} {
+		if op.Responses.Status(http.StatusBadGateway) != nil {
+			t.Fatalf("%s unexpectedly documents refresh-only 502", name)
 		}
 	}
 	if !strings.Contains(refresh.Description, "HTTPS") || !strings.Contains(refresh.Description, "no automatic retry") || !strings.Contains(refresh.Description, "uncertain outcome") || !strings.Contains(refresh.Description, "subset") {
 		t.Fatal("refresh description missing safety/fence contract")
 	}
-	callback := doc.Paths.Value("/auth/v1/saas/callback/{provider_id}").Get
 	if callback == nil || len(*callback.Security) != 1 || (*callback.Security)[0]["browserSession"] == nil || (*callback.Security)[0]["bearerToken"] != nil || (*callback.Security)[0]["apiKey"] != nil {
 		t.Fatalf("callback security=%v", callback.Security)
 	}

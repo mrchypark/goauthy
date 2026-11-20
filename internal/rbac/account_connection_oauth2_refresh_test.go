@@ -1,10 +1,14 @@
 package rbac
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/mrchypark/goauthy/internal/saas"
 )
 
 func oauth2RefreshHTTPFixture(t *testing.T) (*Handler, *http.Cookie, string) {
@@ -118,5 +122,36 @@ func TestAccountConnectionOAuth2RefreshMissingConfigAndResource(t *testing.T) {
 	h.AccountConnectionOAuth2Refresh(w, validRequest())
 	if w.Code != http.StatusNotFound || w.Header().Get("Cache-Control") != "no-store" || strings.Contains(strings.ToLower(w.Body.String()), "secret") {
 		t.Fatalf("missing resource status=%d cache=%q body=%q", w.Code, w.Header().Get("Cache-Control"), w.Body.String())
+	}
+}
+
+func TestAccountConnectionOAuth2RefreshUncertainAndUnavailable(t *testing.T) {
+	t.Parallel()
+	h, cookie, csrf := oauth2RefreshHTTPFixture(t)
+	path := "/auth/v1/account/connections/c/g/oauth2/refresh"
+	for _, tc := range []struct {
+		name string
+		err  error
+		want int
+	}{
+		{"refresh uncertain", saas.ErrRefreshUncertain, http.StatusBadGateway},
+		{"availability", errors.New("storage unavailable"), http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h.oauth2Refresh = func(context.Context, *saas.ProviderStore, string, string, string, int64, func() (string, []any)) (saas.OAuth2Status, error) {
+				return saas.OAuth2Status{}, tc.err
+			}
+			r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"version":1}`))
+			r.SetPathValue("collection_id", "c")
+			r.SetPathValue("connection_id", "g")
+			r.AddCookie(cookie)
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("X-CSRF-Token", csrf)
+			w := httptest.NewRecorder()
+			h.AccountConnectionOAuth2Refresh(w, r)
+			if w.Code != tc.want || w.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("status=%d want=%d cache=%q body=%q", w.Code, tc.want, w.Header().Get("Cache-Control"), w.Body.String())
+			}
+		})
 	}
 }
