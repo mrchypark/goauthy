@@ -118,6 +118,8 @@ func (h *Handler) oauth2ConnectionError(w http.ResponseWriter, err error) {
 		h.notFound(w)
 	case errors.Is(err, saas.ErrCredentialConflict), errors.Is(err, saas.ErrAuthorizationConflict):
 		h.error(w, http.StatusConflict, "Conflict")
+	case errors.Is(err, saas.ErrRefreshUncertain):
+		h.error(w, http.StatusBadGateway, "Bad Gateway")
 	case errors.Is(err, saas.ErrCredentialUnauthorized), errors.Is(err, saas.ErrProviderUnauthorized):
 		h.genericUnauthorized(w)
 	case errors.Is(err, saas.ErrProviderInvalid), errors.Is(err, saas.ErrOAuth2Exchange), errors.Is(err, saas.ErrOAuth2Identity):

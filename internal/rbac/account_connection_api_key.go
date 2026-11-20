@@ -18,6 +18,7 @@ func (h *Handler) BindSaaSCredentials(store *saas.CredentialStore) error {
 		return errors.New("SaaS credential store required")
 	}
 	h.saasCredentials = store
+	h.oauth2Refresh = store.RefreshOAuth2
 	return nil
 }
 

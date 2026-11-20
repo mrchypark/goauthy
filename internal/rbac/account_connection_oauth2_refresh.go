@@ -1,10 +1,15 @@
 package rbac
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/url"
+
+	"github.com/mrchypark/goauthy/internal/saas"
 )
+
+type oauth2RefreshFunc func(context.Context, *saas.ProviderStore, string, string, string, int64, func() (string, []any)) (saas.OAuth2Status, error)
 
 // AccountConnectionOAuth2Refresh refreshes an owner's stored OAuth2
 // connection and returns metadata only; credentials are never serialized.
@@ -24,7 +29,7 @@ func (h *Handler) AccountConnectionOAuth2Refresh(w http.ResponseWriter, r *http.
 		h.badRequest(w)
 		return
 	}
-	if h.saasProviderStore == nil || h.saasCredentials == nil {
+	if h.saasProviderStore == nil || h.saasCredentials == nil || h.oauth2Refresh == nil {
 		h.unavailable(w)
 		return
 	}
@@ -37,7 +42,7 @@ func (h *Handler) AccountConnectionOAuth2Refresh(w http.ResponseWriter, r *http.
 		h.badRequest(w)
 		return
 	}
-	status, err := h.saasCredentials.RefreshOAuth2(r.Context(), h.saasProviderStore, owner, r.PathValue("collection_id"), r.PathValue("connection_id"), version, authority)
+	status, err := h.oauth2Refresh(r.Context(), h.saasProviderStore, owner, r.PathValue("collection_id"), r.PathValue("connection_id"), version, authority)
 	if err != nil {
 		h.oauth2ConnectionError(w, err)
 		return
