@@ -75,8 +75,12 @@ func TestAdminUserUpdateAcrossPods(t *testing.T) {
 		t.Fatal("administrator first-password assignment failed")
 	}
 	delete(body, "password")
+	clearSMTPMailbox(t, client, sink)
 	targetClient := newBrowserClient(t)
 	_, _ = loginForCode(t, targetClient, primary, secondary, defaultRedirectURI, pkceChallenge(pkceVerifier(t)), oldEmail, updateUserPassword, "update-before-email")
+	// Drain the async login-location warning from loginForCode before clearing
+	// the sink so it cannot arrive concurrently with the email-change PUT.
+	_ = waitForLoginLocationMail(t, client, sink, oldEmail)
 	clearSMTPMailbox(t, client, sink)
 	body["email"] = updateUserEmail
 	updated = put(primary)
