@@ -59,7 +59,7 @@ test "$(yq -r "$standalone_statefulset | (.spec.volumeClaimTemplates | length)" 
 test "$(yq -r "$standalone_statefulset | .spec.template.spec.volumes[] | select(.name == \"data\") | has(\"emptyDir\")" "$standalone_render")" = true
 test "$(yq -r "$standalone_statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_PROFILE\") | .value" "$standalone_render")" = standalone
 test "$(yq -r "$standalone_statefulset | .spec.template.spec.containers[0].env[] | select(.name == \"GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE\") | .value" "$standalone_render")" = true
-test "$(yq -r 'select(.kind == "PodDisruptionBudget" and .metadata.name == "ternal-goauthy") | .spec.minAvailable' "$standalone_render")" = 1
+test "$(yq -r 'select(.kind == "PodDisruptionBudget" and .metadata.name == "ternal-goauthy") | .spec.minAvailable' "$standalone_render")" = 0
 for key in s3-endpoint s3-bucket s3-prefix s3-region; do
 	test "$(yq -r "$standalone_statefulset | .spec.template.spec.containers[0].env[] | select(.valueFrom.configMapKeyRef.key == \"$key\") | .valueFrom.configMapKeyRef.name" "$standalone_render")" = ternal-goauthy-config
 done

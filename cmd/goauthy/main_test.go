@@ -2912,3 +2912,31 @@ func TestClientCredentialsMapSubFromEnv(t *testing.T) {
 		}
 	}
 }
+
+func TestRhizaV0273EarlyCloseAndReopen(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ctx := context.Background()
+	db, err := rhiza.Open(ctx, rhiza.Config{NodeID: "early-close-1", DataDir: dir})
+	if err != nil {
+		t.Fatalf("first open: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("early close before ready: %v", err)
+	}
+	reopened, err := rhiza.Open(ctx, rhiza.Config{NodeID: "early-close-1", DataDir: dir})
+	if err != nil {
+		t.Fatalf("reopen after early close: %v", err)
+	}
+	if err := waitForRhizaReady(ctx, 10*time.Second, reopened.Ready); err != nil {
+		_ = reopened.Close()
+		t.Fatalf("reopened ready: %v", err)
+	}
+	if err := storage.Migrate(ctx, reopened); err != nil {
+		_ = reopened.Close()
+		t.Fatalf("reopened migrate: %v", err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatalf("reopened close: %v", err)
+	}
+}

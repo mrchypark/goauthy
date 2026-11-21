@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -28,11 +27,6 @@ import (
 )
 
 const responseBodyLimit = 64 << 10
-
-var (
-	errEndpointUnsafe     = errors.New("endpoint address is not permitted")
-	errEndpointResolution = errors.New("endpoint resolution failed")
-)
 
 // Worker delivers one durable logout notification at a time. Its values must
 // not be changed after Run begins.
@@ -91,7 +85,7 @@ func ValidateEndpoint(raw string, allowPrivate, allowHTTP bool) error {
 	if u.Hostname() == "" || invalidPort(u.Port()) {
 		return errors.New("invalid backchannel endpoint")
 	}
-	if ip := net.ParseIP(u.Hostname()); ip != nil && !allowedIP(ip, allowPrivate) {
+	if addr, err := netip.ParseAddr(u.Hostname()); err == nil && !netsec.AllowedAddr(addr, allowPrivate) {
 		return errors.New("backchannel endpoint address is not permitted")
 	}
 	return nil
@@ -383,20 +377,6 @@ func (w Worker) retryDelay(d delivery) time.Duration {
 }
 
 func (w Worker) post(ctx context.Context, d delivery, token string) (status int, retry, permanent bool, err error) {
-	u, _ := url.Parse(d.logoutURI)
-	ip, err := resolveEndpoint(ctx, u, d.allowPrivate && w.AllowPrivate)
-	if err != nil {
-		return 0, false, errors.Is(err, errEndpointUnsafe), err
-	}
-	port := u.Port()
-	if port == "" {
-		if u.Scheme == "https" {
-			port = "443"
-		} else {
-			port = "80"
-		}
-	}
-	dialer := &net.Dialer{}
 	roots := w.RootCAs
 	if w.RootCAReloader != nil {
 		if reloadErr := w.RootCAReloader.Reload(); reloadErr != nil && w.OnError != nil {
@@ -404,15 +384,14 @@ func (w Worker) post(ctx context.Context, d delivery, token string) (status int,
 		}
 		roots = w.RootCAReloader.Pool()
 	}
-	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: u.Hostname()}
+	var tlsConfig *tls.Config
 	if roots != nil {
-		tlsConfig.RootCAs = roots.Clone()
+		tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots.Clone()}
 	}
-	transport := &http.Transport{Proxy: nil, TLSClientConfig: tlsConfig, DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return dialer.DialContext(ctx, "tcp", net.JoinHostPort(ip.String(), port))
-	}}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := netsec.NewSafeHTTPClient(w.RequestTimeout, d.allowPrivate && w.AllowPrivate, tlsConfig)
+	if transport, ok := client.Transport.(*http.Transport); ok {
+		defer transport.CloseIdleConnections()
+	}
 	requestCtx, cancel := context.WithTimeout(ctx, w.RequestTimeout)
 	defer cancel()
 	form := url.Values{"logout_token": {token}}
@@ -423,7 +402,7 @@ func (w Worker) post(ctx context.Context, d delivery, token string) (status int,
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, false, false, err
+		return 0, false, errors.Is(err, netsec.ErrUnsafeHost), err
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, responseBodyLimit+1))
@@ -434,34 +413,6 @@ func (w Worker) post(ctx context.Context, d delivery, token string) (status int,
 		return resp.StatusCode, true, false, nil
 	}
 	return resp.StatusCode, false, true, nil
-}
-
-func resolveEndpoint(ctx context.Context, u *url.URL, allowPrivate bool) (net.IP, error) {
-	if ip := net.ParseIP(u.Hostname()); ip != nil {
-		if !allowedIP(ip, allowPrivate) {
-			return nil, errEndpointUnsafe
-		}
-		return ip, nil
-	}
-	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", u.Hostname())
-	if err != nil || len(ips) == 0 {
-		return nil, errEndpointResolution
-	}
-	for _, ip := range ips {
-		resolved := net.IP(ip.AsSlice())
-		if !allowedIP(resolved, allowPrivate) {
-			return nil, errEndpointUnsafe
-		}
-	}
-	return net.IP(ips[0].AsSlice()), nil
-}
-
-func allowedIP(ip net.IP, allowPrivate bool) bool {
-	addr, ok := netip.AddrFromSlice(ip)
-	if !ok {
-		return false
-	}
-	return netsec.AllowedAddr(addr, allowPrivate)
 }
 
 func randomToken() (string, error) {

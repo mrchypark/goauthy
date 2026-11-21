@@ -123,11 +123,15 @@ func TestCreationEventsStream(t *testing.T) {
 			response.Body.Close()
 			t.Fatalf("live stream decode=%v", err)
 		}
-		// The first data frame after the barrier must be the newly-created event;
-		// any earlier frame proves latest=0 leaked historical data.
-		if result.Type != eventlog.NewUserRegistered || result.Level != eventlog.Info || result.Text == nil || *result.Text != "stream-created@goauthy.e2e" || result.Timestamp <= 0 || result.Data != nil {
+		// Ignore concurrent background lifecycle events (e.g. async login-location
+		// recording) while still failing if any historical user-registration event
+		// leaks into the latest=0 stream.
+		if result.Type != eventlog.NewUserRegistered {
+			continue
+		}
+		if result.Level != eventlog.Info || result.Text == nil || *result.Text != "stream-created@goauthy.e2e" || result.Timestamp <= 0 || result.Data != nil {
 			response.Body.Close()
-			t.Fatalf("live stream first event=%+v", result)
+			t.Fatalf("live stream unexpected user-registration event=%+v", result)
 		}
 		response.Body.Close()
 		return

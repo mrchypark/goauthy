@@ -126,6 +126,8 @@ func (h *Handler) writeUseGrantError(w http.ResponseWriter, err error) {
 		h.error(w, http.StatusConflict, "Conflict")
 	case errors.Is(err, saas.ErrCredentialUnauthorized):
 		h.genericUnauthorized(w)
+	case errors.Is(err, saas.ErrCredentialCorrupted):
+		h.error(w, http.StatusInternalServerError, "Internal Server Error")
 	default:
 		h.unavailable(w)
 	}

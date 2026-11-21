@@ -5,26 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"time"
-)
 
-const (
-	defaultRhizaStartupTimeout = 10 * time.Minute
-	maxRhizaStartupTimeout     = time.Hour
+	"github.com/mrchypark/goauthy/internal/storage"
 )
 
 func rhizaStartupTimeoutFromEnv(getenv func(string) string) (time.Duration, error) {
-	if getenv == nil {
-		return 0, errors.New("rhiza startup timeout requires environment reader")
-	}
-	raw := getenv("GOAUTHY_RHIZA_STARTUP_TIMEOUT")
-	if raw == "" {
-		return defaultRhizaStartupTimeout, nil
-	}
-	timeout, err := time.ParseDuration(raw)
-	if err != nil || timeout < time.Second || timeout > maxRhizaStartupTimeout {
-		return 0, errors.New("GOAUTHY_RHIZA_STARTUP_TIMEOUT must be between 1s and 1h")
-	}
-	return timeout, nil
+	return storage.RhizaStartupTimeoutFromEnv(getenv)
 }
 
 // waitForRhizaReady bounds only storage startup. Readiness itself remains the

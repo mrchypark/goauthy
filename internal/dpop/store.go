@@ -54,7 +54,7 @@ func (s *Store) IssueNonce(ctx context.Context, clientID, jkt string, now time.T
 		}
 		recovered, collision, reconcileErr := s.reconcileNonceIssue(ctx, digest, clientID, jkt, expires)
 		if reconcileErr != nil {
-			return "", err
+			return "", errors.Join(err, reconcileErr)
 		}
 		if recovered {
 			return nonce, nil
@@ -113,7 +113,7 @@ func (s *Store) MarkReplay(ctx context.Context, jkt, jti string, now, expiresAt 
 	if err != nil {
 		applied, exists, reconcileErr := s.reconcileReplay(ctx, digest, expiresAt, attempt)
 		if reconcileErr != nil {
-			return err
+			return errors.Join(err, reconcileErr)
 		}
 		if applied {
 			return nil

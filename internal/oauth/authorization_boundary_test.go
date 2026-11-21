@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mrchypark/goauthy/internal/dcr"
 	"github.com/mrchypark/rhiza"
 )
 
@@ -157,4 +158,52 @@ func withValue(values url.Values, key, value string) url.Values {
 
 func sameStrings(got, want []string) bool {
 	return len(got) == len(want) && strings.Join(got, "\x00") == strings.Join(want, "\x00")
+}
+
+func TestValidateAuthorizationRequestMarksUntrustedClients(t *testing.T) {
+	t.Parallel()
+	db := oauthTestDB(t)
+	server := oauthTestServer(t, db, randomSecret(t))
+
+	bootstrapValues := authorizationValues(strings.Repeat("a", 43), "")
+	bootstrapValues.Del("resource")
+	bootstrapReq := httptest.NewRequest(http.MethodGet, "/oidc/authorize?"+bootstrapValues.Encode(), nil)
+	bootstrapView, err := server.ValidateAuthorizationRequest(bootstrapReq)
+	if err != nil {
+		t.Fatalf("bootstrap ValidateAuthorizationRequest: %v", err)
+	}
+	if bootstrapView.UntrustedClient {
+		t.Fatal("bootstrap client must not be marked UntrustedClient")
+	}
+
+	dynamic, err := server.store.dynamicClients.Create(context.Background(), dcr.CreateRequest{
+		ClientID:                "untrusted-dcr-client",
+		GrantTypes:              []string{"authorization_code"},
+		ResponseTypes:           []string{"code"},
+		RedirectURIs:            []string{"https://untrusted.example.test/callback"},
+		Scopes:                  []string{"openid", "goauthy.read"},
+		TokenEndpointAuthMethod: dcr.TokenEndpointAuthNone,
+		Name:                    "Untrusted DCR",
+	})
+	if err != nil {
+		t.Fatalf("dcr Create: %v", err)
+	}
+	dcrValues := url.Values{
+		"client_id":             {dynamic.ClientID},
+		"redirect_uri":          {"https://untrusted.example.test/callback"},
+		"response_type":         {"code"},
+		"scope":                 {"openid goauthy.read"},
+		"state":                 {"dcr-state-123"},
+		"nonce":                 {"dcr-nonce-123"},
+		"code_challenge":        {pkceChallenge(strings.Repeat("d", 43))},
+		"code_challenge_method": {"S256"},
+	}
+	dcrReq := httptest.NewRequest(http.MethodGet, "/oidc/authorize?"+dcrValues.Encode(), nil)
+	dcrView, err := server.ValidateAuthorizationRequest(dcrReq)
+	if err != nil {
+		t.Fatalf("dcr ValidateAuthorizationRequest: %v", err)
+	}
+	if !dcrView.UntrustedClient {
+		t.Fatal("DCR client must be marked UntrustedClient")
+	}
 }

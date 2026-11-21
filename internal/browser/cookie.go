@@ -61,6 +61,25 @@ func DeleteSessionCookie(issuer string) (*http.Cookie, error) {
 	if err != nil {
 		return nil, err
 	}
+	return deleteNamedCookie(name, secure), nil
+}
+
+// DeletePasskeyCookie produces a cookie that removes the issuer's passkey-hint
+// cookie so a subsequent user on a shared browser is not pinned to the prior
+// user's subject.
+func DeletePasskeyCookie(issuer string) (*http.Cookie, error) {
+	_, secure, err := cookieShape(issuer)
+	if err != nil {
+		return nil, err
+	}
+	name := "goauthy-passkey"
+	if secure {
+		name = "__Host-goauthy-passkey"
+	}
+	return deleteNamedCookie(name, secure), nil
+}
+
+func deleteNamedCookie(name string, secure bool) *http.Cookie {
 	return &http.Cookie{
 		Name:     name,
 		Value:    "",
@@ -70,7 +89,7 @@ func DeleteSessionCookie(issuer string) (*http.Cookie, error) {
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
-	}, nil
+	}
 }
 
 // FedCMSessionCookie builds the short-lived cross-site session cookie used by

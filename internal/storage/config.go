@@ -374,3 +374,25 @@ func optionalBool(raw string) (bool, error) {
 	}
 	return value, nil
 }
+
+const (
+	defaultRhizaStartupTimeout = 10 * time.Minute
+	maxRhizaStartupTimeout     = time.Hour
+)
+
+// RhizaStartupTimeoutFromEnv parses GOAUTHY_RHIZA_STARTUP_TIMEOUT (1s..1h,
+// defaulting to 10m) for both the main server and goauthy-rhiza-init.
+func RhizaStartupTimeoutFromEnv(getenv func(string) string) (time.Duration, error) {
+	if getenv == nil {
+		return 0, fmt.Errorf("rhiza startup timeout requires environment reader")
+	}
+	raw := getenv("GOAUTHY_RHIZA_STARTUP_TIMEOUT")
+	if raw == "" {
+		return defaultRhizaStartupTimeout, nil
+	}
+	timeout, err := time.ParseDuration(raw)
+	if err != nil || timeout < time.Second || timeout > maxRhizaStartupTimeout {
+		return 0, fmt.Errorf("GOAUTHY_RHIZA_STARTUP_TIMEOUT must be between 1s and 1h")
+	}
+	return timeout, nil
+}

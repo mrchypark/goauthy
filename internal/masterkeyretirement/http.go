@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	jsonv2 "github.com/go-json-experiment/json"
 	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
@@ -273,102 +274,16 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, value any) bool {
 		return false
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, bodyLimit))
-	allowed := map[string]struct{}{}
-	switch value.(type) {
-	case *prepareRequest:
-		allowed = map[string]struct{}{"epoch": {}, "old_key_id": {}, "replacement_key_id": {}}
-	case *epochRequest:
-		allowed = map[string]struct{}{"epoch": {}}
-	}
 	trimmed := bytes.TrimSpace(body)
-	if err != nil || len(trimmed) == 0 || trimmed[0] != '{' || rejectDuplicateFields(body, allowed) != nil {
+	if err != nil || len(trimmed) == 0 || trimmed[0] != '{' {
 		writeStatus(w, http.StatusBadRequest)
 		return false
 	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(value) != nil {
-		writeStatus(w, http.StatusBadRequest)
-		return false
-	}
-	var extra any
-	if decoder.Decode(&extra) != io.EOF {
+	if err := jsonv2.Unmarshal(trimmed, value, jsonv2.RejectUnknownMembers(true)); err != nil {
 		writeStatus(w, http.StatusBadRequest)
 		return false
 	}
 	return true
-}
-
-func rejectDuplicateFields(body []byte, allowed map[string]struct{}) error {
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	if err := walkJSON(decoder, 0, allowed); err != nil {
-		return err
-	}
-	_, err := decoder.Token()
-	if err != io.EOF {
-		return errors.New("trailing json")
-	}
-	return nil
-}
-
-func walkJSON(decoder *json.Decoder, depth int, allowed map[string]struct{}) error {
-	token, err := decoder.Token()
-	if err != nil {
-		return err
-	}
-	delim, ok := token.(json.Delim)
-	if !ok {
-		return nil
-	}
-	switch delim {
-	case '{':
-		seen := map[string]struct{}{}
-		seenFolded := map[string]struct{}{}
-		for decoder.More() {
-			key, err := decoder.Token()
-			if err != nil {
-				return err
-			}
-			name, ok := key.(string)
-			if !ok {
-				return errors.New("invalid object key")
-			}
-			if _, exists := seen[name]; exists {
-				return errors.New("duplicate field")
-			}
-			if depth == 0 {
-				if _, valid := allowed[name]; !valid {
-					return errors.New("unknown or non-canonical field")
-				}
-				folded := strings.ToLower(name)
-				if _, collision := seenFolded[folded]; collision {
-					return errors.New("case-insensitive field collision")
-				}
-				seenFolded[folded] = struct{}{}
-			}
-			seen[name] = struct{}{}
-			if err := walkJSON(decoder, depth+1, allowed); err != nil {
-				return err
-			}
-		}
-		end, err := decoder.Token()
-		if err != nil || end != json.Delim('}') {
-			return errors.New("invalid object")
-		}
-	case '[':
-		for decoder.More() {
-			if err := walkJSON(decoder, depth+1, allowed); err != nil {
-				return err
-			}
-		}
-		end, err := decoder.Token()
-		if err != nil || end != json.Delim(']') {
-			return errors.New("invalid array")
-		}
-	default:
-		return errors.New("invalid JSON root")
-	}
-	return nil
 }
 
 type barrierJSON struct {

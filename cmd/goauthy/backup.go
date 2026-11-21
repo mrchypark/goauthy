@@ -261,20 +261,26 @@ func (r *scheduledBackupRuntime) Run(ctx context.Context, db *rhiza.DB) error {
 		if err := r.ensureReady(jobCtx); err != nil {
 			return err
 		}
+		r.mu.Lock()
+		source, destination := r.source, r.destination
+		r.mu.Unlock()
+		if source == nil || destination == nil {
+			return errors.New("backup storage unavailable")
+		}
 		stage = "capacity"
 		// Publication precedes retention, so reserve the slot the next completion
 		// needs before uploading anything; an oversized catalog is already
 		// unlistable and blocks both pruning and startup.
-		if _, err := backup.TrimCatalog(jobCtx, r.destination, c.catalog, c.trustKeys, time.Now(), c.keepDays, backup.RetentionTarget(c.maxEntries, 1), true, c.retentionPolicy); err != nil {
+		if _, err := backup.TrimCatalog(jobCtx, destination, c.catalog, c.trustKeys, time.Now(), c.keepDays, backup.RetentionTarget(c.maxEntries, 1), true, c.retentionPolicy); err != nil {
 			return err
 		}
 		stage = "create"
-		_, err := backup.Create(jobCtx, r.source, r.destination, path.Join(c.source.ObjStorePrefix, c.source.ClusterID), c.source.ClusterID, c.catalog, c.recipients, c.signer, c.work, backup.Limits{MaxFiles: 65536, MaxFileBytes: 1 << 30, MaxTotalBytes: 8 << 30})
+		_, err := backup.Create(jobCtx, source, destination, path.Join(c.source.ObjStorePrefix, c.source.ClusterID), c.source.ClusterID, c.catalog, c.recipients, c.signer, c.work, backup.Limits{MaxFiles: 65536, MaxFileBytes: 1 << 30, MaxTotalBytes: 8 << 30})
 		if err != nil {
 			return err
 		}
 		stage = "retention"
-		_, err = backup.TrimCatalog(jobCtx, r.destination, c.catalog, c.trustKeys, time.Now(), c.keepDays, c.maxEntries, true, c.retentionPolicy)
+		_, err = backup.TrimCatalog(jobCtx, destination, c.catalog, c.trustKeys, time.Now(), c.keepDays, c.maxEntries, true, c.retentionPolicy)
 		if err == nil {
 			stage = "completion"
 		}

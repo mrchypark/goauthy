@@ -20,7 +20,7 @@ spec:
     spec:
       serviceAccountName: goauthy
       automountServiceAccountToken: false
-      terminationGracePeriodSeconds: 60
+      terminationGracePeriodSeconds: 75
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -210,7 +210,7 @@ spec:
               path: /livez
               port: http
             periodSeconds: 10
-            failureThreshold: 60
+            failureThreshold: 72
           livenessProbe:
             httpGet:
               path: /livez

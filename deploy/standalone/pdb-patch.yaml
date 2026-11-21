@@ -4,4 +4,4 @@ metadata:
   name: goauthy
   namespace: goauthy
 spec:
-  minAvailable: 1
+  minAvailable: 0

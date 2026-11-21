@@ -161,7 +161,7 @@ fi
 ha3_pdb='select(.kind == "PodDisruptionBudget" and .metadata.name == "goauthy-qual-0917")'
 test "$(yq -r "$ha3_pdb | .spec.minAvailable" "$render")" = 2
 s1_pdb='select(.kind == "PodDisruptionBudget" and .metadata.name == "goauthy-qual-s1-0917")'
-test "$(yq -r "$s1_pdb | .spec.minAvailable" "$render")" = 1
+test "$(yq -r "$s1_pdb | .spec.minAvailable" "$render")" = 0
 
 # --- NetworkPolicy checks ---
 if ! yq -e 'select(.kind == "NetworkPolicy" and .metadata.name == "goauthy-qual-ha3-ingress-peer")' "$render" >/dev/null 2>&1; then

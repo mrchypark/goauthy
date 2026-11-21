@@ -58,10 +58,10 @@ Consumer endpoints under `/auth/v1/connection-grants/{grant_id}/*` accept both l
 [Owner Browser] ──(Session + CSRF)──────────────────────────┐
 [Read Client]   ──(Bearer: goauthy.connections.read)────────┼──▶ [internal/rbac HTTP Endpoints]
                                                             │       │                    │
-[Execution Consumer] ──(Bearer / Planned: DPoP: ...use)─────┘       │ (Injected AuthZ)   ▼
+[Execution Consumer] ──(Bearer / DPoP: ...use)─────────────┘       │ (Injected AuthZ)   ▼
         │                                                           │         [internal/saas + internal/authcollection]
         │                                                           ▼             │                  │
-        └──(Planned: RFC 8693 + DPoP POST /oidc/token)──▶ [internal/oauth/dpop]   │ (Rhiza SQL)      │ (HTTPS, internal/netsec)
+        └──(RFC 8693 + DPoP POST /oidc/token)─────▶ [internal/oauth/dpop]   │ (Rhiza SQL)      │ (HTTPS, internal/netsec)
                                                                     │             ▼                  ▼
                                                                     └────▶ [*rhiza.DB]    [Outbound Proxy / Refresh] ──▶ [External SaaS]
 ```
@@ -73,7 +73,7 @@ Consumer endpoints under `/auth/v1/connection-grants/{grant_id}/*` accept both l
   - **Owner**: Browser-authenticated user owning the connection.
   - **Handoff Requester**: Initiates one-use consent handoffs (`POST /auth/v1/connection-handoffs`) with `goauthy.connections.write` ([`connection-use-handoffs.md`](connection-use-handoffs.md#request-and-approval)).
   - **Read Client**: Reads grant status via `GET /auth/v1/connections/{collection_id}/{connection_id}/grants/{grant_id}` (`goauthy.connections.read`) via `AuthorizeUserResource` (DCR clients are admitted only if `GOAUTHY_DCR_ALLOWED_SCOPES` explicitly includes `goauthy.connections.read`, omitted by default).
-  - **Execution Consumer**: Must be a bootstrap or managed client in `connection_client_policies` holding a live human-delegated token (`Authorization Code + PKCE`, `Refresh Token`, `Device Authorization Grant`, or `Password`; `client_credentials` and `token-exchange` currently rejected) with `scope=goauthy.connections.use`, `aud=GOAUTHY_CONNECTIONS_RESOURCE`, active user/client/**client group policy** (`RestrictGroupPrefix` restricting allowed user group prefixes), and—for interactive grants carrying `goauthy_oidc_session_id`—a live browser session (`Device` and `Password` grants lack a browser session and omit this check). `proxy` supports public or confidential clients; `credential_delivery` requires confidential clients.
+  - **Execution Consumer**: Must be a bootstrap or managed client in `connection_client_policies` holding a live human-delegated token (`Authorization Code + PKCE`, `Refresh Token`, `Device Authorization Grant`, `Password`, or `RFC 8693 Token Exchange` with DPoP; `client_credentials` rejected) with `scope=goauthy.connections.use`, `aud=GOAUTHY_CONNECTIONS_RESOURCE`, active user/client/**client group policy** (`RestrictGroupPrefix` restricting allowed user group prefixes), and—for interactive grants carrying `goauthy_oidc_session_id`—a live browser session (`Device` and `Password` grants lack a browser session and omit this check). `proxy` supports public or confidential clients; `credential_delivery` requires confidential clients.
 - **Four-Dimension Fencing & Version Naming**:
   1. **Connection Generation (`connection_generation` / grant `generation`)**: Rotates only on `POST .../oauth2/reconnect` completion (`auth_collection_connections.generation`). Existing grants fail `404` on reconnect.
   2. **Consumer Generation (`consumer_generation`)**:

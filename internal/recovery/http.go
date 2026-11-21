@@ -456,76 +456,9 @@ func (s *Service) RegisterPasskeyStart(w http.ResponseWriter, r *http.Request) {
 		passkeyRegistrationDisabled(w)
 		return
 	}
-	request, err := decodeJSON[passkeyRegistrationStartRequest](w, r, requestLimit)
-	if err != nil {
-		badRegistration(w)
-		return
-	}
-	if request.PasskeyName == "" {
-		badRegistration(w)
-		return
-	}
-	ip, ok := requestPeerIP(r)
-	if !ok {
-		unavailable(w)
-		return
-	}
-	if err := validateCaptcha(r.Context(), s.captcha, request.CaptchaResponse, ip); err != nil {
-		badRegistration(w)
-		return
-	}
-	basicConfig := s.registration.config
-	basicConfig.RedirectValidator = func(string) bool { return true }
-	regRequest := RegistrationRequest{
-		Email:             request.Email,
-		PreferredUsername: request.PreferredUsername,
-		FamilyName:        request.FamilyName,
-		GivenName:         request.GivenName,
-		UserValues:        request.UserValues,
-		ProofOfWork:       request.ProofOfWork,
-		RedirectURI:       request.RedirectURI,
-		CaptchaResponse:   request.CaptchaResponse,
-	}
-	regRequest, err = basicConfig.ValidateRequest(regRequest)
-	if err != nil {
-		if errors.Is(err, ErrRegistrationDisabled) {
-			passkeyRegistrationDisabled(w)
-		} else if errors.Is(err, identity.ErrPreferredUsernameUnavailable) {
-			http.Error(w, http.StatusText(http.StatusNotAcceptable), http.StatusNotAcceptable)
-		} else {
-			badRegistration(w)
-		}
-		return
-	}
-	if s.pow == nil || s.pow.VerifyAndConsume(r.Context(), request.ProofOfWork) != nil {
-		forbidden(w)
-		return
-	}
-	config := s.registration.config
-	config.RedirectValidator = func(uri string) bool {
-		allowed, err := s.registration.validate(r.Context(), uri)
-		return err == nil && allowed
-	}
-	if _, err := config.ValidateRequest(regRequest); err != nil {
-		badRegistration(w)
-		return
-	}
-	allowed, err := s.policy.AllowOpenRegistration(r.Context(), ip, s.now().UTC())
-	if err != nil {
-		unavailable(w)
-		return
-	}
-	if !allowed {
-		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
-		return
-	}
-	// GA-BR-02: this endpoint cannot build the ceremony it reports. Passkey-first
-	// enrollment needs a persisted enrollment binding (subject, expiry, and a
-	// separate bounded attestation payload) that does not exist yet, and no
-	// passkey name can satisfy the canonical 32-byte session digest
-	// BeginRegistration requires. Fail closed before reserving the passkey-only
-	// identity, so a start that cannot complete leaves no account behind and can
-	// never authorize enrollment onto an existing account.
+	// GA-BR-02: passkey-first enrollment needs a persisted enrollment binding
+	// (subject, expiry, and a separate bounded attestation payload) that does
+	// not exist yet. Fail closed before consuming PoW or rate-limit quota.
 	unavailable(w)
 }
 
@@ -548,14 +481,6 @@ func (s *Service) RegisterPasskeyFinish(w http.ResponseWriter, r *http.Request) 
 		passkeyRegistrationDisabled(w)
 		return
 	}
-	request, err := decodeJSON[passkeyRegistrationFinishRequest](w, r, requestLimit)
-	if err != nil || request.Code == "" || request.PasskeyName == "" {
-		badRegistration(w)
-		return
-	}
-	// GA-BR-02: the same missing enrollment binding applies here, and this path
-	// also handed the already-decoded request body to WebAuthn and carried no
-	// attestation payload, so it could never verify the credential. No ceremony
-	// can exist while start fails closed; reject before loading one anyway.
-	badRegistration(w)
+	// GA-BR-02: fail closed while passkey-first enrollment binding is unimplemented.
+	unavailable(w)
 }

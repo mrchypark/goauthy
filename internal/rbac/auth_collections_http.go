@@ -9,6 +9,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/apikey"
 	"github.com/mrchypark/goauthy/internal/authcollection"
 	"github.com/mrchypark/goauthy/internal/browser"
+	"github.com/mrchypark/goauthy/internal/identity"
 )
 
 func (h *Handler) BindAuthCollections(store *authcollection.Store) error {
@@ -135,8 +136,24 @@ func (h *Handler) authConnectionSubject(w http.ResponseWriter, r *http.Request) 
 	}
 	cookie := cookies[0]
 	session, err := h.browser.LoadSessionForPeer(r.Context(), cookie.Value, browser.PeerIPFromContext(r.Context()))
-	if err != nil || !session.Authenticated() || h.identity.ValidateSubject(r.Context(), session.Subject) != nil {
+	if err != nil {
+		if errors.Is(err, browser.ErrNotFound) {
+			h.genericUnauthorized(w)
+			return "", nil, false
+		}
+		h.unavailable(w)
+		return "", nil, false
+	}
+	if !session.Authenticated() {
 		h.genericUnauthorized(w)
+		return "", nil, false
+	}
+	if err := h.identity.ValidateSubject(r.Context(), session.Subject); err != nil {
+		if errors.Is(err, identity.ErrInactiveSubject) {
+			h.genericUnauthorized(w)
+			return "", nil, false
+		}
+		h.unavailable(w)
 		return "", nil, false
 	}
 	if r.Method != http.MethodGet && (len(r.Header.Values("X-CSRF-Token")) != 1 || browser.ValidateCSRFToken(cookie.Value, r.Header.Get("X-CSRF-Token")) != nil) {

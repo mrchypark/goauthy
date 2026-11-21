@@ -34,15 +34,11 @@ finishes; the complete existing handler is then published atomically. Readiness
 still performs the existing quorum-backed linearizable check. TLS and request
 draining apply from the first accepted connection.
 
-The startup defer intentionally does not call `DB.Close()` until all startup
-initialization has succeeded and the server lifecycle is about to begin. This
-guard addresses a checkpoint-corruption hazard confirmed on Rhiza v0.10.0 when
-a database was closed during startup, even if `DB.Ready()` became true
-transiently before a later migration, quorum, or configuration failure. The
-hazard's status on Rhiza v0.27.3 has not been runtime-verified. Local
-recovery tests do not establish startup-close safety. Retain the
-guard until the upgraded startup path is checked. After startup, graceful
-shutdown still closes the database.
+The startup defer closes `DB.Close()` on startup failure as well as graceful
+shutdown (verified safe on Rhiza v0.27.3 via `TestRhizaV0273EarlyCloseAndReopen`
+so WAL/DataDir are not left unclosed across container restarts). Only when
+graceful shutdown fails to drain active request handlers within the cleanup
+budget does `runLifecycle` skip `DB.Close()`.
 
 The GoAuthy startup-close regression test verifies this guard. One fresh local
 v0.18.0 diagnostic with three logical GoAuthy members on one Kind node and a Versity

@@ -50,7 +50,7 @@ Core GoAuthy domain, protocol, security, persistence, and UI packages under `int
 - `scim`: [./scim/README.md](./scim/README.md) - Stateless bounded outbound SCIM 2.0 client for Users and Groups, Rhiza-backed durable outbox, encrypted SCIM client config store, and immutable user mapping store.
 - `security`: [./security/README.md](./security/README.md) - HTTP header text validation for upstream login metadata.
 - `smtptransport`: [./smtptransport/README.md](./smtptransport/README.md) - Context-bound SMTP dialer and custom authentication selector for `go-mail` supporting implicit TLS and channel-bound SCRAM.
-- `storage`: [./storage/README.md](./storage/README.md) - Embedded Rhiza database configuration, schema migrations (`v115`), S3/GCS object-store opening, master-key retirement fencing, envelope writer admission, DCR trust fencing, and passkey cookie retention watermarks.
+- `storage`: [./storage/README.md](./storage/README.md) - Embedded Rhiza database configuration, schema migrations (`v116`), S3/GCS object-store opening, master-key retirement fencing, envelope writer admission, DCR trust fencing, and passkey cookie retention watermarks.
 - `testbrowser`: [./testbrowser/README.md](./testbrowser/README.md) - Bounded headless Chrome lifecycle helper for UI and end-to-end browser regression tests via `chromedp`.
 - `tlsconfig`: [./tlsconfig/README.md](./tlsconfig/README.md) - Loads and atomically hot-reloads X.509 server TLS certificates from disk for `tls.Config.GetCertificate`.
 - `tracing`: [./tracing/README.md](./tracing/README.md) - Configures OpenTelemetry OTLP/HTTP tracing, HTTP request tracing middleware without path credential leakage, and allowlisted auth-stage spans.
