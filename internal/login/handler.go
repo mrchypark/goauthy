@@ -334,7 +334,7 @@ func (h *Handler) Authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	var err error
 	initialSession, initialSessionToken, initialSessionOK := h.session(r)
-	if initialSessionOK && initialSession.Authenticated() && !reauthenticate(request, initialSession, h.now()) {
+	if !request.UntrustedClient && initialSessionOK && initialSession.Authenticated() && !reauthenticate(request, initialSession, h.now()) {
 		session, sessionToken := initialSession, initialSessionToken
 		if _, err := h.identity.UserBySubject(r.Context(), session.Subject); err == nil && (!request.ForceMFA || session.AuthenticationMethod == "mfa") {
 			needs, checkErr := h.needsProfileUpdate(r, session.Subject, request.ClientID)
@@ -1688,6 +1688,9 @@ func (h *Handler) WebAuthnStart(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			http.Error(w, "Invalid login request", http.StatusUnauthorized)
 			return
+		}
+		if payload.Username != "" {
+			fresh = true
 		}
 
 	case errors.Is(cookieErr, http.ErrNoCookie):

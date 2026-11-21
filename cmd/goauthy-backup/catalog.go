@@ -15,6 +15,7 @@ import (
 	"github.com/mrchypark/goauthy/internal/backup"
 	"github.com/mrchypark/goauthy/internal/backupconfig"
 	"github.com/mrchypark/goauthy/internal/storage"
+	"github.com/mrchypark/rhiza"
 )
 
 func runCatalog(ctx context.Context, args []string, getenv func(string) string, out io.Writer) (err error) {
@@ -53,7 +54,7 @@ func runCatalog(ctx context.Context, args []string, getenv func(string) string, 
 	if err != nil {
 		return err
 	}
-	config, err := storage.RhizaConfigFromEnv(getenv)
+	config, err := catalogObjectStoreConfig(getenv)
 	if err != nil {
 		return err
 	}
@@ -122,4 +123,30 @@ func runCatalog(ctx context.Context, args []string, getenv func(string) string, 
 
 func readCatalogKey(name string, private bool) (ed25519.PrivateKey, ed25519.PublicKey, error) {
 	return backupconfig.ReadCatalogKey(name, private)
+}
+
+func catalogObjectStoreConfig(getenv func(string) string) (rhiza.Config, error) {
+	if getenv == nil {
+		return rhiza.Config{}, errors.New("environment reader required")
+	}
+	defaults := map[string]string{
+		"GOAUTHY_CLUSTER_ID":    "backup-catalog",
+		"GOAUTHY_NODE_ID":       "backup-catalog",
+		"GOAUTHY_DATA_DIR":      "/tmp/goauthy-backup-catalog",
+		"GOAUTHY_RHIZA_PROFILE": "standalone",
+	}
+	wrapped := func(name string) string {
+		if v := getenv(name); v != "" {
+			return v
+		}
+		return defaults[name]
+	}
+	config, separate, err := backupconfig.DestinationConfig(wrapped, rhiza.Config{})
+	if err != nil {
+		return rhiza.Config{}, err
+	}
+	if separate {
+		return config, nil
+	}
+	return storage.RhizaConfigFromEnv(getenv)
 }

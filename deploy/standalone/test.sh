@@ -27,7 +27,7 @@ test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | 
 # app.kubernetes.io/component: object-store-client, so the pod template must keep it.
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .spec.template.metadata.labels."app.kubernetes.io/component"' "$render")" = object-store-client
 test "$(yq -r 'select(.kind == "StatefulSet" and .metadata.name == "goauthy") | .metadata.name' "$render" | awk 'END { print NR }')" = 1
-test "$(yq -r 'select(.kind == "PodDisruptionBudget" and .metadata.name == "goauthy") | .spec.minAvailable' "$render")" = 1
+test "$(yq -r 'select(.kind == "PodDisruptionBudget" and .metadata.name == "goauthy") | .spec.minAvailable' "$render")" = 0
 if grep -E -n 'GOAUTHY_RHIZA_(PEER_ADDR|MEMBERS|ADMIN_TOKEN)|name: peer|targetPort: peer' "$render"; then
 	echo "standalone render contains forbidden peer settings" >&2
 	exit 1

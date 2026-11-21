@@ -155,6 +155,7 @@ type AuthorizationRequest struct {
 	Prompt             []string
 	MaxAgeSeconds      *int64
 	ForceMFA           bool
+	UntrustedClient    bool
 }
 
 type Server struct {
@@ -1159,7 +1160,23 @@ func (s *Server) authorizationRequestView(ctx context.Context, authorizeRequest 
 		Prompt:             prompt,
 		MaxAgeSeconds:      maxAge,
 		ForceMFA:           forceMFA,
+		UntrustedClient:    !s.store.isTrustedClient(authorizeRequest.GetClient()),
 	}, nil
+}
+
+// isTrustedClient reports whether client is the bootstrap first-party client or
+// an administrator-managed client. DCR and CIMD clients are untrusted third
+// parties and must not receive silent authorization codes from an existing
+// browser session without explicit user interaction.
+func (s *Store) isTrustedClient(client fosite.Client) bool {
+	if client == nil {
+		return false
+	}
+	if s.client != nil && client.GetID() == s.client.GetID() {
+		return true
+	}
+	_, managed := client.(*clients.Client)
+	return managed
 }
 
 // forceMFA reads the MFA policy from the exact client snapshot Fosite resolved

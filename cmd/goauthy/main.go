@@ -190,7 +190,7 @@ func run() (err error) {
 	if err != nil {
 		return fmt.Errorf("open rhiza: %w", err)
 	}
-	dbCloseAllowed := false
+	dbCloseAllowed := true
 	defer func() { err = closeRhizaAfterStartupComplete(db, dbCloseAllowed, err) }()
 	// Probes must reach liveness while schema and application state initialize.
 	// Opening storage retains the existing startup-probe bound. Until activation,
@@ -1025,6 +1025,14 @@ func run() (err error) {
 		if err != nil {
 			return err
 		}
+		if emailOutbox == nil {
+			var outboxErr error
+			emailOutboxWake = make(chan struct{}, 1)
+			emailOutbox, outboxErr = recovery.NewEmailOutbox(db, recovery.SMTPSendFunc(loginLocationSender), recovery.WithEnvelopeKeyring(keyring), recovery.WithWake(emailOutboxWake))
+			if outboxErr != nil {
+				return fmt.Errorf("configure email outbox: %w", outboxErr)
+			}
+		}
 		loginLocationSender.OnDeliveryFailure = newEmailDeliveryFailureHandler(ctx, db, emailOutbox)
 	}
 	emailSubjectPrefix, prefixConfigured := os.LookupEnv("GOAUTHY_EMAIL_SUB_PREFIX")
@@ -1554,9 +1562,6 @@ func run() (err error) {
 	}
 
 	gate.activate(healthBypass(issuerPathMiddleware(peerIPMiddleware(appHandler, trustedProxies), issuer), handler))
-	// No startup path below this point can fail before the server lifecycle
-	// owns shutdown, so it is now safe to close Rhiza on return.
-	dbCloseAllowed = true
 
 	dbCloseAllowed, err = drain.runLifecycle(ctx, server, metricsServer, errCh, metricsErrCh, func() {
 		providerStore.CloseConnections()
@@ -2696,11 +2701,10 @@ func loadMetricsToken(getenv func(string) string) (string, error) {
 	return token, nil
 }
 
-// closeRhizaAfterStartupComplete avoids a Rhiza v0.10.0 early-close
-// checkpoint hazard. Rhiza is closed only after all startup work has
-// succeeded and the server lifecycle is about to begin.
-func closeRhizaAfterStartupComplete(db *rhiza.DB, startupComplete bool, current error) error {
-	if !startupComplete || db == nil {
+// closeRhizaAfterStartupComplete closes Rhiza storage unless shutdown draining
+// timed out with active handlers still running.
+func closeRhizaAfterStartupComplete(db *rhiza.DB, closeAllowed bool, current error) error {
+	if !closeAllowed || db == nil {
 		return current
 	}
 	return errors.Join(current, closeWithin(db.Close, rhizaShutdownTimeout))

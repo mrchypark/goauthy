@@ -28,7 +28,7 @@ func OpenObjectStore(ctx context.Context, config rhiza.Config) (objstore.Bucket,
 			SessionToken: config.ObjStoreSessionToken, MaxRetries: config.ObjStoreRetries,
 		}, "rhiza", nil)
 		if err != nil {
-			return nil, errors.New("open s3 object store")
+			return nil, fmt.Errorf("open s3 object store: %w", err)
 		}
 		return bucket, nil
 	case "gcs":
@@ -38,7 +38,7 @@ func OpenObjectStore(ctx context.Context, config rhiza.Config) (objstore.Bucket,
 		providerConfig.MaxRetries = config.ObjStoreRetries
 		bucket, err := gcs.NewBucketWithConfig(ctx, kitlog.NewNopLogger(), providerConfig, "rhiza", nil)
 		if err != nil {
-			return nil, errors.New("open gcs object store")
+			return nil, fmt.Errorf("open gcs object store: %w", err)
 		}
 		return bucket, nil
 	default:

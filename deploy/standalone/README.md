@@ -27,7 +27,7 @@ environment lists so a feature cannot silently disappear in standalone mode.
 
 ## Invariants
 
-- `StatefulSet/goauthy` has `replicas: 1`, zero `volumeClaimTemplates`, `emptyDir.sizeLimit: 1Gi` for `data`, `GOAUTHY_RHIZA_PROFILE=standalone`, `GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE=true`, and `PodDisruptionBudget` `minAvailable: 1`.
+- `StatefulSet/goauthy` has `replicas: 1`, zero `volumeClaimTemplates`, `emptyDir.sizeLimit: 1Gi` for `data`, `GOAUTHY_RHIZA_PROFILE=standalone`, `GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE=true`, and `PodDisruptionBudget` `minAvailable: 0` (so single-replica node drains are not blocked).
 - Pod template retains `app.kubernetes.io/component: object-store-client` so `versity-ingress` admits TCP/9000.
 - Rendered manifest must not contain `GOAUTHY_RHIZA_PEER_ADDR`, `GOAUTHY_RHIZA_MEMBERS`, `GOAUTHY_RHIZA_ADMIN_TOKEN`, or `peer` ports.
 - Application environment variable names must match `deploy/k8s` (excluding `GOAUTHY_RHIZA_(PEER_ADDR|MEMBERS|ADMIN_TOKEN)`).

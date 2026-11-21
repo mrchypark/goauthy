@@ -122,9 +122,9 @@ GoAuthy writes Argon2id `v=19` credentials using the OWASP baseline (`m=19456` K
 
 ## Known Operational Risks & Qualification Boundaries
 
-- **Startup `db.Close()` guard**: The startup path skips `db.Close()` until initialization succeeds (originally added for a Rhiza `v0.10.0` checkpoint-corruption hazard); its behavior on `v0.27.3` remains unverified.
+- **Startup `db.Close()` guard**: `closeRhizaAfterStartupComplete` closes Rhiza on startup failures as well as graceful shutdown (early-close/reopen verified on `v0.27.3` by `TestRhizaV0273EarlyCloseAndReopen`) and skips `db.Close()` only if shutdown draining times out with active handlers.
 - **`before-ack` latency sensitivity**: Synchronous `before-ack` object-store publication sits on auth write paths (sessions, DPoP nonces/JTIs, brute-force counters, PoW); degraded object-store latency directly affects auth tail latency.
-- **Reverse-proxy rate-limit key**: `peerIPMiddleware` honors configured trusted-proxy headers, whereas Device flow and `POST /auth/v1/pow` rate-limiters key on direct TCP `RemoteAddr`—behind a reverse proxy or Ingress without ProxyProtocol, all clients share one bucket.
+- **Reverse-proxy rate-limit key**: `peerIPMiddleware` honors configured trusted-proxy headers (including `POST /auth/v1/pow`), whereas the Device flow rate-limiter keys on direct TCP `RemoteAddr`—behind a reverse proxy or Ingress without ProxyProtocol, Device flow clients share one bucket.
 - **Legacy session & key-rotation gaps**: Pre-v31 sessions with empty `peer_ip` are accepted without IP binding; password↔passkey account conversions retain existing sessions; `CookieKey` rotation, non-rotating encrypted values, and automatic master-key file removal remain manual/pending.
 - **Event-log hash chain & SCIM tombstones**: Production event-log append-chain wiring is incomplete ([docs/capabilities.md](docs/capabilities.md)), and deleting a SCIM provider blocks tombstone cleanup for that provider ID until it is restored.
 

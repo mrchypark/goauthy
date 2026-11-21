@@ -182,7 +182,7 @@ func TestEnableFedCMIsHTTPSOnlyAndDeletesSeparateCookie(t *testing.T) {
 		t.Fatal(err)
 	}
 	cookies := recorder.Result().Cookies()
-	if len(cookies) != 2 || cookies[0].Name == cookies[1].Name || cookies[1].Name != browser.FedCMSessionCookieName || cookies[1].MaxAge != -1 || !cookies[1].Secure || cookies[1].SameSite != http.SameSiteNoneMode {
+	if len(cookies) != 3 || cookies[0].Name == cookies[1].Name || cookies[2].Name != browser.FedCMSessionCookieName || cookies[2].MaxAge != -1 || !cookies[2].Secure || cookies[2].SameSite != http.SameSiteNoneMode {
 		t.Fatalf("deletion cookies=%#v", cookies)
 	}
 }
@@ -202,7 +202,7 @@ func TestHandlerMatchingHintLogsOutAndDeletesCookie(t *testing.T) {
 		t.Fatalf("status=%d location=%q", response.Code, response.Header().Get("Location"))
 	}
 	cookies := response.Result().Cookies()
-	if len(cookies) != 1 || cookies[0].MaxAge != -1 || cookies[0].Value != "" {
+	if len(cookies) != 2 || cookies[0].MaxAge != -1 || cookies[0].Value != "" || cookies[1].MaxAge != -1 || cookies[1].Value != "" {
 		t.Fatalf("deletion cookies=%#v", cookies)
 	}
 	if _, err := sessions.LoadSession(context.Background(), issued.Token); !errors.Is(err, browser.ErrRevoked) {
@@ -253,7 +253,7 @@ func TestHandlerConfirmationIsSessionBoundSingleUseAndSameOrigin(t *testing.T) {
 	valid.Header.Set("Sec-Fetch-Site", "same-origin")
 	ok := httptest.NewRecorder()
 	h.ServeHTTP(ok, valid)
-	if ok.Code != http.StatusSeeOther || ok.Header().Get("Location") != logoutRedirect+"&state=state" || len(ok.Result().Cookies()) != 1 {
+	if ok.Code != http.StatusSeeOther || ok.Header().Get("Location") != logoutRedirect+"&state=state" || len(ok.Result().Cookies()) != 2 {
 		t.Fatalf("confirmation status=%d location=%q cookies=%#v", ok.Code, ok.Header().Get("Location"), ok.Result().Cookies())
 	}
 	if _, err := sessions.LoadSession(context.Background(), first.Token); !errors.Is(err, browser.ErrRevoked) {

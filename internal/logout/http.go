@@ -386,6 +386,11 @@ func (h *Handler) deleteSessionCookies(w http.ResponseWriter) error {
 		return err
 	}
 	http.SetCookie(w, cookie)
+	passkeyCookie, err := browser.DeletePasskeyCookie(h.issuer)
+	if err != nil {
+		return err
+	}
+	http.SetCookie(w, passkeyCookie)
 	if h.fedcmEnabled {
 		fedcmCookie, err := browser.DeleteFedCMSessionCookie(h.issuer)
 		if err != nil {

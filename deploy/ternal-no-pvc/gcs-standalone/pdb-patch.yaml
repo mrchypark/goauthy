@@ -4,4 +4,4 @@ metadata:
   name: ternal-goauthy
   namespace: ternal-auth
 spec:
-  minAvailable: 1
+  minAvailable: 0

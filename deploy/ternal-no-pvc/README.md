@@ -29,7 +29,7 @@ empty-disk recovery or backup/restore has been qualified.
 
 - All profiles use `emptyDir` for `/var/lib/goauthy`, zero `volumeClaimTemplates`, `readOnlyRootFilesystem: true`, `automountServiceAccountToken: false`, and `GOAUTHY_RHIZA_REQUIRE_OBJECT_STORE=true`.
 - Rendered manifests must not contain `PersistentVolumeClaim`, `Job`, `versity`, `:latest` image tags, or `CHANGEME`/`TODO` placeholders.
-- `standalone` and `gcs-standalone` must not retain `GOAUTHY_RHIZA_PEER*`/`_MEMBERS`/`_ADMIN*` or `peer` port `8444` (PDB `minAvailable: 1`); HA and `gcs-ha` retain 3 replicas, port `8444`, and PDB `minAvailable: 2`.
+- `standalone` and `gcs-standalone` must not retain `GOAUTHY_RHIZA_PEER*`/`_MEMBERS`/`_ADMIN*` or `peer` port `8444` (PDB `minAvailable: 0`); HA and `gcs-ha` retain 3 replicas, port `8444`, and PDB `minAvailable: 2`.
 - `gcs-standalone` and `gcs-ha` must use `object-store-bucket` and `object-store-prefix` from `ternal-goauthy-config` and must not contain S3 env vars, `service-account.json`, or `GOOGLE_APPLICATION_CREDENTIALS`.
 
 ## Side Effects

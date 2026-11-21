@@ -9,7 +9,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -596,12 +595,17 @@ func jwtClaims(t *testing.T, compact string) map[string]any {
 
 func TestAllowedIPBlocksMetadataAndSpecialUse(t *testing.T) {
 	for _, blocked := range []string{"169.254.169.254", "fe80::1", "198.18.0.1", "64:ff9b::1", "2002::1"} {
-		ip := net.ParseIP(blocked)
-		if allowedIP(ip, false) || allowedIP(ip, true) {
-			t.Fatalf("expected %s to be blocked regardless of allowPrivate", blocked)
+		if err := ValidateEndpoint("https://"+blocked+"/logout", false, false); err == nil {
+			t.Fatalf("expected %s to be blocked with allowPrivate=false", blocked)
+		}
+		if err := ValidateEndpoint("https://"+blocked+"/logout", true, false); err == nil {
+			t.Fatalf("expected %s to be blocked with allowPrivate=true", blocked)
 		}
 	}
-	if !allowedIP(net.ParseIP("10.0.0.1"), true) || allowedIP(net.ParseIP("10.0.0.1"), false) {
-		t.Fatal("expected RFC1918 to follow allowPrivate")
+	if err := ValidateEndpoint("https://10.0.0.1/logout", true, false); err != nil {
+		t.Fatalf("expected RFC1918 to be allowed when allowPrivate=true: %v", err)
+	}
+	if err := ValidateEndpoint("https://10.0.0.1/logout", false, false); err == nil {
+		t.Fatal("expected RFC1918 to be blocked when allowPrivate=false")
 	}
 }

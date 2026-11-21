@@ -1174,12 +1174,24 @@ func (s *Store) updateBootstrapClientLoginRestriction(ctx context.Context, actor
 	}
 	if expectedRevision == 0 {
 		id := requestID("bootstrap-client-login-restriction-create", actor, clientID, prefixKey, attempt)
-		executeErr = s.run(ctx, key, "Clients", apikey.Update, id, []rhiza.SQLStatement{{SQL: `INSERT INTO bootstrap_client_login_restrictions (client_id,restrict_group_prefix,revision,updated_at_unix_ms)
-			SELECT ?,?,1,? WHERE NOT EXISTS (SELECT 1 FROM bootstrap_client_login_restrictions WHERE client_id=?) AND ` + adminGuard(), Args: []any{clientID, prefixValue, now, clientID, actor}}})
+		sqlStmt := `INSERT INTO bootstrap_client_login_restrictions (client_id,restrict_group_prefix,revision,updated_at_unix_ms)
+			SELECT ?,?,1,? WHERE NOT EXISTS (SELECT 1 FROM bootstrap_client_login_restrictions WHERE client_id=?)`
+		args := []any{clientID, prefixValue, now, clientID}
+		if key == nil {
+			sqlStmt += ` AND ` + adminGuard()
+			args = append(args, actor)
+		}
+		executeErr = s.run(ctx, key, "Clients", apikey.Update, id, []rhiza.SQLStatement{{SQL: sqlStmt, Args: args}})
 	} else {
 		id := requestID("bootstrap-client-login-restriction-update", actor, clientID, fmt.Sprint(expectedRevision), prefixKey, attempt)
-		executeErr = s.run(ctx, key, "Clients", apikey.Update, id, []rhiza.SQLStatement{{SQL: `UPDATE bootstrap_client_login_restrictions SET restrict_group_prefix=?,revision=revision+1,updated_at_unix_ms=?
-			WHERE client_id=? AND revision=? AND ` + adminGuard(), Args: []any{prefixValue, now, clientID, expectedRevision, actor}}})
+		sqlStmt := `UPDATE bootstrap_client_login_restrictions SET restrict_group_prefix=?,revision=revision+1,updated_at_unix_ms=?
+			WHERE client_id=? AND revision=?`
+		args := []any{prefixValue, now, clientID, expectedRevision}
+		if key == nil {
+			sqlStmt += ` AND ` + adminGuard()
+			args = append(args, actor)
+		}
+		executeErr = s.run(ctx, key, "Clients", apikey.Update, id, []rhiza.SQLStatement{{SQL: sqlStmt, Args: args}})
 	}
 	var current BootstrapClientLoginRestriction
 	var readErr error
