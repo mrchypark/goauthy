@@ -1,6 +1,6 @@
 # Rauthy v0.36.2 behavior-parity plan
 
-> **Historical-baseline note:** The `Fixed baselines` and dated rows below record the September 2026 parity audit baselines (such as `Rhiza v0.10.0` / `v0.12.3`, `LatticeDB v0.5.1`, and `Schema v102`). For the current codebase dependency baseline (`Go 1.27.4`, `Rhiza v0.24.0`, `latticedb-go v0.13.0`, schema `v114`), see [go.mod](../go.mod) and [README.md](../README.md); for the current product support boundary, see [capabilities.md](capabilities.md).
+> **Historical-baseline note:** The `Fixed baselines` and dated rows below record the September 2026 parity audit baselines (such as `Rhiza v0.10.0` / `v0.12.3`, `LatticeDB v0.5.1`, and `Schema v102`). For the current codebase dependency baseline (`Go 1.27.4`, `Rhiza v0.27.3`, `latticedb-go v0.13.0`, schema `v116`), see [go.mod](../go.mod) and [README.md](../README.md); for the current product support boundary, see [capabilities.md](capabilities.md).
 
 ## Fixed baselines
 
@@ -79,7 +79,7 @@ tests cover the source contract; the live exact-three gate passed all three
 zero-reference checks, restart boot-ID change with attestation sequence 2,
 Ready, key retention, and cleanup. No automatic key removal exists.
 
-Rhiza schema v102 is the current source baseline (v98-v102: scim_client_config, force_mfa, system_lockdown, identity_email_otp, event_log prev_hash/integrity_hash). The schema-v38 provider-scoped
+Rhiza schema v102 was the audit source baseline (v98-v102: scim_client_config, force_mfa, system_lockdown, identity_email_otp, event_log prev_hash/integrity_hash). The schema-v38 provider-scoped
 SCIM remote-user mapping, user-first full scan/reconcile, group enqueue/runtime,
 and schema-v39 tombstone/delete projection are source-tested. `identity.DeleteUser`
 atomically snapshots a tombstone, cleans owned identity state, invalidates stale

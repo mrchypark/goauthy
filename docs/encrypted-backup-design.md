@@ -44,7 +44,7 @@ Objects are packed under `objects/<source-relative-key>` alongside `manifest.jso
 | Field (`SnapshotManifest`) | Type | Meaning |
 | --- | --- | --- |
 | `format_version` | `int` | `1` (checkpoint-backed) or `2` (archive-only) |
-| `rhiza_version` | `string` | Pinned `github.com/mrchypark/rhiza` module version (`v0.24.0` in `go.mod`) |
+| `rhiza_version` | `string` | Pinned `github.com/mrchypark/rhiza` module version (`v0.27.3` in `go.mod`) |
 | `source_prefix`, `cluster_id`, `config_id` | `string`, `string`, `uint64` | Source cluster namespace and configuration ID (`1`) |
 | `checkpoint_index`, `checkpoint_root_hash`, `checkpoint_state_hash` | `uint64`, `string`, `string` | Certified checkpoint coordinates (zero/empty in `v2`) |
 | `recovery_mode`, `archive_tip` | `string`, `uint64` | Set to `"archive-only"` and tip index in `v2` |

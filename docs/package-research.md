@@ -1,6 +1,6 @@
 # Package research
 
-> **Historical-baseline note:** Sections below are dated package evaluations and design records (some citing earlier baselines such as Rhiza v0.10.0 / v0.12.3 or LatticeDB v0.6.0). For the current dependency baseline (`Go 1.27.4`, `Rhiza v0.24.0`, `latticedb-go v0.13.0`, schema `v114`), see [go.mod](../go.mod) and [README.md](../README.md).
+> **Historical-baseline note:** Sections below are dated package evaluations and design records (some citing earlier baselines such as Rhiza v0.10.0 / v0.12.3 or LatticeDB v0.6.0). For the current dependency baseline (`Go 1.27.4`, `Rhiza v0.27.3`, `latticedb-go v0.13.0`, schema `v116`), see [go.mod](../go.mod) and [README.md](../README.md).
 
 ## Password grant and expired-password recovery (2026-09-11)
 
