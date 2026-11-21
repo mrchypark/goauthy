@@ -7,13 +7,13 @@
 
 ## Problem Statement
 
-GoAuthy stores third-party SaaS credentials (API keys and OAuth 2.0 tokens) encrypted under **auth collections** (global admin-defined metadata schemas) and global **providers** (admin-registered OAuth 2.0 or API-key SaaS definitions, each carrying `provider_id`, `provider_revision`, and—for API keys—one or more named **connectors** with `GET` operations and `response_fields` projections). In GoAuthy's embedded Raft-replicated SQLite engine (Rhiza `v0.24.0`, qualified for single-node `standalone-local` per [README.md](../README.md#L89)):
+GoAuthy stores third-party SaaS credentials (API keys and OAuth 2.0 tokens) encrypted under **auth collections** (global admin-defined metadata schemas) and global **providers** (admin-registered OAuth 2.0 or API-key SaaS definitions, each carrying `provider_id`, `provider_revision`, and—for API keys—one or more named **connectors** with `GET` operations and `response_fields` projections). In GoAuthy's embedded Raft-replicated SQLite engine (Rhiza `v0.27.3`, with single-node synthetic filesystem qualification limited as described in [no-pvc-dr.md](no-pvc-dr.md#qualification-boundary)):
 - `auth_collection_connections` (`internal/authcollection`) stores per-owner credential-free connection metadata and a reconnect counter `generation`.
 - `saas_connection_credentials` (`internal/saas`) stores AEAD-encrypted credentials bound to `(owner_subject, collection_id, connection_id, provider_id, generation, token_version)`.
 
 External consumers—such as **Handoff Requesters** (e.g., Backoffice, initiating one-use owner consent handoffs) and **Execution Consumers** (e.g., Conductor, executing connectors)—need scoped, revocable, owner-consented access without receiving long-lived refresh tokens or admin-level session authority.
 
-Consumer endpoints under `/auth/v1/connection-grants/{grant_id}/*` accept both live non-DPoP human Bearer tokens and [RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693) (`token-exchange`) [RFC 9449](https://datatracker.ietf.org/doc/html/rfc9449) (`DPoP`, Demonstrating Proof-of-Possession)-bound delegation tokens scoped to `goauthy.connections.use` and [RFC 8707](https://datatracker.ietf.org/doc/html/rfc8707) `GOAUTHY_CONNECTIONS_RESOURCE`. Queued/asynchronous Execution Consumers exchange a single-hop human `subject_token` at `POST /oidc/token` for a DPoP-bound delegation token without persisting raw user Bearer tokens in durable write-ahead logs (WALs), while bounding synchronous Raft writes on single-node Rhiza `v0.24.0` via `jti` replay protection (`MarkReplay`).
+Consumer endpoints under `/auth/v1/connection-grants/{grant_id}/*` accept both live non-DPoP human Bearer tokens and [RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693) (`token-exchange`) [RFC 9449](https://datatracker.ietf.org/doc/html/rfc9449) (`DPoP`, Demonstrating Proof-of-Possession)-bound delegation tokens scoped to `goauthy.connections.use` and [RFC 8707](https://datatracker.ietf.org/doc/html/rfc8707) `GOAUTHY_CONNECTIONS_RESOURCE`. Queued/asynchronous Execution Consumers exchange a single-hop human `subject_token` at `POST /oidc/token` for a DPoP-bound delegation token without persisting raw user Bearer tokens in durable write-ahead logs (WALs), while bounding synchronous Raft writes on single-node Rhiza `v0.27.3` via `jti` replay protection (`MarkReplay`).
 
 ---
 
@@ -41,11 +41,11 @@ Consumer endpoints under `/auth/v1/connection-grants/{grant_id}/*` accept both l
 
 ## References
 
-- Repository overview & Rhiza `v0.24.0` single-node qualification: [`README.md`](../README.md)
+- Repository overview: [`README.md`](../README.md); Rhiza `v0.27.3` qualification boundary: [`no-pvc-dr.md`](no-pvc-dr.md#qualification-boundary)
 - One-use consent handoffs & bootstrap policy pinning: [`connection-use-handoffs.md`](connection-use-handoffs.md#request-and-approval), [`connection-use-handoffs.md`](connection-use-handoffs.md#bootstrap-client-policy)
 - Consumer HTTP contract & schema `v74`: [`external-credential-consumer-contract.md`](external-credential-consumer-contract.md#사용자-oauth-연결-runtime-schema-v74) (Korean reference)
 - Maturity matrix (`Preview` vs `Experimental`): [`capabilities.md`](capabilities.md#external-user-owned-connections)
-- Qualification ledger (`2026-09-17`, schema `v102` baseline; `status.md` header notes `v114`, runtime is at `schemaVersion = 116`): [`status.md`](status.md#current-qualification-ledger-verified-2026-09-17)
+- Qualification ledger (`2026-09-17`, schema `v102` baseline; `status.md` header notes `v116`, runtime is at `schemaVersion = 116`): [`status.md`](status.md#current-qualification-ledger-verified-2026-09-17)
 - Package docs: [`internal/authcollection`](../internal/authcollection/README.md), [`internal/saas`](../internal/saas/README.md), [`internal/rbac`](../internal/rbac/README.md), [`internal/oauth`](../internal/oauth/README.md), [`internal/dpop`](../internal/dpop/README.md), [`internal/clients`](../internal/clients/README.md), [`internal/claims`](../internal/claims/README.md), [`internal/netsec`](../internal/netsec/README.md), [`internal/storage`](../internal/storage/README.md), [`cmd/goauthy`](../cmd/goauthy/README.md)
 
 ---
@@ -201,7 +201,7 @@ To support asynchronous/queued confidential Execution Consumers without storing 
 5. **Non-Browser Grant Partial Revocation Cascade**: `Device` and `Password` grants lack `goauthy_oidc_session_id`, and `POST /oidc/revoke` on a `subject_token` does not cascade to derived exchanged tokens.
    - *Mitigation*: Keep `subject_token` TTLs short (`expires_in` of exchanged tokens is bounded by `subject_token.remaining`); enforce `ForceMFA` and active authority per call in Rhiza.
 6. **Synchronous Raft Write & Cleanup Cost (`N + 4` Writes)**: Where `N` is the number of resource calls per exchanged delegation token, `1` un-nonced `POST /oidc/token` + retry adds `4` Raft writes (`IssueNonce` + `ConsumeNonce` + `MarkReplay` + `Commit`), and each resource call adds `1` Raft write (`MarkReplay`) = `N + 4` writes (`N + 2` RTTs; e.g., `20` writes / `18` RTTs at `N=16`), each running `expiredCleanup` (`DELETE ... LIMIT 128` on `dpop_replays`), alongside 5 (`DeliverAPIKey`) or 6 (`DeliverOAuth2`) queries and 2 AEAD decrypts per `/credential`.
-   - *Mitigation*: Benchmark `N + 4` writes against single-node Rhiza `v0.24.0` (with `before-ack` object-store publication disabled or tuned per deployment per [`README.md`](../README.md#L126)) and gate production rollout on target sustained QPS and p99 latency SLOs.
+   - *Mitigation*: Benchmark `N + 4` writes against single-node Rhiza `v0.27.3` (with `before-ack` object-store publication disabled or tuned per deployment per [`README.md`](../README.md#L126)) and gate production rollout on target sustained QPS and p99 latency SLOs.
 
 ---
 
@@ -209,7 +209,7 @@ To support asynchronous/queued confidential Execution Consumers without storing 
 
 ### Current Regression Baseline
 
-Qualification in [`status.md`](status.md#current-qualification-ledger-verified-2026-09-17) verified schema `v102` on `2026-09-17` (runtime is now at `schemaVersion = 116` on Rhiza `v0.24.0`). Run package tests covering `Scope` (`internal/storage` uses `-p=2` per ledger):
+Qualification in [`status.md`](status.md#current-qualification-ledger-verified-2026-09-17) verified schema `v102` on `2026-09-17` (runtime is now at `schemaVersion = 116` on Rhiza `v0.27.3`). Run package tests covering `Scope` (`internal/storage` uses `-p=2` per ledger):
 
 ```sh
 go test -count=1 -p=3 -timeout=60m ./internal/authcollection ./internal/clients ./internal/claims ./internal/dpop ./internal/netsec ./internal/saas ./internal/rbac ./internal/oauth ./cmd/goauthy

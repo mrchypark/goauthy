@@ -1,6 +1,6 @@
 # GoAuthy Status & Dated Qualification Ledger
 
-> **Historical-baseline note:** Entries below are reverse-chronological dated execution records (covering earlier baselines such as Rhiza `v0.10.0` / `v0.12.3` / `v0.21.x` and Schema `v102`). For the current dependency baseline (`Go 1.27.4`, `Rhiza v0.24.0`, `latticedb-go v0.13.0`, schema `v114`), see [go.mod](../go.mod) and [README.md](../README.md); for current capability status, see [capabilities.md](capabilities.md), [no-pvc-dr.md](no-pvc-dr.md), and [encrypted-backup-design.md](encrypted-backup-design.md).
+> **Historical-baseline note:** Entries below are reverse-chronological dated execution records (covering earlier baselines such as Rhiza `v0.10.0` / `v0.12.3` / `v0.21.x` and Schema `v102`). For the current dependency baseline (`Go 1.27.4`, `Rhiza v0.27.3`, `latticedb-go v0.13.0`, schema `v116`), see [go.mod](../go.mod) and [README.md](../README.md); for current capability status, see [capabilities.md](capabilities.md), [no-pvc-dr.md](no-pvc-dr.md), and [encrypted-backup-design.md](encrypted-backup-design.md).
 
 ## 2026-09-18 Actual Ternal operational qualification / runtime image / open-registration E2E
 

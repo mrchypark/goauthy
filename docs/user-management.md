@@ -1,6 +1,6 @@
 # 사용자 관리: 계약과 구현 잔여 항목
 
-기준(도입 당시): Rauthy v0.36.2, Rhiza v0.12.0, GoAuthy schema 61 (현재 `go.mod` 기준 `rhiza v0.24.0`, schema `v102`).
+기준(도입 당시): Rauthy v0.36.2, Rhiza v0.12.0, GoAuthy schema 61 (현재 `go.mod` 기준 `rhiza v0.27.3`, schema `v116`).
 전체 사용자 CRUD는 **미완료**다. 기존 삭제·멤버십·비밀번호 API가 있다는 이유로
 사용자 생성/상세 조회/전체 프로필 수정을 완료 처리하지 않는다.
 

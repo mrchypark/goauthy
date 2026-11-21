@@ -4,7 +4,7 @@ This file is the **Rauthy parity ledger**, not the product support matrix. For t
 GoAuthy support boundary, use [capabilities.md](capabilities.md). Dated entries below are
 kept as implementation and qualification evidence and may describe intermediate states
 that were superseded by later source. For the current codebase dependency baseline
-(`Go 1.27.4`, `Rhiza v0.24.0`, `latticedb-go v0.13.0`, schema `v114`), see
+(`Go 1.27.4`, `Rhiza v0.27.3`, `latticedb-go v0.13.0`, schema `v116`), see
 [go.mod](../go.mod) and [README.md](../README.md).
 
 This is the implementation ledger for the fixed upstream tag
