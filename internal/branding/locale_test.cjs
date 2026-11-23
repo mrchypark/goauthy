@@ -20,12 +20,11 @@ assert.equal(ko.context.GoAuthyI18n.t('Check your username or password'),'사용
 assert.equal(ko.context.GoAuthyI18n.t('Too many attempts'),'시도 횟수가 많습니다.');
 assert.equal(ko.context.GoAuthyI18n.t('Sign-in temporarily unavailable'),'로그인 서비스를 일시적으로 사용할 수 없습니다.');
 assert.equal(ko.context.GoAuthyI18n.t('Your account could not be loaded.'),'계정을 불러올 수 없습니다.');
-assert.equal(ko.context.GoAuthyI18n.t('Please check this message.'),'메시지를 확인해 주세요.');
+assert.equal(ko.context.GoAuthyI18n.t('Code not accepted'),'인증 코드가 올바르지 않습니다.');
 assert.equal(ko.context.GoAuthyI18n.t('Passkey sign-in failed'),'패스키 로그인에 실패했습니다.');
 assert.equal(ko.context.GoAuthyI18n.t('Please try your passkey again.'),'패스키로 다시 시도하세요.');
 assert.equal(ko.context.GoAuthyI18n.t('Password change outcome is unknown. Check the current state before retrying.'),'비밀번호 변경 결과를 확인할 수 없습니다. 현재 상태를 확인한 뒤 다시 시도하세요.');
 assert.equal(ko.context.GoAuthyI18n.t('Request outcome is unknown. Check the current state before retrying.'),'요청 결과를 확인할 수 없습니다. 현재 상태를 확인한 뒤 다시 시도하세요.');
-assert.equal(ko.context.GoAuthyI18n.t('Check the code and try again.'),'인증 코드를 확인하고 다시 시도하세요.');
 assert.equal(page('en').context.GoAuthyI18n.t('Password change outcome is unknown. Check the current state before retrying.'),'Password change outcome is unknown. Check the current state before retrying.');
 assert.equal(ko.context.GoAuthyI18n.t('Hello {name}',{name:'<script>'}),'Hello <script>');
 ko.change('en');assert.equal(ko.document.cookie,'goauthy_ui_locale=en; Path=/tenant/; Max-Age=31536000; SameSite=Lax; Secure');assert.equal(ko.stats().reloads,1);

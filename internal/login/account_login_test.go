@@ -91,7 +91,7 @@ func accountLoginPage(t *testing.T, h *Handler) (*http.Cookie, string, string) {
 	r := httptest.NewRequest(http.MethodGet, "/account/login", nil)
 	r.RemoteAddr = "203.0.113.8:1234"
 	h.AccountLoginHandler(false).ServeHTTP(w, r)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Sign in to manage your account.") {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `<form id="login-form"`) || strings.Contains(w.Body.String(), "Sign in to manage your account.") {
 		t.Fatalf("GET status=%d body=%s", w.Code, w.Body.String())
 	}
 	if !strings.Contains(w.Body.String(), `name="username" value=""`) {

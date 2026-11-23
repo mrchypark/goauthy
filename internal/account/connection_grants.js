@@ -65,7 +65,7 @@
     let createForm = null;
     if (canCreate) {
       createForm = document.createElement('div');
-      const consumerLabel = document.createElement('label'); consumerLabel.textContent = t('Consumer client ID (admin supplied ID; the server validates it)'); const consumer = document.createElement('input'); consumer.dataset.grantControl = ''; consumer.dataset.grantConsumer = text(connection.id); consumer.id = `grant-consumer-${connection.id}`; consumerLabel.htmlFor = consumer.id;
+      const consumerLabel = document.createElement('label'); consumerLabel.textContent = t('Consumer client ID'); const consumer = document.createElement('input'); consumer.dataset.grantControl = ''; consumer.dataset.grantConsumer = text(connection.id); consumer.id = `grant-consumer-${connection.id}`; consumerLabel.htmlFor = consumer.id;
       const purposeLabel = document.createElement('label'); purposeLabel.textContent = t('Purpose'); const purpose = document.createElement('textarea'); purpose.maxLength = 256; purpose.rows = 2; purpose.dataset.grantControl = ''; purpose.dataset.grantPurpose = text(connection.id); purpose.id = `grant-purpose-${connection.id}`; purposeLabel.htmlFor = purpose.id;
       const expiryLabel = document.createElement('label'); expiryLabel.textContent = t('Expires'); const expiry = document.createElement('input'); expiry.type = 'datetime-local'; expiry.dataset.grantControl = ''; expiry.dataset.grantExpiry = text(connection.id); expiry.id = `grant-expiry-${connection.id}`; expiryLabel.htmlFor = expiry.id;
       const mode = document.createElement('p'); mode.textContent = canCreateOAuth ? t('Mode: credential delivery') : t('Mode: proxy');

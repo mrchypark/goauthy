@@ -82,7 +82,7 @@
       const response = await api(mode === 'register' ? '/auth/v1/users/register' : '/auth/v1/users/request_reset', json('POST',data));
       if (!response.ok) { if (response.status < 500) submitted = false; throw new Error(failure(response)); }
       form.hidden = true;
-      status(words('Check your inbox. If this address is eligible, an email with the next steps will arrive shortly. You can close this tab.', '받은편지함을 확인하세요. 요청 가능한 주소라면 다음 단계가 담긴 이메일이 도착합니다. 이 탭을 닫아도 됩니다.'));
+      status(words('Check your inbox. If this address is eligible, an email with the next steps will arrive shortly.', '받은편지함을 확인하세요. 요청 가능한 주소라면 다음 단계가 담긴 이메일이 도착합니다.'));
     } catch (error) { if (submitted) unknown(); else { status(words('Unable to continue.', '계속할 수 없습니다.'), error.message, true); button.disabled = false; } } finally { globalThis.GoAuthyI18n?.setBusy?.(false); }
   });
   const start = $('#reset-start'), reset = $('#reset-form');

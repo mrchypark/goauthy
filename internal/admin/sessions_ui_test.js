@@ -9,14 +9,14 @@ const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 const api = async (path, opts = {}) => { calls.push({path, opts}); return ctx.reply; };
 const ctx = {document, console, URLSearchParams, encodeURIComponent, confirm: () => true,
   location: {pathname: '/auth/v1/admin/sessions', search: ''}, history: {replaceState(_, __, url) { ctx.location.search = url.split('?')[1] ? '?' + url.split('?')[1] : ''; }},
-  root: {innerHTML: ''}, shell: (_, __, body) => { node('app').innerHTML = body; for (const id of body.matchAll(/(?:id|data-[a-z-]+)="([^"]+)"/g)) node(id[1]); }, esc, api};
+  root: {innerHTML: ''}, shell: (_, body) => { node('app').innerHTML = body; for (const id of body.matchAll(/(?:id|data-[a-z-]+)="([^"]+)"/g)) node(id[1]); }, esc, api};
 ctx.reply = Object.assign([{id: 'sid/1', user_id: '<subject>', state: 'Auth', last_seen: 1, exp: 2, remote_ip: '1.2.3.4'}], {_headers: {get: n => ({'X-Page-Count': '2', 'X-Continuation-Token': 'cursor/next'}[n] || null)}});
 vm.runInNewContext(source, ctx);
 (async () => {
   await ctx.sessions();
   assert.equal(calls[0].path, '/auth/v1/sessions?session_state=Auth&page_size=20');
   assert.match(source, /min="1" max="65535"/);
-  assert.match(node('app').innerHTML, /Requested page size; the server applies its paging threshold and returns smaller result sets in full/);
+  assert.doesNotMatch(node('app').innerHTML, /Requested page size/);
   assert.match(node('app').innerHTML, /id="session-status" role="status" aria-live="polite"/);
   assert.match(node('session-table').innerHTML, /&lt;subject&gt;/);
   assert.match(node('session-table').innerHTML, /data-revoke-session="sid\/1"/);

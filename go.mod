@@ -18,7 +18,7 @@ require (
 	github.com/go-webauthn/webauthn v0.18.0
 	github.com/minio/minio-go/v7 v7.0.95
 	github.com/mrchypark/ely-htmx v0.1.0
-	github.com/mrchypark/elysdui v0.3.2
+	github.com/mrchypark/elysdui v0.4.6
 	github.com/mrchypark/rhiza v0.27.3
 	github.com/ncruces/go-sqlite3 v0.35.3
 	github.com/ory/fosite v0.49.0

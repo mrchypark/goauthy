@@ -189,7 +189,7 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
     await context.accountDashboard.checkSelfDelete();
     assert.equal(context.accountDashboard.state.selfDeleteAllowed, false);
     assert.equal(element('self-delete-section').hidden, failure === 406);
-    if (failure === 406) { assert.equal(element('self-delete-status').children[1].textContent, 'Please check this message.'); assert.match(element('self-delete-status').children[2].textContent, /^요청에 실패했습니다 \(406\)\.$/); }
+    if (failure === 406) { assert.equal(element('self-delete-status').children.length, 2); assert.match(element('self-delete-status').children[1].textContent, /^요청에 실패했습니다 \(406\)\.$/); }
     assert.equal(element('self-delete-button').disabled, true);
     element('self-delete-confirm').value = 'a@example.test';
     const forbiddenDelete = requests.length;
@@ -226,9 +226,8 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
   assert.equal(usernameStatus.attributes.role, 'alert');
   assert.equal(usernameStatus.attributes['aria-live'], 'assertive');
   assert.equal(usernameStatus.children[0].attributes['aria-hidden'], 'true');
-  assert.equal(usernameStatus.children[1].textContent, 'Please check this message.');
-  assert.equal(usernameStatus.children[2].textContent, failureDetail, 'error detail stays literal text');
-  assert.equal(usernameStatus.children.length, 3);
+  assert.equal(usernameStatus.children[1].textContent, failureDetail, 'error detail stays literal text');
+  assert.equal(usernameStatus.children.length, 2);
   context.accountDashboard.connectionDeps.status('username-status', 'Username saved.');
   assert.equal(usernameStatus.attributes.role, 'status');
   assert.equal(usernameStatus.attributes['aria-live'], 'polite');
@@ -246,8 +245,8 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
   const conversionStatus = element('passwordless-status');
   assert.equal(conversionCalls, 2, 'the conversion succeeds before account refresh fails');
   assert.equal(conversionStatus.attributes.role, 'alert');
-  assert.equal(conversionStatus.children[1].textContent, 'Please check this message.');
-  assert.equal(conversionStatus.children[2].textContent, 'Request failed (503).');
+  assert.equal(conversionStatus.children[1].textContent, 'Request failed (503).');
+  assert.equal(conversionStatus.children.length, 2);
   assert.doesNotMatch(conversionStatus.textContent, /retry|try again/i, 'ambiguous write outcomes get no retry advice');
 
   context.accountDashboard.state.account = { subject: 'stale-user' };
@@ -291,11 +290,11 @@ vm.runInNewContext(fs.readFileSync(__dirname + '/dashboard.js', 'utf8'), context
   element('password-confirm').value = 'NewPassword2';
   context.fetch = async () => ({ ok: false, status: 401, json: async () => ({ error_code: 'invalid_current_password' }) });
   await context.accountDashboard.submitPassword({ preventDefault() {}, target: form('password-form') });
-  assert.equal(element('password-status').children[2].textContent, 'The current password is incorrect. Check it and try again.');
+  assert.equal(element('password-status').children[1].textContent, 'The current password is incorrect. Check it and try again.');
   context.fetch = async () => ({ ok: false, status: 503, json: async () => ({ error_code: 'mutation_outcome_unknown' }) });
   const passwordFailureForm = form('password-form');
   await context.accountDashboard.submitPassword({ preventDefault() {}, target: passwordFailureForm });
-  assert.equal(element('password-status').children[2].textContent, 'Password change outcome is unknown. Check the current state before retrying.');
+  assert.equal(element('password-status').children[1].textContent, 'Password change outcome is unknown. Check the current state before retrying.');
   assert.equal(passwordFailureForm.submitButton.disabled, true, 'unknown password result must remain blocked');
   const blockedPasswordRequests = requests.length;
   context.fetch = async () => { throw new Error('offline'); };

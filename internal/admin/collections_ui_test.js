@@ -18,7 +18,7 @@ const ctx = {
   root,
   esc: value => String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c])),
   split: value => value.split(',').map(x => x.trim()).filter(Boolean),
-  shell: (_title, _sub, body) => { root.innerHTML = body; for (const match of body.matchAll(/(?:id|data-[a-z-]+)="([^"]+)"/g)) element(match[1]); },
+  shell: (_title, body) => { root.innerHTML = body; for (const match of body.matchAll(/(?:id|data-[a-z-]+)="([^"]+)"/g)) element(match[1]); },
   api: async (url, opts = {}) => { calls.push({url, opts}); if (url.includes('/missing')) throw Error('missing collection'); return opts.method ? {} : (url.endsWith('auth-collections') ? [{id: 'login', name: 'Login', auth_method: 'oauth2', enabled: true, revision: 3, fields: [], provider_ids: ['github', 'google']}] : {id: 'login', name: 'Login', auth_method: 'oauth2', enabled: true, revision: 3, fields: [], provider_ids: ['github', 'google']}); },
   confirm: message => { assert.match(message, /Delete collection/); return true; },
 };
@@ -156,7 +156,7 @@ vm.runInContext(source, ctx, {filename: 'collections.js'});
   assert.equal(deleted.opts.headers['If-Match'], '"3"');
   assert.equal(ctx.location.href, '/auth/v1/admin/collections');
   assert.match(source, /If-Match/);
-  assert.match(source, /metadata-only/);
+  assert.match(source, /metadata only/);
   assert.match(source, /data-field-type/);
 
   let resolveSave;

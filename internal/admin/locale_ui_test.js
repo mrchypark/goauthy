@@ -10,11 +10,9 @@ assert.equal(context.GoAuthyI18n.messages.Menu, '메뉴');
 assert.equal(context.GoAuthyI18n.t('Back to {list}', {list: '사용자'}), '사용자 목록으로 돌아가기');
 const localizedKeys = [
   'Name', 'Metadata', 'Optional JSON value', 'Create', 'Save changes', 'Cancel', 'Delete', 'Saved',
-  'New role', 'New group', 'Manage roles through the live authorization service.',
-  'Manage groups through the live authorization service.', '{count} roles', '{count} groups',
+  'New role', 'New group', '{count} roles', '{count} groups',
   '{count} users', 'Metadata must be valid JSON', 'Request outcome is unknown. Check the current state before retrying.', 'Saving…', 'Creating…',
   'Deleting…', 'Rotating…', 'Expiry must be a safe integer of at least 1719784800',
-  'Create a named authorization entity.', 'Update {name} and preserve its immutable ID.',
   'Create user', 'Edit user', 'Email', 'Given name',
   'Family name', 'Language', 'Roles', 'Groups', 'roles', 'groups', 'JSON array of names', 'Names must be a JSON array of strings', 'Preferred username',
   'Time zone', 'Optional IANA name, for example Asia/Seoul', 'Account expiry',
@@ -23,11 +21,10 @@ const localizedKeys = [
   'New API key', 'Expiry', 'Never',
   'Delete subject {subject} permanently?', 'Delete {kind} permanently?', 'Delete user',
   'Delete API key permanently?', 'Expiry must be a safe integer of at least 1719784800',
-  'Edit API key', 'Update rights and expiry; the name is immutable.',
-  'Create a key with at least one access right.', '2–24 characters; letters, numbers, _, /, or -',
+  'Edit API key', '2–24 characters; letters, numbers, _, /, or -',
   'Name must be 2–24 characters using letters, numbers, _, /, or -', 'Create key',
   'Select at least one access right', 'Secret (copy now): {secret}', 'Done',
-  'Manage access rights and expiry. Plaintext secrets are shown once and are not stored.',
+  'Plaintext secrets are shown once and are not stored.',
   'API-key permissions do not grant API-key management. Manage keys with an administrator browser session.',
   '{count} keys', 'Expires', 'Rotate', 'Rotated secret (copy now): {secret}',
 ];
@@ -50,7 +47,7 @@ assert.match(apiKeyForm, /href="\/auth\/v1\/admin\/api-keys">\$\{t\('Back to \{l
 assert.match(adminJS, /<legend>\$\{t\(g\)\}<\/legend>/);
 assert.match(adminJS, /data-group="\$\{g\}" data-right="\$\{r\}"/);
 assert.match(adminJS, /\$\{t\(r\)\}<\/label>/);
-assert.match(adminJS, /t\('Manage access rights and expiry\. Plaintext secrets are shown once and are not stored\.'/);
+assert.match(adminJS, /t\('Plaintext secrets are shown once and are not stored\.'/);
 assert.equal(context.GoAuthyI18n.t('Back to {list}', {list: context.GoAuthyI18n.t('API keys')}), 'API 키 목록으로 돌아가기');
 assert.equal(context.GoAuthyI18n.t('Generic'), '일반');
 assert.equal(context.GoAuthyI18n.t('UserAttributes'), '사용자 속성');
@@ -60,7 +57,7 @@ assert.equal(context.GoAuthyI18n.t('create'), '만들기');
 assert.equal(context.GoAuthyI18n.t('update'), '수정');
 assert.equal(context.GoAuthyI18n.t('delete'), '삭제');
 assert.equal(context.GoAuthyI18n.t('API-key permissions do not grant API-key management. Manage keys with an administrator browser session.'), 'API 키 권한으로는 API 키를 관리할 수 없습니다. 관리자 브라우저 세션으로 관리하세요.');
-assert.equal(context.GoAuthyI18n.t('Manage access rights and expiry. Plaintext secrets are shown once and are not stored.'), '접근 권한과 만료 시간을 관리합니다. 평문 비밀 값은 한 번만 표시되며 저장되지 않습니다.');
+assert.equal(context.GoAuthyI18n.t('Plaintext secrets are shown once and are not stored.'), '평문 비밀 값은 한 번만 표시되며 저장되지 않습니다.');
 const html = fs.readFileSync(__dirname + '/admin.html', 'utf8');
 assert.match(html, /src="\/auth\/v1\/branding\/locale\.js" defer/);
 assert.match(html, /data-language-select/);

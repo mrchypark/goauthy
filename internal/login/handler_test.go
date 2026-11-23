@@ -183,7 +183,7 @@ func TestHTMLLoginFailureKeepsOAuthInteractionForRetry(t *testing.T) {
 	for _, want := range []string{
 		`id="login-error" class="auth-error" role="alert"`, `data-i18n="Login failed">로그인하지 못했습니다`,
 		`aria-hidden="true">⚠</span>`, `data-i18n="Check your username or password">사용자 이름 또는 비밀번호를 확인하세요.`,
-		`data-i18n="Check your username or password"`, `data-brand-ko="계속할 서비스: browser-client"`,
+			`data-i18n="Check your username or password"`,
 		`id="login-client-context"><span data-i18n="Continue to">다음으로 계속</span> browser-client</p>`,
 		`data-login-progress hidden data-i18n="Signing in…">Signing in…</p>`,
 		`method="post" action="/auth/login"`, `value="` + interaction + `"`,

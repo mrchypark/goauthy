@@ -10,14 +10,14 @@ function catalog(kind, id) {
     const found = rows.find(x => (attribute ? x.name : x.scope) === id);
     if (!found) throw Error(t('Could not find {kind} {name}', {kind: label, name: id}));
     return catalog(kind, id, found);
-  }).catch(error => { shell(t('Catalog entry unavailable'), '', '<p class="error">' + esc(error.message) + '</p><p><a class="button secondary" href="/auth/v1/admin/' + kind + '">' + esc(t('Back to {list}', {list: t(kind)})) + '</a></p>'); });
+  }).catch(error => { shell(t('Catalog entry unavailable'), '<p class="error">' + esc(error.message) + '</p><p><a class="button secondary" href="/auth/v1/admin/' + kind + '">' + esc(t('Back to {list}', {list: t(kind)})) + '</a></p>'); });
   if (id != null) return catalogForm(kind, id, current || {}, t);
   return catalogList(kind, endpoint, label, attribute, t);
 }
 
 async function catalogList(kind, endpoint, label, attribute, t = key => key) {
   const h = (key, values) => esc(t(key, values));
-  shell(t(attribute ? 'User attributes' : 'Scopes'), t('Manage the live custom-claims catalog.'), '<div class="toolbar"><span class="hint" id="catalog-status">' + h('Loading…') + '</span><a class="button" id="catalog-new" href="/auth/v1/admin/' + kind + '/new">' + h(attribute ? 'New attribute' : 'New scope') + '</a></div><div id="catalog-list"></div>');
+  shell(t(attribute ? 'User attributes' : 'Scopes'), '<div class="toolbar"><span class="hint" id="catalog-status">' + h('Loading…') + '</span><a class="button" id="catalog-new" href="/auth/v1/admin/' + kind + '/new">' + h(attribute ? 'New attribute' : 'New scope') + '</a></div><div id="catalog-list"></div>');
   try {
     const data = await api(endpoint), rows = attribute ? (data && data.values || []) : (Array.isArray(data) ? data : []);
     document.getElementById('catalog-status').textContent = t('{count} {kind}', {count: rows.length, kind: t(rows.length === 1 ? label : label + 's')});
@@ -27,7 +27,7 @@ async function catalogList(kind, endpoint, label, attribute, t = key => key) {
         const details = attribute ? (x.typ || '—') : t('{accessCount} access, {idCount} ID', {accessCount: (x.attr_include_access || []).length, idCount: (x.attr_include_id || []).length});
         return '<tr><td><a href="/auth/v1/admin/' + kind + '/' + encodeURIComponent(name) + '">' + esc(name) + '</a></td><td>' + esc(details) + '</td></tr>';
       }).join('') + '</tbody></table>'
-      : '<p class="state">' + h('No {kind} entries yet. Create the first one above.', {kind: t(label + 's')}) + '</p>';
+      : '<p class="state">' + h('No {kind} entries yet.', {kind: t(label + 's')}) + '</p>';
   } catch (error) {
     document.getElementById('catalog-list').innerHTML = '<p class="error">' + h('Could not load {kind}: {message}', {kind: t(label + 's'), message: error.message}) + '</p>';
   }
@@ -42,7 +42,7 @@ function catalogForm(kind, id, value, t = key => key) {
   const fields = attribute
     ? '<label for="catalog-desc">' + h('Description') + ' <span class="hint">' + h('Optional, 128 characters max') + '</span><input id="catalog-desc" maxlength="128" value="' + esc(value.desc) + '"></label><label for="catalog-default">' + h('Default value') + ' <span class="hint">' + h('Optional JSON') + '</span><textarea id="catalog-default" placeholder="null">' + esc(value.default_value === undefined ? '' : JSON.stringify(value.default_value)) + '</textarea></label><label for="catalog-type">' + h('Type') + '<select id="catalog-type"><option value="">' + h('Optional') + '</option><option value="email"' + (value.typ === 'email' ? ' selected' : '') + '>email</option></select></label><label><input id="catalog-editable" type="checkbox"' + (value.user_editable ? ' checked' : '') + '> ' + h('User editable') + '</label>'
     : '<label for="catalog-access">' + h('Include in access claims') + ' <span class="hint">' + h('Comma-separated attribute names') + '</span><input id="catalog-access" value="' + esc((value.attr_include_access || []).join(', ')) + '"></label><label for="catalog-id">' + h('Include in ID claims') + ' <span class="hint">' + h('Comma-separated attribute names') + '</span><input id="catalog-id" value="' + esc((value.attr_include_id || []).join(', ')) + '"></label><label><input id="catalog-root" type="checkbox"' + (value.claims_at_root ? ' checked' : '') + '> ' + h('Put claims at root') + '</label>';
-  shell(t(editing ? 'Edit {kind}' : 'New {kind}', {kind: t(label)}), t(editing ? 'Update the catalog entry, then verify the server response.' : 'Create a catalog entry with server-side validation.'), '<div class="panel"><form id="catalog-form">' + nameInput + fields + '<div class="actions"><button id="catalog-submit" type="submit">' + h(editing ? 'Save changes' : 'Create {kind}', {kind: t(label)}) + '</button><a class="button secondary" id="catalog-cancel" href="/auth/v1/admin/' + kind + '">' + h('Cancel') + '</a>' + (editing ? '<button type="button" class="button secondary" id="catalog-delete">' + h('Delete') + '</button>' : '') + '<span id="catalog-result" role="status"></span></div></form></div>');
+  shell(t(editing ? 'Edit {kind}' : 'New {kind}', {kind: t(label)}), '<div class="panel"><form id="catalog-form">' + nameInput + fields + '<div class="actions"><button id="catalog-submit" type="submit">' + h(editing ? 'Save changes' : 'Create {kind}', {kind: t(label)}) + '</button><a class="button secondary" id="catalog-cancel" href="/auth/v1/admin/' + kind + '">' + h('Cancel') + '</a>' + (editing ? '<button type="button" class="button secondary" id="catalog-delete">' + h('Delete') + '</button>' : '') + '<span id="catalog-result" role="status"></span></div></form></div>');
   const form = document.getElementById('catalog-form');
   let saving = false;
   const controls = [...form.querySelectorAll('input, select, textarea, button')];

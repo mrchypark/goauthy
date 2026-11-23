@@ -12,15 +12,10 @@ assert.equal(i18n.messages['Back to dashboard'], '대시보드로 돌아가기')
 assert.equal(i18n.messages['Common logo'], '공통 로고');
 assert.equal(i18n.messages['Current common logo'], '현재 공통 로고');
 assert.equal(i18n.messages['Remove this common logo?'], '공통 로고를 삭제하시겠습니까?');
-for (const key of [
-  'Creating an account requires password recovery and email delivery. Assign goauthy_admin to grant access to this administration page.',
-  'Creating an account requires password recovery and email delivery. Administrator access requires the goauthy_admin role.'
-]) assert.match(i18n.messages[key], /goauthy_admin/);
+assert.match(i18n.messages['Account creation requires email delivery.'], /이메일 발송/);
+assert.match(i18n.messages['Account creation requires email delivery. Administrator access requires the goauthy_admin role.'], /goauthy_admin/);
 for (const [key, value] of Object.entries({Operators: '운영자', 'Service users': '서비스 사용자', 'New operator': '새 운영자', 'Create operator': '운영자 만들기', 'Edit operator': '운영자 수정'})) {
   assert.equal(i18n.messages[key], value);
 }
-for (const key of [
-  'Both pages show the same full account list available to you. Appearance here does not grant administrator access; roles determine access. Service app access is not blocked by this page.',
-  'Both pages show the same full account list available to you. Appearance on the operators page does not grant administrator access; roles determine access. Service app access is not blocked by this page.'
-]) assert.match(i18n.messages[key], /동일한 전체 계정 목록/);
+assert.match(i18n.messages['Operator listing does not grant administrator access; roles determine access.'], /관리자 권한/);
 console.log('admin module locale checks passed');

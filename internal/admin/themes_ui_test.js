@@ -62,7 +62,7 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
       previewLabels.set(key, {textContent: '', getAttribute: () => key});
     }
   }});
-  const previewNodes = new Map(['theme-sample-fields','theme-sample-title','theme-sample-description','theme-sample-button','theme-logo-image','theme-default-brand','theme-brand-label'].map(id => [id, {id, textContent: '', hidden: false, dataset: {}, style: {setProperty() {}}, set src(value) { this._src = value; this.srcWrites = (this.srcWrites || 0) + 1; }, get src() { return this._src; }}]));
+  const previewNodes = new Map(['theme-sample-fields','theme-sample-title','theme-sample-button','theme-logo-image','theme-default-brand','theme-brand-label'].map(id => [id, {id, textContent: '', hidden: false, dataset: {}, style: {setProperty() {}}, set src(value) { this._src = value; this.srcWrites = (this.srcWrites || 0) + 1; }, get src() { return this._src; }}]));
   const previewPanel = {style: {setProperty(name, value) { this[name] = value; }}}, brand = {style: {setProperty(name, value) { this[name] = value; }}}, topbar = {classList: {toggle(name, value) { this[name] = value; }}};
   frame.contentDocument = {documentElement: {lang: ''}, body: frameBody, getElementById: id => id === 'theme-sample-fields' ? (sampleReady ? sampleFields : null) : previewNodes.get(id) || null, querySelectorAll: selector => selector === '[data-i18n]' ? [...previewLabels.values()] : [], querySelector: selector => selector === '.auth-panel' ? previewPanel : selector === '.auth-topbar .auth-brand' ? brand : topbar};
   const root = {innerHTML: ''};
@@ -73,7 +73,7 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
     document, console, root, confirm: () => { confirmCount++; return true; }, encodeURIComponent, Date, FormData: class { append(key, value) { this[key] = value; } },
     esc: value => String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c])),
     GoAuthyI18n: {language, messages, t(key, values = {}) { return String(language === 'ko' ? (messages[key] || key) : key).replace(/\{(\w+)\}/g, (_, name) => Object.hasOwn(values, name) ? values[name] : `{${name}}`); }},
-    shell(title, subtitle, body, toolbar = '') { root.innerHTML = `${toolbar}${title}\n${subtitle}\n${body}`; for (const match of (toolbar + body).matchAll(/id="([^"]+)"/g)) node(match[1]); },
+    shell(title, body, toolbar = '') { root.innerHTML = `${toolbar}${title}\n${body}`; for (const match of (toolbar + body).matchAll(/id="([^"]+)"/g)) node(match[1]); },
     api: async (path, opts = {}) => {
       calls.push({path, opts});
       if (path === '/auth/v1/branding/legacy') return clone(legacyStatus || {resolved: true, legacy_theme: !!saved});
@@ -110,7 +110,7 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
   assert.match(h.node('theme-fields').innerHTML, /data-theme-layout="card_width"/);
   assert.match(h.node('theme-fields').innerHTML, /theme-colors/);
   assert.ok(h.controls.every(control => !control.disabled), 'all editor controls are enabled after initial load');
-  assert.ok(h.controls.some(control => control.dataset?.themeCopy === 'description'), 'description textarea participates in busy state');
+  assert.ok(h.controls.every(control => control.dataset?.themeCopy !== 'description'), 'description subtitle editor is absent');
   assert.ok(h.controls.some(control => control.dataset?.themeLayout === 'logo_alignment'), 'alignment select participates in busy state');
   assert.match(h.root.innerHTML, /theme-preview/);
   assert.match(h.frame.srcdoc, /href="\/auth\/v1\/theme\/global\.css"/);
@@ -359,10 +359,10 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
     await localized.ctx.clientTheme('goauthy', true);
     localized.frame.onload();
     const adminMarkup = localized.root.innerHTML, callsBefore = localized.calls.length;
-    const sampleText = () => ['title', 'description', 'button'].map(field => localized.previewNodes.get('theme-sample-' + field).textContent);
+    const sampleText = () => ['title', 'button'].map(field => localized.previewNodes.get('theme-sample-' + field).textContent);
     const defaults = {
-      en: ['Sign in', 'Enter your account details to continue.', 'Continue'],
-      ko: ['로그인', koreanMessages['Enter your account details to continue.'], koreanMessages.Continue],
+      en: ['Sign in', 'Continue'],
+      ko: ['로그인', koreanMessages.Continue],
     };
     const switchCopy = language => { localized.copyLanguage.value = language; localized.copyLanguage.onchange(); };
     for (const language of ['en', 'ko', 'en']) {
@@ -370,7 +370,7 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
       assert.deepEqual(sampleText(), defaults[language], `${adminLanguage} admin: ${language} preview defaults`);
       assert.equal(localized.frame.contentDocument.documentElement.lang, language);
       assert.match(localized.frame.srcdoc, /lang="en"/);
-      for (const key of ['PREVIEW', 'Email', 'Password', 'Example error message']) {
+      for (const key of ['Email', 'Password', 'Example error message']) {
         assert.equal(localized.previewLabels.get(key)?.textContent, language === 'ko' ? koreanMessages[key] : key, `${language} static ${key}`);
       }
       assert.equal(localized.previewNodes.get('theme-logo-image').alt, language === 'ko' ? koreanMessages['Sign-in preview sample'] : 'Sign-in preview sample');
@@ -379,8 +379,8 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
     loadedImage.complete = true; loadedImage.naturalWidth = 120; loadedImage.onload();
     const cachedLogoURL = loadedImage.src, previewLogo = localized.previewNodes.get('theme-logo-image');
     const editorLogoWrites = loadedImage.srcWrites, previewLogoWrites = previewLogo.srcWrites;
-    const custom = {en: ['English title', 'English description', 'English button'], ko: ['한국어 제목', '한국어 설명', '한국어 버튼']};
-    const editCopy = values => ['title', 'description', 'button'].forEach((field, index) => {
+    const custom = {en: ['English title', 'English button'], ko: ['한국어 제목', '한국어 버튼']};
+    const editCopy = values => ['title', 'button'].forEach((field, index) => {
       const input = localized.copyFields.find(input => input.dataset.themeCopy === field);
       input.value = values[index]; input.oninput();
     });
@@ -391,7 +391,7 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
     for (const language of ['en', 'ko', 'en']) {
       switchCopy(language);
       assert.deepEqual(sampleText(), custom[language], 'unsaved language edits survive switching');
-      assert.deepEqual(['title', 'description', 'button'].map(field => localized.copyFields.find(input => input.dataset.themeCopy === field).value), custom[language]);
+      assert.deepEqual(['title', 'button'].map(field => localized.copyFields.find(input => input.dataset.themeCopy === field).value), custom[language]);
     }
     assert.equal(localized.calls.length, callsBefore, 'language changes and typing do not request data');
     assert.equal(localized.frameWrites, 1, 'language changes keep the iframe and its loaded assets');
@@ -404,14 +404,14 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
     assert.equal(localized.ctx.GoAuthyI18n.language, adminLanguage);
     assert.equal(localized.root.innerHTML, adminMarkup, 'management UI remains in its own language');
     await localized.node('theme-save').onclick();
-    assert.deepEqual(clone(localized.saved.login.copy), {en: {title: custom.en[0], description: custom.en[1], button: custom.en[2]}, ko: {title: custom.ko[0], description: custom.ko[1], button: custom.ko[2]}});
+    assert.deepEqual(clone(localized.saved.login.copy), {en: {title: custom.en[0], button: custom.en[1]}, ko: {title: custom.ko[0], button: custom.ko[1]}});
     assert.deepEqual(Object.keys(localized.saved.login).sort(), ['card_width', 'copy', 'logo_alignment'], 'editing language does not become a stored default');
-    editCopy(['Discard title', 'Discard description', 'Discard button']);
+    editCopy(['Discard title', 'Discard button']);
     await localized.node('theme-reload').onclick();
     for (const language of ['en', 'ko']) {
       switchCopy(language);
       assert.deepEqual(sampleText(), custom[language], 'reload restores both saved languages');
-      assert.deepEqual(['title', 'description', 'button'].map(field => localized.copyFields.find(input => input.dataset.themeCopy === field).value), custom[language]);
+      assert.deepEqual(['title', 'button'].map(field => localized.copyFields.find(input => input.dataset.themeCopy === field).value), custom[language]);
     }
   }
   console.log('client theme UI checks passed');

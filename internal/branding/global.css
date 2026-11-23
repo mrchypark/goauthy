@@ -435,9 +435,8 @@ pre {
 }
 .auth-brand { display: flex; align-items: center; gap: 12px; color: hsl(var(--text-high)); font-size: 23px; font-weight: 600; letter-spacing: -.9px; }
 .auth-panel { width: min(100%, 420px); align-self: center; justify-self: center; margin: 40px 0 48px; }
-.auth-page .auth-eyebrow { margin: 0 0 16px; color: hsl(var(--action)); font-size: 11px; font-weight: 700; letter-spacing: .15em; }
 .auth-panel h1 { margin: 0 0 20px; font-size: clamp(32px, 4vw, 44px); font-weight: 600; letter-spacing: -.055em; line-height: 1.2; }
-.auth-panel .auth-intro, .auth-panel > p:not(.auth-eyebrow) { margin: 0 0 20px; font-size: 15px; line-height: 1.7; text-wrap: pretty; }
+.auth-panel .auth-intro, .auth-panel > p { margin: 0 0 20px; font-size: 15px; line-height: 1.7; text-wrap: pretty; }
 .auth-panel form { display: grid; gap: 14px; }
 .auth-panel label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: hsl(var(--text-high)); }
 .auth-panel input { margin: 0; min-height: 44px; padding: 9px 12px; font-size: 16px; border-color: hsl(var(--text) / .25); background: hsl(var(--bg)); border-radius: var(--border-radius); transition: border-color 160ms ease, background-color 160ms ease; }

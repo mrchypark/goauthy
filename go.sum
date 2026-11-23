@@ -390,8 +390,8 @@ github.com/mozillazg/go-httpheader v0.2.1 h1:geV7TrjbL8KXSyvghnFm+NyTux/hxwueTSr
 github.com/mozillazg/go-httpheader v0.2.1/go.mod h1:jJ8xECTlalr6ValeXYdOF8fFUISeBAdw6E61aqQma60=
 github.com/mrchypark/ely-htmx v0.1.0 h1:HI5uuCvLcbiHdiEi3GSKz1fPMNc+bLFGQhrSj6o/wrs=
 github.com/mrchypark/ely-htmx v0.1.0/go.mod h1:df8hZdxaPs+K67jE5bkpNq9uSwoe3fFBhZLKYeCLs1s=
-github.com/mrchypark/elysdui v0.3.2 h1:t+StjE//TvrRC4IEPFYDfw9SB75q+pVj936S36aY9hI=
-github.com/mrchypark/elysdui v0.3.2/go.mod h1:hY215nJF85Xjy2CvDdMYvkE4nFXXAeCuYorq9VQjvrM=
+github.com/mrchypark/elysdui v0.4.6 h1:dHY8fikVoMcFu6wAgr+yxKHoTxzXcnbc3HxkIYgTV+0=
+github.com/mrchypark/elysdui v0.4.6/go.mod h1:hY215nJF85Xjy2CvDdMYvkE4nFXXAeCuYorq9VQjvrM=
 github.com/mrchypark/fosite v0.49.0-goauthy.1 h1:qmX+A4WsDTlMdKYIYG5MjGffBykXH1iuIZebOqj7xBg=
 github.com/mrchypark/fosite v0.49.0-goauthy.1/go.mod h1:ZvPcG+J72oeyT6IJEKNrmmdDwIt/xx9sYp79yj/ulmY=
 github.com/mrchypark/latticedb-go v0.13.0 h1:62TMpqK1PMwoBWVNEOBi6TEmlZUeXAswykuii5bB9CY=

@@ -242,18 +242,24 @@ func TestRBACPagesCommonBrand(t *testing.T) {
 	handoffReq := httptest.NewRequest(http.MethodGet, "/tenant/account/connection-handoffs/missing", nil)
 	handoffW := httptest.NewRecorder()
 	h.ConnectionHandoffPage(handoffW, handoffReq)
-	for _, want := range []string{`· Acme ID</title>`, `href="/tenant/auth/v1/theme/acme/2"`, `<p class="eyebrow">Acme ID · `} {
+	for _, want := range []string{`· Acme ID</title>`, `href="/tenant/auth/v1/theme/acme/2"`, `<h1>Review service access</h1>`} {
 		if !strings.Contains(handoffW.Body.String(), want) {
 			t.Fatalf("handoff missing %q in %s", want, handoffW.Body.String())
 		}
+	}
+	if strings.Contains(handoffW.Body.String(), `class="eyebrow"`) {
+		t.Fatal("connection handoff rendered a redundant eyebrow")
 	}
 
 	oauth2Req := httptest.NewRequest(http.MethodGet, "/tenant/account/connections/oauth2/complete", nil)
 	oauth2W := httptest.NewRecorder()
 	h.renderOAuth2CompletionPage(oauth2W, oauth2Req)
-	for _, want := range []string{`· Acme ID</title>`, `<p class="eyebrow">Acme ID</p>`, `href="/tenant/auth/v1/theme/acme/2"`} {
+	for _, want := range []string{`· Acme ID</title>`, `<h1>Connection saved</h1>`, `href="/tenant/auth/v1/theme/acme/2"`} {
 		if !strings.Contains(oauth2W.Body.String(), want) {
 			t.Fatalf("oauth2 completion missing %q in %s", want, oauth2W.Body.String())
 		}
+	}
+	if strings.Contains(oauth2W.Body.String(), `class="eyebrow"`) {
+		t.Fatal("OAuth completion rendered a redundant eyebrow")
 	}
 }

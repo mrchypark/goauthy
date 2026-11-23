@@ -19,7 +19,7 @@ const ctx = {
   }},
   // Bounded form fixture, not a browser substitute: missing IDs return null,
   // rerender discards removed controls, and native input defaults survive.
-  shell(_title, _hint, html) {
+  shell(_title, html) {
     elements.clear();
     for (const m of html.matchAll(/<(\w+)\b([^>]*\bid="([^"]+)"[^>]*)>/g)) {
       const attrs = m[2], tag = m[1].toUpperCase();

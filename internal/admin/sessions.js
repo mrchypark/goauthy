@@ -7,11 +7,11 @@ async function sessions() {
   const state = states.includes(params.get('session_state')) ? params.get('session_state') : 'Auth';
   const rawPageSize = params.get('page_size'), parsedPageSize = Number(rawPageSize);
   const pageSize = rawPageSize && Number.isInteger(parsedPageSize) && parsedPageSize >= 1 && parsedPageSize <= 65535 ? String(parsedPageSize) : '20';
-  shell(t('Sessions'), t('Inspect active browser sessions and revoke access at the smallest useful scope.'),
+  shell(t('Sessions'),
     '<div class="panel"><form id="session-filter" class="toolbar">' +
     '<label for="session-state">' + h('State') + '<select id="session-state">' + states.map(x => `<option value="${x}">${x}</option>`).join('') +
     '</select></label><label for="session-page-size">' + h('Rows') + '<input id="session-page-size" type="number" min="1" max="65535" step="1" inputmode="numeric" value="' + esc(pageSize) + '"></label>' +
-    '<button type="submit">' + h('Apply') + '</button><span class="hint" id="session-status" role="status" aria-live="polite">' + h('Loading…') + '</span></form><p class="hint">' + h('Requested page size; the server applies its paging threshold and returns smaller result sets in full.') + '</p></div>' +
+    '<button type="submit">' + h('Apply') + '</button><span class="hint" id="session-status" role="status" aria-live="polite">' + h('Loading…') + '</span></form></div>' +
     '<div id="session-table"></div><div id="session-paging"></div>' +
     '<div class="panel"><h2>' + h('Global logout') + '</h2><p class="warning">' + h('Revoke every browser session and OAuth token. This also ends your current administrator session.') + '</p>' +
     '<form id="global-logout"><label><input id="global-ack" type="checkbox"> ' + h('I understand this administrator session will be lost.') + '</label>' +
@@ -54,7 +54,7 @@ async function sessions() {
     if (!confirm(t('Severe action: revoke every session and token, including this administrator session?'))) return;
     try {
       await api('/auth/v1/sessions', {method: 'DELETE'});
-      root.innerHTML = '<p class="eyebrow">' + h('GoAuthy / administration') + '</p><h1>' + h('Global logout complete') + '</h1><p class="state">' + h('Every session and token was revoked, including this administrator session. Sign in again to continue.') + '</p>';
+      root.innerHTML = '<h1>' + h('Global logout complete') + '</h1><p class="state">' + h('Every session and token was revoked, including this administrator session. Sign in again to continue.') + '</p>';
     } catch (err) { showError(out, err); }
   };
   table.onclick = async e => {

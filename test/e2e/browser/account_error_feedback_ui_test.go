@@ -121,7 +121,7 @@ func TestAccountErrorFeedbackUI(t *testing.T) {
 		t.Fatalf("account profile heading/content not loaded: heading-empty=%t", strings.TrimSpace(initialProfileName) == "")
 	}
 
-	assertErrorFeedback := func(id, wantTitle string) {
+	assertErrorFeedback := func(id, wantTitle, wantDetail string) {
 		t.Helper()
 		var role, live, iconHidden, title, detail string
 		var bold bool
@@ -137,8 +137,8 @@ func TestAccountErrorFeedbackUI(t *testing.T) {
 		); err != nil {
 			t.Fatalf("read %s error feedback: %v", id, err)
 		}
-		if role != "alert" || live != "assertive" || iconHidden != "true" || title != wantTitle || detail == "" || !bold {
-			t.Fatalf("%s feedback role=%q live=%q icon-hidden=%q title=%q detail-empty=%t bold=%t", id, role, live, iconHidden, title, detail == "", bold)
+		if role != "alert" || live != "assertive" || iconHidden != "true" || title != wantTitle || detail != wantDetail || (wantTitle != "" && !bold) {
+			t.Fatalf("%s feedback role=%q live=%q icon-hidden=%q title=%q detail=%q bold=%t", id, role, live, iconHidden, title, detail, bold)
 		}
 	}
 
@@ -156,7 +156,7 @@ func TestAccountErrorFeedbackUI(t *testing.T) {
 	); err != nil {
 		t.Fatalf("submit password mismatch: %v", err)
 	}
-	assertErrorFeedback("password-status", "Please check this message.")
+	assertErrorFeedback("password-status", "", "The current password is incorrect. Check it and try again.")
 	var currentValue, newValue, confirmValue, profileText, profileNameAfter string
 	stage = "verify-password-form-preserved"
 	if err := runLoginJourney(browser, 10*time.Second,
@@ -210,7 +210,7 @@ func TestAccountErrorFeedbackUI(t *testing.T) {
 		stage = "controlled-profile-503-intercept"
 		t.Fatal("exact /account/data request was not intercepted")
 	}
-	assertErrorFeedback("profile-status", "Your account could not be loaded.")
+	assertErrorFeedback("profile-status", "Your account could not be loaded.", "Request failed (503).")
 	var profileAfterFailure string
 	var passwordSectionHidden bool
 	stage = "verify-profile-load-failure-cleared-data"

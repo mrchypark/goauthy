@@ -8,7 +8,7 @@ const ctx = {
   console,
   document: {getElementById: node, createElement: () => ({value: '', textContent: ''})},
   esc: value => String(value ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c])),
-  shell: (_title, _subtitle, html) => { for (const match of html.matchAll(/id="([^"]+)"/g)) node(match[1]); },
+  shell: (_title, html) => { for (const match of html.matchAll(/id="([^"]+)"/g)) node(match[1]); },
   api: async () => ({types: ['password_reset', 'registered_already'], languages: {password_reset: ['en', 'ko'], registered_already: ['en']}}),
 };
 vm.runInNewContext(fs.readFileSync(__dirname + '/templates.js', 'utf8'), ctx);

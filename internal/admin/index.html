@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="/auth/v1/branding/brand.css"></head>
 <body>
   <main>
-    <p class="brand-lockup"><i class="brand-symbol" aria-hidden="true"></i>GoAuthy</p><h1>Administration</h1><p class="lede">Manage identities, applications and access.</p>
+    <p class="brand-lockup"><i class="brand-symbol" aria-hidden="true"></i>GoAuthy</p><h1>Administration</h1>
     <nav class="index-nav" aria-label="Administration">
       <ul>
         {{range .Routes}}<li>{{template "button" (dict "Href" .Path "Label" .Label "Variant" "outline" "Size" "sm")}}</li>{{end}}

@@ -25,7 +25,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .hint, .status, .connection-key-settings { color: var(--color-muted); font-size: .9rem; line-height: 1.5; }
 .hint, .status { margin: 6px 0; }
 .status.error { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--goauthy-error) 38%, var(--color-line)); border-radius: .5rem; background: color-mix(in srgb, var(--goauthy-error) 9%, var(--color-paper)); color: var(--color-ink); }
-.status-icon { grid-row: span 2; font-size: 1.1rem; }
+.status-icon { grid-column: 1; grid-row: 1; font-size: 1.1rem; }
+.status-detail, .status.error > strong, .status.error > a { grid-column: 2; }
 .status:empty, [hidden] { display: none !important; }
 #profile p { margin: .25rem 0; }
 #attributes { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }

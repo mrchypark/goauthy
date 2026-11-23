@@ -265,7 +265,7 @@
       try {
         const value = await request(path, options).then((response) => { if (kind !== 'revoke') return readJSON(response); if (response.status !== 204) throw new Error('unsupported revoke response'); return null; }); if (!current()) return;
         if (kind === 'revoke') { renderState({ state: 'revoked', version, connected: false, provider_id: '', scopes: [] }); return; }
-        if (kind === 'start') { if (!validURL(value?.authorization_url)) throw new Error('unsafe authorization URL'); continueButton.href = value.authorization_url; continueButton.hidden = false; loaded = false; start.hidden = true; statusText(t('Open authorization in a new tab, return here, then check status.')); setPanelBusy(false); return; }
+        if (kind === 'start') { if (!validURL(value?.authorization_url)) throw new Error('unsafe authorization URL'); continueButton.href = value.authorization_url; continueButton.hidden = false; loaded = false; start.hidden = true; setPanelBusy(false); return; }
         if (!validStatus(value) || (kind === 'refresh' && (value.state !== 'ready' || value.version !== version + 1)) || (kind === 'reconnect' && (value.state !== 'reconnecting' || value.version !== version))) throw new Error('unsupported response'); renderState(value);
       } catch (_) { if (current()) { failed = true; clearMetadata(); clearLink(); statusText(t('OAuth action failed. Check status before trying again.'), true); setPanelBusy(false); } }
     }

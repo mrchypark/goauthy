@@ -275,8 +275,7 @@ func TestForcedMFAOTPInvalidFormRendersRetryAndKeepsBoundCode(t *testing.T) {
 	}
 	for _, want := range []string{
 		`class="auth-error" role="alert"`, `class="auth-error-icon" aria-hidden="true">⚠`,
-		`data-i18n="Please check this message."`, `data-i18n="Check the code and try again."`,
-		"메시지를 확인해 주세요.", "인증 코드를 확인하고 다시 시도하세요.",
+		`data-i18n="Code not accepted"`, "인증 코드가 올바르지 않습니다.",
 		`role="status" aria-live="polite"`, `action="/auth/v1/users/otp/verify"`, `name="code"`,
 	} {
 		if !strings.Contains(failed.Body.String(), want) {

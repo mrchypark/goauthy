@@ -10,16 +10,13 @@
     el.setAttribute('role', error ? 'alert' : 'status');
     el.setAttribute('aria-live', error ? 'assertive' : 'polite');
     if (!error) { el.textContent = message; return; }
-    const title = id === 'profile-status' ? 'Your account could not be loaded.' : 'Please check this message.';
     const icon = document.createElement('span'); icon.className = 'status-icon'; icon.setAttribute('aria-hidden', 'true'); icon.textContent = '⚠';
-    const heading = document.createElement('strong'); heading.textContent = t(title);
     const detail = document.createElement('span'); detail.className = 'status-detail'; detail.textContent = message;
-    if (message === t('Your session has expired. Sign in again.')) {
-      const action = document.createElement('a'); action.className = 'button secondary'; action.href = endpoint('/account/login'); action.textContent = t('Sign in again');
-      el.replaceChildren(icon, heading, detail, action);
-      return;
-    }
-    el.replaceChildren(icon, heading, detail);
+    const children = [icon];
+    if (id === 'profile-status') { const heading = document.createElement('strong'); heading.textContent = t('Your account could not be loaded.'); children.push(heading); }
+    children.push(detail);
+    if (message === t('Your session has expired. Sign in again.')) { const action = document.createElement('a'); action.className = 'button secondary'; action.href = endpoint('/account/login'); action.textContent = t('Sign in again'); children.push(action); }
+    el.replaceChildren(...children);
   };
   const basePath = () => { const path = window.location.pathname; const marker = path.lastIndexOf('/account'); return marker < 0 ? '' : path.slice(0, marker); };
   const endpoint = (path) => `${basePath()}${path}`;
@@ -189,7 +186,7 @@
     return withFormBusy(event.target, async () => {
       const current = $('#password-current').value; const next = $('#password-new').value;
       if (next !== $('#password-confirm').value) { status('password-status', t('New passwords do not match.'), true); return; }
-      try { await jsonRequest(`/auth/v1/users/${encodeURIComponent(state.account.subject)}/self`, 'PUT', { password_current: current, password_new: next }); event.target.reset(); status('password-status', t('Password changed. Use the new password the next time you sign in.')); }
+      try { await jsonRequest(`/auth/v1/users/${encodeURIComponent(state.account.subject)}/self`, 'PUT', { password_current: current, password_new: next }); event.target.reset(); status('password-status', t('Password changed.')); }
       catch (error) { status('password-status', error.message, true); }
     });
   }

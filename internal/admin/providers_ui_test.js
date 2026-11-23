@@ -16,7 +16,7 @@ const ctx = {
     getElementById: node,
     querySelectorAll: selector => selector.startsWith('#provider-form ') ? controls() : [],
   },
-  shell: (_title, _subtitle, html) => {
+  shell: (_title, html) => {
     nodes.clear();
     for (const match of html.matchAll(/<(\w+)\b([^>]*\bid="([^"]+)"[^>]*)>/g)) {
       const tagName = match[1].toUpperCase(), attrs = match[2];

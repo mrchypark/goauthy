@@ -56,7 +56,7 @@ func (h *Handler) accountLoginGet(w http.ResponseWriter, r *http.Request, forceM
 	}
 	http.SetCookie(w, cookie)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	h.renderApprovalLoginPage(w, r, payload, "/account/login", "Sign in to manage your account.", interaction.Token, csrf, themeURL)
+	h.renderApprovalLoginPage(w, r, payload, "/account/login", "", interaction.Token, csrf, themeURL)
 }
 
 func (h *Handler) accountLoginPost(w http.ResponseWriter, r *http.Request, forceMFA bool) {

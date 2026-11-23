@@ -1,7 +1,7 @@
 async function blacklist() {
   const t = globalThis.GoAuthyI18n?.t || ((key, values = {}) => String(key).replace(/\{(\w+)\}/g, (match, name) => Object.hasOwn(values, name) ? String(values[name]) : match));
   const fmt = v => v ? new Date(Number(v) * 1000).toLocaleString() : t('Never');
-  shell(t('IP Blacklist'), t('Block specific IP prefixes.'),
+  shell(t('IP Blacklist'),
     '<div class="panel"><h2>' + t('Blacklist') + '</h2><form id="bl-add" class="toolbar">' +
     '<label for="bl-ip">' + t('IP prefix') + '<input id="bl-ip" required placeholder="203.0.113.0/24"></label>' +
     '<label for="bl-exp">' + t('Expiry') + '<input id="bl-exp" type="datetime-local" required></label>' +

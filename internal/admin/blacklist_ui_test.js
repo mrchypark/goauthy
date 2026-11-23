@@ -8,7 +8,7 @@ const node = id => nodes.get(id) || (nodes.set(id, {id, innerHTML: '', textConte
 const ctx = {
   console, document: {getElementById: node}, encodeURIComponent, confirm: () => true,
   esc: value => String(value ?? ''),
-  shell: (_title, _subtitle, body) => { node('app').innerHTML = body; for (const match of body.matchAll(/id="([^"]+)"/g)) node(match[1]); },
+  shell: (_title, body) => { node('app').innerHTML = body; for (const match of body.matchAll(/id="([^"]+)"/g)) node(match[1]); },
   api: async (path, opts = {}) => { calls.push({path, opts}); return opts.method ? {} : {ips: [{ip: '203.0.113.0/24', exp: 2_000_000_000}]}; },
 };
 vm.runInNewContext(source, ctx);

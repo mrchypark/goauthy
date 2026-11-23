@@ -18,7 +18,7 @@ func TestClientLoginBrandingEscapesCopyAndKeepsAuthenticationFields(t *testing.T
 		if id != "browser-client" {
 			t.Fatalf("client=%q", id)
 		}
-		return LoginBranding{LogoURL: "/auth/v1/clients/browser-client/logo?updated=1", English: branding.LoginCopy{Title: `Welcome <script>alert(1)</script>`, Description: "Your team", Button: "Continue"}, Korean: branding.LoginCopy{Title: "환영합니다", Description: "팀 로그인", Button: "계속"}}, nil
+		return LoginBranding{LogoURL: "/auth/v1/clients/browser-client/logo?updated=1", English: branding.LoginCopy{Title: `Welcome <script>alert(1)</script>`, Description: "Unused editorial subtitle", Button: "Continue"}, Korean: branding.LoginCopy{Title: "환영합니다", Description: "사용하지 않는 안내", Button: "계속"}}, nil
 	})
 	r := httptest.NewRequest(http.MethodGet, authorizePath+"?"+authorizeValues().Encode(), nil)
 	r.AddCookie(&http.Cookie{Name: "goauthy_ui_locale", Value: "ko"})
@@ -37,6 +37,9 @@ func TestClientLoginBrandingEscapesCopyAndKeepsAuthenticationFields(t *testing.T
 	if strings.Contains(body, `<script>alert(1)</script>`) {
 		t.Fatal("unescaped copy")
 	}
+	if strings.Contains(body, "Unused editorial subtitle") || strings.Contains(body, "사용하지 않는 안내") || strings.Contains(body, `class="auth-eyebrow"`) || strings.Contains(body, "Your access. In your hands.") {
+		t.Fatal("unnecessary login subtitle rendered")
+	}
 	if strings.Contains(w.Header().Get("Content-Security-Policy"), "unsafe-inline") {
 		t.Fatal("CSP weakened")
 	}
@@ -54,13 +57,16 @@ func TestAccountLoginCommonBrandAndCopy(t *testing.T) {
 	r.RemoteAddr = "203.0.113.8:1234"
 	w := httptest.NewRecorder()
 	h.AccountLoginHandler(false).ServeHTTP(w, r)
-	for _, want := range []string{`ID &#34;&lt;operator&gt;&#34;`, `Your common account`, `One account for both apps`, `data-brand-en="Your common account"`, `name="csrf_token"`, `action="/account/login"`, `src="/auth/v1/branding/logo?updated=7"`} {
+	for _, want := range []string{`ID &#34;&lt;operator&gt;&#34;`, `Your common account`, `data-brand-en="Your common account"`, `name="csrf_token"`, `action="/account/login"`, `src="/auth/v1/branding/logo?updated=7"`} {
 		if w.Code != 200 || !strings.Contains(w.Body.String(), want) {
 			t.Fatalf("status=%d missing %q body=%s", w.Code, want, w.Body.String())
 		}
 	}
 	if strings.Contains(w.Body.String(), `<operator>`) {
 		t.Fatal("unescaped brand")
+	}
+	if strings.Contains(w.Body.String(), "One account for both apps") {
+		t.Fatal("brand description subtitle rendered")
 	}
 }
 
