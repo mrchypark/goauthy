@@ -2,6 +2,7 @@ package branding
 
 import (
 	"errors"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -10,11 +11,15 @@ import (
 )
 
 var (
-	clientIDPattern = regexp.MustCompile(`^[a-zA-Z0-9,.:/_\-&?=~#!$'()*+%]{2,256}$`)
-	cssValuePattern = regexp.MustCompile(`^[a-z0-9-,.#()%/\s]+$`)
+	clientIDPattern  = regexp.MustCompile(`^[a-zA-Z0-9,.:/_\-&?=~#!$'()*+%]{2,256}$`)
+	cssNumberPattern = regexp.MustCompile(`^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$`)
+	cssValuePattern  = regexp.MustCompile(`^[a-z0-9-,.#()%/\s]+$`)
 )
 
-var ErrInvalidTheme = errors.New("invalid theme")
+var (
+	ErrInvalidTheme     = errors.New("invalid theme")
+	ErrThemeLowContrast = errors.New("theme colors lack sufficient contrast")
+)
 
 // ThemeCSS contains the HSL values and CSS values used by a theme variant.
 // HSL slices are validated at the JSON boundary so missing values are not
@@ -74,7 +79,7 @@ func DefaultTheme(clientID string) Theme {
 			Text:      []uint16{200, 5, 37},
 			TextHigh:  []uint16{200, 15, 25},
 			Bg:        []uint16{34, 25, 97},
-			BgHigh:    []uint16{34, 20, 90},
+			BgHigh:    []uint16{34, 20, 95},
 			Action:    []uint16{34, 100, 40},
 			Accent:    []uint16{265, 100, 53},
 			Error:     []uint16{15, 100, 37},
@@ -89,7 +94,7 @@ func DefaultTheme(clientID string) Theme {
 			BgHigh:    []uint16{200, 20, 17},
 			Action:    []uint16{34, 100, 59},
 			Accent:    []uint16{265, 100, 53},
-			Error:     []uint16{15, 100, 37},
+			Error:     []uint16{15, 100, 70},
 			BtnText:   "hsl(var(--bg))",
 			ThemeSun:  "hsla(var(--action) / .7)",
 			ThemeMoon: "hsla(var(--accent) / .85)",
@@ -122,6 +127,24 @@ func (t Theme) Validate() error {
 			if (language != "en" && language != "ko") || utf8.RuneCountInString(copy.Title) > 120 || utf8.RuneCountInString(copy.Description) > 500 || utf8.RuneCountInString(copy.Button) > 60 {
 				return ErrInvalidTheme
 			}
+		}
+	}
+	return nil
+}
+
+// ValidateWriteContrast rejects new themes whose core text or focus colors
+// would be unreadable. Stored themes intentionally skip this check so that
+// they remain loadable and CSS can render them with accessible fallbacks.
+func (t Theme) ValidateWriteContrast() error {
+	for _, theme := range []ThemeCSS{t.Light, t.Dark} {
+		if !hasContrast(theme.Text, theme.Bg, 4.5) || !hasContrast(theme.TextHigh, theme.Bg, 4.5) || !hasContrast(theme.Error, theme.Bg, 4.5) || !hasContrast(theme.Action, theme.Bg, 3) {
+			return ErrThemeLowContrast
+		}
+		if !hasContrast(theme.Text, theme.BgHigh, 4.5) || !hasContrast(theme.TextHigh, theme.BgHigh, 4.5) || !hasContrast(theme.Error, theme.BgHigh, 4.5) || !hasContrast(theme.Action, theme.BgHigh, 3) {
+			return ErrThemeLowContrast
+		}
+		if buttonText, known := cssColorRGB(theme.BtnText, theme); known && contrast(buttonText, hslRGB(theme.Action)) < 4.5 {
+			return ErrThemeLowContrast
 		}
 	}
 	return nil
@@ -212,6 +235,7 @@ func (t Theme) EmailCSS() string {
 }
 
 func appendThemeCSS(css *strings.Builder, theme ThemeCSS) {
+	theme = theme.accessible()
 	for _, value := range []struct {
 		name string
 		data []uint16
@@ -239,4 +263,148 @@ func appendThemeCSS(css *strings.Builder, theme ThemeCSS) {
 	css.WriteString(";--theme-moon:")
 	css.WriteString(theme.ThemeMoon)
 	css.WriteByte(';')
+}
+
+func (t ThemeCSS) accessible() ThemeCSS {
+	t.Text = accessibleHSL(t.Text, t.Bg, 4.5)
+	t.TextHigh = accessibleHSL(t.TextHigh, t.Bg, 4.5)
+	t.Action = accessibleHSL(t.Action, t.Bg, 3)
+	t.Error = accessibleHSL(t.Error, t.Bg, 4.5)
+	if !hasContrast(t.Text, t.BgHigh, 4.5) || !hasContrast(t.TextHigh, t.BgHigh, 4.5) || !hasContrast(t.Error, t.BgHigh, 4.5) || !hasContrast(t.Action, t.BgHigh, 3) {
+		t.BgHigh = t.Bg
+	}
+	t.BtnText = accessibleButtonText(t.BtnText, t)
+	return t
+}
+
+func accessibleHSL(foreground, background []uint16, minimum float64) []uint16 {
+	if hasContrast(foreground, background, minimum) {
+		return foreground
+	}
+	if contrast(rgb{0, 0, 0}, hslRGB(background)) >= contrast(rgb{1, 1, 1}, hslRGB(background)) {
+		return []uint16{0, 0, 0}
+	}
+	return []uint16{0, 0, 100}
+}
+
+func accessibleButtonText(value string, theme ThemeCSS) string {
+	foreground, ok := cssColorRGB(value, theme)
+	if !ok || contrast(foreground, hslRGB(theme.Action)) >= 4.5 {
+		return value
+	}
+	if contrast(rgb{0, 0, 0}, hslRGB(theme.Action)) >= contrast(rgb{1, 1, 1}, hslRGB(theme.Action)) {
+		return "#000"
+	}
+	return "#fff"
+}
+
+func cssColorRGB(value string, theme ThemeCSS) (rgb, bool) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	switch value {
+	case "black":
+		return rgb{0, 0, 0}, true
+	case "white":
+		return rgb{1, 1, 1}, true
+	case "hsl(var(--bg))":
+		return hslRGB(theme.Bg), true
+	case "hsl(var(--text))":
+		return hslRGB(theme.Text), true
+	case "hsl(var(--text-high))":
+		return hslRGB(theme.TextHigh), true
+	}
+	if strings.HasPrefix(value, "rgb(") && strings.HasSuffix(value, ")") {
+		body := strings.TrimSpace(value[4 : len(value)-1])
+		var parts []string
+		if strings.Contains(body, ",") {
+			parts = strings.Split(body, ",")
+		} else {
+			parts = strings.Fields(body)
+		}
+		if len(parts) == 3 {
+			var channels [3]float64
+			firstPercent := strings.HasSuffix(strings.TrimSpace(parts[0]), "%")
+			for i, part := range parts {
+				part = strings.TrimSpace(part)
+				if strings.Contains(body, ",") && strings.HasSuffix(part, "%") != firstPercent {
+					return rgb{}, false
+				}
+				scale := 255.0
+				if strings.HasSuffix(part, "%") {
+					part, scale = strings.TrimSuffix(part, "%"), 100
+				}
+				n, err := strconv.ParseFloat(part, 64)
+				if !cssNumberPattern.MatchString(part) {
+					return rgb{}, false
+				}
+				if err != nil || math.IsNaN(n) || math.IsInf(n, 0) {
+					return rgb{}, false
+				}
+				channels[i] = math.Max(0, math.Min(scale, n)) / scale
+			}
+			return rgb{channels[0], channels[1], channels[2]}, true
+		}
+	}
+	if (len(value) != 4 && len(value) != 7) || !strings.HasPrefix(value, "#") {
+		return rgb{}, false
+	}
+	if len(value) == 4 {
+		value = "#" + strings.Repeat(string(value[1]), 2) + strings.Repeat(string(value[2]), 2) + strings.Repeat(string(value[3]), 2)
+	}
+	parsed, err := strconv.ParseUint(value[1:], 16, 32)
+	if err != nil {
+		return rgb{}, false
+	}
+	return rgb{float64(parsed>>16) / 255, float64((parsed>>8)&0xff) / 255, float64(parsed&0xff) / 255}, true
+}
+
+type rgb struct{ red, green, blue float64 }
+
+func hasContrast(foreground, background []uint16, minimum float64) bool {
+	return contrast(hslRGB(foreground), hslRGB(background)) >= minimum
+}
+
+func contrast(first, second rgb) float64 {
+	firstLum, secondLum := luminance(first), luminance(second)
+	if firstLum < secondLum {
+		firstLum, secondLum = secondLum, firstLum
+	}
+	return (firstLum + 0.05) / (secondLum + 0.05)
+}
+
+func luminance(value rgb) float64 {
+	linear := func(component float64) float64 {
+		if component <= 0.04045 {
+			return component / 12.92
+		}
+		return math.Pow((component+0.055)/1.055, 2.4)
+	}
+	return 0.2126*linear(value.red) + 0.7152*linear(value.green) + 0.0722*linear(value.blue)
+}
+
+func hslRGB(value []uint16) rgb {
+	if len(value) != 3 {
+		return rgb{}
+	}
+	hue := float64(value[0]%360) / 60
+	saturation := float64(min(value[1], 100)) / 100
+	lightness := float64(min(value[2], 100)) / 100
+	chroma := (1 - math.Abs(2*lightness-1)) * saturation
+	x := chroma * (1 - math.Abs(math.Mod(hue, 2)-1))
+	match := rgb{}
+	switch {
+	case hue < 1:
+		match = rgb{chroma, x, 0}
+	case hue < 2:
+		match = rgb{x, chroma, 0}
+	case hue < 3:
+		match = rgb{0, chroma, x}
+	case hue < 4:
+		match = rgb{0, x, chroma}
+	case hue < 5:
+		match = rgb{x, 0, chroma}
+	default:
+		match = rgb{chroma, 0, x}
+	}
+	minimum := lightness - chroma/2
+	return rgb{match.red + minimum, match.green + minimum, match.blue + minimum}
 }

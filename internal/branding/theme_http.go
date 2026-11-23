@@ -193,7 +193,7 @@ func (h *ThemeHandler) put(w http.ResponseWriter, r *http.Request, clientID stri
 	} else if r.Header.Get("If-None-Match") == "*" {
 		err = h.store.PutIfAbsentAuthorized(r.Context(), theme, h.apiKeys, principal)
 	} else {
-		err = h.store.PutAuthorized(r.Context(), theme, h.apiKeys, principal)
+		err = h.store.PutClientIfMatchAuthorized(r.Context(), theme, h.apiKeys, principal, r.Header.Get("If-Match"))
 	}
 	if err != nil {
 		h.themeMutationError(w, err)
@@ -271,6 +271,8 @@ func (h *ThemeHandler) authorize(w http.ResponseWriter, r *http.Request, right a
 
 func (h *ThemeHandler) themeMutationError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, ErrThemeLowContrast):
+		http.Error(w, "Theme colors must have sufficient contrast", http.StatusBadRequest)
 	case errors.Is(err, apikey.ErrForbidden):
 		http.Error(w, "Forbidden", http.StatusForbidden)
 	case errors.Is(err, ErrInvalidTheme):

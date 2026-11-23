@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -296,6 +297,217 @@ func TestThemeHandlerValidatesPutPathPayloadAndClient(t *testing.T) {
 	}
 	if _, err := store.GetDefault(ctx, "client-a"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestThemeHandlerRejectsLowContrastWritesWithoutChangingStoredTheme(t *testing.T) {
+	t.Parallel()
+	ctx, db := clientFaviconDB(t)
+	store, err := NewThemeStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := apikey.NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewThemeHandler(store, keys, func(http.ResponseWriter, *http.Request, bool) bool { return true }, func(context.Context, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	lowContrast := DefaultTheme("client-a")
+	lowContrast.Light.Bg = []uint16{0, 0, 100}
+	lowContrast.Light.Text = []uint16{0, 0, 100}
+	lowContrast.Light.TextHigh = []uint16{0, 0, 100}
+	lowContrast.Light.Action = []uint16{0, 0, 100}
+
+	body, err := json.Marshal(lowContrast)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := httptest.NewRecorder()
+	handler.Theme(client, themeRequest(http.MethodPut, "/auth/v1/theme/client-a", bytes.NewReader(body), "client-a", ""))
+	if client.Code != http.StatusBadRequest || !strings.Contains(client.Body.String(), "sufficient contrast") {
+		t.Fatalf("client low-contrast PUT status=%d body=%q", client.Code, client.Body.String())
+	}
+	if got, err := store.GetDefault(ctx, "client-a"); err != nil || !reflect.DeepEqual(got, DefaultTheme(GlobalBrandID)) {
+		t.Fatalf("client theme changed after rejected PUT: %#v err=%v", got, err)
+	}
+
+	lowContrast.ClientID = GlobalBrandID
+	body, err = json.Marshal(lowContrast)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commonRequest := httptest.NewRequest(http.MethodPut, "/auth/v1/branding/theme", bytes.NewReader(body))
+	commonRequest.Header.Set("Content-Type", "application/json")
+	etag, err := themeETag(DefaultTheme(GlobalBrandID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	commonRequest.Header.Set("If-Match", etag)
+	common := httptest.NewRecorder()
+	handler.GlobalTheme(common, commonRequest)
+	if common.Code != http.StatusBadRequest || !strings.Contains(common.Body.String(), "sufficient contrast") {
+		t.Fatalf("common low-contrast PUT status=%d body=%q", common.Code, common.Body.String())
+	}
+	if got, err := store.GetGlobal(ctx); err != nil || !reflect.DeepEqual(got, DefaultTheme(GlobalBrandID)) {
+		t.Fatalf("common theme changed after rejected PUT: %#v err=%v", got, err)
+	}
+}
+
+func TestSafeClientThemeRejectsStaleETag(t *testing.T) {
+	ctx, db := clientFaviconDB(t)
+	store, err := NewThemeStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := apikey.NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "safe-theme-etag-client", SQL: `INSERT INTO managed_oauth_clients(id,generation,revision,enabled,metadata_json) VALUES('client-safe','test',1,0,'{}')`}); err != nil {
+		t.Fatal(err)
+	}
+	original := DefaultTheme("client-safe")
+	if err := store.Put(ctx, original); err != nil {
+		t.Fatal(err)
+	}
+	etag, err := themeETag(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := original
+	updated.BrandName = "Newer"
+	if err := store.PutClientIfMatchAuthorized(ctx, updated, keys, nil, etag); err != nil {
+		t.Fatalf("current ETag: %v", err)
+	}
+	stale := original
+	stale.BrandName = "Stale"
+	if err := store.PutClientIfMatchAuthorized(ctx, stale, keys, nil, etag); !errors.Is(err, ErrThemeConflict) {
+		t.Fatalf("stale ETag: %v", err)
+	}
+	got, err := store.GetDefault(ctx, "client-safe")
+	if err != nil || got.BrandName != "Newer" {
+		t.Fatalf("stored after stale write: %+v %v", got, err)
+	}
+}
+
+func TestLegacyThemeCopyOnlyUpdateAndColorFence(t *testing.T) {
+	ctx, db := clientFaviconDB(t)
+	store, err := NewThemeStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := apikey.NewStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "contrast-legacy-client", SQL: `INSERT INTO managed_oauth_clients(id,generation,revision,enabled,metadata_json) VALUES('client-legacy','test',1,0,'{}')`}); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewThemeHandler(store, keys, func(http.ResponseWriter, *http.Request, bool) bool { return true }, func(context.Context, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	logos, err := NewClientLogoStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedLogo(t, ctx, db, "client-legacy", "small", "image/webp", []byte("client-logo"), 11)
+	if err := logos.ReplaceGlobalAuthorized(ctx, []LogoAsset{{Resolution: "small", ContentType: "image/webp", Data: []byte("global-logo")}}, keys, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, global := range []bool{false, true} {
+		id := "client-legacy"
+		if global {
+			id = GlobalBrandID
+		}
+		original := DefaultTheme(id)
+		original.Light.Text = []uint16{0, 0, 100}
+		original.Light.TextHigh = []uint16{0, 0, 100}
+		original.Light.Bg = []uint16{0, 0, 100}
+		original.BrandName = "Preserved"
+		if global {
+			err = store.PutGlobalAuthorized(ctx, original, keys, nil)
+		} else {
+			err = store.Put(ctx, original)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated := original
+		updated.Login = &LoginAppearance{Copy: map[string]LoginCopy{"en": {Title: "New title"}}}
+		body, err := json.Marshal(updated)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := themeRequest(http.MethodPut, "/auth/v1/theme/"+id, bytes.NewReader(body), id, "")
+		etag, err := themeETag(original)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("If-Match", etag)
+		response := httptest.NewRecorder()
+		if global {
+			handler.GlobalTheme(response, request)
+		} else {
+			handler.Theme(response, request)
+		}
+		if response.Code != http.StatusOK {
+			t.Fatalf("global=%v copy PUT: %d %s", global, response.Code, response.Body.String())
+		}
+		var got Theme
+		if global {
+			got, err = store.GetGlobal(ctx)
+		} else {
+			got, err = store.GetDefault(ctx, id)
+		}
+		if err != nil || !reflect.DeepEqual(got, updated) {
+			t.Fatalf("global=%v stored=%+v err=%v", global, got, err)
+		}
+		stale := themeRequest(http.MethodPut, "/auth/v1/theme/"+id, bytes.NewReader(body), id, "")
+		stale.Header.Set("If-Match", etag)
+		rejected := httptest.NewRecorder()
+		if global {
+			handler.GlobalTheme(rejected, stale)
+		} else {
+			handler.Theme(rejected, stale)
+		}
+		if rejected.Code != http.StatusPreconditionFailed {
+			t.Fatalf("global=%v stale PUT=%d", global, rejected.Code)
+		}
+		var logo StoredLogo
+		if global {
+			logo, err = logos.GetGlobal(ctx)
+		} else {
+			logo, err = logos.Find(ctx, id, "small")
+		}
+		wantLogo := "client-logo"
+		if global {
+			wantLogo = "global-logo"
+		}
+		if err != nil || string(logo.Data) != wantLogo {
+			t.Fatalf("global=%v logo=%+v err=%v", global, logo, err)
+		}
+		if !global {
+			state, err := store.clientThemeState(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			other := updated
+			other.BrandName = "Concurrent"
+			if err := store.Put(ctx, other); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.putAuthorized(ctx, updated, keys, nil, false, false, &state); !errors.Is(err, ErrThemeConflict) {
+				t.Fatalf("stale state write: %v", err)
+			}
+			got, err = store.GetDefault(ctx, id)
+			if err != nil || got.BrandName != "Concurrent" {
+				t.Fatalf("stale write changed data: %+v %v", got, err)
+			}
+		}
 	}
 }
 

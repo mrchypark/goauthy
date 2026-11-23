@@ -38,7 +38,6 @@ func TestGlobalCSSHandlerGetAndHead(t *testing.T) {
 		t.Fatalf("HEAD headers=%v", head.Header())
 	}
 }
-
 func TestGlobalCSSHandlerMethodBoundary(t *testing.T) {
 	t.Parallel()
 	response := httptest.NewRecorder()
