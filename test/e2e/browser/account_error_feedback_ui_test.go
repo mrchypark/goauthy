@@ -124,21 +124,25 @@ func TestAccountErrorFeedbackUI(t *testing.T) {
 	assertErrorFeedback := func(id, wantTitle, wantDetail string) {
 		t.Helper()
 		var role, live, iconHidden, title, detail string
-		var bold bool
+		var hasTitle, bold bool
 		selector := "#" + id
 		stage = "read-feedback-" + id
-		if err := runLoginJourney(browser, 10*time.Second,
+		actions := []chromedp.Action{
 			chromedp.AttributeValue(selector, "role", &role, nil, chromedp.ByQuery),
 			chromedp.AttributeValue(selector, "aria-live", &live, nil, chromedp.ByQuery),
 			chromedp.AttributeValue(selector+" .status-icon", "aria-hidden", &iconHidden, nil, chromedp.ByQuery),
-			chromedp.Text(selector+" strong", &title, chromedp.ByQuery),
 			chromedp.Text(selector+" .status-detail", &detail, chromedp.ByQuery),
+			chromedp.Evaluate(`document.querySelector('`+selector+` strong') !== null`, &hasTitle),
 			chromedp.Evaluate(`(() => { const e = document.querySelector('`+selector+` strong'); return !!e && parseInt(getComputedStyle(e).fontWeight, 10) >= 600; })()`, &bold),
-		); err != nil {
+		}
+		if wantTitle != "" {
+			actions = append(actions, chromedp.Text(selector+" strong", &title, chromedp.ByQuery))
+		}
+		if err := runLoginJourney(browser, 10*time.Second, actions...); err != nil {
 			t.Fatalf("read %s error feedback: %v", id, err)
 		}
-		if role != "alert" || live != "assertive" || iconHidden != "true" || title != wantTitle || detail != wantDetail || (wantTitle != "" && !bold) {
-			t.Fatalf("%s feedback role=%q live=%q icon-hidden=%q title=%q detail=%q bold=%t", id, role, live, iconHidden, title, detail, bold)
+		if role != "alert" || live != "assertive" || iconHidden != "true" || title != wantTitle || detail != wantDetail || (wantTitle == "" && hasTitle) || (wantTitle != "" && (!hasTitle || !bold)) {
+			t.Fatalf("%s feedback role=%q live=%q icon-hidden=%q title=%q has-title=%t detail=%q bold=%t", id, role, live, iconHidden, title, hasTitle, detail, bold)
 		}
 	}
 
