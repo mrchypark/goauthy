@@ -55,12 +55,16 @@ func TestElysduiDynamicAdminInBrowser(t *testing.T) {
 			t.Logf("browser exception: %s", e.ExceptionDetails)
 		}
 	})
-	var result, mobile, missingLocaleReproduced bool
+	var result, mobile, missingLocaleReproduced, canvasAt1099, canvasAt844 bool
 	err = chromedp.Run(ctx,
 		chromedp.Navigate(missingLocale.URL+"/auth/v1/admin/users"),
 		chromedp.Evaluate(`typeof globalThis.GoAuthyI18n === 'undefined' && !!document.querySelector('#app .state') && !document.querySelector('#table')`, &missingLocaleReproduced),
+		chromedp.EmulateViewport(1280, 1099),
 		chromedp.Navigate(server.URL+"/auth/v1/admin/users"),
 		chromedp.WaitVisible(`#table table.ui-table`, chromedp.ByQuery),
+		chromedp.Evaluate(`document.body.getBoundingClientRect().height >= innerHeight`, &canvasAt1099),
+		chromedp.EmulateViewport(1280, 844),
+		chromedp.Evaluate(`document.body.getBoundingClientRect().height >= innerHeight`, &canvasAt844),
 		chromedp.Navigate(server.URL+"/auth/v1/admin/users/new"),
 		chromedp.WaitVisible(`#user input[data-slot=input]`, chromedp.ByQuery),
 		chromedp.Evaluate(`new Promise(resolve => {
@@ -81,6 +85,9 @@ func TestElysduiDynamicAdminInBrowser(t *testing.T) {
 	}
 	if !missingLocaleReproduced {
 		t.Fatal("missing locale fixture did not reproduce the stalled administration page")
+	}
+	if !canvasAt1099 || !canvasAt844 {
+		t.Fatal("short admin page did not paint the themed body through the viewport")
 	}
 	if !result {
 		t.Fatal("dynamic components lost their elysdui contract or native behavior")
