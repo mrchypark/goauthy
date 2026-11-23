@@ -7,7 +7,8 @@ async function clientTheme(id, common = false) {
   const colorFields = ['text', 'text_high', 'bg', 'bg_high', 'action', 'accent', 'error'];
   const colorLabels = {text: 'Text', text_high: 'Strong text', bg: 'Background', bg_high: 'Raised background', action: 'Action', accent: 'Accent', error: 'Error'};
   const invalidPreviewMessage = t('The preview omits invalid CSS values; your input is kept for server validation.');
-  let theme = null, mode = 'light', inherited = false, pending = false, commonName = 'GoAuthy', createOnly = false, commonEtag = '';
+  let theme = null, mode = 'light', inherited = false, pending = false, commonName = 'GoAuthy', createOnly = false, commonEtag = '', clientEtag = '', savedColors = '', previewStatus = false;
+  const colorsOf = theme => JSON.stringify([theme.light, theme.dark]);
 
   shell(t(common ? 'Common brand' : 'Client login theme'),
     `<p><a class="button secondary" href="${common ? '/auth/v1/admin/dashboard' : '/auth/v1/admin/clients'}">${h(common ? 'Back to dashboard' : 'Back to clients')}</a></p><div class="theme-workspace"><section class="panel theme-editor"><p id="theme-notice" class="hint theme-notice" role="status"></p><div id="theme-status" class="theme-status" role="status"></div><div class="theme-mode" role="group" aria-label="${h('Preview mode')}"><button type="button" data-theme-mode="light" aria-pressed="true">${h('Light')}</button><button type="button" data-theme-mode="dark" aria-pressed="false">${h('Dark')}</button></div><div id="theme-fields"></div><div class="theme-actions actions"><button id="theme-save" type="button">${h('Save theme')}</button><button id="theme-reload" class="button secondary" type="button">${h('Reload saved')}</button><button id="theme-reset" class="button secondary" type="button">${h('Reset to inherited theme')}</button></div><div id="theme-reset-review" hidden><p class="warning">${h('Remove this client theme and inherit the global theme?')}</p><div class="actions"><button id="theme-reset-confirm" type="button">${h('Confirm reset')}</button><button id="theme-reset-cancel" type="button" class="button secondary">${h('Cancel')}</button></div></div><section class="theme-logo"><h3>${h(common ? 'Common logo' : 'Client logo')}</h3><p class="hint">${h('Logo changes save immediately and are separate from theme settings.')}</p><img id="theme-logo-image" alt="${h(common ? 'Current common logo' : 'Current client logo')}" hidden><label>${h('Upload logo (PNG, JPEG, or SVG; up to 10 MiB)')}<input id="theme-logo-upload" type="file" accept="image/png,image/jpeg,image/svg+xml"></label><button id="theme-logo-delete" type="button" class="button secondary">${h('Remove client logo')}</button><div id="theme-logo-remove-review" hidden><p class="warning">${h(common ? 'Remove this common logo?' : 'Remove this client logo?')}</p><div class="actions"><button id="theme-logo-remove-confirm" type="button">${h('Confirm removal')}</button><button id="theme-logo-remove-cancel" type="button" class="button secondary">${h('Cancel')}</button></div></div><div id="theme-logo-status" class="theme-status" role="status"></div></section></section><section class="theme-preview" aria-label="${h('Sign-in preview sample')}"><h2>${h('Preview')}</h2><p class="hint">${h('Sample only. It does not submit credentials or represent the full sign-in flow.')}</p><iframe id="theme-preview-frame" class="theme-preview-frame" title="${h('Client theme preview')}" sandbox="allow-same-origin"></iframe></section></div>`);
@@ -52,6 +53,7 @@ async function clientTheme(id, common = false) {
   const requestTheme = async global => {
     const result = await api(global ? '/auth/v1/branding/theme' : endpoint, {method: 'POST'});
     if (global) commonEtag = result?._headers?.get?.('ETag')?.trim() || '';
+    else clientEtag = result?._headers?.get?.('ETag')?.trim() || '';
     return result;
   };
   const loadTheme = async () => {
@@ -65,6 +67,7 @@ async function clientTheme(id, common = false) {
     if (!loaded?.light || !loaded?.dark) throw Error(t('Theme data is incomplete.'));
     commonName = globalTheme?.brand_name || 'GoAuthy';
     theme = loaded;
+    savedColors = usesGlobal && !common ? '' : colorsOf(theme);
     theme.login ||= {};
     theme.login.copy ||= {};
     for (const lang of ['en', 'ko']) theme.login.copy[lang] ||= {};
@@ -73,8 +76,9 @@ async function clientTheme(id, common = false) {
     inherited = usesGlobal;
     renderFields();
     updateNotice();
-    updatePreview();
     status.textContent = '';
+    previewStatus = false;
+    updatePreview();
   };
   const updateNotice = () => {
     by('theme-notice').textContent = inherited
@@ -82,6 +86,58 @@ async function clientTheme(id, common = false) {
       : t(common ? 'These settings apply to the central ID and apps without a theme override.' : 'This client has a saved theme override.');
   };
   const hslText = value => (Array.isArray(value) ? value : []).join(' ');
+  const hslRGB = value => {
+    if (!Array.isArray(value) || value.length !== 3) return [0, 0, 0];
+    const [rawHue, rawSat, rawLight] = value.map(Number), hue = ((rawHue % 360) + 360) % 360 / 60, saturation = Math.max(0, Math.min(100, rawSat)) / 100, lightness = Math.max(0, Math.min(100, rawLight)) / 100;
+    const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation, x = chroma * (1 - Math.abs(hue % 2 - 1)), minimum = lightness - chroma / 2;
+    const rgb = hue < 1 ? [chroma, x, 0] : hue < 2 ? [x, chroma, 0] : hue < 3 ? [0, chroma, x] : hue < 4 ? [0, x, chroma] : hue < 5 ? [x, 0, chroma] : [chroma, 0, x];
+    return rgb.map(component => component + minimum);
+  };
+  const contrast = (first, second) => {
+    const luminance = value => value.map(component => component <= .04045 ? component / 12.92 : ((component + .055) / 1.055) ** 2.4).reduce((sum, component, index) => sum + component * [.2126, .7152, .0722][index], 0);
+    const [high, low] = [luminance(first), luminance(second)].sort((a, b) => b - a);
+    return (high + .05) / (low + .05);
+  };
+  const readableHSL = (foreground, background, minimum) => contrast(hslRGB(foreground), hslRGB(background)) >= minimum ? foreground : contrast([0, 0, 0], hslRGB(background)) >= contrast([1, 1, 1], hslRGB(background)) ? [0, 0, 0] : [0, 0, 100];
+  const cssRGB = (value, selected) => {
+    const text = String(value || '').trim().toLowerCase();
+    if (text === 'black') return [0, 0, 0];
+    if (text === 'white') return [1, 1, 1];
+    if (text === 'hsl(var(--bg))') return hslRGB(selected.bg);
+    if (text === 'hsl(var(--text))') return hslRGB(selected.text);
+    if (text === 'hsl(var(--text-high))') return hslRGB(selected.text_high);
+    const rgbMatch = text.match(/^rgb\(\s*([^,]+),\s*([^,]+),\s*([^,]+)\s*\)$/) || text.match(/^rgb\(\s*(\S+)\s+(\S+)\s+(\S+)\s*\)$/);
+    if (rgbMatch) {
+      const commaSyntax = text.includes(',');
+      const firstPercent = rgbMatch[1].trim().endsWith('%');
+      const channels = rgbMatch.slice(1).map(component => {
+        const part = component.trim(), percent = part.endsWith('%'), numeric = percent ? part.slice(0, -1) : part;
+        if ((commaSyntax && percent !== firstPercent) || !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/.test(numeric)) return NaN;
+        const number = Number(numeric);
+        if (!Number.isFinite(number)) return NaN;
+        return Math.max(0, Math.min(percent ? 100 : 255, number)) / (percent ? 100 : 255);
+      });
+      if (channels.every(Number.isFinite)) return channels;
+    }
+    const hex = text.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/);
+    if (!hex) return null;
+    const valueHex = hex[1].length === 3 ? hex[1].split('').map(component => component + component).join('') : hex[1];
+    return [0, 2, 4].map(offset => parseInt(valueHex.slice(offset, offset + 2), 16) / 255);
+  };
+  const readableButtonText = (value, selected) => {
+    const foreground = cssRGB(value, selected);
+    if (!foreground || contrast(foreground, hslRGB(selected.action)) >= 4.5) return value;
+    return contrast([0, 0, 0], hslRGB(selected.action)) >= contrast([1, 1, 1], hslRGB(selected.action)) ? '#000' : '#fff';
+  };
+  const contrastIssue = selected => {
+    if (contrast(hslRGB(selected.text), hslRGB(selected.bg)) < 4.5 || contrast(hslRGB(selected.text_high), hslRGB(selected.bg)) < 4.5) return t('Text and strong text need at least 4.5:1 contrast with the background.');
+    if (contrast(hslRGB(selected.error), hslRGB(selected.bg)) < 4.5 || contrast(hslRGB(selected.error), hslRGB(selected.bg_high)) < 4.5) return t('Error text needs at least 4.5:1 contrast with the backgrounds.');
+    if (contrast(hslRGB(selected.action), hslRGB(selected.bg)) < 3) return t('Action color needs at least 3:1 contrast with the background.');
+    if (contrast(hslRGB(selected.text), hslRGB(selected.bg_high)) < 4.5 || contrast(hslRGB(selected.text_high), hslRGB(selected.bg_high)) < 4.5 || contrast(hslRGB(selected.action), hslRGB(selected.bg_high)) < 3) return t('Text and action colors need sufficient contrast with the raised background.');
+    const buttonText = cssRGB(selected.btn_text, selected);
+    if (buttonText && contrast(buttonText, hslRGB(selected.action)) < 4.5) return t('Button text needs at least 4.5:1 contrast with the action color.');
+    return '';
+  };
   const hslToHex = value => {
     if (!Array.isArray(value) || value.length !== 3) return '#000000';
     const [rawHue, rawSat, rawLight] = value.map(Number);
@@ -131,7 +187,14 @@ async function clientTheme(id, common = false) {
   };
   const sampleDocument = () => `<!doctype html><html lang="${copyLanguage}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/auth/v1/ui/app.css"><link rel="stylesheet" href="/auth/v1/ui/ely-controls.css"><link rel="stylesheet" href="/auth/v1/ui/ely-patterns.css"><link rel="stylesheet" href="/auth/v1/ui/brand.css"><link rel="stylesheet" href="/auth/v1/theme/global.css"></head><body class="auth-page"><header class="auth-topbar"><a class="auth-brand"><img id="theme-logo-image" class="client-login-logo" alt="${previewHTML(common ? 'Sign-in preview sample' : clientID)}" hidden><span id="theme-default-brand" class="auth-brand"><span class="brand-symbol" aria-hidden="true"></span><span id="theme-brand-label">GoAuthy</span></span></a></header><main class="auth-panel"><h1 id="theme-sample-title">${previewHTML(common ? 'Sign in' : 'Sign in to {client}', {client: clientID})}</h1><div id="theme-sample-fields" inert><label><span data-i18n="Email">${previewHTML('Email')}</span><input type="email" value="alex@example.test"></label><label><span data-i18n="Password">${previewHTML('Password')}</span><input type="password" value="sample-password"></label><button id="theme-sample-button" type="button">${previewHTML('Continue')}</button></div><p class="auth-error" data-i18n="Example error message">${previewHTML('Example error message')}</p></main></body></html>`;
   const updatePreview = () => {
-    if (!theme || !frame.contentDocument?.body) return;
+    if (!theme) return;
+    const unverified = [theme.light, theme.dark].some(variant => !cssRGB(variant.btn_text, variant))
+      ? t('Button text contrast cannot be verified for this CSS color. Check it in the preview.') : '';
+    if (!frame.contentDocument?.body) {
+      const issue = contrastIssue(theme.light) || contrastIssue(theme.dark);
+      if (issue || unverified) { status.className = 'theme-status warning'; status.textContent = [issue, unverified].filter(Boolean).join(' '); previewStatus = true; }
+      return;
+    }
     frame.contentDocument.documentElement.lang = copyLanguage;
     frame.contentDocument.querySelectorAll('[data-i18n]').forEach(label => { label.textContent = previewText(label.getAttribute('data-i18n')); });
     const logo = frame.contentDocument.getElementById('theme-logo-image');
@@ -139,6 +202,7 @@ async function clientTheme(id, common = false) {
     const body = frame.contentDocument.body;
     body.className = mode === 'dark' ? 'auth-page theme-dark' : 'auth-page theme-light';
     const selected = theme[mode];
+    const issue = contrastIssue(theme.light) || contrastIssue(theme.dark);
     let invalidCSS = false;
     const setCSS = (name, value) => {
       const text = String(value ?? '').trim();
@@ -146,8 +210,11 @@ async function clientTheme(id, common = false) {
       if (/^[a-zA-Z0-9-,.#()%/\s]+$/.test(text)) body.style.setProperty(name, text);
       else { body.style.removeProperty(name); invalidCSS = true; }
     };
-    for (const field of colorFields) setCSS('--' + field.replace('_', '-'), (selected[field] || []).join(' '));
-    setCSS('--btn-text', selected.btn_text);
+    const preview = {...selected, text: readableHSL(selected.text, selected.bg, 4.5), text_high: readableHSL(selected.text_high, selected.bg, 4.5), action: readableHSL(selected.action, selected.bg, 3), error: readableHSL(selected.error, selected.bg, 4.5)};
+    if (contrast(hslRGB(preview.text), hslRGB(preview.bg_high)) < 4.5 || contrast(hslRGB(preview.text_high), hslRGB(preview.bg_high)) < 4.5 || contrast(hslRGB(preview.error), hslRGB(preview.bg_high)) < 4.5 || contrast(hslRGB(preview.action), hslRGB(preview.bg_high)) < 3) preview.bg_high = preview.bg;
+    for (const field of colorFields) setCSS('--' + field.replace('_', '-'), (preview[field] || []).join(' '));
+    if (selected.btn_text && !/^[a-zA-Z0-9-,.#()%/\s]+$/.test(selected.btn_text)) setCSS('--btn-text', selected.btn_text);
+    else setCSS('--btn-text', readableButtonText(selected.btn_text, preview));
     setCSS('--border-radius', theme.border_radius);
     setCSS('--theme-sun', selected.theme_sun);
     setCSS('--theme-moon', selected.theme_moon);
@@ -168,8 +235,8 @@ async function clientTheme(id, common = false) {
     brand.style.setProperty('margin-inline', theme.login.logo_alignment === 'center' ? 'auto' : '');
     sampleFields.style.setProperty('display', 'grid');
     sampleFields.style.setProperty('gap', '14px');
-    if (invalidCSS) { status.className = 'theme-status hint'; status.textContent = invalidPreviewMessage; }
-    else if (status.textContent === invalidPreviewMessage) { status.className = 'theme-status'; status.textContent = ''; }
+    if (issue || invalidCSS || unverified) { status.className = 'theme-status warning'; status.textContent = [issue, invalidCSS ? invalidPreviewMessage : '', unverified].filter(Boolean).join(' '); previewStatus = true; }
+    else if (previewStatus) { status.className = 'theme-status'; status.textContent = ''; previewStatus = false; }
   };
   frame.onload = updatePreview;
   frame.srcdoc = sampleDocument();
@@ -193,20 +260,20 @@ async function clientTheme(id, common = false) {
   });
   by('theme-save').onclick = async () => {
     if (pending || !theme) return;
+    const issue = contrastIssue(theme.light) || contrastIssue(theme.dark);
+    if (issue && colorsOf(theme) !== savedColors) { status.className = 'theme-status error'; status.textContent = issue; previewStatus = true; return; }
     busy(true);
     status.className = 'theme-status';
     status.textContent = t('Saving…');
     try {
       const payload = {...theme}; if (!Object.keys(payload.login.copy.en).length && !Object.keys(payload.login.copy.ko).length && !payload.login.logo_alignment && !payload.login.card_width) delete payload.login;
-      const headers = createOnly ? {'If-None-Match': '*'} : common ? {'If-Match': commonEtag} : {};
+      const headers = createOnly || !common && inherited ? {'If-None-Match': '*'} : common ? {'If-Match': commonEtag} : clientEtag ? {'If-Match': clientEtag} : {};
       if (common && !commonEtag) throw new Error(t('Reload the common theme before saving.'));
       await api(endpoint, {method: 'PUT', responseType: 'empty', headers, body: JSON.stringify({...payload, client_id: clientID})});
-      createOnly = false;
-      inherited = false;
-      if (common) await loadTheme();
+      await loadTheme();
+      savedColors = colorsOf(theme);
       updateNotice();
-      status.className = 'theme-status success';
-      status.textContent = t('Theme saved.');
+      if (!previewStatus) { status.className = 'theme-status success'; status.textContent = t('Theme saved.'); }
     } catch (error) {
       status.className = 'theme-status error';
       status.textContent = error.message;
@@ -217,7 +284,7 @@ async function clientTheme(id, common = false) {
     busy(true);
     status.className = 'theme-status';
     status.textContent = t('Loading saved theme…');
-    try { await loadTheme(); status.textContent = t('Saved theme reloaded.'); }
+    try { await loadTheme(); if (!previewStatus) status.textContent = t('Saved theme reloaded.'); }
     catch (error) { status.className = 'theme-status error'; status.textContent = error.message; }
     finally { busy(false); }
   };
@@ -233,8 +300,7 @@ async function clientTheme(id, common = false) {
       await api(endpoint, {method: 'DELETE', ...(common ? {headers: {'If-Match': commonEtag}} : {})});
       await loadTheme();
       by('theme-reset-review').hidden = true;
-      status.className = 'theme-status success';
-      status.textContent = t(common ? 'Common theme reset to defaults.' : 'Client theme removed. The preview shows the current global theme; saving creates a client override.');
+      if (!previewStatus) { status.className = 'theme-status success'; status.textContent = t(common ? 'Common theme reset to defaults.' : 'Client theme removed. The preview shows the current global theme; saving creates a client override.'); }
     } catch (error) {
       status.className = 'theme-status error';
       status.textContent = error.message;

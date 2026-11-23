@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -138,12 +139,43 @@ func (s *ThemeStore) Delete(ctx context.Context, clientID string) error {
 // PutAuthorized fences API-key authorization in the same transaction as the write.
 // A nil principal requires the caller's existing browser-admin boundary.
 func (s *ThemeStore) PutAuthorized(ctx context.Context, theme Theme, keys *apikey.Store, principal *apikey.Principal) error {
+	return s.PutClientIfMatchAuthorized(ctx, theme, keys, principal, "")
+}
+
+func (s *ThemeStore) PutClientIfMatchAuthorized(ctx context.Context, theme Theme, keys *apikey.Store, principal *apikey.Principal, ifMatch string) error {
+	contrastErr := theme.ValidateWriteContrast()
+	if ifMatch != "" || contrastErr != nil {
+		state, readErr := s.clientThemeState(ctx, theme.ClientID)
+		if readErr != nil {
+			return readErr
+		}
+		if !state.present {
+			if contrastErr != nil && ifMatch == "" {
+				return contrastErr
+			}
+			return ErrThemeConflict
+		}
+		if contrastErr != nil && !sameThemeColors(theme, state.theme) {
+			return contrastErr
+		}
+		etag, etagErr := themeETag(state.theme)
+		if etagErr != nil {
+			return etagErr
+		}
+		if ifMatch != etag {
+			return ErrThemeConflict
+		}
+		return s.putAuthorized(ctx, theme, keys, principal, false, false, &state)
+	}
 	return s.putAuthorized(ctx, theme, keys, principal, false, false, nil)
 }
 
 var ErrThemeConflict = errors.New("theme revision conflict")
 
 func (s *ThemeStore) PutIfAbsentAuthorized(ctx context.Context, theme Theme, keys *apikey.Store, principal *apikey.Principal) error {
+	if err := theme.ValidateWriteContrast(); err != nil {
+		return err
+	}
 	return s.putAuthorized(ctx, theme, keys, principal, false, true, nil)
 }
 
@@ -160,6 +192,45 @@ type globalThemeState struct {
 	version, updated int64
 	document         string
 	present          bool
+}
+
+func sameThemeColors(a, b Theme) bool {
+	for _, pair := range [][2]ThemeCSS{{a.Light, b.Light}, {a.Dark, b.Dark}} {
+		x, y := pair[0], pair[1]
+		if !reflect.DeepEqual(x.Text, y.Text) || !reflect.DeepEqual(x.TextHigh, y.TextHigh) || !reflect.DeepEqual(x.Bg, y.Bg) || !reflect.DeepEqual(x.BgHigh, y.BgHigh) || !reflect.DeepEqual(x.Action, y.Action) || !reflect.DeepEqual(x.Accent, y.Accent) || !reflect.DeepEqual(x.Error, y.Error) || x.BtnText != y.BtnText || x.ThemeSun != y.ThemeSun || x.ThemeMoon != y.ThemeMoon {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *ThemeStore) clientThemeState(ctx context.Context, id string) (globalThemeState, error) {
+	result, err := s.db.Query(ctx, rhiza.QueryRequest{SQL: `SELECT version,updated_at_unix_ms,document_json FROM client_themes WHERE client_id=? AND (client_id!='goauthy' OR EXISTS(SELECT 1 FROM branding_legacy_resolution WHERE singleton=1))`, Args: []any{id}, Consistency: rhiza.ConsistencyLinearizable})
+	if err != nil {
+		return globalThemeState{}, err
+	}
+	var state globalThemeState
+	if len(result.Rows) == 0 {
+		return state, nil
+	}
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 3 {
+		return state, errors.New("invalid client theme result")
+	}
+	row := result.Rows[0]
+	version, okVersion := row[0].(int64)
+	updated, okUpdated := row[1].(int64)
+	document, okDocument := row[2].(string)
+	if !okVersion || !okUpdated || !okDocument || version != 1 {
+		return state, errors.New("unsupported client theme version")
+	}
+	theme, err := decodeStoredTheme(id, version, document)
+	if err != nil {
+		return state, err
+	}
+	if err := theme.Validate(); err != nil {
+		return state, err
+	}
+	return globalThemeState{theme: theme, version: version, updated: updated, document: document, present: true}, nil
 }
 
 func (s *ThemeStore) globalState(ctx context.Context) (globalThemeState, error) {
@@ -218,6 +289,9 @@ func (s *ThemeStore) PutGlobalIfMatchAuthorized(ctx context.Context, theme Theme
 	if ifMatch != state.etag {
 		return ErrThemeConflict
 	}
+	if err := theme.ValidateWriteContrast(); err != nil && (!state.present || state.version != 1 || !sameThemeColors(theme, state.theme)) {
+		return err
+	}
 	return s.putAuthorized(ctx, theme, keys, principal, true, false, &state)
 }
 
@@ -247,8 +321,8 @@ func (s *ThemeStore) putAuthorized(ctx context.Context, theme Theme, keys *apike
 	}
 	if expected != nil {
 		if expected.present {
-			exists += ` AND EXISTS(SELECT 1 FROM global_brand_themes WHERE client_id=? AND version=? AND updated_at_unix_ms=? AND document_json=?)`
-			existsArgs = append(existsArgs, GlobalBrandID, expected.version, expected.updated, expected.document)
+			exists += ` AND EXISTS(SELECT 1 FROM ` + table + ` WHERE client_id=? AND version=? AND updated_at_unix_ms=? AND document_json=?)`
+			existsArgs = append(existsArgs, theme.ClientID, expected.version, expected.updated, expected.document)
 		} else {
 			exists += ` AND NOT EXISTS(SELECT 1 FROM global_brand_themes)`
 		}

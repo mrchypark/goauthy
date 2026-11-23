@@ -4,7 +4,7 @@
 [hidden] { display: none !important; }
 #prov-oauth-fields { display: grid; gap: 12px; }
 body { margin: 0; min-height: 100vh; background: var(--color-paper); color: var(--color-ink); font: 14px/1.6 var(--brand-font, sans-serif); }
-a { color: var(--color-accent); text-underline-offset: 3px; }
+a { color: var(--color-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .top {
   position: fixed; inset: 0 auto 0 0; width: 208px; padding: 28px 16px 20px;
   display: flex; flex-direction: column; gap: 28px;
@@ -18,7 +18,7 @@ a { color: var(--color-accent); text-underline-offset: 3px; }
 .top nav a { padding: 8px 12px; border-radius: 6px; text-decoration: none; color: var(--color-muted); font-size: 13px; font-weight: 500; }
 .top nav a[aria-current="page"] { background: var(--color-accent); color: var(--on-accent); font-weight: 600; }
 .nav-footer { margin-top: auto; padding: 16px 12px 0; border-top: 1px solid var(--color-line); }
-.nav-footer a { font-size: 12px; text-decoration: none; }
+.nav-footer a { font-size: 12px; text-decoration: underline; }
 body:has(.top) main { margin-left: 208px; }
 main { padding: 40px clamp(24px, 4vw, 64px) 64px; min-width: 0; }
 #app { width: 100%; max-width: 1180px; margin-inline: auto; min-width: 0; }
@@ -59,7 +59,7 @@ button:active:not(:disabled), .button:active { transform: translateY(1px); }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 @media (hover: hover) {
   .top nav a:not([aria-current]):hover { background: var(--accent-tint); color: var(--color-ink); }
-  button:not([data-slot]):not(:disabled):hover, .button:not([data-slot]):hover { background: var(--accent-hover); color: var(--on-accent); }
+  button:not([data-slot]):not(:disabled):hover, .button:not([data-slot]):hover { background: var(--accent-hover); color: var(--on-accent); text-decoration: underline; }
   button.secondary:not([data-slot]):not(:disabled):hover, .button.secondary:not([data-slot]):hover { background: var(--accent-tint); color: var(--color-ink); }
 }
 /* Confine wide tables to their own region instead of widening the whole page. */
@@ -69,11 +69,11 @@ th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--co
 th { color: var(--color-muted); background: var(--accent-tint); font-size: 11px; font-weight: 600; white-space: nowrap; }
 td { font-size: 13px; overflow-wrap: anywhere; min-width: 12ch; max-width: 36ch; }
 td .button, td button { min-height: 34px; padding: 5px 10px; font-size: 12px; }
-td a { font-weight: 500; }
+td a { display: inline-flex; align-items: center; font-weight: 500; }
 pre { overflow-x: auto; max-width: 100%; padding: 16px; background: var(--accent-tint); border-radius: 6px; }
-.error, .success, .warning { padding: 12px 16px; border: 1px solid var(--goauthy-error); border-radius: 6px; background: var(--error-tint); color: var(--goauthy-error); overflow-wrap: anywhere; }
-.success { background: var(--approved-tint); border-color: var(--approved); color: var(--approved); }
-.warning { background: var(--warning-tint); border-color: var(--warning); color: var(--warning); }
+.error, .success, .warning { padding: 12px 16px; border: 1px solid var(--goauthy-error); border-radius: 6px; background: var(--error-tint); color: var(--color-ink); overflow-wrap: anywhere; }
+.success { background: var(--approved-tint); border-color: var(--approved); }
+.warning { background: var(--warning-tint); border-color: var(--warning); }
 [role=status]:empty { display: none; }
 #template-preview { margin-top: 20px; }
 #template-preview iframe { display: block; width: 100%; height: 560px; border: 1px solid var(--color-line); border-radius: 6px; background: var(--surface); }
@@ -108,7 +108,7 @@ pre { overflow-x: auto; max-width: 100%; padding: 16px; background: var(--accent
 .overview-areas { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 24px; padding-top: 20px; }
 .overview-areas h2 { margin-bottom: 6px; }
 .overview-links a { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--color-line); text-decoration: none; }
-.overview-links strong { display: block; font-size: 14px; font-weight: 600; }
+.overview-links strong { display: block; font-size: 14px; font-weight: 600; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .overview-links small { display: block; color: var(--color-muted); margin-top: 3px; font-size: 12px; }
 .overview-links a:hover strong { text-decoration: underline; text-underline-offset: 4px; }
 
@@ -120,7 +120,6 @@ pre { overflow-x: auto; max-width: 100%; padding: 16px; background: var(--accent
 .nav-footer{display:flex;flex-direction:column;align-items:flex-start;gap:8px}.nav-footer [data-language-select]{width:100%}.back-link{display:inline-flex;align-items:center;min-height:36px;margin-bottom:8px;color:var(--color-muted);text-underline-offset:4px}@media(max-width:1000px){.nav-footer{flex-direction:row;align-items:center;flex-wrap:wrap}.nav-footer [data-language-select]{width:auto}}
 
 .panel:has(>form:not(.toolbar)){max-width:840px}.panel:has(#template-type){max-width:760px}.panel:has(#template-type)>label{max-width:24rem;margin-bottom:12px}
-@media(pointer:coarse){button,.button,input:not([type=checkbox]):not([type=radio]),select,.top nav a{min-height:44px}}
 
 /* Keep language with the navigation brand instead of reserving a page row. */
 .admin-header{display:grid;gap:10px;min-width:0}
@@ -130,7 +129,6 @@ pre { overflow-x: auto; max-width: 100%; padding: 16px; background: var(--accent
 .top .brand .brand-lockup{align-items:center;flex-wrap:wrap;gap:8px;overflow-wrap:anywhere}
 @media(max-width:1000px){.admin-header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}.admin-header .brand{flex:1 1 0}.admin-header-controls{justify-content:flex-end}}
 @media(max-width:540px){.admin-section{display:none}}
-@media(pointer:coarse){.top .admin-language{min-height:44px}}
 
 #session-filter{grid-template-columns:minmax(120px,180px) minmax(120px,180px) auto 1fr;gap:12px}#session-status{justify-self:end}#session-filter+p{margin:8px 0 0}
 @media(max-width:540px){#session-filter{grid-template-columns:1fr 1fr}#session-status{justify-self:start}}
@@ -174,10 +172,14 @@ pre { overflow-x: auto; max-width: 100%; padding: 16px; background: var(--accent
 #app [data-slot=button] { min-height:36px; height:auto; padding:7px 12px; border-radius:6px; font:600 13px/1.5 var(--brand-font,sans-serif); }
 #app [data-slot=button][data-variant=primary] { background:var(--color-accent); color:var(--btn-text,#f6f8f0); }
 #app [data-slot=button][data-variant=secondary] { background:transparent; color:var(--color-ink); border-color:var(--border); }
-#app [data-slot=button]:focus-visible, #app [data-slot=input]:focus-visible, #app [data-slot=select]:focus-visible, #app [data-slot=textarea]:focus-visible { outline:2px solid var(--color-accent); outline-offset:3px; }
+#app [data-slot=button]:focus-visible, #app [data-slot=input]:focus-visible, #app [data-slot=select]:focus-visible, #app [data-slot=textarea]:focus-visible { outline:2px solid var(--focus); outline-offset:3px; }
 #app .ui-table th, #app .ui-table td { padding:8px 10px; border-color:var(--color-line); }
 #app .ui-table th { background:var(--accent-tint); }
 #app :is(#user, #client-form, #collection-form, #catalog-form) { grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; }
 #app :is(#user, #client-form, #collection-form, #catalog-form) > :not(label) { grid-column:1 / -1; }
 @media(max-width:700px) { #app :is(#user, #client-form, #collection-form, #catalog-form) { grid-template-columns:1fr; } }
-@media(pointer:coarse) { #app [data-slot=button] { min-height:44px; } }
+@media(pointer:coarse) {
+  :is(button:not([data-slot]), .button:not([data-slot]), #app [data-slot=button], .top nav a, .nav-footer a, .overview-links a, td a, .theme-mode button) { min-height:44px; }
+  input:not([type=checkbox]):not([type=radio]), select { min-height:44px; }
+  label:has(> input[type=checkbox]), label:has(> input[type=radio]) { min-height:44px; }
+}

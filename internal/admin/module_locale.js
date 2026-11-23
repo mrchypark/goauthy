@@ -6,6 +6,8 @@ Object.assign(globalThis.GoAuthyI18n.messages, {
   'Operator listing does not grant administrator access; roles determine access.':'운영자 목록에 표시된다고 관리자 권한이 부여되는 것은 아니며, 권한은 역할에 따라 결정됩니다.',
 
   'Common brand':'공통 브랜드',
+  'Button text contrast cannot be verified for this CSS color. Check it in the preview.':'이 CSS 색상은 버튼 글자 대비를 확인할 수 없습니다. 미리보기에서 확인하세요.',
+  'Error text needs at least 4.5:1 contrast with the backgrounds.':'오류 글자색은 배경과 4.5:1 이상의 대비가 필요합니다.',
   'Common brand name':'공통 브랜드 이름',
   'Back to dashboard':'대시보드로 돌아가기',
   'Common logo':'공통 로고',
