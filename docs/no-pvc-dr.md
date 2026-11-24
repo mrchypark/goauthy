@@ -61,11 +61,12 @@ scripts/test-rhiza-local-upgrade.sh
 scripts/test-rhiza-local-upgrade.sh --race
 ```
 
-Historically, on macOS arm64, `scripts/test-rhiza-local-upgrade.sh` passed both normal and race runs using synthetic filesystem data for the `v0.24.0 -> v0.27.3` retained-directory upgrade, abrupt no-`Close` recovery, total `DataDir` loss recovery, keyring-sealed synthetic blob continuity, and negative node/prefix rejection. On 2026-11-24, the updated script passed its normal run on macOS arm64 for `v0.27.3 -> v0.27.4`, including retained and cold recovery; its race run was not performed. [PR176 final CI](https://github.com/mrchypark/goauthy/actions/runs/42146836993) covered S3/GCS/Azure SDK contracts and a Linux cross-version oracle on an older Rhiza version; it does not establish cloud or HA qualification for `v0.27.4`.
+Historically, on macOS arm64, `scripts/test-rhiza-local-upgrade.sh` passed both normal and race runs using synthetic filesystem data for the `v0.24.0 -> v0.27.3` retained-directory upgrade, abrupt no-`Close` recovery, total `DataDir` loss recovery, keyring-sealed synthetic blob continuity, and negative node/prefix rejection. On 2026-11-24, the updated script passed normal and race runs on macOS arm64 for `v0.27.3 -> v0.27.4`, including retained and cold recovery. [PR176 final CI](https://github.com/mrchypark/goauthy/actions/runs/42146836993) covered S3/GCS/Azure SDK contracts and a Linux cross-version oracle on an older Rhiza version; it does not establish cloud or HA qualification for `v0.27.4`.
 
 ### Qualification Boundary
 
 - **Historical `v0.27.3` evidence**: Single-node synthetic filesystem `Open`/`Close` recovery and `v0.24.0 -> v0.27.3` Local upgrade on macOS arm64, in normal and race runs.
+- **`v0.27.4` evidence**: Single-node synthetic filesystem `v0.27.3 -> v0.27.4` Local upgrade and recovery on macOS arm64, in normal and race runs.
 - **Not qualified on `v0.27.4`**: Packaged S3/GCS application recovery, Kubernetes deployment (`deploy/standalone-local`), managed HA, writer fencing, real account/token continuity, arbitrary production-data migration, and production-cloud parity.
 
 ---
