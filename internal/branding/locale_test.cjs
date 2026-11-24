@@ -16,7 +16,7 @@ function page(language, protocol='https:') {
 }
 const ko=page('ko');assert.equal(ko.labels[0].textContent,'계정');assert.equal(ko.select.value,'ko');
 assert.equal(ko.context.GoAuthyI18n.t('Login failed'),'로그인하지 못했습니다');
-assert.equal(ko.context.GoAuthyI18n.t('Check your username or password'),'사용자 이름 또는 비밀번호를 확인하세요.');
+assert.equal(ko.context.GoAuthyI18n.t('Check your email/username or password'),'이메일/사용자 이름 또는 비밀번호를 확인하세요.');
 assert.equal(ko.context.GoAuthyI18n.t('Too many attempts'),'시도 횟수가 많습니다.');
 assert.equal(ko.context.GoAuthyI18n.t('Sign-in temporarily unavailable'),'로그인 서비스를 일시적으로 사용할 수 없습니다.');
 assert.equal(ko.context.GoAuthyI18n.t('Your account could not be loaded.'),'계정을 불러올 수 없습니다.');

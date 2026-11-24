@@ -180,7 +180,7 @@ func TestLoginFailureRetryAppReturnAndLogout(t *testing.T) {
 		chromedp.Text(`#login-error .auth-error-detail`, &errorDetail, chromedp.ByQuery),
 		chromedp.AttributeValue(`#login-error`, "role", &errorRole, nil, chromedp.ByQuery),
 		chromedp.AttributeValue(`#login-error .auth-error-icon`, "aria-hidden", &iconHidden, nil, chromedp.ByQuery),
-	); err != nil || errorTitle != "Login failed" || errorDetail != "Check your username or password" || errorRole != "alert" || iconHidden != "true" {
+	); err != nil || errorTitle != "Login failed" || errorDetail != "Check your email/username or password" || errorRole != "alert" || iconHidden != "true" {
 		t.Fatal("stage branded-login-error failed")
 	}
 	stage = "login-progress-status-color"

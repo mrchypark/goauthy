@@ -6,7 +6,7 @@
   let language = document.documentElement.lang === 'ko' ? 'ko' : 'en';
   const messages = {
      'Enter a device code': '기기 코드 입력', 'Language': '언어', 'Change language': '언어 변경', 'Keep editing': '계속 편집',
-    'Sign in': '로그인', 'Username': '사용자 이름', 'Password': '비밀번호',
+    'Sign in': '로그인', 'Username': '이메일 또는 사용자 이름', 'Email or username': '이메일 또는 사용자 이름', 'Password': '비밀번호',
     'Signing in…': '로그인 중…',
     'Login failed': '로그인하지 못했습니다',
     'Too many attempts': '시도 횟수가 많습니다.',
@@ -18,7 +18,8 @@
     'Passkey sign-in failed': '패스키 로그인에 실패했습니다.',
     'Please try your passkey again.': '패스키로 다시 시도하세요.',
     'Check the code and try again.': '인증 코드를 확인하고 다시 시도하세요.',
-    'Check your username or password': '사용자 이름 또는 비밀번호를 확인하세요.',
+    'Check your username or password': '이메일/사용자 이름 또는 비밀번호를 확인하세요.',
+    'Check your email/username or password': '이메일/사용자 이름 또는 비밀번호를 확인하세요.',
     'Too many attempts. Please wait before trying again.': '시도 횟수가 많습니다. 잠시 후 다시 시도하세요.',
     'Sign-in is temporarily unavailable. Please try again shortly.': '로그인 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.',
     'Password change outcome is unknown. Check the current state before retrying.': '비밀번호 변경 결과를 확인할 수 없습니다. 현재 상태를 확인한 뒤 다시 시도하세요.',

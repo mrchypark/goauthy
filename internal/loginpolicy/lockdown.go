@@ -149,14 +149,24 @@ func (s *LockdownStore) IsAdminByUsername(ctx context.Context, username string) 
 		return false, errors.New("invalid input")
 	}
 	result, err := s.db.Query(ctx, rhiza.QueryRequest{
-		SQL:         `SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.username = ? AND u.disabled = 0 AND r.name = 'goauthy_admin'`,
-		Args:        []any{username},
+		SQL: `SELECT u.subject, COALESCE(MAX(CASE WHEN r.name = 'goauthy_admin' THEN 1 ELSE 0 END), 0)
+			FROM identity_users u
+			LEFT JOIN identity_user_profiles p ON p.subject = u.subject
+			LEFT JOIN rbac_user_roles m ON m.subject = u.subject
+			LEFT JOIN rbac_roles r ON r.id = m.role_id
+			WHERE (u.username = ? OR p.preferred_username = ?) AND u.disabled = 0
+			GROUP BY u.subject`,
+		Args:        []any{username, username},
 		Consistency: rhiza.ConsistencyLinearizable,
 	})
 	if err != nil {
 		return false, err
 	}
-	return len(result.Rows) == 1, nil
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 2 {
+		return false, nil
+	}
+	isAdmin, ok := result.Rows[0][1].(int64)
+	return ok && isAdmin == 1, nil
 }
 
 func randomLockdownRequestID() (string, error) {

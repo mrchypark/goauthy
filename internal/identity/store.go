@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mrchypark/goauthy/internal/credential"
 	"github.com/mrchypark/goauthy/internal/eventlog"
@@ -106,6 +107,7 @@ func SchemaStatements() []rhiza.SQLStatement {
 			family_name TEXT CHECK (family_name IS NULL OR length(family_name) BETWEEN 1 AND 32),
 			user_values_json TEXT CHECK (user_values_json IS NULL OR (length(user_values_json) BETWEEN 2 AND 8192 AND json_valid(user_values_json)))
 		) STRICT`},
+		{SQL: `CREATE INDEX IF NOT EXISTS identity_user_profiles_preferred_username ON identity_user_profiles(preferred_username)`},
 		{SQL: `CREATE TABLE IF NOT EXISTS identity_authentication_modes (
 			subject TEXT PRIMARY KEY NOT NULL CHECK (length(subject) BETWEEN 1 AND 512),
 			mode TEXT NOT NULL CHECK (mode IN ('password', 'passkey')),
@@ -289,6 +291,21 @@ func ValidateUsername(username string) error {
 	return nil
 }
 
+// validateLoginIdentifier bounds login-form / passkey-lookup inputs without
+// rejecting valid preferred_username policies (e.g. uppercase, Unicode, or
+// lengths up to 128 bytes).
+func validateLoginIdentifier(identifier string) error {
+	if identifier == "" || len(identifier) > 254 || !utf8.ValidString(identifier) || strings.TrimSpace(identifier) != identifier {
+		return ErrInvalidUsername
+	}
+	for _, r := range identifier {
+		if r < 0x20 || r == 0x7f {
+			return ErrInvalidUsername
+		}
+	}
+	return nil
+}
+
 // CleanupExpiredOpenRegistrations removes at most 64 abandoned password-first
 // identities. Passing time in keeps scheduler tests deterministic.
 func (s *Store) CleanupExpiredOpenRegistrations(ctx context.Context, now time.Time) error {
@@ -383,7 +400,7 @@ func (s *Store) RegisterOpenUser(ctx context.Context, input OpenRegistration) (O
 		return OpenRegistrationResult{}, err
 	}
 	statements := append(cleanup, []rhiza.SQLStatement{
-		{SQL: `INSERT OR IGNORE INTO identity_users (subject,username,password_phc,password_changed_at_unix_ms,password_generation,created_at_unix_ms,language) SELECT ?,?, '', ?,1,?,? WHERE NOT EXISTS (SELECT 1 FROM identity_recovery_emails WHERE email = ?) AND NOT EXISTS (SELECT 1 FROM identity_user_profiles WHERE email = ?) AND NOT EXISTS (SELECT 1 FROM identity_user_profiles WHERE preferred_username=?)`, Args: []any{subject, email, now.UnixMilli(), now.UnixMilli(), input.Language, email, email, preferred}},
+		{SQL: `INSERT OR IGNORE INTO identity_users (subject,username,password_phc,password_changed_at_unix_ms,password_generation,created_at_unix_ms,language) SELECT ?,?, '', ?,1,?,? WHERE NOT EXISTS (SELECT 1 FROM identity_recovery_emails WHERE email = ?) AND NOT EXISTS (SELECT 1 FROM identity_user_profiles WHERE email = ?) AND NOT EXISTS (SELECT 1 FROM identity_user_profiles WHERE preferred_username=?) AND NOT EXISTS (SELECT 1 FROM identity_users WHERE username=?)`, Args: []any{subject, email, now.UnixMilli(), now.UnixMilli(), input.Language, email, email, preferred, preferred}},
 		{SQL: `INSERT OR IGNORE INTO rbac_principal_versions (subject,revision,updated_at_unix_ms) SELECT ?,1,? WHERE EXISTS (SELECT 1 FROM identity_users WHERE subject = ? AND username = ? AND password_phc = '')`, Args: []any{subject, now.UnixMilli(), subject, email}},
 		{SQL: `INSERT OR IGNORE INTO identity_authentication_modes (subject,mode,generation,updated_at_unix_ms) SELECT ?, 'password', 1, ? WHERE EXISTS (SELECT 1 FROM identity_users WHERE subject = ? AND username = ? AND password_phc = '')`, Args: []any{subject, now.UnixMilli(), subject, email}},
 		{SQL: `INSERT OR IGNORE INTO identity_recovery_emails (subject,email) SELECT ?,? WHERE EXISTS (SELECT 1 FROM identity_users WHERE subject = ? AND username = ? AND password_phc = '')`, Args: []any{subject, email, subject, email}},
@@ -538,7 +555,7 @@ func (s *Store) RegisterPasskeyUser(ctx context.Context, input OpenRegistration)
 		return "", err
 	}
 	statements := append(cleanup, []rhiza.SQLStatement{
-		{SQL: `INSERT OR IGNORE INTO identity_users (subject,username,password_phc,password_changed_at_unix_ms,password_generation,created_at_unix_ms,language) SELECT ?,?, '', ?,1,?,? WHERE NOT EXISTS (SELECT 1 FROM identity_recovery_emails WHERE email = ?) AND NOT EXISTS (SELECT 1 FROM identity_user_profiles WHERE email = ?) AND NOT EXISTS (SELECT 1 FROM identity_user_profiles WHERE preferred_username=?)`, Args: []any{subject, email, now.UnixMilli(), now.UnixMilli(), input.Language, email, email, preferred}},
+		{SQL: `INSERT OR IGNORE INTO identity_users (subject,username,password_phc,password_changed_at_unix_ms,password_generation,created_at_unix_ms,language) SELECT ?,?, '', ?,1,?,? WHERE NOT EXISTS (SELECT 1 FROM identity_recovery_emails WHERE email = ?) AND NOT EXISTS (SELECT 1 FROM identity_user_profiles WHERE email = ?) AND NOT EXISTS (SELECT 1 FROM identity_user_profiles WHERE preferred_username=?) AND NOT EXISTS (SELECT 1 FROM identity_users WHERE username=?)`, Args: []any{subject, email, now.UnixMilli(), now.UnixMilli(), input.Language, email, email, preferred, preferred}},
 		{SQL: `INSERT OR IGNORE INTO rbac_principal_versions (subject,revision,updated_at_unix_ms) SELECT ?,1,? WHERE EXISTS (SELECT 1 FROM identity_users WHERE subject = ? AND username = ? AND password_phc = '')`, Args: []any{subject, now.UnixMilli(), subject, email}},
 		{SQL: `INSERT OR IGNORE INTO identity_authentication_modes (subject,mode,generation,updated_at_unix_ms) SELECT ?, 'passkey', 1, ? WHERE EXISTS (SELECT 1 FROM identity_users WHERE subject = ? AND username = ? AND password_phc = '')`, Args: []any{subject, now.UnixMilli(), subject, email}},
 		{SQL: `INSERT OR IGNORE INTO identity_recovery_emails (subject,email) SELECT ?,? WHERE EXISTS (SELECT 1 FROM identity_users WHERE subject = ? AND username = ? AND password_phc = '')`, Args: []any{subject, email, subject, email}},
@@ -597,7 +614,7 @@ func (s *Store) BootstrapUser(ctx context.Context, subject, username, passwordPH
 	if _, err := storage.Execute(ctx, s.db, rhiza.ExecuteRequest{
 		RequestID: mutationID("bootstrap", subject, username, passwordPHC, strconv.FormatInt(now.UnixMilli(), 10)),
 		Statements: []rhiza.SQLStatement{
-			{SQL: `INSERT OR IGNORE INTO identity_users (subject, username, password_phc, password_changed_at_unix_ms, password_generation, created_at_unix_ms) SELECT ?, ?, ?, ?, 1, ? WHERE NOT EXISTS (SELECT 1 FROM scim_user_tombstones WHERE local_external_id = ?)`, Args: []any{subject, username, passwordPHC, now.UnixMilli(), now.UnixMilli(), subject}},
+			{SQL: `INSERT OR IGNORE INTO identity_users (subject, username, password_phc, password_changed_at_unix_ms, password_generation, created_at_unix_ms) SELECT ?, ?, ?, ?, 1, ? WHERE NOT EXISTS (SELECT 1 FROM scim_user_tombstones WHERE local_external_id = ?) AND NOT EXISTS (SELECT 1 FROM identity_user_profiles WHERE preferred_username = ?)`, Args: []any{subject, username, passwordPHC, now.UnixMilli(), now.UnixMilli(), subject, username}},
 			{SQL: `INSERT OR IGNORE INTO rbac_principal_versions (subject,revision,updated_at_unix_ms) SELECT ?,1,? WHERE EXISTS (SELECT 1 FROM identity_users WHERE subject = ? AND username = ?)`, Args: []any{subject, now.UnixMilli(), subject, username}},
 			{SQL: `INSERT OR IGNORE INTO identity_authentication_modes (subject, mode, generation, updated_at_unix_ms) SELECT ?, 'password', 1, ? WHERE EXISTS (SELECT 1 FROM identity_users WHERE subject = ?)`, Args: []any{subject, now.UnixMilli(), subject}},
 		},
@@ -860,7 +877,7 @@ func (s *Store) AuthenticatePasswordGrant(ctx context.Context, username string, 
 }
 
 func (s *Store) authenticate(ctx context.Context, username string, password []byte, recordFailure bool, onExpired func(context.Context, string) error) (Authentication, error) {
-	if err := ValidateUsername(username); err != nil {
+	if err := validateLoginIdentifier(username); err != nil {
 		_, _, workErr := s.hasher.VerifyOrDummy(ctx, password, "")
 		if workErr != nil {
 			return Authentication{}, workErr
@@ -1727,17 +1744,22 @@ func (s *Store) lookupByUsername(ctx context.Context, username string) (User, bo
 
 func (s *Store) lookupCredential(ctx context.Context, username string) (User, string, int64, bool, bool, bool, Authentication, error) {
 	result, err := s.db.Query(ctx, rhiza.QueryRequest{
-		SQL:         `SELECT u.subject, u.username, u.password_phc, u.disabled, u.password_changed_at_unix_ms, m.mode, u.user_expires_at_unix_ms, u.password_generation, m.generation FROM identity_users u JOIN identity_authentication_modes m ON m.subject = u.subject WHERE u.username = ?`,
-		Args:        []any{username},
+		SQL: `SELECT u.subject, u.username, u.password_phc, u.disabled, u.password_changed_at_unix_ms, m.mode, u.user_expires_at_unix_ms, u.password_generation, m.generation
+			FROM identity_users u
+			JOIN identity_authentication_modes m ON m.subject = u.subject
+			LEFT JOIN identity_user_profiles p ON p.subject = u.subject
+			WHERE u.username = ? OR p.preferred_username = ?`,
+		Args:        []any{username, username},
 		Consistency: rhiza.ConsistencyLinearizable,
 	})
 	if err != nil {
 		return User{}, "", 0, false, false, false, Authentication{}, err
 	}
-	if len(result.Rows) == 0 {
+	// Fail closed on 0 matches or ambiguous cross-column/legacy duplicate rows.
+	if len(result.Rows) != 1 {
 		return User{}, "", 0, false, false, false, Authentication{}, nil
 	}
-	if len(result.Rows) != 1 || len(result.Rows[0]) != 9 {
+	if len(result.Rows[0]) != 9 {
 		return User{}, "", 0, false, false, false, Authentication{}, errors.New("invalid identity row")
 	}
 	user, ok := decodeUser([]any{result.Rows[0][0], result.Rows[0][1], result.Rows[0][3]})
@@ -1957,6 +1979,34 @@ func decodeUser(row []any) (User, bool) {
 		return User{}, false
 	}
 	return User{Subject: subject, Username: username, Disabled: disabled == 1}, true
+}
+
+// ResolveCanonicalUsername maps either identity_users.username or
+// identity_user_profiles.preferred_username to the canonical username when a
+// unique account matches, preventing brute-force bucket splitting across aliases.
+func (s *Store) ResolveCanonicalUsername(ctx context.Context, identifier string) (string, error) {
+	if s == nil || s.db == nil {
+		return "", errors.New("identity store unavailable")
+	}
+	if err := validateLoginIdentifier(identifier); err != nil {
+		return identifier, nil
+	}
+	result, err := s.db.Query(ctx, rhiza.QueryRequest{
+		SQL:         `SELECT u.username FROM identity_users u LEFT JOIN identity_user_profiles p ON p.subject = u.subject WHERE u.username = ? OR p.preferred_username = ?`,
+		Args:        []any{identifier, identifier},
+		Consistency: rhiza.ConsistencyLinearizable,
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(result.Rows) != 1 || len(result.Rows[0]) != 1 {
+		return identifier, nil
+	}
+	canonical, ok := result.Rows[0][0].(string)
+	if !ok || canonical == "" {
+		return identifier, nil
+	}
+	return canonical, nil
 }
 
 func validateSubject(subject string) error {

@@ -88,3 +88,39 @@ func TestCreateUserWithGuardDuplicateEmailLeavesExistingRowsUnchanged(t *testing
 		t.Fatalf("duplicate preferred created=%#v err=%v", duplicatePreferred, err)
 	}
 }
+
+func TestAuthenticateWithPreferredUsername(t *testing.T) {
+	t.Parallel()
+	store := testResetStore(t, credential.DefaultRules())
+	ctx := context.Background()
+	created, err := store.CreateUserWithGuard(ctx, UserCreation{
+		OpenRegistration: OpenRegistration{
+			Email:             "owner@conalog.com",
+			PreferredUsername: "owner",
+			TTL:               time.Hour,
+		},
+	}, "1=1", nil)
+	if err != nil || !created.Created {
+		t.Fatalf("CreateUserWithGuard: created=%#v err=%v", created, err)
+	}
+	phc, err := store.hasher.Hash(ctx, []byte("Owner-Secret-123!"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := storage.Execute(ctx, store.db, rhiza.ExecuteRequest{
+		RequestID: "set-owner-password",
+		SQL:       `UPDATE identity_users SET password_phc=? WHERE subject=?`,
+		Args:      []any{phc, created.Subject},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	authByEmail, err := store.Authenticate(ctx, "owner@conalog.com", []byte("Owner-Secret-123!"))
+	if err != nil || authByEmail.Subject != created.Subject {
+		t.Fatalf("Authenticate by email: auth=%+v err=%v", authByEmail, err)
+	}
+	authByPreferred, err := store.Authenticate(ctx, "owner", []byte("Owner-Secret-123!"))
+	if err != nil || authByPreferred.Subject != created.Subject {
+		t.Fatalf("Authenticate by preferred_username: auth=%+v err=%v", authByPreferred, err)
+	}
+}
