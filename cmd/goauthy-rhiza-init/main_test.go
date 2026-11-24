@@ -16,8 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/mrchypark/goauthy/internal/storage"
 	"github.com/mrchypark/rhiza"
 	"github.com/mrchypark/rhiza/pkg/recovery"
@@ -55,9 +53,9 @@ func TestRestoreInitMainAbruptDataLossS3(t *testing.T) {
 	if len(nonce) != 32 || strings.Trim(nonce, "0123456789abcdef") != "" || fixture == "" || os.Getenv("GOAUTHY_INIT_TEST_S3_SECRET") == "" {
 		t.Fatal("requires a script-owned disposable S3 fixture")
 	}
-	out, err := exec.Command("docker", "inspect", "--format", `{{index .Config.Labels "goauthy.init.fixture"}}|{{(index (index .NetworkSettings.Ports "9000/tcp") 0).HostIp}}:{{(index (index .NetworkSettings.Ports "9000/tcp") 0).HostPort}}|{{range .Mounts}}{{if eq .Destination "/data"}}{{.Type}}{{end}}{{end}}`, fixture).Output()
-	if err != nil || strings.TrimSpace(string(out)) != nonce+"|"+endpoint+"|tmpfs" {
-		t.Fatal("S3 endpoint does not match the script-owned container")
+	interfaces, err := net.Interfaces()
+	if err != nil || endpoint != "127.0.0.1:9000" || len(interfaces) != 1 || interfaces[0].Name != "lo" || interfaces[0].Flags&net.FlagLoopback == 0 {
+		t.Fatal("test requires the fixture's isolated loopback network")
 	}
 	initMainAbruptDataLoss(t, true)
 }
@@ -76,7 +74,24 @@ func initMainAbruptDataLoss(t *testing.T, s3 bool) {
 					t.Fatalf("DataDir loss incomplete: %v", err)
 				}
 				if s3 && os.Getenv("GOAUTHY_INIT_TEST_S3_FAILURE_CONTROL") == "1" {
-					initRemoveTestArchive(t)
+					if err := os.WriteFile("/control/archive-ready", nil, 0600); err != nil {
+						t.Fatal(err)
+					}
+					deadline := time.After(90 * time.Second)
+					for {
+						if _, err := os.Stat("/control/archive-removed"); err == nil {
+							break
+						} else if !os.IsNotExist(err) {
+							t.Fatal(err)
+						}
+						select {
+						case <-deadline:
+							t.Fatal("timed out waiting for fixture archive removal")
+						case <-t.Context().Done():
+							t.Fatal(t.Context().Err())
+						case <-time.After(100 * time.Millisecond):
+						}
+					}
 				}
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
@@ -193,39 +208,6 @@ func initMainAbruptDataLoss(t *testing.T, s3 bool) {
 	if _, err := storage.Execute(ctx, db, rhiza.ExecuteRequest{RequestID: "post-recovery", SQL: "INSERT INTO init_main_proof VALUES (2, 'new-write')"}); err != nil {
 		t.Fatalf("main was not writable after recovery: %v", err)
 	}
-}
-
-func initRemoveTestArchive(t *testing.T) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	client, err := minio.New(os.Getenv("GOAUTHY_INIT_TEST_S3_ENDPOINT"), &minio.Options{
-		Creds:  credentials.NewStaticV4("goauthy-init-test", os.Getenv("GOAUTHY_INIT_TEST_S3_SECRET"), ""),
-		Region: "us-east-1", BucketLookup: minio.BucketLookupPath,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	bucket := "goauthy-init-" + os.Getenv("GOAUTHY_INIT_TEST_S3_NONCE")
-	removed := 0
-	for object := range client.ListObjects(ctx, bucket, minio.ListObjectsOptions{Recursive: true}) {
-		if object.Err != nil {
-			t.Fatal(object.Err)
-		}
-		if err := client.RemoveObject(ctx, bucket, object.Key, minio.RemoveObjectOptions{}); err != nil {
-			t.Fatal(err)
-		}
-		removed++
-	}
-	if removed == 0 {
-		t.Fatal("failure control found no archive objects to remove")
-	}
-	for object := range client.ListObjects(ctx, bucket, minio.ListObjectsOptions{Recursive: true}) {
-		if object.Err != nil || object.Key != "" {
-			t.Fatalf("failure control archive removal incomplete: %+v", object)
-		}
-	}
-	t.Logf("failure control removed %d archive objects", removed)
 }
 
 func TestRestoreInitRefusesChangedBoundHistory(t *testing.T) {
