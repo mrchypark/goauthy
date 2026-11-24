@@ -43,7 +43,7 @@ jobs:
           && github.event.workflow_run.head_repository.full_name == github.repository
       }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - name: Resolve source SHA
         id: source
@@ -74,6 +74,9 @@ jobs:
           fi
 
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if [ -z "$RELEASE_TAG" ] && [ "$EVENT_NAME" = "workflow_run" ]; then
+            RELEASE_TAG=$(gh api "repos/$REPOSITORY/tags?per_page=100" --jq "[.[] | select(.commit.sha == \"$sha\" and (.name | test(\"^v(0|[1-9][0-9]*)\\\\.(0|[1-9][0-9]*)\\\\.(0|[1-9][0-9]*)$\")))] | .[0].name // \"\"")
+          fi
           tags="$IMAGE:latest,$IMAGE:sha-$sha"
           if [ -n "$RELEASE_TAG" ]; then
             if ! [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
@@ -101,12 +104,26 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          runs=$(gh api "repos/$REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=$SOURCE_SHA&status=success&per_page=100" | jq --arg sha "$SOURCE_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .event == "push" and .conclusion == "success" and .status == "completed")] | length')
-          if [ "$runs" -lt 1 ]; then
-            echo "::error::No successful CI push run found for SHA $SOURCE_SHA on main"
-            exit 1
-          fi
-          echo "Verified $runs successful CI run(s) for $SOURCE_SHA"
+          deadline=$((SECONDS + 5400))
+          while true; do
+            runs_json=$(gh api "repos/$REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=$SOURCE_SHA&per_page=100")
+            success=$(printf '%s' "$runs_json" | jq --arg sha "$SOURCE_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .event == "push" and .conclusion == "success" and .status == "completed")] | length')
+            if [ "$success" -ge 1 ]; then
+              echo "Verified $success successful CI run(s) for $SOURCE_SHA"
+              exit 0
+            fi
+            active=$(printf '%s' "$runs_json" | jq --arg sha "$SOURCE_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .event == "push" and (.status == "queued" or .status == "in_progress" or .status == "waiting" or .status == "requested" or .status == "pending"))] | length')
+            if [ "$active" -lt 1 ]; then
+              echo "::error::No successful CI push run found for SHA $SOURCE_SHA on main"
+              exit 1
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::Timed out waiting for CI push run for SHA $SOURCE_SHA on main"
+              exit 1
+            fi
+            echo "Waiting 30s for $active active CI push run(s) on main for $SOURCE_SHA..."
+            sleep 30
+          done
 
       - name: Checkout source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
