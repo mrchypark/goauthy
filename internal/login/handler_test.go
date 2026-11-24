@@ -183,7 +183,7 @@ func TestHTMLLoginFailureKeepsOAuthInteractionForRetry(t *testing.T) {
 	for _, want := range []string{
 		`id="login-error" class="auth-error" role="alert"`, `data-i18n="Login failed">로그인하지 못했습니다`,
 		`aria-hidden="true">⚠</span>`, `data-i18n="Check your email/username or password">이메일/사용자 이름 또는 비밀번호를 확인하세요.`,
-		`data-i18n="Check your username or password"`, `data-brand-ko="계속할 서비스: browser-client"`,
+		`data-i18n="Check your email/username or password"`, `data-brand-ko="계속할 서비스: browser-client"`,
 		`id="login-client-context"><span data-i18n="Continue to">다음으로 계속</span> browser-client</p>`,
 		`data-login-progress hidden data-i18n="Signing in…">Signing in…</p>`,
 		`method="post" action="/auth/login"`, `value="` + interaction + `"`,
@@ -210,7 +210,7 @@ func TestHTMLLoginFailureKeepsOAuthInteractionForRetry(t *testing.T) {
 	if !strings.Contains(failed.Body.String(), `name="username" value="&lt;script&gt;alert(1)&lt;/script&gt;"`) || strings.Contains(failed.Body.String(), failedUsername) || strings.Contains(failed.Body.String(), "wrong password") || strings.Contains(failed.Body.String(), "Unable to continue") {
 		t.Fatal("failed login did not safely retain only the submitted username")
 	}
-	if !strings.Contains(failed.Body.String(), "Check your username or password") {
+	if !strings.Contains(failed.Body.String(), "Check your email/username or password") {
 		t.Fatal("failed login did not show the generic actionable error")
 	}
 	unknownRequest := postLogin(init, interaction, "nobody", "wrong password")
@@ -218,7 +218,7 @@ func TestHTMLLoginFailureKeepsOAuthInteractionForRetry(t *testing.T) {
 	unknownRequest.Header.Set("Accept-Language", "ko")
 	unknown := httptest.NewRecorder()
 	branding.BrowserPageErrors(h.issuer, http.HandlerFunc(h.Login)).ServeHTTP(unknown, unknownRequest)
-	if unknown.Code != failed.Code || !strings.Contains(unknown.Body.String(), `name="username" value="nobody"`) || !strings.Contains(unknown.Body.String(), "Check your username or password") {
+	if unknown.Code != failed.Code || !strings.Contains(unknown.Body.String(), `name="username" value="nobody"`) || !strings.Contains(unknown.Body.String(), "Check your email/username or password") {
 		t.Fatalf("unknown-user retry status=%d body=%s", unknown.Code, unknown.Body.String())
 	}
 	normalizeRetry := func(body string) string {

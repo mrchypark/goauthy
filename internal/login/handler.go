@@ -1052,7 +1052,11 @@ checkRateLimit:
 			return identity.Authentication{}, "", time.Time{}, false
 		}
 	}
-	accountHash := loginpolicy.AccountStuffingDigest(username)
+	accountKey := username
+	if resolved, resolveErr := h.identity.ResolveCanonicalUsername(r.Context(), username); resolveErr == nil {
+		accountKey = resolved
+	}
+	accountHash := loginpolicy.AccountStuffingDigest(accountKey)
 	if h.policy != nil {
 		lockStart := time.Now()
 		locked, remaining, lockErr := h.policy.CheckAccountLock(r.Context(), accountHash, h.now().UTC())

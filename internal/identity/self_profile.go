@@ -148,7 +148,7 @@ func (s *Store) UpdateSelfProfileWithGuard(ctx context.Context, subject string, 
 
 	guardSQL := `u.subject=? AND (` + authoritySQL + `) AND (` + selfProfileSnapshotSQL + `)=?`
 	if finalPreferred != nil {
-		guardSQL += ` AND NOT EXISTS(SELECT 1 FROM identity_user_profiles WHERE preferred_username=? AND subject<>?)`
+		guardSQL += ` AND NOT EXISTS(SELECT 1 FROM identity_user_profiles WHERE preferred_username=? AND subject<>?) AND NOT EXISTS(SELECT 1 FROM identity_users WHERE username=? AND subject<>?)`
 	}
 
 	var preferredArg any
@@ -167,7 +167,7 @@ func (s *Store) UpdateSelfProfileWithGuard(ctx context.Context, subject string, 
 	args = append(args, authorityArgs...)
 	args = append(args, subject, now, snapshot)
 	if finalPreferred != nil {
-		args = append(args, *finalPreferred, subject)
+		args = append(args, *finalPreferred, subject, *finalPreferred, subject)
 	}
 
 	conditionalUpsert := rhiza.SQLStatement{

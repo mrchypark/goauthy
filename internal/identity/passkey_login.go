@@ -14,7 +14,7 @@ func (s *Store) LookupPasskeyOnlySubject(ctx context.Context, username string) (
 	if s == nil {
 		return "", "", errors.New("identity store unavailable")
 	}
-	if err := ValidateUsername(username); err != nil {
+	if err := validateLoginIdentifier(username); err != nil {
 		return "", "", ErrInvalidUsername
 	}
 	user, _, _, passwordMode, found, expired, _, err := s.lookupCredential(ctx, username)
