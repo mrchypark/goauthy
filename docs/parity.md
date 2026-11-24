@@ -1,6 +1,6 @@
 # Rauthy v0.36.2 behavior-parity plan
 
-> **Historical-baseline note:** The `Fixed baselines` and dated rows below record the September 2026 parity audit baselines (such as `Rhiza v0.10.0` / `v0.12.3`, `LatticeDB v0.5.1`, and `Schema v102`). For the current codebase dependency baseline (`Go 1.27.4`, `Rhiza v0.27.3`, `latticedb-go v0.13.0`, schema `v116`), see [go.mod](../go.mod) and [README.md](../README.md); for the current product support boundary, see [capabilities.md](capabilities.md).
+> **Historical-baseline note:** The `Fixed baselines` and dated rows below record the September 2026 parity audit baselines (such as `Rhiza v0.10.0` / `v0.12.3`, `LatticeDB v0.5.1`, and `Schema v102`). For the current codebase dependency baseline (`Go 1.27.4`, `Rhiza v0.27.4`, `latticedb-go v0.13.0`, schema `v116`), see [go.mod](../go.mod) and [README.md](../README.md); for the current product support boundary, see [capabilities.md](capabilities.md).
 
 ## Fixed baselines
 

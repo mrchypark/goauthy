@@ -10,7 +10,7 @@ GET /metrics/archive/v1
 ```
 
 All three routes require the configured bearer token. The archive endpoint keeps
-its version 1 fixed stage shape for compatibility; on current Rhiza (`v0.27.3`
+its version 1 fixed stage shape for compatibility; on current Rhiza (`v0.27.4`
 in `go.mod`) `cmd/goauthy` serves `unavailableArchiveStatsV1` where every stage
 is unavailable (`available: false`) with `null` count and duration values. These
 values mean unavailable, not zero.

@@ -75,7 +75,7 @@ printf '%s\n' 'fixture source SHA256 (working tree, not a release artifact):'
 shasum -a 256 scripts/test-rhiza-local-upgrade.sh cmd/goauthy-rhiza-init/compatibility_test.go go.mod go.sum
 cp go.mod "$work/producer.mod"
 cp go.sum "$work/producer.sum"
-go mod edit -modfile="$work/producer.mod" -require=github.com/mrchypark/rhiza@v0.24.0
+go mod edit -modfile="$work/producer.mod" -require=github.com/mrchypark/rhiza@v0.27.3
 # Build only GoAuthy's own existing init tests against each published SDK.
 run go test ${race:+"$race"} -mod=mod -modfile="$work/producer.mod" -p 1 -c -o "$work/producer" ./cmd/goauthy-rhiza-init
 run go test ${race:+"$race"} -mod=readonly -p 1 -c -o "$work/consumer" ./cmd/goauthy-rhiza-init
@@ -84,7 +84,7 @@ go version -m "$work/consumer" | sed -n '/github.com\/mrchypark\/rhiza/p'
 mkdir "$work/live"
 export GOAUTHY_INIT_LIFECYCLE_TEST_ROOT="$work/live"
 for phase in seed write; do
-  GOAUTHY_LOCAL_COMPAT_VERSION=v0.24.0 GOAUTHY_LOCAL_COMPAT_PHASE=$phase run_phase "$phase" TestLocalArchiveVersionCompatibilityPhases "$work/producer" -test.timeout=2m
+  GOAUTHY_LOCAL_COMPAT_VERSION=v0.27.3 GOAUTHY_LOCAL_COMPAT_PHASE=$phase run_phase "$phase" TestLocalArchiveVersionCompatibilityPhases "$work/producer" -test.timeout=2m
 done
 # Producer exits without Close after its BeforeAck receipt; keep an unopened copy.
 copy_archive "$work/live" "$work/original"
@@ -111,7 +111,7 @@ digest "$work/live" | sed '\|  ./data/qlog/lock.qlog$|d' > "$work/live.after"
 diff -u "$work/live.before" "$work/live.after"
 printf '%s\n' 'negative before/after manifest SHA256 (must match):'
 shasum -a 256 "$work/live.before" "$work/live.after"
-GOAUTHY_LOCAL_COMPAT_VERSION=v0.27.3 GOAUTHY_LOCAL_COMPAT_PHASE=retained run_phase retained TestLocalArchiveVersionCompatibilityPhases "$work/consumer" -test.timeout=2m
+GOAUTHY_LOCAL_COMPAT_VERSION=v0.27.4 GOAUTHY_LOCAL_COMPAT_PHASE=retained run_phase retained TestLocalArchiveVersionCompatibilityPhases "$work/consumer" -test.timeout=2m
 cmp "$work/original/data/local-backup.json" "$work/live/data/local-backup.json"
 # Restore an untouched producer archive at its original location, not a new
 # namespace. Cold recovery must derive its binding from the archive itself.
@@ -122,7 +122,7 @@ GOAUTHY_LOCAL_COMPAT_COPY_SOURCE_ROOT="$work/original" GOAUTHY_LOCAL_COMPAT_COPY
   run_phase restored-metadata TestLocalArchiveCopyMetadata "$work/consumer" -test.timeout=30s
 [ ! -e "$work/live/data" ]
 for phase in cold second; do
-  GOAUTHY_INIT_LIFECYCLE_TEST_ROOT="$work/live" GOAUTHY_LOCAL_COMPAT_VERSION=v0.27.3 GOAUTHY_LOCAL_COMPAT_PHASE=$phase run_phase "$phase" TestLocalArchiveVersionCompatibilityPhases "$work/consumer" -test.timeout=2m
+  GOAUTHY_INIT_LIFECYCLE_TEST_ROOT="$work/live" GOAUTHY_LOCAL_COMPAT_VERSION=v0.27.4 GOAUTHY_LOCAL_COMPAT_PHASE=$phase run_phase "$phase" TestLocalArchiveVersionCompatibilityPhases "$work/consumer" -test.timeout=2m
   cmp "$work/original/data/local-backup.json" "$work/live/data/local-backup.json"
   if [ "$phase" = cold ]; then
     rm -rf "$work/live/data"
@@ -133,4 +133,4 @@ digest "$work/original" > "$work/original.after"
 cmp "$work/original.before" "$work/original.after"
 printf '%s\n' 'final original tree manifest SHA256 (must match original):'
 shasum -a 256 "$work/original.after"
-printf '%s\n' 'PASS: v0.24.0 -> v0.27.3; retained upgrade, nonempty snapshot+abrupt ACK tail, cold+second init/main restore, exact receipt replay, no duplicates, new write, binding refusal, original copy unchanged'
+printf '%s\n' 'PASS: v0.27.3 -> v0.27.4; retained upgrade, nonempty snapshot+abrupt ACK tail, cold+second init/main restore, exact receipt replay, no duplicates, new write, binding refusal, original copy unchanged'

@@ -1,11 +1,11 @@
 # Rhiza startup close guard
 
-The current integration candidate uses official Rhiza `v0.27.3`,
+The current integration candidate uses official Rhiza `v0.27.4`,
 resolving to upstream commit
-[`234602aeb1783f11f1e878a5e1a4793ff7a473d6`](https://github.com/mrchypark/rhiza/commit/234602aeb1783f11f1e878a5e1a4793ff7a473d6).
+[`94e9ef3f29ddf52b3d543133bae3e3d8ba57558c`](https://github.com/mrchypark/rhiza/commit/94e9ef3f29ddf52b3d543133bae3e3d8ba57558c).
 The bounded integration scope is single-node `standalone-local` object-store
 recovery without an operator; it does not qualify managed HA. See the
-[verification scope and reproduction commands](no-pvc-dr.md#current-v0273-integration).
+[verification scope and reproduction commands](no-pvc-dr.md#current-v0274-integration).
 The earlier v0.21.2 release reconciled a lost Local maintenance-release acknowledgement only
 after stable readback proves the exact expected free control at a changed
 object version. Work errors and cancellation remain errors; this does not

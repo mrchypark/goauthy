@@ -1,7 +1,7 @@
 # Lifecycle events
 
 Baseline when introduced: Rauthy v0.36.2 (`dd61ac3c84d6b238108dc8438b53043b5177a662`),
-Rhiza v0.12.0, GoAuthy schema 60 (current `go.mod` uses `rhiza v0.27.3` and
+Rhiza v0.12.0, GoAuthy schema 60 (current `go.mod` uses `rhiza v0.27.4` and
 schema `v116`; schema `v102` added `prev_hash`/`integrity_hash` columns on `event_log`).
 This is not the existing pseudonymous API-key/master-key audit API. Full event
 parity is **incomplete** (capability status: **Preview** in
