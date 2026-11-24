@@ -1,7 +1,7 @@
 {
   "sign_in": "Sign in",
   "continue_to": "Continue to",
-  "username": "Username",
+  "username": "Email or username",
   "password": "Password",
   "sign_out": "Sign out",
   "confirm_sign_out": "Confirm that you want to sign out.",

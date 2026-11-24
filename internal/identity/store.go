@@ -1735,7 +1735,18 @@ func (s *Store) lookupCredential(ctx context.Context, username string) (User, st
 		return User{}, "", 0, false, false, false, Authentication{}, err
 	}
 	if len(result.Rows) == 0 {
-		return User{}, "", 0, false, false, false, Authentication{}, nil
+		result, err = s.db.Query(ctx, rhiza.QueryRequest{
+			SQL:         `SELECT u.subject, u.username, u.password_phc, u.disabled, u.password_changed_at_unix_ms, m.mode, u.user_expires_at_unix_ms, u.password_generation, m.generation FROM identity_users u JOIN identity_authentication_modes m ON m.subject = u.subject JOIN identity_user_profiles p ON p.subject = u.subject WHERE p.preferred_username = ?`,
+			Args:        []any{username},
+			Consistency: rhiza.ConsistencyLinearizable,
+		})
+		if err != nil {
+			return User{}, "", 0, false, false, false, Authentication{}, err
+		}
+		// Fail closed if legacy/synthetic data has duplicate preferred_username rows.
+		if len(result.Rows) != 1 {
+			return User{}, "", 0, false, false, false, Authentication{}, nil
+		}
 	}
 	if len(result.Rows) != 1 || len(result.Rows[0]) != 9 {
 		return User{}, "", 0, false, false, false, Authentication{}, errors.New("invalid identity row")

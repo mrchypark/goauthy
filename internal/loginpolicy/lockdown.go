@@ -149,8 +149,8 @@ func (s *LockdownStore) IsAdminByUsername(ctx context.Context, username string) 
 		return false, errors.New("invalid input")
 	}
 	result, err := s.db.Query(ctx, rhiza.QueryRequest{
-		SQL:         `SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id WHERE u.username = ? AND u.disabled = 0 AND r.name = 'goauthy_admin'`,
-		Args:        []any{username},
+		SQL:         `SELECT 1 FROM identity_users u JOIN rbac_user_roles m ON m.subject = u.subject JOIN rbac_roles r ON r.id = m.role_id LEFT JOIN identity_user_profiles p ON p.subject = u.subject WHERE (u.username = ? OR p.preferred_username = ?) AND u.disabled = 0 AND r.name = 'goauthy_admin' LIMIT 1`,
+		Args:        []any{username, username},
 		Consistency: rhiza.ConsistencyLinearizable,
 	})
 	if err != nil {

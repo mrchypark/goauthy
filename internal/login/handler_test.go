@@ -182,7 +182,7 @@ func TestHTMLLoginFailureKeepsOAuthInteractionForRetry(t *testing.T) {
 	}
 	for _, want := range []string{
 		`id="login-error" class="auth-error" role="alert"`, `data-i18n="Login failed">로그인하지 못했습니다`,
-		`aria-hidden="true">⚠</span>`, `data-i18n="Check your username or password">사용자 이름 또는 비밀번호를 확인하세요.`,
+		`aria-hidden="true">⚠</span>`, `data-i18n="Check your email/username or password">이메일/사용자 이름 또는 비밀번호를 확인하세요.`,
 		`data-i18n="Check your username or password"`, `data-brand-ko="계속할 서비스: browser-client"`,
 		`id="login-client-context"><span data-i18n="Continue to">다음으로 계속</span> browser-client</p>`,
 		`data-login-progress hidden data-i18n="Signing in…">Signing in…</p>`,
@@ -261,7 +261,7 @@ func TestLoginPageLocalizesEachFailureStatus(t *testing.T) {
 		titleKey, title, detailKey, detail string
 		credentialGuidance                 bool
 	}{
-		{http.StatusUnauthorized, "Login failed", "로그인하지 못했습니다", "Check your username or password", "사용자 이름 또는 비밀번호를 확인하세요.", true},
+		{http.StatusUnauthorized, "Login failed", "로그인하지 못했습니다", "Check your email/username or password", "이메일/사용자 이름 또는 비밀번호를 확인하세요.", true},
 		{http.StatusTooManyRequests, "Too many attempts", "시도 횟수가 많습니다.", "Please wait before trying again.", "잠시 후 다시 시도하세요.", false},
 		{http.StatusServiceUnavailable, "Sign-in temporarily unavailable", "로그인 서비스를 일시적으로 사용할 수 없습니다.", "Please try again shortly.", "잠시 후 다시 시도하세요.", false},
 	} {
@@ -278,7 +278,7 @@ func TestLoginPageLocalizesEachFailureStatus(t *testing.T) {
 				t.Fatalf("status %d error did not retain localized guidance: %s", test.status, response.Body.String())
 			}
 			if strings.Index(body, `id="login-error"`) > strings.Index(body, `name="password"`) ||
-				strings.Contains(body, `data-i18n="Check your username or password"`) != test.credentialGuidance {
+				strings.Contains(body, `data-i18n="Check your email/username or password"`) != test.credentialGuidance {
 				t.Fatalf("status %d alert placement or guidance is incorrect: %s", test.status, body)
 			}
 		})
