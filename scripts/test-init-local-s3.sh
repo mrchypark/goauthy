@@ -38,12 +38,12 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 container_id=$(docker create --name "$fixture" --network none --label "goauthy.init.fixture=$nonce" \
-  --tmpfs /data:mode=0777 -e ROOT_ACCESS_KEY_ID=goauthy-init-test \
+  --mount type=tmpfs,destination=/data,tmpfs-mode=0777 -e ROOT_ACCESS_KEY_ID=goauthy-init-test \
   -e "ROOT_SECRET_ACCESS_KEY=$secret" -e VGW_HEALTH=/_/health \
   versity/versitygw:v1.8.0 --port :9000 posix /data)
 docker start "$container_id" >/dev/null
 inspect=$(docker inspect --format '{{index .Config.Labels "goauthy.init.fixture"}}|{{.HostConfig.NetworkMode}}|{{len .NetworkSettings.Ports}}|{{range .Mounts}}{{if eq .Destination "/data"}}{{.Type}}{{end}}{{end}}' "$container_id")
-[ "$inspect" = "$nonce|none|0|tmpfs" ] || { echo 'invalid isolated S3 fixture' >&2; exit 1; }
+[ "$inspect" = "$nonce|none|0|tmpfs" ] || { printf 'invalid isolated S3 fixture (label|network|ports|data mount): %s\n' "$inspect" >&2; exit 1; }
 cd "$root"
 go mod download
 mode=${1:-}
@@ -74,7 +74,7 @@ if [ "$mode" = --failure-control ]; then
     sleep 1
   done
   inspect=$(docker inspect --format '{{index .Config.Labels "goauthy.init.fixture"}}|{{.HostConfig.NetworkMode}}|{{len .NetworkSettings.Ports}}|{{range .Mounts}}{{if eq .Destination "/data"}}{{.Type}}{{end}}{{end}}' "$container_id")
-  [ "$inspect" = "$nonce|none|0|tmpfs" ] || { echo 'invalid isolated S3 fixture' >&2; exit 1; }
+  [ "$inspect" = "$nonce|none|0|tmpfs" ] || { printf 'invalid isolated S3 fixture (label|network|ports|data mount): %s\n' "$inspect" >&2; exit 1; }
   docker exec "$container_id" sh -c '
     set -eu
     bucket=/data/$1
