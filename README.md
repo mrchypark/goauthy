@@ -14,7 +14,7 @@ GoAuthy is a pre-alpha Go OAuth 2.0 / OIDC identity provider targeting behaviora
 
 GoAuthy runs as a single binary (`cmd/goauthy`) with no external database server in the default deployment topology ("no GoAuthy PVC"):
 
-- **Storage & replication (`Rhiza v0.27.3`, `latticedb-go v0.13.0`, schema `v116`)**: State is stored in an embedded `*rhiza.DB` SQLite/consensus engine (`github.com/mrchypark/rhiza`, commit [`234602aeb1783f11f1e878a5e1a4793ff7a473d6`](https://github.com/mrchypark/rhiza/commit/234602aeb1783f11f1e878a5e1a4793ff7a473d6)) using `emptyDir` local storage paired with synchronous `before-ack` object-store publication (S3 or GCS) for disaster recovery.
+- **Storage & replication (`Rhiza v0.27.4`, `latticedb-go v0.13.0`, schema `v116`)**: State is stored in an embedded `*rhiza.DB` SQLite/consensus engine (`github.com/mrchypark/rhiza`, commit [`94e9ef3f29ddf52b3d543133bae3e3d8ba57558c`](https://github.com/mrchypark/rhiza/commit/94e9ef3f29ddf52b3d543133bae3e3d8ba57558c)) using `emptyDir` local storage paired with synchronous `before-ack` object-store publication (S3 or GCS) for disaster recovery.
 - **OAuth 2.0 / OIDC core (`ory/fosite` fork `v0.49.0-goauthy.1`)**: Uses a minimally patched `github.com/mrchypark/fosite` fork for security fixes and compatibility; the policy is to return to upstream once published and qualified.
 - **Cryptography & WebAuthn**: `go-jose/v4` for EdDSA JWT/JWKS signing, `go-webauthn` for passkeys, Argon2id for password hashing, and `*oidc.Keyring` with **GAOP** (GoAuthy Authenticated Object Protection) AES-256-GCM envelope encryption.
 - **Runtime requirement**: Go `1.27.4` minimum (also enforced by the root `Dockerfile`).
@@ -86,7 +86,7 @@ GoAuthy supports four Rhiza profiles via `GOAUTHY_RHIZA_PROFILE`:
 | `standalone-local` | 1-member (`Local: true`) | `emptyDir` | Required (S3/GCS, `local/v1`) | `goauthy-rhiza-init` pre-start recovery; `goauthy-backup` rejected |
 | `cluster` | 3-voter HA (`Local: false`) | `emptyDir` | Required (S3/GCS) | `goauthy-backup` & scheduled snapshots |
 
-- **Current `v0.27.3` qualification scope**: Bounded verification targets single-node `standalone-local` object-store recovery without an operator. Managed HA, Kubernetes, and production-cloud operation on `v0.27.3` remain unqualified; see [docs/no-pvc-dr.md](docs/no-pvc-dr.md#current-v0273-integration).
+- **Current `v0.27.4` qualification scope**: Bounded verification targets single-node `standalone-local` object-store recovery without an operator. Managed HA, Kubernetes, and production-cloud operation on `v0.27.4` remain unqualified; see [docs/no-pvc-dr.md](docs/no-pvc-dr.md#current-v0274-integration).
 - **No-PVC DR & consumer integration**: See [deploy/ternal-no-pvc/README.md](deploy/ternal-no-pvc/README.md) (`Ternal` is the reference consumer deployment) and [docs/backup-operator.md](docs/backup-operator.md) for offline `age`/Ed25519 backup and restore workflows.
 - **Checkpoint intervals**: `GOAUTHY_RHIZA_CHECKPOINT_INTERVAL` supports durable checkpointing, but avoid aggressive `1s` intervals during schema migrations or heavy writes (observed to trigger `node is not ready` in [docs/no-pvc-dr.md](docs/no-pvc-dr.md)).
 - **Archive-statistics compatibility**: Rhiza `v0.21+` removed the archive-statistics API; GoAuthy's protected `/metrics/archive/v1` endpoint retains schema version 1 with `available: false` and `null` count/duration values.

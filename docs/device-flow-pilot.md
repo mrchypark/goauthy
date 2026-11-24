@@ -30,7 +30,7 @@ source-overlay/테스트 범위는 [status.md](status.md)를 따른다.
 로그인·승인 → 기기에서 토큰으로 API 사용**이다. 기기 자산 목록이나 passkey
 등록 기능을 뜻하지 않는다. 당시 기록은 Rhiza v0.12.0, schema v63 후보 기준이며
 2026-09-07 후속 지원 사항은 schema v79 기준으로 기존 제한 기록을 갱신한다(현재
-소스 기준은 `rhiza v0.27.3`, schema v116이며 제품 상태는 [capabilities.md](capabilities.md)를
+소스 기준은 `rhiza v0.27.4`, schema v116이며 제품 상태는 [capabilities.md](capabilities.md)를
 우선한다).
 
 ## 구현 및 확인 범위

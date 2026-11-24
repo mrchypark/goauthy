@@ -158,7 +158,7 @@ Older verification paragraphs below record the API-key-only milestone.
 
 Uses existing OAuth resource authorization, managed clients, credential encryption,
 consent policy and Rhiza (embedded distributed SQLite store; implemented on v0.12.0,
-current `go.mod` is `v0.27.3`) transactions, plus Go stdlib `crypto/sha256`,
+current `go.mod` is `v0.27.4`) transactions, plus Go stdlib `crypto/sha256`,
 `encoding/base64`, `net/url`. No added dependencies or new token protocol.
 Rhiza v0.12.0's ordinary batch receipt omits per-statement results unless rows are
 requested; `RETURNING` + `WantRows` explicitly returns the inserted/consumed ID.

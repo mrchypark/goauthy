@@ -49,7 +49,7 @@ jobs:
         run: sh scripts/test-object-store-contract.sh
 
       # Synthetic filesystem archive proof; does not qualify app init on clouds.
-      - name: Local archive v0.24.0 to v0.27.3 compatibility
+      - name: Local archive v0.27.3 to v0.27.4 compatibility
         timeout-minutes: 20
         run: sh scripts/test-rhiza-local-upgrade.sh
 
@@ -196,6 +196,10 @@ jobs:
         name: Setup Go
         with:
           go-version-file: go.mod
+
+      - name: Standalone Local S3 init recovery -race
+        timeout-minutes: 15
+        run: sh scripts/test-init-local-s3.sh
 
       - name: test -race
         run: go test -race -timeout=90m -p 3 ./...

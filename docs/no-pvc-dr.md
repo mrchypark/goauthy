@@ -21,7 +21,7 @@ For durable single-node operation, GoAuthy provides two distinct profiles config
 | --- | --- | --- |
 | **PVC-backed SQLite + volume snapshots** | Rejected as default | Couples pod scheduling and DR to node/AZ-local storage classes and CSI snapshot availability. |
 | **External managed DB (Postgres/MySQL)** | Rejected | Introduces a separate database service, network hop, and external HA/backup operational surface. |
-| **Rhiza `Local: true` (`standalone-local`) + `/goauthy-rhiza-init`** | Opt-in (`v0.27.3`) | Separates crash recovery (`Open`/`Close`) from service startup without a Rhiza operator, at the cost of `goauthy-backup` incompatibility and single-writer fencing reliance. |
+| **Rhiza `Local: true` (`standalone-local`) + `/goauthy-rhiza-init`** | Opt-in (`v0.27.4`) | Separates crash recovery (`Open`/`Close`) from service startup without a Rhiza operator, at the cost of `goauthy-backup` incompatibility and single-writer fencing reliance. |
 | **Adapting `goauthy-backup` for `local/v1`** | Deferred | Requires a logical `*rhiza.DB` export/import boundary or `local/v1` codec adapter; currently rejected to avoid silent format corruption. |
 
 ---
@@ -38,9 +38,9 @@ For durable single-node operation, GoAuthy provides two distinct profiles config
 
 ### Init and Main Process (`/goauthy-rhiza-init`)
 
-Rhiza `v0.27.3` uses an application-owned `Open`/`Close` init-container flow ([tagged Rhiza guide](https://github.com/mrchypark/rhiza/blob/v0.27.3/docs/local-init-container-recovery.md)):
+Rhiza `v0.27.4` uses an application-owned `Open`/`Close` init-container flow ([tagged Rhiza guide](https://github.com/mrchypark/rhiza/blob/v0.27.4/docs/local-init-container-recovery.md)):
 
-1. **Init container (`/goauthy-rhiza-init`)**: Built into the GoAuthy image (`deploy/standalone-local/statefulset-patch.yaml`). It opens the Local database with the same `ClusterID`, `NodeID`, `DataDir`, and object-store configuration as `main`, waits for `Open` (bounded by a hardcoded 2-minute timeout in `cmd/goauthy-rhiza-init/main.go`), and calls `Close` without running application SQL, migrations, or HTTP listeners. Any nonzero error blocks `main` from starting.
+1. **Init container (`/goauthy-rhiza-init`)**: Built into the GoAuthy image (`deploy/standalone-local/statefulset-patch.yaml`). It opens the Local database with the same `ClusterID`, `NodeID`, `DataDir`, and object-store configuration as `main`, using a context bounded by `GOAUTHY_RHIZA_STARTUP_TIMEOUT` (default 10 minutes; accepted range 1 second to 1 hour), and calls `Close` without running application SQL, migrations, or HTTP listeners. Any nonzero error blocks `main` from starting.
 2. **Main container (`goauthy`)**: Mounts the same `DataDir` (`emptyDir`) read/write with identical object-store credentials. Rhiza validates the **local binding** (the local identity/history marker persisted inside `DataDir`, which survives container restarts in the same Pod but is lost when the Pod is deleted) and **archive binding** (remote `local/v1` archive identity), reconciling any uncheckpointed tail without a blind checkpoint redownload when histories match.
 3. **Fail-closed greenfield rule**:
    - When a **local binding exists** in `DataDir`, missing, corrupt, partial, inaccessible, or maintenance-held remote history fails closed; preserve remote objects and investigate rather than clearing the prefix.
@@ -48,9 +48,9 @@ Rhiza `v0.27.3` uses an application-owned `Open`/`Close` init-container flow ([t
 
 ---
 
-## Current v0.27.3 Integration
+## Current v0.27.4 Integration
 
-GoAuthy pins Rhiza `v0.27.3` at [`234602aeb1783f11f1e878a5e1a4793ff7a473d6`](https://github.com/mrchypark/rhiza/commit/234602aeb1783f11f1e878a5e1a4793ff7a473d6) (Go `1.27.4+`).
+GoAuthy pins Rhiza `v0.27.4` at [`94e9ef3f29ddf52b3d543133bae3e3d8ba57558c`](https://github.com/mrchypark/rhiza/commit/94e9ef3f29ddf52b3d543133bae3e3d8ba57558c) (Go `1.27.4+`).
 
 ### Verification Commands
 
@@ -61,12 +61,13 @@ scripts/test-rhiza-local-upgrade.sh
 scripts/test-rhiza-local-upgrade.sh --race
 ```
 
-On macOS arm64, `scripts/test-rhiza-local-upgrade.sh` passed both normal and race runs using synthetic filesystem data for the `v0.24.0 -> v0.27.3` retained-directory upgrade, abrupt no-`Close` recovery, total `DataDir` loss recovery, keyring-sealed synthetic blob continuity, and negative node/prefix rejection. [PR176 final CI](https://github.com/mrchypark/goauthy/actions/runs/42146836993) covered S3/GCS/Azure SDK contracts and a Linux cross-version oracle on an older Rhiza version; it does not establish cloud or HA qualification for `v0.27.3`.
+Historically, on macOS arm64, `scripts/test-rhiza-local-upgrade.sh` passed both normal and race runs using synthetic filesystem data for the `v0.24.0 -> v0.27.3` retained-directory upgrade, abrupt no-`Close` recovery, total `DataDir` loss recovery, keyring-sealed synthetic blob continuity, and negative node/prefix rejection. On 2026-11-24, the updated script passed normal and race runs on macOS arm64 for `v0.27.3 -> v0.27.4`, including retained and cold recovery. [PR176 final CI](https://github.com/mrchypark/goauthy/actions/runs/42146836993) covered S3/GCS/Azure SDK contracts and a Linux cross-version oracle on an older Rhiza version; it does not establish cloud or HA qualification for `v0.27.4`.
 
 ### Qualification Boundary
 
-- **Qualified on `v0.27.3`**: Single-node synthetic filesystem `Open`/`Close` recovery and `v0.24.0 -> v0.27.3` Local upgrade on macOS arm64, in normal and race runs.
-- **Not qualified on `v0.27.3`**: Packaged S3/GCS application recovery, Kubernetes deployment (`deploy/standalone-local`), managed HA, writer fencing, real account/token continuity, arbitrary production-data migration, and production-cloud parity.
+- **Historical `v0.27.3` evidence**: Single-node synthetic filesystem `Open`/`Close` recovery and `v0.24.0 -> v0.27.3` Local upgrade on macOS arm64, in normal and race runs.
+- **`v0.27.4` evidence**: Single-node synthetic filesystem `v0.27.3 -> v0.27.4` Local upgrade and recovery on macOS arm64, in normal and race runs.
+- **Not qualified on `v0.27.4`**: Packaged S3/GCS application recovery, Kubernetes deployment (`deploy/standalone-local`), managed HA, writer fencing, real account/token continuity, arbitrary production-data migration, and production-cloud parity.
 
 ---
 
@@ -84,9 +85,9 @@ On macOS arm64, `scripts/test-rhiza-local-upgrade.sh` passed both normal and rac
 4. **Silent greenfield initialization on prefix typo**:
    - *Risk*: On Pod replacement (`emptyDir` absent), a typo in `GOAUTHY_RHIZA_OBJECT_STORE_PREFIX` / `BUCKET` or an empty prefix silently initializes a blank IdP.
    - *Mitigation*: Validate prefix/bucket configuration via external inventory and `goauthy config check` before rollout.
-5. **Init 2-minute timeout & `db.Close()` retry hazard**:
-   - *Risk*: `/goauthy-rhiza-init` hardcodes a `2m` timeout (`cmd/goauthy-rhiza-init/main.go`); large checkpoints exceeding `2m` trigger `Init:CrashLoopBackOff`. Additionally, `main` still carries a `v0.10.0` `db.Close()`-skip guard whose `v0.27.3` behavior on interrupted startup is unverified.
-   - *Mitigation*: Keep `DataDir` within bounded checkpoint sizes and verify partial-`DataDir` retry idempotency on `v0.27.3`.
+5. **Init timeout and recovery retry hazard**:
+   - *Risk*: Recovery that exceeds `GOAUTHY_RHIZA_STARTUP_TIMEOUT` can fail initialization and cause repeated container restarts. A timed-out recovery may leave a partial `DataDir` that must be handled safely on retry.
+   - *Mitigation*: Size the timeout for measured recovery duration and verify partial-`DataDir` retry behavior for the deployment.
 6. **`1Gi` `emptyDir` eviction & `before-ack` tail latency**:
    - *Risk*: `deploy/standalone-local` bounds `emptyDir` to `1Gi` (covering SQLite DB, WAL, downloaded checkpoint, and journal install copies); exceeding `1Gi` triggers kubelet eviction into a fresh `emptyDir`. Synchronous `before-ack` writes also tie auth write latency/availability directly to object-store health.
    - *Mitigation*: Monitor `emptyDir` usage and object-store latency; ensure `SQLITE_TMPDIR` and checkpoint sizes stay well below `1Gi`.
@@ -97,4 +98,4 @@ On macOS arm64, `scripts/test-rhiza-local-upgrade.sh` passed both normal and rac
 
 - **Kubernetes deployment & fixtures**: Current Kustomize overlays live in [`deploy/standalone`](../deploy/standalone/README.md) (`Local: false`) and [`deploy/standalone-local`](../deploy/standalone-local/README.md) (`Local: true`), both using **VersityGW** as the local Kubernetes S3 fixture (historical 2026-09 `v0.12.3` E2E runs used MinIO).
 - **Backup & scheduling contracts**: Offline `age`/Ed25519 backup/restore is specified in [docs/backup-operator.md](backup-operator.md) and scheduled KV-lease backups in [docs/backup-scheduling.md](backup-scheduling.md).
-- **Historical qualification ledger**: Earlier Rhiza `v0.21.2` (`8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd`), `v0.21.1`, `v0.19.0`, and `v0.12.3` (schema 86/87 Kind/MinIO crash, corruption, and `tc` partition) runs are recorded in [docs/status.md](status.md) and do not qualify `v0.27.3`.
+- **Historical qualification ledger**: Earlier Rhiza `v0.21.2` (`8acb6da35a4c6fc83fa14ecec2fe2b64370fa4bd`), `v0.21.1`, `v0.19.0`, and `v0.12.3` (schema 86/87 Kind/MinIO crash, corruption, and `tc` partition) runs are recorded in [docs/status.md](status.md) and do not qualify `v0.27.4`.

@@ -1,6 +1,6 @@
 # Global JSON KV
 
-Rauthy v0.36.2의 전역 KV 기능을 SQL schema v55(초기 도입 기준 Rhiza v0.10.0, 현재 `go.mod` 기준 `v0.27.3`)로 구현한다.
+Rauthy v0.36.2의 전역 KV 기능을 SQL schema v55(초기 도입 기준 Rhiza v0.10.0, 현재 `go.mod` 기준 `v0.27.4`)로 구현한다.
 별도의 저장 엔진이나 암호화 패키지를 추가하지 않는다. 제품 전체 완료 여부와
 실행별 검증 상태는 [진행 현황](status.md)과 [기능표](features.md)를 따른다.
 
