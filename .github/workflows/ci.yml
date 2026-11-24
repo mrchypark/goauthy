@@ -197,6 +197,10 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Standalone Local S3 init recovery -race
+        timeout-minutes: 15
+        run: sh scripts/test-init-local-s3.sh
+
       - name: test -race
         run: go test -race -timeout=90m -p 3 ./...
         # Known passing race suite (OAuth) takes ~56m; 60m timeout has too little headroom.
