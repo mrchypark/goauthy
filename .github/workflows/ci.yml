@@ -205,14 +205,13 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_RUN_RACE: ${{ inputs.run_race }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
           run_race=false
           commit_msg=$(git log -1 --pretty=%B HEAD^2 2>/dev/null || git log -1 --pretty=%B)
           if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$INPUT_RUN_RACE" = "true" ]; then
             run_race=true
-          elif printf '%s\n%s\n%s' "$commit_msg" "$PR_TITLE" "$PR_BODY" | grep -qiE '\[(run-)?race\]'; then
+          elif printf '%s\n%s' "$commit_msg" "$PR_TITLE" | grep -qiE '\[(run-)?race\]'; then
             run_race=true
           elif printf '%s' "$PR_LABELS" | tr ',' '\n' | grep -qiE '^(run-)?race$'; then
             run_race=true
@@ -221,7 +220,7 @@ jobs:
           if [ "$run_race" = "true" ]; then
             echo "Race tests triggered."
           else
-            echo "Race tests skipped (default off; add [race] or [run-race] to commit message/PR, label 'race', or dispatch with run_race=true)."
+            echo "Race tests skipped (default off; add [race] or [run-race] to commit message/PR title, label 'race', or dispatch with run_race=true)."
           fi
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
