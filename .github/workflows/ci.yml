@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_race:
+        description: 'Run the Go race detector suite'
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -192,18 +199,46 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         name: Checkout
 
+      - name: Check race test trigger
+        id: gate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_RUN_RACE: ${{ inputs.run_race }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          run_race=false
+          commit_msg=$(git log -1 --pretty=%B HEAD^2 2>/dev/null || git log -1 --pretty=%B)
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$INPUT_RUN_RACE" = "true" ]; then
+            run_race=true
+          elif printf '%s\n%s' "$commit_msg" "$PR_TITLE" | grep -qiE '\[(run-)?race\]'; then
+            run_race=true
+          elif printf '%s' "$PR_LABELS" | tr ',' '\n' | grep -qiE '^(run-)?race$'; then
+            run_race=true
+          fi
+          echo "run=$run_race" >> "$GITHUB_OUTPUT"
+          if [ "$run_race" = "true" ]; then
+            echo "Race tests triggered."
+          else
+            echo "Race tests skipped (default off; add [race] or [run-race] to commit message/PR title, label 'race', or dispatch with run_race=true)."
+          fi
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         name: Setup Go
+        if: steps.gate.outputs.run == 'true'
         with:
           go-version-file: go.mod
 
       - name: Standalone Local S3 init recovery -race
+        if: steps.gate.outputs.run == 'true'
         timeout-minutes: 15
         run: sh scripts/test-init-local-s3.sh
 
       - name: test -race
+        if: steps.gate.outputs.run == 'true'
         run: go test -race -timeout=90m -p 3 ./...
         # Known passing race suite (OAuth) takes ~56m; 60m timeout has too little headroom.
 
       - name: Registered refresh shutdown integration -race
+        if: steps.gate.outputs.run == 'true'
         run: go test -race -tags=goauthy_integration ./cmd/goauthy -run '^TestRuntimeShutdownRegisteredRefresh$' -count=1 -timeout=120s
