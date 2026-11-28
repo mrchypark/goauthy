@@ -6,6 +6,7 @@
   let language = document.documentElement.lang === 'ko' ? 'ko' : 'en';
   const messages = {
      'Enter a device code': '기기 코드 입력', 'Language': '언어', 'Change language': '언어 변경', 'Keep editing': '계속 편집',
+    'Theme': '테마', 'System': '시스템', 'Light': '라이트', 'Dark': '다크',
     'Sign in': '로그인', 'Username': '이메일 또는 사용자 이름', 'Email or username': '이메일 또는 사용자 이름', 'Password': '비밀번호',
     'Signing in…': '로그인 중…',
     'Login failed': '로그인하지 못했습니다',
@@ -46,8 +47,17 @@
     pending = Math.max(0, pending + (busy ? 1 : -1));
     document.querySelectorAll('[data-language-select]').forEach(select => { select.disabled = pending > 0; });
   }
+  function syncBodyThemeClass() {
+    const mode = document.documentElement?.dataset?.theme;
+    if (!document.body || (mode !== 'light' && mode !== 'dark')) return;
+    document.body.classList.toggle('theme-light', mode === 'light');
+    document.body.classList.toggle('theme-dark', mode === 'dark');
+  }
+  document.addEventListener('ely:theme-change', syncBodyThemeClass);
   globalThis.GoAuthyI18n = {language, messages, t, translate, setBusy};
   document.addEventListener('DOMContentLoaded', () => {
+    syncBodyThemeClass();
+    document.querySelectorAll('[data-theme-select]').forEach(select => { select.setAttribute('aria-label', t('Theme')); });
     translate();
     const loginForm = document.getElementById('login-form');
     if (loginForm) {

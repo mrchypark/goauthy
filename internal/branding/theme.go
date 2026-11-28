@@ -32,6 +32,8 @@ type ThemeCSS struct {
 	Action    []uint16 `json:"action"`
 	Accent    []uint16 `json:"accent"`
 	Error     []uint16 `json:"error"`
+	Approved  []uint16 `json:"approved,omitempty"`
+	Warning   []uint16 `json:"warning,omitempty"`
 	BtnText   string   `json:"btn_text"`
 	ThemeSun  string   `json:"theme_sun"`
 	ThemeMoon string   `json:"theme_moon"`
@@ -40,6 +42,7 @@ type ThemeCSS struct {
 type Theme struct {
 	ClientID     string           `json:"client_id"`
 	BrandName    string           `json:"brand_name,omitempty"`
+	FontFamily   string           `json:"font_family,omitempty"`
 	Light        ThemeCSS         `json:"light"`
 	Dark         ThemeCSS         `json:"dark"`
 	BorderRadius string           `json:"border_radius"`
@@ -110,6 +113,9 @@ func (t Theme) Validate() error {
 	if utf8.RuneCountInString(t.BrandName) > 120 || (t.BrandName != "" && strings.TrimSpace(t.BrandName) == "") || strings.ContainsFunc(t.BrandName, unicode.IsControl) {
 		return ErrInvalidTheme
 	}
+	if _, ok := fontStackFor(t.FontFamily); !ok {
+		return ErrInvalidTheme
+	}
 	if err := t.Light.Validate(); err != nil {
 		return err
 	}
@@ -146,6 +152,12 @@ func (t Theme) ValidateWriteContrast() error {
 		if buttonText, known := cssColorRGB(theme.BtnText, theme); known && contrast(buttonText, hslRGB(theme.Action)) < 4.5 {
 			return ErrThemeLowContrast
 		}
+		if len(theme.Approved) == 3 && (!hasContrast(theme.Approved, theme.Bg, 4.5) || !hasContrast(theme.Approved, theme.BgHigh, 4.5)) {
+			return ErrThemeLowContrast
+		}
+		if len(theme.Warning) == 3 && (!hasContrast(theme.Warning, theme.Bg, 4.5) || !hasContrast(theme.Warning, theme.BgHigh, 4.5)) {
+			return ErrThemeLowContrast
+		}
 	}
 	return nil
 }
@@ -165,10 +177,37 @@ func (t ThemeCSS) Validate() error {
 			return ErrInvalidTheme
 		}
 	}
+	for _, optional := range [][]uint16{t.Approved, t.Warning} {
+		if len(optional) == 0 {
+			continue
+		}
+		if len(optional) != 3 || optional[0] > 360 || optional[1] > 100 || optional[2] > 100 {
+			return ErrInvalidTheme
+		}
+	}
 	if !validCSSValue(t.BtnText) || !validCSSValue(t.ThemeSun) || !validCSSValue(t.ThemeMoon) {
 		return ErrInvalidTheme
 	}
 	return nil
+}
+
+func fontStackFor(name string) (string, bool) {
+	switch name {
+	case "", "default":
+		return "", true
+	case "system":
+		return "system-ui, -apple-system, sans-serif", true
+	case "geist":
+		return "Geist, system-ui, sans-serif", true
+	case "pretendard":
+		return "Pretendard, system-ui, sans-serif", true
+	case "inter":
+		return "Inter, system-ui, sans-serif", true
+	case "mono":
+		return "'Geist Mono', 'JetBrains Mono', ui-monospace, monospace", true
+	default:
+		return "", false
+	}
 }
 
 func validCSSValue(value string) bool {
@@ -192,6 +231,10 @@ func (t Theme) CSS() string {
 	appendThemeCSS(&css, t.Light)
 	css.WriteString("--border-radius:")
 	css.WriteString(t.BorderRadius)
+	if stack, ok := fontStackFor(t.FontFamily); ok && stack != "" {
+		css.WriteString(";--brand-font:")
+		css.WriteString(stack)
+	}
 	css.WriteString(";}")
 
 	css.WriteString(".theme-dark{")
@@ -263,6 +306,18 @@ func appendThemeCSS(css *strings.Builder, theme ThemeCSS) {
 	css.WriteString(";--theme-moon:")
 	css.WriteString(theme.ThemeMoon)
 	css.WriteByte(';')
+	for _, opt := range []struct {
+		name string
+		data []uint16
+	}{
+		{"approved", theme.Approved},
+		{"warning", theme.Warning},
+	} {
+		if len(opt.data) == 3 {
+			hsl := strconv.Itoa(int(opt.data[0])) + " " + strconv.Itoa(int(opt.data[1])) + "% " + strconv.Itoa(int(opt.data[2])) + "%"
+			css.WriteString("--" + opt.name + ":hsl(" + hsl + ");--" + opt.name + "-tint:hsl(" + hsl + " / .12);")
+		}
+	}
 }
 
 func (t ThemeCSS) accessible() ThemeCSS {

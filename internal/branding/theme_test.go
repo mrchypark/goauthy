@@ -27,6 +27,36 @@ func TestDefaultThemeAndCSS(t *testing.T) {
 	}
 }
 
+func TestThemeFontFamilyAndStatusColors(t *testing.T) {
+	t.Parallel()
+	theme := DefaultTheme("client-1")
+	theme.FontFamily = "pretendard"
+	theme.Light.Approved = []uint16{150, 50, 30}
+	theme.Dark.Approved = []uint16{150, 45, 65}
+	theme.Light.Warning = []uint16{35, 85, 32}
+	theme.Dark.Warning = []uint16{38, 85, 68}
+	if err := theme.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+	if err := theme.ValidateWriteContrast(); err != nil {
+		t.Fatalf("ValidateWriteContrast() unexpected error: %v", err)
+	}
+	css := theme.CSS()
+	for _, want := range []string{
+		"--brand-font:Pretendard, system-ui, sans-serif",
+		"--approved:hsl(150 50% 30%)",
+		"--warning:hsl(35 85% 32%)",
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("CSS() missing %q in %q", want, css)
+		}
+	}
+	theme.FontFamily = "invalid-font"
+	if !errors.Is(theme.Validate(), ErrInvalidTheme) {
+		t.Fatal("expected invalid font family to fail validation")
+	}
+}
+
 func TestThemeValidateRejectsMalformedJSONAndCSS(t *testing.T) {
 	t.Parallel()
 	valid := `{"client_id":"client-1","light":{"text":[1,2,3],"text_high":[1,2,3],"bg":[1,2,3],"bg_high":[1,2,3],"action":[1,2,3],"accent":[1,2,3],"error":[1,2,3],"btn_text":"white","theme_sun":"none","theme_moon":"none"},"dark":{"text":[1,2,3],"text_high":[1,2,3],"bg":[1,2,3],"bg_high":[1,2,3],"action":[1,2,3],"accent":[1,2,3],"error":[1,2,3],"btn_text":"white","theme_sun":"none","theme_moon":"none"},"border_radius":"5px"}`

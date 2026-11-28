@@ -1,13 +1,13 @@
 <!doctype html>
-<html lang="en">
+<html lang="{{if .Language}}{{.Language}}{{else}}en{{end}}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GoAuthy administration</title>{{template "goauthy-head" ""}}<link rel="stylesheet" href="/auth/v1/admin/admin.css">
-<link rel="stylesheet" href="/auth/v1/branding/brand.css"></head>
-<body>
+  <title>{{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}} administration</title>{{template "goauthy-head" .BasePath}}<link rel="stylesheet" href="{{.BasePath}}/auth/v1/admin/admin.css">
+<link rel="stylesheet" href="{{.BasePath}}/auth/v1/branding/brand.css">{{if .Brand.ThemeURL}}<link rel="stylesheet" href="{{.BasePath}}{{.Brand.ThemeURL}}">{{end}}</head>
+<body class="common-brand">
   <main>
-    <p class="brand-lockup"><i class="brand-symbol" aria-hidden="true"></i>GoAuthy</p><h1>Administration</h1><p class="lede">Manage identities, applications and access.</p>
+    <p class="brand-lockup">{{template "goauthy-brand" (dict "Base" .BasePath "LogoURL" .Brand.LogoURL "Name" .Brand.Name)}}</p><h1>Administration</h1><p class="lede">Manage identities, applications and access.</p>
     <nav class="index-nav" aria-label="Administration">
       <ul>
         {{range .Routes}}<li>{{template "button" (dict "Href" .Path "Label" .Label "Variant" "outline" "Size" "sm")}}</li>{{end}}

@@ -93,11 +93,29 @@ type Handler struct {
 	limits         Limits
 	now            func() time.Time
 	brand          func(context.Context) (branding.Brand, error)
+	clientBrand    func(context.Context, string) (branding.Brand, error)
 }
 
 // SetBrandResolver configures common branding for the device verification page.
 func (h *Handler) SetBrandResolver(resolve func(context.Context) (branding.Brand, error)) {
 	h.brand = resolve
+}
+
+// SetClientBrandResolver configures per-client branding after a valid code review.
+func (h *Handler) SetClientBrandResolver(resolve func(context.Context, string) (branding.Brand, error)) {
+	h.clientBrand = resolve
+}
+
+func (h *Handler) resolveClientBrand(ctx context.Context, clientID string) branding.Brand {
+	if h.clientBrand != nil && clientID != "" {
+		if resolved, err := h.clientBrand(ctx, clientID); err == nil {
+			if strings.TrimSpace(resolved.Name) == "" {
+				resolved.Name = "GoAuthy"
+			}
+			return resolved
+		}
+	}
+	return branding.ResolveOptional(ctx, h.brand)
 }
 
 // SetReauthentication configures the same-subject MFA login continuation.
@@ -267,6 +285,7 @@ func (h *Handler) verifyPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: h.csrfCookieName(), Value: token, Path: "/", HttpOnly: true, Secure: h.issuer.Scheme == "https", SameSite: http.SameSiteLaxMode, MaxAge: 300})
+	data.Brand = h.resolveClientBrand(r.Context(), review.ClientID)
 	data.UserCode, data.CSRFToken, data.Review = code, reviewedDeviceCSRF(token, code), &review
 	render(http.StatusOK)
 }

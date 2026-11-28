@@ -388,8 +388,8 @@ github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 h1:RWengNIwukTxcDr9
 github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826/go.mod h1:TaXosZuwdSHYgviHp1DAtfrULt5eUgsSMsZf+YrPgl8=
 github.com/mozillazg/go-httpheader v0.2.1 h1:geV7TrjbL8KXSyvghnFm+NyTux/hxwueTSrwhe88TQQ=
 github.com/mozillazg/go-httpheader v0.2.1/go.mod h1:jJ8xECTlalr6ValeXYdOF8fFUISeBAdw6E61aqQma60=
-github.com/mrchypark/elysdui v0.4.12 h1:8+hltfXXzO3p71Y6snIo40krqnuVKATsfmKafPukqL0=
-github.com/mrchypark/elysdui v0.4.12/go.mod h1:hY215nJF85Xjy2CvDdMYvkE4nFXXAeCuYorq9VQjvrM=
+github.com/mrchypark/elysdui v0.4.13 h1:w0OLuVwReLA4uXhUimOxoVLfjzBFNorkqtLCOwmf0NY=
+github.com/mrchypark/elysdui v0.4.13/go.mod h1:hY215nJF85Xjy2CvDdMYvkE4nFXXAeCuYorq9VQjvrM=
 github.com/mrchypark/fosite v0.49.0-goauthy.1 h1:qmX+A4WsDTlMdKYIYG5MjGffBykXH1iuIZebOqj7xBg=
 github.com/mrchypark/fosite v0.49.0-goauthy.1/go.mod h1:ZvPcG+J72oeyT6IJEKNrmmdDwIt/xx9sYp79yj/ulmY=
 github.com/mrchypark/latticedb-go v0.13.0 h1:62TMpqK1PMwoBWVNEOBi6TEmlZUeXAswykuii5bB9CY=

@@ -47,11 +47,29 @@ type Handler struct {
 	resolveClient ClientResolver
 	fedcmEnabled  bool
 	brand         func(context.Context) (branding.Brand, error)
+	clientBrand   func(context.Context, string) (branding.Brand, error)
 }
 
 // SetBrandResolver configures common branding for the logout confirmation page.
 func (h *Handler) SetBrandResolver(resolve func(context.Context) (branding.Brand, error)) {
 	h.brand = resolve
+}
+
+// SetClientBrandResolver configures per-client branding when a valid client_id is present.
+func (h *Handler) SetClientBrandResolver(resolve func(context.Context, string) (branding.Brand, error)) {
+	h.clientBrand = resolve
+}
+
+func (h *Handler) resolveClientBrand(ctx context.Context, clientID string) branding.Brand {
+	if h.clientBrand != nil && clientID != "" {
+		if resolved, err := h.clientBrand(ctx, clientID); err == nil {
+			if strings.TrimSpace(resolved.Name) == "" {
+				resolved.Name = "GoAuthy"
+			}
+			return resolved
+		}
+	}
+	return branding.ResolveOptional(ctx, h.brand)
 }
 
 // ClientResolver returns the current registry view for a client ID. The
@@ -327,7 +345,7 @@ func (h *Handler) renderConfirmation(w http.ResponseWriter, r *http.Request, coo
 	messages := i18n.MessagesFor(i18n.UILanguageFromRequest(r))
 	localizedLogoutHTMLHeaders(w, messages.Language)
 	issuerURL, _ := url.Parse(h.issuer)
-	_ = confirmationPage.Execute(w, confirmationPageData{BasePath: strings.TrimRight(issuerURL.Path, "/"), Interaction: interaction.Token, Brand: branding.ResolveOptional(r.Context(), h.brand), Messages: messages})
+	_ = confirmationPage.Execute(w, confirmationPageData{BasePath: strings.TrimRight(issuerURL.Path, "/"), Interaction: interaction.Token, Brand: h.resolveClientBrand(r.Context(), payload.ClientID), Messages: messages})
 }
 
 type confirmationPageData struct {

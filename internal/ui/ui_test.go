@@ -82,7 +82,7 @@ func TestAssetsEmbeddedContentCachingAndMethods(t *testing.T) {
 	if err := BindAssets(mux); err != nil {
 		t.Fatal(err)
 	}
-	names := append(append([]string(nil), stylesheets...), "geist.woff2", "geist-mono.woff2", "pretendard.woff2")
+	names := append(append([]string(nil), stylesheets...), "theme.js", "geist.woff2", "geist-mono.woff2", "pretendard.woff2")
 	for _, name := range names {
 		t.Run(name, func(t *testing.T) {
 			w := httptest.NewRecorder()
@@ -99,7 +99,9 @@ func TestAssetsEmbeddedContentCachingAndMethods(t *testing.T) {
 				}
 			}
 			mime := "font/woff2"
-			if strings.HasSuffix(name, ".css") {
+			if strings.HasSuffix(name, ".js") {
+				mime = "text/javascript; charset=utf-8"
+			} else if strings.HasSuffix(name, ".css") {
 				want = bytes.ReplaceAll(want, []byte("/assets/"), nil)
 				mime = "text/css; charset=utf-8"
 			}
@@ -126,7 +128,7 @@ func TestAssetsEmbeddedContentCachingAndMethods(t *testing.T) {
 			}
 		})
 	}
-	for _, name := range []string{"", "missing.css", "ui.go", "templates/shadcn-button.html", "theme.js", "htmx.min.js", "input.css", "%2e%2e%2fgo.mod"} {
+	for _, name := range []string{"", "missing.css", "ui.go", "templates/shadcn-button.html", "htmx.min.js", "input.css", "%2e%2e%2fgo.mod"} {
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, httptest.NewRequest("GET", AssetPath+name, nil))
 		if w.Code != 404 {

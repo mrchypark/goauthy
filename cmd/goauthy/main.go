@@ -821,6 +821,9 @@ func run() (err error) {
 	commonBrand := func(ctx context.Context) (branding.Brand, error) {
 		return themeStore.Brand(ctx, clientLogoStore, "")
 	}
+	clientBrand := func(ctx context.Context, clientID string) (branding.Brand, error) {
+		return themeStore.Brand(ctx, clientLogoStore, clientID)
+	}
 	adminHandler.SetBrandResolver(commonBrand)
 	adminUI.SetBrandResolver(commonBrand)
 	adminUI.SetCSRFTokenProvider(adminCSRFTokenProvider(issuer))
@@ -998,6 +1001,7 @@ func run() (err error) {
 		return fmt.Errorf("configure device handler: %w", err)
 	}
 	deviceHandler.SetBrandResolver(commonBrand)
+	deviceHandler.SetClientBrandResolver(clientBrand)
 	loginHandler, err := login.New(issuer, browserStore, identityStore, oauthServer)
 	if err != nil {
 		return err
@@ -1219,6 +1223,7 @@ func run() (err error) {
 		return err
 	}
 	logoutHandler.SetBrandResolver(commonBrand)
+	logoutHandler.SetClientBrandResolver(clientBrand)
 	fedcmRuntime, err := fedcmRuntimeFromEnv(os.Getenv, db, keyring, issuer, browserStore, identityStore)
 	if err != nil {
 		return err
@@ -1506,7 +1511,7 @@ func run() (err error) {
 	if fedcmRuntime != nil {
 		docFeatures.FedCMLanding = fedcmRuntime.loginURL
 	}
-	if err := mountSwaggerRoutes(handler, swaggerConfig, issuer, docFeatures, browserAdmin); err != nil {
+	if err := mountSwaggerRoutes(handler, swaggerConfig, issuer, docFeatures, browserAdmin, commonBrand); err != nil {
 		return fmt.Errorf("configure API documentation: %w", err)
 	}
 
