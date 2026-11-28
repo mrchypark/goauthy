@@ -203,7 +203,8 @@ func TestLoginRevokePageCSSOnlyIssuerAssets(t *testing.T) {
 			}
 			body := w.Body.String()
 			for _, asset := range []string{"ui/app.css", "ui/ely-controls.css", "ui/ely-patterns.css", "ui/brand.css", "theme/global.css"} {
-				if !strings.Contains(body, `href="`+prefix+"/auth/v1/"+asset+`"`) {
+				prefixHref := `href="` + prefix + "/auth/v1/" + asset
+				if !strings.Contains(body, prefixHref+`"`) && !strings.Contains(body, prefixHref+`?v=`) {
 					t.Errorf("missing %s", asset)
 				}
 			}
