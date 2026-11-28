@@ -47,7 +47,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .account-tools .button { margin-top: 0; }
 .account-topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .account-topbar .brand-lockup { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.account-topbar [data-language-select] { flex: none; width: auto; }
+.account-topbar-controls { display: flex; align-items: center; gap: 8px; flex: none; }
+.account-topbar [data-language-select], .account-topbar [data-theme-select] { flex: none; width: auto; }
 .common-brand-logo { width: auto; max-width: 120px; height: 36px; object-fit: contain; }
 #self-delete-section { margin-top: 16px; }
 dd { overflow-wrap: anywhere; }
