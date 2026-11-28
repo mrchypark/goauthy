@@ -26,7 +26,16 @@ func TestLoginBrowserLayoutAndKeyboard(t *testing.T) {
 	ctx := testbrowser.Start(t)
 	for _, viewport := range []struct{ width, height int64 }{{1280, 800}, {390, 844}, {320, 640}} {
 		var valid bool
-		if err := chromedp.Run(ctx, chromedp.EmulateViewport(viewport.width, viewport.height), chromedp.Navigate(server.URL+"/account/login"), chromedp.WaitVisible(`input[name=username]`), chromedp.Evaluate(`document.documentElement.scrollWidth <= innerWidth && !!document.querySelector('#login-form button[data-slot=button]') && getComputedStyle(document.querySelector('#login-form button')).display !== 'none'`, &valid)); err != nil || !valid {
+		if err := chromedp.Run(ctx, chromedp.EmulateViewport(viewport.width, viewport.height), chromedp.Navigate(server.URL+"/account/login"), chromedp.WaitVisible(`input[name=username]`), chromedp.Evaluate(`(() => {
+			const sel = document.querySelector('[data-language-select]');
+			const st = sel ? getComputedStyle(sel) : null;
+			return document.documentElement.scrollWidth <= innerWidth &&
+				!!document.querySelector('#login-form button[data-slot=button]') &&
+				getComputedStyle(document.querySelector('#login-form button')).display !== 'none' &&
+				!!sel && sel.dataset.slot === 'select' &&
+				st.appearance === 'none' && st.webkitAppearance === 'none' &&
+				st.backgroundImage !== 'none' && parseFloat(st.paddingInlineEnd) >= 30;
+		})()`, &valid)); err != nil || !valid {
 			t.Fatalf("viewport %dx%d: valid=%v err=%v", viewport.width, viewport.height, valid, err)
 		}
 	}
