@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/input"
 	"github.com/chromedp/chromedp"
 	"github.com/mrchypark/goauthy/internal/branding"
@@ -37,6 +38,28 @@ func TestLoginBrowserLayoutAndKeyboard(t *testing.T) {
 				st.backgroundImage !== 'none' && parseFloat(st.paddingInlineEnd) >= 30;
 		})()`, &valid)); err != nil || !valid {
 			t.Fatalf("viewport %dx%d: valid=%v err=%v", viewport.width, viewport.height, valid, err)
+		}
+	}
+	// Live viewport resizing without page reload across light and dark modes
+	// must never restore native select arrows or lose chevron spacing.
+	for _, scheme := range []string{"light", "dark"} {
+		if err := chromedp.Run(ctx,
+			emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: scheme}}),
+			chromedp.Navigate(server.URL+"/account/login"),
+			chromedp.WaitVisible(`input[name=username]`),
+		); err != nil {
+			t.Fatalf("%s navigate: %v", scheme, err)
+		}
+		for _, viewport := range []struct{ width, height int64 }{{320, 640}, {390, 844}, {480, 800}, {540, 800}, {640, 800}, {800, 800}, {1024, 768}, {1280, 800}, {480, 800}} {
+			var valid bool
+			if err := chromedp.Run(ctx, chromedp.EmulateViewport(viewport.width, viewport.height), chromedp.Evaluate(`(() => {
+				const sel = document.querySelector('[data-language-select]');
+				const st = sel ? getComputedStyle(sel) : null;
+				return !!sel && st.appearance === 'none' && st.webkitAppearance === 'none' &&
+					st.backgroundImage !== 'none' && parseFloat(st.paddingInlineEnd) >= 30;
+			})()`, &valid)); err != nil || !valid {
+				t.Fatalf("%s live resize %dx%d: valid=%v err=%v", scheme, viewport.width, viewport.height, valid, err)
+			}
 		}
 	}
 	var focused bool

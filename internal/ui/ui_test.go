@@ -41,8 +41,8 @@ func TestHeadLocalCSSAndIssuerPaths(t *testing.T) {
 							t.Fatal("unexpected extra stylesheet")
 						}
 						want := strings.TrimRight(prefix, "/") + AssetPath + stylesheets[links]
-						if attr.Val != want {
-							t.Fatalf("href %q, want %q", attr.Val, want)
+						if !strings.HasPrefix(attr.Val, want+"?v=") {
+							t.Fatalf("href %q, want prefix %q", attr.Val, want+"?v=")
 						}
 					default:
 						t.Fatalf("unexpected head attribute: %v", attr)
