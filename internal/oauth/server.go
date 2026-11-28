@@ -427,7 +427,7 @@ func newServer(ctx context.Context, db *rhiza.DB, hmacSecret []byte, clientID, c
 		// the provider is published so concurrent requests only read it.
 		JWKSFetcherStrategy: fosite.NewDefaultJWKSFetcherStrategy(),
 	}
-	hasher := &fosite.BCrypt{Config: config}
+	hasher := newCachedClientSecretsHasher(&fosite.BCrypt{Config: config}, defaultClientSecretCacheTTL, defaultClientSecretCacheMaxEntries)
 	config.ClientSecretsHasher = hasher
 	hash, err := hasher.Hash(ctx, []byte(clientSecret))
 	if err != nil {
