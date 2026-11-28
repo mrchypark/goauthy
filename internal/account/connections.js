@@ -72,10 +72,13 @@
       let input;
       if (field.type === 'enum') {
         input = document.createElement('select');
+        input.dataset.slot = 'select';
         if (!field.required) { const empty = document.createElement('option'); empty.value = ''; empty.textContent = t('Not set'); input.append(empty); }
         field.options.forEach((option) => { const item = document.createElement('option'); item.value = option; item.textContent = option; input.append(item); });
       } else if (field.type === 'boolean' && !field.required) {
-        input = document.createElement('select'); [['', t('Not set')], ['true', t('True')], ['false', t('False')]].forEach(([value, text]) => { const item = document.createElement('option'); item.value = value; item.textContent = text; input.append(item); });
+        input = document.createElement('select');
+        input.dataset.slot = 'select';
+        [['', t('Not set')], ['true', t('True')], ['false', t('False')]].forEach(([value, text]) => { const item = document.createElement('option'); item.value = value; item.textContent = text; input.append(item); });
       } else if (field.type === 'string') { input = document.createElement('textarea'); input.rows = 2; if (field.max_length > 0) input.maxLength = field.max_length; }
       else { input = document.createElement('input'); input.type = field.type === 'boolean' ? 'checkbox' : 'text'; }
       input.dataset.connectionField = field.name;
@@ -201,7 +204,7 @@
     const clearMetadata = () => { delete panel.dataset.oauth2State; delete panel.dataset.oauth2Version; };
     const statusMessage = document.createElement('p'); statusMessage.className = 'hint'; statusMessage.dataset.oauth2Status = String(connection.id); statusMessage.setAttribute('role', 'status'); statusMessage.setAttribute('aria-live', 'polite');
     const providerLabel = document.createElement('label'); providerLabel.textContent = t('Provider'); providerLabel.htmlFor = `connection-oauth2-provider-${connection.id}`;
-    const provider = document.createElement('select'); provider.id = providerLabel.htmlFor; provider.dataset.oauth2Provider = String(connection.id);
+    const provider = document.createElement('select'); provider.dataset.slot = 'select'; provider.id = providerLabel.htmlFor; provider.dataset.oauth2Provider = String(connection.id);
     const providerIds = Array.isArray(def?.provider_ids) ? def.provider_ids.filter((id) => typeof id === 'string' && id !== '') : [];
     providerIds.forEach((id) => { const option = document.createElement('option'); option.value = id; option.textContent = id; provider.append(option); });
     provider.value = providerIds[0] || '';
