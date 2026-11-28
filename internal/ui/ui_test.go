@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	ely "github.com/mrchypark/ely-htmx"
+	ely "github.com/mrchypark/elysdui/ui/gohtmx"
 	"golang.org/x/net/html"
 )
 

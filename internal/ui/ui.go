@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	ely "github.com/mrchypark/ely-htmx"
+	ely "github.com/mrchypark/elysdui/ui/gohtmx"
 )
 
 const AssetPath = "/auth/v1/ui/"
@@ -55,7 +55,12 @@ func assetBase(prefix string) (string, error) {
 // issuerPathMiddleware removes the issuer prefix before requests reach this mux.
 func BindAssets(mux *http.ServeMux) error {
 	names := append([]string(nil), stylesheets...)
-	names = append(names, "geist.woff2", "geist-mono.woff2", "pretendard.woff2")
+	names = append(names,
+		"geist.woff2", "geist-mono.woff2", "pretendard.woff2",
+		"ely/fonts/Inter-Regular.ttf", "ely/fonts/Inter-Medium.ttf",
+		"ely/fonts/Inter-SemiBold.ttf", "ely/fonts/Inter-Italic.ttf",
+		"ely/fonts/JetBrainsMono-Regular.ttf", "ely/fonts/JetBrainsMono-Medium.ttf",
+	)
 	for _, name := range names {
 		body := brandCSS
 		if name != "brand.css" {
@@ -66,7 +71,9 @@ func BindAssets(mux *http.ServeMux) error {
 			}
 		}
 		contentType := "font/woff2"
-		if strings.HasSuffix(name, ".css") {
+		if strings.HasSuffix(name, ".ttf") {
+			contentType = "font/ttf"
+		} else if strings.HasSuffix(name, ".css") {
 			contentType = "text/css; charset=utf-8"
 			// Ely's root font URLs must resolve within the issuer namespace.
 			body = bytes.ReplaceAll(body, []byte("/assets/"), nil)

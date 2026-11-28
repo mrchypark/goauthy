@@ -17,7 +17,6 @@ require (
 	github.com/go-kit/log v0.2.1
 	github.com/go-webauthn/webauthn v0.18.0
 	github.com/minio/minio-go/v7 v7.0.95
-	github.com/mrchypark/ely-htmx v0.1.0
 	github.com/mrchypark/elysdui v0.4.12
 	github.com/mrchypark/rhiza v0.27.6-0.20261125120454-c43ee9b34bc1
 	github.com/ncruces/go-sqlite3 v0.35.3
