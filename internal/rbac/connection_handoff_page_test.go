@@ -251,7 +251,7 @@ func TestRBACPagesCommonBrand(t *testing.T) {
 	oauth2Req := httptest.NewRequest(http.MethodGet, "/tenant/account/connections/oauth2/complete", nil)
 	oauth2W := httptest.NewRecorder()
 	h.renderOAuth2CompletionPage(oauth2W, oauth2Req)
-	for _, want := range []string{`· Acme ID</title>`, `<p class="eyebrow">Acme ID</p>`, `href="/tenant/auth/v1/theme/acme/2"`} {
+	for _, want := range []string{`· Acme ID</title>`, `<header class="auth-topbar"><a class="auth-brand"`, `<span>Acme ID</span>`, `href="/tenant/auth/v1/theme/acme/2"`} {
 		if !strings.Contains(oauth2W.Body.String(), want) {
 			t.Fatalf("oauth2 completion missing %q in %s", want, oauth2W.Body.String())
 		}

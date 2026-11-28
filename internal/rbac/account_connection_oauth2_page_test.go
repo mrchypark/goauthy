@@ -1,12 +1,14 @@
 package rbac
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/mrchypark/goauthy/internal/branding"
 	"github.com/mrchypark/goauthy/internal/saas"
 )
 
@@ -106,5 +108,26 @@ func TestElyOAuth2CompletionUsesIssuerAssetsWithoutScripts(t *testing.T) {
 	}
 	if w.Header().Get("Content-Security-Policy") != "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" {
 		t.Fatal("completion CSP changed")
+	}
+}
+
+func TestOAuth2CompletionRendersBrandLogo(t *testing.T) {
+	h := &Handler{
+		issuer: "https://issuer.example.test/tenant",
+		brand: func(context.Context) (branding.Brand, error) {
+			return branding.Brand{Name: "Acme ID", LogoURL: "/auth/v1/branding/logo?updated=5", ThemeURL: "/auth/v1/branding/theme.css?v=5"}, nil
+		},
+	}
+	w := httptest.NewRecorder()
+	h.renderOAuth2CompletionPage(w, httptest.NewRequest(http.MethodGet, "/account/connections/oauth2/callback", nil))
+	body := w.Body.String()
+	for _, want := range []string{
+		`src="/tenant/auth/v1/branding/logo?updated=5"`,
+		`alt="Acme ID"`,
+		`href="/tenant/auth/v1/branding/theme.css?v=5"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %s in %s", want, body)
+		}
 	}
 }

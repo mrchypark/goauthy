@@ -33,7 +33,7 @@ func (s *Service) NotifyUserUpdate(ctx context.Context, result identity.UserUpda
 }
 
 var emailChangeText = texttemplate.Must(texttemplate.New("email-change.txt").Parse("{{.Header}}\n\n{{.Text}}\n{{.NewEmail}}\n\n{{.Footer}}\n"))
-var emailChangeHTML = template.Must(template.New("email-change.html").Parse(`<!doctype html><html><head><meta charset="utf-8"></head><body><h1>{{.Header}}</h1><p>{{.Text}}</p><p>{{.NewEmail}}</p><p>{{.Footer}}</p></body></html>`))
+var emailChangeHTML = template.Must(template.New("email-change.html").Parse(`<!doctype html><html><head><meta charset="utf-8"></head><body style="background:#f7f5ef;color:#1c2520"><h1>{{.Header}}</h1><p style="color:#4a554f">{{.Text}}</p><p style="color:#2e5241">{{.NewEmail}}</p><p style="color:#5c6660">{{.Footer}}</p></body></html>`))
 
 func (s *SMTPSender) SendEmailChange(ctx context.Context, message EmailChangeMessage) error {
 	if s == nil || s.send == nil {

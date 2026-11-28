@@ -29,13 +29,13 @@ var (
 {{.Footer}}
 `))
 	otpHTML = template.Must(template.New("otp.html").Parse(`<!doctype html>
-<html><head><meta charset="utf-8"></head><body>
+<html><head><meta charset="utf-8"></head><body style="background:#f7f5ef;color:#1c2520">
 <h1>{{.Header}}</h1>
-<p>{{.Text}}</p>
-<p style="font-size:2em;font-weight:bold;letter-spacing:0.1em;margin:1em 0">{{.OTP}}</p>
-<p>{{.Validity}}</p>
-<p>{{.Expires}} <strong>{{.ExpiresAt}}</strong></p>
-<footer><p>{{.Footer}}</p></footer>
+<p style="color:#4a554f">{{.Text}}</p>
+<p style="font-size:2em;font-weight:bold;letter-spacing:0.1em;margin:1em 0;color:#2e5241">{{.OTP}}</p>
+<p style="color:#4a554f">{{.Validity}}</p>
+<p style="color:#4a554f">{{.Expires}} <strong>{{.ExpiresAt}}</strong></p>
+<footer style="color:#5c6660"><p>{{.Footer}}</p></footer>
 </body></html>`))
 	passwordResetText = texttemplate.Must(texttemplate.New("password-reset.txt").Parse(`{{.Header}}
 
@@ -51,14 +51,14 @@ var (
 {{.Footer}}
 `))
 	passwordResetHTML = template.Must(template.New("password-reset.html").Parse(`<!doctype html>
-<html><head><meta charset="utf-8"></head><body>
+<html><head><meta charset="utf-8"></head><body style="background:#f7f5ef;color:#1c2520">
 <h1>{{.Header}}</h1>
-<p>{{.Text}}</p>
-<p>{{.ClickLink}}</p>
-<p>{{.Validity}}</p>
-<p>{{.Expires}} <strong>{{.ExpiresAt}}</strong></p>
-<p><a href="{{.ResetURL}}">{{.Button}}</a></p>
-<footer><p>{{.Footer}}</p></footer>
+<p style="color:#4a554f">{{.Text}}</p>
+<p style="color:#4a554f">{{.ClickLink}}</p>
+<p style="color:#4a554f">{{.Validity}}</p>
+<p style="color:#4a554f">{{.Expires}} <strong>{{.ExpiresAt}}</strong></p>
+<p><a href="{{.ResetURL}}" style="color:#2e5241">{{.Button}}</a></p>
+<footer style="color:#5c6660"><p>{{.Footer}}</p></footer>
 </body></html>`))
 	registeredAlreadyText = texttemplate.Must(texttemplate.New("registered-already.txt").Parse(`{{.Header}}
 
@@ -67,10 +67,10 @@ var (
 {{.Footer}}
 `))
 	registeredAlreadyHTML = template.Must(template.New("registered-already.html").Parse(`<!doctype html>
-<html><head><meta charset="utf-8"></head><body>
+<html><head><meta charset="utf-8"></head><body style="background:#f7f5ef;color:#1c2520">
 <h1>{{.Header}}</h1>
-<p>{{.Text}}</p>
-<footer><p>{{.Footer}}</p></footer>
+<p style="color:#4a554f">{{.Text}}</p>
+<footer style="color:#5c6660"><p>{{.Footer}}</p></footer>
 </body></html>`))
 )
 

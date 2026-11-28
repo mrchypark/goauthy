@@ -5,7 +5,9 @@ async function clientTheme(id, common = false) {
   const clientID = String(id ?? ''), endpoint = common ? '/auth/v1/branding/theme' : '/auth/v1/theme/' + encodeURIComponent(clientID);
   const logoEndpoint = common ? '/auth/v1/branding/logo' : `/auth/v1/clients/${encodeURIComponent(clientID)}/logo`;
   const colorFields = ['text', 'text_high', 'bg', 'bg_high', 'action', 'accent', 'error'];
-  const colorLabels = {text: 'Text', text_high: 'Strong text', bg: 'Background', bg_high: 'Raised background', action: 'Action', accent: 'Accent', error: 'Error'};
+  const optionalColorFields = ['approved', 'warning'];
+  const colorLabels = {text: 'Text', text_high: 'Strong text', bg: 'Background', bg_high: 'Raised background', action: 'Action', accent: 'Accent', error: 'Error', approved: 'Approved', warning: 'Warning'};
+  const fontStacks = {default: '', system: 'system-ui, -apple-system, sans-serif', geist: 'Geist, system-ui, sans-serif', pretendard: 'Pretendard, system-ui, sans-serif', inter: 'Inter, system-ui, sans-serif', mono: "'Geist Mono', 'JetBrains Mono', ui-monospace, monospace"};
   const invalidPreviewMessage = t('The preview omits invalid CSS values; your input is kept for server validation.');
   let theme = null, mode = 'light', inherited = false, pending = false, commonName = 'GoAuthy', createOnly = false, commonEtag = '', clientEtag = '', savedColors = '', previewStatus = false;
   const colorsOf = theme => JSON.stringify([theme.light, theme.dark]);
@@ -162,7 +164,7 @@ async function clientTheme(id, common = false) {
   const renderFields = () => {
     const selected = theme[mode];
     const login = theme.login, copy = login.copy[copyLanguage];
-    fields.innerHTML = `<section class="theme-login"><h3>${h('Login text')}</h3><label>${h('Copy language')}<select data-theme-copy-language><option value="en"${copyLanguage === 'en' ? ' selected' : ''}>English</option><option value="ko"${copyLanguage === 'ko' ? ' selected' : ''}>한국어</option></select></label><label>${h('Title')}<input maxlength="120" data-theme-copy="title" value="${esc(copy.title || '')}"></label><label>${h('Description')}<textarea maxlength="500" data-theme-copy="description">${esc(copy.description || '')}</textarea></label><label>${h('Button text')}<input maxlength="60" data-theme-copy="button" value="${esc(copy.button || '')}"></label><h3>${h('Login layout')}</h3><label>${h('Logo alignment')}<select data-theme-layout="logo_alignment"><option value=""${login.logo_alignment === '' ? ' selected' : ''}>${h('Default')}</option><option value="start"${login.logo_alignment === 'start' ? ' selected' : ''}>${h('Start')}</option><option value="center"${login.logo_alignment === 'center' ? ' selected' : ''}>${h('Center')}</option></select></label><label>${h('Card width (0 for default)')}<input type="number" min="0" max="640" data-theme-layout="card_width" value="${Number(login.card_width) || 0}"></label></section><details class="theme-colors-details"><summary>${h('Colors and advanced appearance')}</summary><div class="theme-colors">${colorFields.map(field => `<label class="theme-color"><span>${h(colorLabels[field])}</span><input type="color" data-theme-color="${field}" value="${hslToHex(selected[field])}" aria-label="${h(colorLabels[field] + ' color')}"><output data-theme-hsl="${field}">${esc(hslText(selected[field]))}</output></label>`).join('')}</div><label for="theme-btn-text">${h('Button text CSS value')}<input id="theme-btn-text" data-theme-css="btn_text" value="${esc(selected.btn_text)}"></label><label for="theme-border-radius">${h('Border radius CSS value')}<input id="theme-border-radius" data-theme-css="border_radius" value="${esc(theme.border_radius)}"></label></details>`;
+    fields.innerHTML = `<section class="theme-login"><h3>${h('Login text')}</h3><label>${h('Copy language')}<select data-theme-copy-language><option value="en"${copyLanguage === 'en' ? ' selected' : ''}>English</option><option value="ko"${copyLanguage === 'ko' ? ' selected' : ''}>한국어</option></select></label><label>${h('Title')}<input maxlength="120" data-theme-copy="title" value="${esc(copy.title || '')}"></label><label>${h('Description')}<textarea maxlength="500" data-theme-copy="description">${esc(copy.description || '')}</textarea></label><label>${h('Button text')}<input maxlength="60" data-theme-copy="button" value="${esc(copy.button || '')}"></label><h3>${h('Login layout')}</h3><label>${h('Logo alignment')}<select data-theme-layout="logo_alignment"><option value=""${login.logo_alignment === '' ? ' selected' : ''}>${h('Default')}</option><option value="start"${login.logo_alignment === 'start' ? ' selected' : ''}>${h('Start')}</option><option value="center"${login.logo_alignment === 'center' ? ' selected' : ''}>${h('Center')}</option></select></label><label>${h('Card width (0 for default)')}<input type="number" min="0" max="640" data-theme-layout="card_width" value="${Number(login.card_width) || 0}"></label></section><details class="theme-colors-details"><summary>${h('Colors and advanced appearance')}</summary><label for="theme-font-family">${h('Font family')}<select id="theme-font-family" data-theme-font><option value=""${!theme.font_family ? ' selected' : ''}>${h('Default')}</option><option value="system"${theme.font_family === 'system' ? ' selected' : ''}>System UI</option><option value="geist"${theme.font_family === 'geist' ? ' selected' : ''}>Geist</option><option value="pretendard"${theme.font_family === 'pretendard' ? ' selected' : ''}>Pretendard</option><option value="inter"${theme.font_family === 'inter' ? ' selected' : ''}>Inter</option><option value="mono"${theme.font_family === 'mono' ? ' selected' : ''}>Monospace</option></select></label><div class="theme-colors">${[...colorFields, ...optionalColorFields].map(field => `<label class="theme-color"><span>${h(colorLabels[field])}</span><input type="color" data-theme-color="${field}" value="${hslToHex(selected[field] || selected.action)}" aria-label="${h(colorLabels[field] + ' color')}"><output data-theme-hsl="${field}">${esc(hslText(selected[field]))}</output></label>`).join('')}</div><label for="theme-btn-text">${h('Button text CSS value')}<input id="theme-btn-text" data-theme-css="btn_text" value="${esc(selected.btn_text)}"></label><label for="theme-border-radius">${h('Border radius CSS value')}<input id="theme-border-radius" data-theme-css="border_radius" value="${esc(theme.border_radius)}"></label></details>`;
     if (common) {
       fields.insertAdjacentHTML('afterbegin', `<label>${h('Common brand name')}<input id="theme-brand-name" maxlength="120" value="${esc(theme.brand_name || '')}" placeholder="GoAuthy"></label>`);
       by('theme-brand-name').disabled = pending;
@@ -170,6 +172,7 @@ async function clientTheme(id, common = false) {
     }
     fields.querySelectorAll('[data-theme-copy-language]').forEach(input => { input.disabled = pending; input.onchange = () => { copyLanguage = input.value; renderFields(); updatePreview(); }; });
     fields.querySelectorAll('[data-theme-copy]').forEach(input => { input.disabled = pending; input.oninput = () => { if (!pending) { copy[input.dataset.themeCopy] = input.value; updatePreview(); } }; });
+    fields.querySelectorAll('[data-theme-font]').forEach(input => { input.disabled = pending; input.onchange = () => { if (!pending) { theme.font_family = input.value; updatePreview(); } }; });
     fields.querySelectorAll('[data-theme-layout]').forEach(input => { input.disabled = pending; input.oninput = () => { if (!pending) { login[input.dataset.themeLayout] = input.dataset.themeLayout === 'card_width' ? Number(input.value) || 0 : input.value; updatePreview(); } }; });
     fields.querySelectorAll('[data-theme-color]').forEach(input => { input.disabled = pending; input.oninput = () => {
       if (pending) return;
@@ -213,6 +216,19 @@ async function clientTheme(id, common = false) {
     const preview = {...selected, text: readableHSL(selected.text, selected.bg, 4.5), text_high: readableHSL(selected.text_high, selected.bg, 4.5), action: readableHSL(selected.action, selected.bg, 3), error: readableHSL(selected.error, selected.bg, 4.5)};
     if (contrast(hslRGB(preview.text), hslRGB(preview.bg_high)) < 4.5 || contrast(hslRGB(preview.text_high), hslRGB(preview.bg_high)) < 4.5 || contrast(hslRGB(preview.error), hslRGB(preview.bg_high)) < 4.5 || contrast(hslRGB(preview.action), hslRGB(preview.bg_high)) < 3) preview.bg_high = preview.bg;
     for (const field of colorFields) setCSS('--' + field.replace('_', '-'), (preview[field] || []).join(' '));
+    for (const field of optionalColorFields) {
+      if (Array.isArray(selected[field]) && selected[field].length === 3) {
+        const hsl = `${selected[field][0]} ${selected[field][1]}% ${selected[field][2]}%`;
+        body.style.setProperty('--' + field, `hsl(${hsl})`);
+        body.style.setProperty('--' + field + '-tint', `hsl(${hsl} / .12)`);
+      } else {
+        body.style.removeProperty('--' + field);
+        body.style.removeProperty('--' + field + '-tint');
+      }
+    }
+    const stack = fontStacks[theme.font_family || 'default'] || '';
+    if (stack) body.style.setProperty('--brand-font', stack);
+    else body.style.removeProperty('--brand-font');
     if (selected.btn_text && !/^[a-zA-Z0-9-,.#()%/\s]+$/.test(selected.btn_text)) setCSS('--btn-text', selected.btn_text);
     else setCSS('--btn-text', readableButtonText(selected.btn_text, preview));
     setCSS('--border-radius', theme.border_radius);

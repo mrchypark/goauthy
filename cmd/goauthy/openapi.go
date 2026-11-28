@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/mrchypark/goauthy/internal/apidocs"
+	"github.com/mrchypark/goauthy/internal/branding"
 )
 
 type swaggerConfig struct {
@@ -28,7 +30,7 @@ func swaggerConfigFromEnv(getenv func(string) string) (swaggerConfig, error) {
 	return config, nil
 }
 
-func mountSwaggerRoutes(mux *http.ServeMux, config swaggerConfig, issuer string, features apidocs.Features, admin func(http.ResponseWriter, *http.Request, bool) bool) error {
+func mountSwaggerRoutes(mux *http.ServeMux, config swaggerConfig, issuer string, features apidocs.Features, admin func(http.ResponseWriter, *http.Request, bool) bool, brand ...func(context.Context) (branding.Brand, error)) error {
 	if !config.Enabled {
 		return nil
 	}
@@ -39,6 +41,11 @@ func mountSwaggerRoutes(mux *http.ServeMux, config swaggerConfig, issuer string,
 	handler, err := apidocs.NewHandler(issuer, document, config.Public, admin)
 	if err != nil {
 		return err
+	}
+	if len(brand) > 0 && brand[0] != nil {
+		if themed, ok := handler.(*apidocs.Handler); ok {
+			themed.SetBrandResolver(brand[0])
+		}
 	}
 	mux.Handle("/auth/v1/docs", handler)
 	mux.Handle("/auth/v1/docs/", handler)

@@ -1,10 +1,13 @@
 package apidocs
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/mrchypark/goauthy/internal/branding"
 )
 
 func TestDocsAuthAssetsAndLocalSpec(t *testing.T) {
@@ -98,5 +101,34 @@ func TestNewHandlerValidatesIssuerAndPrivateAuth(t *testing.T) {
 	}
 	if _, err := NewHandler("https://example.test", nil, false, nil); err == nil {
 		t.Fatal("private docs accepted nil auth")
+	}
+}
+
+func TestDocsAppliesCommonBrandTheme(t *testing.T) {
+	h, err := NewHandler("https://id.example.test/tenant", []byte("{}"), true, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.(*Handler).SetBrandResolver(func(context.Context) (branding.Brand, error) {
+		return branding.Brand{Name: "Acme ID", ThemeURL: "/auth/v1/branding/theme.css?v=3"}, nil
+	})
+	index := httptest.NewRecorder()
+	h.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/auth/v1/docs/", nil))
+	body := index.Body.String()
+	for _, want := range []string{
+		`<title>Acme ID · API Docs</title>`,
+		`href="/tenant/auth/v1/ui/brand.css"`,
+		`href="/tenant/auth/v1/theme/global.css"`,
+		`href="/tenant/auth/v1/branding/theme.css?v=3"`,
+		`href="./theme.css"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %q in %q", want, body)
+		}
+	}
+	css := httptest.NewRecorder()
+	h.ServeHTTP(css, httptest.NewRequest(http.MethodGet, "/auth/v1/docs/theme.css", nil))
+	if css.Code != http.StatusOK || !strings.Contains(css.Header().Get("Content-Type"), "text/css") || !strings.Contains(css.Body.String(), "var(--bg)") {
+		t.Fatalf("theme.css status=%d type=%q", css.Code, css.Header().Get("Content-Type"))
 	}
 }

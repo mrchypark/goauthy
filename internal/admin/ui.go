@@ -224,11 +224,17 @@ func (u *UI) handleEmailTemplatePreview(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Preview unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	brand := branding.ResolveOptional(r.Context(), u.brand)
+	themeLink := ""
+	if strings.HasPrefix(brand.ThemeURL, "/") && !strings.HasPrefix(brand.ThemeURL, "//") {
+		themeLink = fmt.Sprintf(`<link rel="stylesheet" href="%s%s">`, template.HTMLEscapeString(u.basePath), template.HTMLEscapeString(brand.ThemeURL))
+	}
 	_, _ = fmt.Fprintf(w, `<!doctype html>
-<html><head><meta charset="utf-8"><title>Email Preview</title>
+<html><head><meta charset="utf-8"><title>%s · Email Preview</title>
 %s
-<link rel="stylesheet" href="../admin.css"><link rel="stylesheet" href="../../branding/brand.css">
+<link rel="stylesheet" href="../admin.css"><link rel="stylesheet" href="../../branding/brand.css">%s
 </head><body class="email-preview">
+<p class="eyebrow">%s</p>
 <h1>%s</h1>
 <p>%s</p>
 %s
@@ -237,7 +243,10 @@ func (u *UI) handleEmailTemplatePreview(w http.ResponseWriter, r *http.Request) 
 %s
 <footer><p>%s</p></footer>
 </body></html>`,
+		template.HTMLEscapeString(brand.Name),
 		head.String(),
+		themeLink,
+		template.HTMLEscapeString(brand.Name),
 		template.HTMLEscapeString(info.Header),
 		template.HTMLEscapeString(info.Text),
 		func() string {

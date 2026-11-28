@@ -81,6 +81,7 @@ func assetBase(prefix string) (string, error) {
 func BindAssets(mux *http.ServeMux) error {
 	names := append([]string(nil), stylesheets...)
 	names = append(names,
+		"theme.js",
 		"geist.woff2", "geist-mono.woff2", "pretendard.woff2",
 		"ely/fonts/Inter-Regular.ttf", "ely/fonts/Inter-Medium.ttf",
 		"ely/fonts/Inter-SemiBold.ttf", "ely/fonts/Inter-Italic.ttf",
@@ -98,6 +99,8 @@ func BindAssets(mux *http.ServeMux) error {
 		contentType := "font/woff2"
 		if strings.HasSuffix(name, ".ttf") {
 			contentType = "font/ttf"
+		} else if strings.HasSuffix(name, ".js") {
+			contentType = "text/javascript; charset=utf-8"
 		} else if strings.HasSuffix(name, ".css") {
 			contentType = "text/css; charset=utf-8"
 			// Ely's root font URLs must resolve within the issuer namespace.
