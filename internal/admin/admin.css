@@ -1,5 +1,4 @@
 /* Layout and Ely-token styling for the existing JavaScript-rendered console. */
-* { box-sizing: border-box; }
 .common-brand-logo { width:auto; max-width:72px; height:36px; object-fit:contain; }
 [hidden] { display: none !important; }
 #prov-oauth-fields { display: grid; gap: 12px; }
@@ -107,7 +106,7 @@ pre { overflow-x: auto; max-width: 100%; padding: 16px; background: var(--accent
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
 .overview-account { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0 16px; border-bottom: 1px solid var(--color-line); }
 #overview-identity { font-size: 18px; margin: 4px 0 0; overflow-wrap: anywhere; }
-.overview-areas { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 24px; padding-top: 20px; }
+.overview-areas { padding-top: 20px; }
 .overview-areas h2 { margin-bottom: 6px; }
 .overview-areas .hint { margin: 0 0 20px; }
 .overview-links a { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--color-line); text-decoration: none; }
@@ -171,13 +170,7 @@ pre { overflow-x: auto; max-width: 100%; padding: 16px; background: var(--accent
 .theme-preview h2{margin:0 0 6px}
 .theme-preview>p{margin:0 0 12px}
 
-/* elysdui components follow the active GoAuthy brand and compact admin density. */
-#app [data-slot=button] { min-height:36px; height:auto; padding:7px 12px; border-radius:6px; font:600 13px/1.5 var(--brand-font,sans-serif); }
-#app [data-slot=button][data-variant=primary] { background:var(--color-accent); color:var(--btn-text,#f6f8f0); }
-#app [data-slot=button][data-variant=secondary] { background:transparent; color:var(--color-ink); border-color:var(--border); }
-#app [data-slot=button]:focus-visible, #app [data-slot=input]:focus-visible, #app [data-slot=select]:focus-visible, #app [data-slot=textarea]:focus-visible { outline:2px solid var(--focus); outline-offset:3px; }
-#app .ui-table th, #app .ui-table td { padding:8px 10px; border-color:var(--color-line); }
-#app .ui-table th { background:var(--accent-tint); }
+/* elysdui components follow the active GoAuthy brand; keep only 2-column form layout. */
 #app :is(#user, #client-form, #collection-form, #catalog-form) { grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; }
 #app :is(#user, #client-form, #collection-form, #catalog-form) > :not(label) { grid-column:1 / -1; }
 @media(max-width:700px) { #app :is(#user, #client-form, #collection-form, #catalog-form) { grid-template-columns:1fr; } }
