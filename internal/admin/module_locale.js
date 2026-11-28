@@ -8,6 +8,8 @@ Object.assign(globalThis.GoAuthyI18n.messages, {
   'Accounts are shared with operators. Administrator access depends on roles; service app access is not blocked by this page.':'계정은 운영자와 공유됩니다. 관리자 접근 권한은 역할에 따라 결정되며, 이 화면은 서비스 앱 로그인을 차단하지 않습니다.',
   'Send an activation email. Assign an administrator role explicitly to grant administrator access.':'활성화 이메일을 보냅니다. 관리자 접근을 허용하려면 관리자 역할을 명시적으로 부여하세요.',
   'Common brand':'공통 브랜드',
+  'Button text contrast cannot be verified for this CSS color. Check it in the preview.':'이 CSS 색상은 버튼 글자 대비를 확인할 수 없습니다. 미리보기에서 확인하세요.',
+  'Error text needs at least 4.5:1 contrast with the backgrounds.':'오류 글자색은 배경과 4.5:1 이상의 대비가 필요합니다.',
   'Common brand name':'공통 브랜드 이름',
   'Back to dashboard':'대시보드로 돌아가기',
   'Common logo':'공통 로고',

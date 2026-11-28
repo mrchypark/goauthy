@@ -55,12 +55,16 @@ func TestElysduiDynamicAdminInBrowser(t *testing.T) {
 			t.Logf("browser exception: %s", e.ExceptionDetails)
 		}
 	})
-	var result, mobile, missingLocaleReproduced bool
+	var result, mobile, missingLocaleReproduced, canvasAt1099, canvasAt844 bool
 	err = chromedp.Run(ctx,
 		chromedp.Navigate(missingLocale.URL+"/auth/v1/admin/users"),
 		chromedp.Evaluate(`typeof globalThis.GoAuthyI18n === 'undefined' && !!document.querySelector('#app .state') && !document.querySelector('#table')`, &missingLocaleReproduced),
+		chromedp.EmulateViewport(1280, 1099),
 		chromedp.Navigate(server.URL+"/auth/v1/admin/users"),
 		chromedp.WaitVisible(`#table table.ui-table`, chromedp.ByQuery),
+		chromedp.Evaluate(`document.body.getBoundingClientRect().height >= innerHeight`, &canvasAt1099),
+		chromedp.EmulateViewport(1280, 844),
+		chromedp.Evaluate(`document.body.getBoundingClientRect().height >= innerHeight`, &canvasAt844),
 		chromedp.Navigate(server.URL+"/auth/v1/admin/users/new"),
 		chromedp.WaitVisible(`#user input[data-slot=input]`, chromedp.ByQuery),
 		chromedp.Evaluate(`new Promise(resolve => {
@@ -82,6 +86,9 @@ func TestElysduiDynamicAdminInBrowser(t *testing.T) {
 	if !missingLocaleReproduced {
 		t.Fatal("missing locale fixture did not reproduce the stalled administration page")
 	}
+	if !canvasAt1099 || !canvasAt844 {
+		t.Fatal("short admin page did not paint the themed body through the viewport")
+	}
 	if !result {
 		t.Fatal("dynamic components lost their elysdui contract or native behavior")
 	}
@@ -95,8 +102,12 @@ func TestElysduiDynamicAdminInBrowser(t *testing.T) {
 func TestAdminAccentComputedStylesInBrowser(t *testing.T) {
 	mux := http.NewServeMux()
 	customTheme := branding.DefaultTheme(branding.GlobalBrandID)
-	customTheme.Dark.Action = []uint16{210, 80, 20}
-	customTheme.Dark.BtnText = "#ffffff"
+	customTheme.Dark.Bg = []uint16{0, 0, 100}
+	customTheme.Dark.Text = []uint16{0, 0, 100}
+	customTheme.Dark.TextHigh = []uint16{0, 0, 100}
+	customTheme.Dark.Action = []uint16{0, 0, 100}
+	customTheme.Dark.BgHigh = []uint16{0, 0, 0}
+	customTheme.Dark.BtnText = "white"
 	if err := sharedUI.BindAssets(mux); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +140,7 @@ func TestAdminAccentComputedStylesInBrowser(t *testing.T) {
 <link rel="stylesheet" href="/admin.css"><link rel="stylesheet" href="` + themeURL + `"></head><body class="common-brand">
 <div id="app"><button data-slot="button" data-variant="primary">Save</button>
 <input data-slot="input"><select data-slot="select"><option>One</option></select><textarea data-slot="textarea"></textarea></div>
-<div id="resolved" style="background-color:var(--color-accent)"></div></body></html>`))
+<div id="resolved" style="background-color:var(--color-accent)"></div><div id="raised" style="background-color:hsl(var(--bg-high))">Text</div></body></html>`))
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
@@ -183,8 +194,8 @@ resolve(result);
 		})
 	}
 	var custom struct {
-		PrimaryText, Background string
-		Contrast                float64
+		PrimaryText, Background, Ink, Paper, Raised string
+		Contrast, TextContrast                      float64
 	}
 	if err := chromedp.Run(ctx,
 		chromedp.Navigate(server.URL+"?custom=1"),
@@ -196,11 +207,12 @@ const rgb = value => value.match(/[\d.]+/g).slice(0, 3).map(Number);
 const luminance = value => rgb(value).map(component => { component /= 255; return component <= .04045 ? component / 12.92 : ((component + .055) / 1.055) ** 2.4; }).reduce((sum, component, index) => sum + component * [.2126, .7152, .0722][index], 0);
 const button = getComputedStyle(document.querySelector('#app button'));
 const first = luminance(button.color), second = luminance(button.backgroundColor);
-resolve({PrimaryText:button.color, Background:button.backgroundColor, Contrast:(Math.max(first, second) + .05) / (Math.min(first, second) + .05)});
+const body = getComputedStyle(document.body), ink = luminance(body.color), paper = luminance(body.backgroundColor), raised = getComputedStyle(document.querySelector('#raised'));
+resolve({PrimaryText:button.color, Background:button.backgroundColor, Ink:body.color, Paper:body.backgroundColor, Raised:raised.backgroundColor, Contrast:(Math.max(first, second) + .05) / (Math.min(first, second) + .05), TextContrast:(Math.max(ink, paper) + .05) / (Math.min(ink, paper) + .05)});
 }))`, &custom, chromedp.EvalAsValue, func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithAwaitPromise(true) })); err != nil {
 		t.Fatal(err)
 	}
-	if custom.PrimaryText != "rgb(255, 255, 255)" || custom.Background != "rgb(10, 51, 92)" || custom.Contrast < 4.5 {
-		t.Fatalf("custom dark primary palette=%+v", custom)
+	if custom.PrimaryText != "rgb(255, 255, 255)" || custom.Background != "rgb(0, 0, 0)" || custom.Ink != "rgb(0, 0, 0)" || custom.Paper != "rgb(255, 255, 255)" || custom.Raised != custom.Paper || custom.Contrast < 4.5 || custom.TextContrast < 4.5 {
+		t.Fatalf("low-contrast stored theme fallback=%+v", custom)
 	}
 }

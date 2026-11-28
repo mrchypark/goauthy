@@ -4,7 +4,7 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(__dirname + '/themes.js', 'utf8');
 const clone = value => JSON.parse(JSON.stringify(value));
-const makeTheme = client_id => ({client_id, light: {text: [200, 5, 37], text_high: [200, 15, 25], bg: [34, 25, 97], bg_high: [34, 20, 90], action: [34, 100, 40], accent: [265, 100, 53], error: [15, 100, 37], btn_text: 'white', theme_sun: 'hsla(var(--action) / .7)', theme_moon: 'hsla(var(--accent) / .85)'}, dark: {text: [34, 5, 75], text_high: [34, 7, 90], bg: [200, 40, 6], bg_high: [200, 20, 17], action: [34, 100, 59], accent: [265, 100, 53], error: [15, 100, 37], btn_text: 'hsl(var(--bg))', theme_sun: 'hsla(var(--action) / .7)', theme_moon: 'hsla(var(--accent) / .85)'}, border_radius: '5px'});
+const makeTheme = client_id => ({client_id, light: {text: [200, 5, 37], text_high: [200, 15, 25], bg: [34, 25, 97], bg_high: [34, 20, 95], action: [34, 100, 40], accent: [265, 100, 53], error: [15, 100, 37], btn_text: '#10231b', theme_sun: 'hsla(var(--action) / .7)', theme_moon: 'hsla(var(--accent) / .85)'}, dark: {text: [34, 5, 75], text_high: [34, 7, 90], bg: [200, 40, 6], bg_high: [200, 20, 17], action: [34, 100, 59], accent: [265, 100, 53], error: [15, 100, 37], btn_text: 'hsl(var(--bg))', theme_sun: 'hsla(var(--action) / .7)', theme_moon: 'hsla(var(--accent) / .85)'}, border_radius: '5px'});
 
 function harness(messages = {}, language = 'ko', legacyStatus = null) {
   const nodes = new Map(), calls = [], vars = new Map(), removedVars = [], sampleVars = new Map(), frameBody = {style: {setProperty: (key, value) => vars.set(key, value), removeProperty: key => { removedVars.push(key); vars.delete(key); }}, dataset: {}};
@@ -67,7 +67,8 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
   frame.contentDocument = {documentElement: {lang: ''}, body: frameBody, getElementById: id => id === 'theme-sample-fields' ? (sampleReady ? sampleFields : null) : previewNodes.get(id) || null, querySelectorAll: selector => selector === '[data-i18n]' ? [...previewLabels.values()] : [], querySelector: selector => selector === '.auth-panel' ? previewPanel : selector === '.auth-topbar .auth-brand' ? brand : topbar};
   const root = {innerHTML: ''};
   const globalTheme = makeTheme('goauthy');
-  let saved = null, failNextPut = false, failNextPost = false, holdNextPut = false, resolvePut, rejectPut, confirmCount = 0;
+  globalTheme.dark.error = [15, 100, 70];
+  let saved = null, failNextPut = false, failNextPost = false, holdNextPut = false, resolvePut, rejectPut, confirmCount = 0, nextClientRead = null;
   const document = {documentElement: {lang: language}, getElementById: node, querySelectorAll: selector => selector === '[data-theme-mode]' ? modes : []};
   const ctx = {
     document, console, root, confirm: () => { confirmCount++; return true; }, encodeURIComponent, Date, FormData: class { append(key, value) { this[key] = value; } },
@@ -80,7 +81,11 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
       if (opts.method === 'POST') {
         if (failNextPost) { failNextPost = false; throw Error('read unavailable'); }
         if (path === '/auth/v1/branding/theme') { const value = clone(saved?.client_id === 'goauthy' ? saved : globalTheme); Object.defineProperty(value, '_headers', {value: {get: name => name === 'ETag' ? '"sha256:common"' : null}}); return value; }
-        return clone(saved || globalTheme);
+        const next = nextClientRead || {theme: saved || globalTheme, etag: saved ? '"sha256:client-saved"' : '"sha256:inherited"'};
+        nextClientRead = null;
+        const value = clone(next.theme);
+        Object.defineProperty(value, '_headers', {value: {get: name => name === 'ETag' ? next.etag : null}});
+        return value;
       }
       if (opts.method === 'PUT') {
         if (failNextPut) { failNextPut = false; throw Error('write unavailable'); }
@@ -94,11 +99,91 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
     },
   };
   vm.runInNewContext(source, ctx);
-  return {ctx, calls, root, node, colors, cssFields, copyFields, layoutFields, controls, copyLanguage, outputs, modes, frame, vars, removedVars, sampleVars, previewNodes, previewLabels, get frameWrites() { return frameWrites; }, previewPanel, brand, globalTheme, get saved() { return saved; }, get confirmCount() { return confirmCount; }, setFailPut: () => { failNextPut = true; }, setFailPost: () => { failNextPost = true; }, setSampleReady: ready => { sampleReady = ready; }, holdPut: () => { holdNextPut = true; }, rejectPut: error => rejectPut(error), resolvePut: value => resolvePut(value)};
+  return {ctx, calls, root, node, colors, cssFields, copyFields, layoutFields, controls, copyLanguage, outputs, modes, frame, vars, removedVars, sampleVars, previewNodes, previewLabels, get frameWrites() { return frameWrites; }, previewPanel, brand, globalTheme, get saved() { return saved; }, get confirmCount() { return confirmCount; }, setFailPut: () => { failNextPut = true; }, setFailPost: () => { failNextPost = true; }, setNextClientRead: (theme, etag) => { nextClientRead = {theme, etag}; }, setSampleReady: ready => { sampleReady = ready; }, holdPut: () => { holdNextPut = true; }, rejectPut: error => rejectPut(error), resolvePut: value => resolvePut(value)};
 }
 
 (async () => {
   const h = harness(), id = 'client<& /id';
+  const race = harness();
+  await race.ctx.clientTheme('client-race');
+  race.copyFields.find(input => input.dataset.themeCopy === 'title').value = 'First admin';
+  race.copyFields.find(input => input.dataset.themeCopy === 'title').oninput();
+  const otherTheme = makeTheme('client-race');
+  otherTheme.login = {copy: {en: {title: 'Other admin'}, ko: {}}, logo_alignment: '', card_width: 0};
+  race.setNextClientRead(otherTheme, '"sha256:other-admin"');
+  await race.node('theme-save').onclick();
+  const firstCreate = race.calls.filter(call => call.opts.method === 'PUT').at(-1);
+  assert.equal(firstCreate.opts.headers['If-None-Match'], '*', 'an inherited client theme is created conditionally');
+  await race.node('theme-save').onclick();
+  const afterRace = race.calls.filter(call => call.opts.method === 'PUT').at(-1);
+  assert.equal(afterRace.opts.headers['If-Match'], '"sha256:other-admin"', 'the refreshed draft keeps the ETag returned with its content');
+  assert.equal(JSON.parse(afterRace.opts.body).login.copy.en.title, 'Other admin', 'a concurrent theme read replaces the saved draft instead of being overwritten');
+  const resetWarning = harness();
+  resetWarning.globalTheme.light.btn_text = 'color-mix(in srgb, white 80%, black)';
+  await resetWarning.ctx.clientTheme('client-reset');
+  await resetWarning.node('theme-save').onclick();
+  resetWarning.node('theme-reset').onclick();
+  await resetWarning.node('theme-reset-confirm').onclick();
+  assert.match(resetWarning.node('theme-status').textContent, /button.*contrast.*cannot.*verif/i, 'reset keeps the inherited complex-CSS warning visible');
+  assert.doesNotMatch(resetWarning.node('theme-status').textContent, /Client theme removed/i);
+  const legacy = harness();
+  legacy.globalTheme.light.bg = [0, 0, 100];
+  legacy.globalTheme.light.text = [0, 0, 100];
+  legacy.globalTheme.light.text_high = [0, 0, 100];
+  await legacy.ctx.clientTheme('goauthy', true);
+  assert.match(legacy.node('theme-status').textContent, /contrast/i, 'initial legacy warning remains visible');
+  await legacy.node('theme-reload').onclick();
+  assert.match(legacy.node('theme-status').textContent, /contrast/i, 'reloading an unsafe saved theme retains its warning');
+  assert.doesNotMatch(legacy.node('theme-status').textContent, /Saved theme reloaded/i);
+  legacy.copyFields.find(input => input.dataset.themeCopy === 'title').value = 'Changed copy';
+  legacy.copyFields.find(input => input.dataset.themeCopy === 'title').oninput();
+  await legacy.node('theme-save').onclick();
+  assert.equal(legacy.saved.login.copy.en.title, 'Changed copy', 'copy-only edit preserves legacy colors');
+  assert.deepEqual(legacy.saved.light.text, [0, 0, 100]);
+  assert.match(legacy.node('theme-status').textContent, /contrast/i, 'saving copy keeps the legacy contrast warning');
+  const invalidLegacy = legacy.cssFields.find(input => input.dataset.themeCss === 'border_radius');
+  invalidLegacy.value = 'bad;';
+  invalidLegacy.oninput();
+  assert.match(legacy.node('theme-status').textContent, /contrast/i);
+  assert.match(legacy.node('theme-status').textContent, /invalid CSS/i, 'both warnings remain visible');
+  invalidLegacy.value = '5px';
+  invalidLegacy.oninput();
+  assert.match(legacy.node('theme-status').textContent, /contrast/i);
+  assert.doesNotMatch(legacy.node('theme-status').textContent, /invalid CSS/i);
+  const fixedText = legacy.colors.find(input => input.dataset.themeColor === 'text');
+  const fixedHigh = legacy.colors.find(input => input.dataset.themeColor === 'text_high');
+  fixedText.value = '#000000'; fixedText.oninput();
+  fixedHigh.value = '#000000'; fixedHigh.oninput();
+  assert.doesNotMatch(legacy.node('theme-status').textContent, /contrast/i, 'correcting colors clears warning');
+  const darkWarning = harness();
+  darkWarning.globalTheme.dark.text = [...darkWarning.globalTheme.dark.bg];
+  await darkWarning.ctx.clientTheme('goauthy', true);
+  assert.match(darkWarning.node('theme-status').textContent, /contrast/i, 'dark warning appears in light mode');
+  darkWarning.copyFields.find(input => input.dataset.themeCopy === 'title').oninput();
+  assert.match(darkWarning.node('theme-status').textContent, /contrast/i, 'editing copy keeps dark warning visible');
+  const rgbPreview = harness();
+  rgbPreview.globalTheme.light.btn_text = 'rgb(0e2 0e2 0e2)';
+  await rgbPreview.ctx.clientTheme('goauthy', true);
+  assert.equal(rgbPreview.vars.get('--btn-text'), 'rgb(0e2 0e2 0e2)', 'safe exponent RGB is preserved');
+  for (const value of ['rgba(255, 255, 255, 0.9)', 'hsl(210, 50%, 90%)', 'color-mix(in srgb, white 80%, black)']) {
+    const complex = harness();
+    complex.globalTheme.light.btn_text = value;
+    complex.globalTheme.dark.btn_text = value;
+    await complex.ctx.clientTheme('goauthy', true);
+    assert.equal(complex.vars.get('--btn-text'), value, 'complex color is preserved in preview');
+    assert.match(complex.node('theme-status').textContent, /button.*contrast.*cannot.*verif/i, 'unverified color is disclosed');
+    complex.modes[1].onclick();
+    assert.equal(complex.vars.get('--btn-text'), value, 'dark preview preserves complex color');
+    await complex.node('theme-save').onclick();
+    assert.equal(complex.saved.light.btn_text, value);
+    assert.equal(complex.saved.dark.btn_text, value);
+    assert.match(complex.node('theme-status').textContent, /button.*contrast.*cannot.*verif/i, 'warning remains after save');
+  }
+  const errorContrast = harness();
+  errorContrast.globalTheme.light.error = [0, 0, 55];
+  await errorContrast.ctx.clientTheme('goauthy', true);
+  assert.match(errorContrast.node('theme-status').textContent, /error.*4\.5/i);
+  assert.equal(errorContrast.vars.get('--error'), '0 0 0', 'error text receives 4.5:1 fallback');
   await h.ctx.clientTheme(id);
   const endpoint = '/auth/v1/theme/' + encodeURIComponent(id);
   assert.deepEqual(h.calls.slice(0, 2).map(x => [x.path, x.opts.method]), [[endpoint, 'POST'], ['/auth/v1/branding/theme', 'POST']]);
@@ -130,6 +215,24 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
   assert.equal(h.sampleVars.get('display'), 'grid');
   assert.equal(h.sampleVars.get('gap'), '14px');
   assert.equal(h.vars.get('--text'), '200 5 37');
+  for (const field of ['bg', 'text', 'text_high', 'action', 'error']) {
+    const input = h.colors.find(value => value.dataset.themeColor === field);
+    input.value = '#ffffff';
+    input.oninput();
+  }
+  assert.equal(h.vars.get('--text'), '0 0 0', 'unsafe preview text uses the readable fallback');
+  assert.equal(h.vars.get('--text-high'), '0 0 0', 'unsafe preview strong text uses the readable fallback');
+  assert.equal(h.vars.get('--action'), '0 0 0', 'unsafe preview focus/action uses the readable fallback');
+  assert.equal(h.vars.get('--error'), '0 0 0', 'unsafe preview error color uses the readable fallback');
+  const unsafeButtonText = h.cssFields.find(value => value.dataset.themeCss === 'btn_text');
+  unsafeButtonText.value = '#000';
+  unsafeButtonText.oninput();
+  assert.equal(h.vars.get('--btn-text'), '#fff', 'unsafe preview button text uses the readable fallback');
+  const lowContrastSaves = h.calls.filter(call => call.opts.method === 'PUT').length;
+  await h.node('theme-save').onclick();
+  assert.equal(h.calls.filter(call => call.opts.method === 'PUT').length, lowContrastSaves, 'low-contrast drafts are not saved');
+  assert.match(h.node('theme-status').textContent, /contrast/i);
+  await h.node('theme-reload').onclick();
   const logo = h.previewNodes.get('theme-logo-image');
   assert.match(h.node('theme-logo-image').src, /\/auth\/v1\/clients\/client%3C%26%20%2Fid\/logo\?v=/);
   assert.equal(logo.hidden, true);
@@ -166,18 +269,18 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
   assert.equal(h.previewPanel.style['max-width'], '420px');
   assert.equal(h.brand.style['margin-inline'], 'auto');
 
-  h.colors.find(x => x.dataset.themeColor === 'text').value = '#ff0000';
+  h.colors.find(x => x.dataset.themeColor === 'text').value = '#000000';
   h.colors.find(x => x.dataset.themeColor === 'text').oninput();
-  assert.equal(h.outputs.get('text').textContent, '0 100 50');
+  assert.equal(h.outputs.get('text').textContent, '0 0 0');
   const btnText = h.cssFields.find(x => x.dataset.themeCss === 'btn_text');
-  btnText.value = 'white'; btnText.oninput();
+  btnText.value = '#10231b'; btnText.oninput();
   h.modes[1].onclick();
   assert.equal(h.modes[1].attrs['aria-pressed'], 'true');
   assert.equal(h.outputs.get('text').textContent, '34 5 75');
-  h.colors.find(x => x.dataset.themeColor === 'text').value = '#00ff00';
+  h.colors.find(x => x.dataset.themeColor === 'text').value = '#ffffff';
   h.colors.find(x => x.dataset.themeColor === 'text').oninput();
   h.modes[0].onclick();
-  assert.equal(h.outputs.get('text').textContent, '0 100 50');
+  assert.equal(h.outputs.get('text').textContent, '0 0 0');
 
   await h.node('theme-save').onclick();
   const put = h.calls.filter(x => x.opts.method === 'PUT').at(-1);
@@ -188,11 +291,11 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
   assert.equal(payload.login.copy.en.title, 'English fallback');
   assert.equal(payload.login.copy.ko.title, '한국어 제목');
   assert.equal(payload.login.card_width, 420);
-  assert.deepEqual(payload.light.text, [0, 100, 50]);
-  assert.deepEqual(payload.dark.text, [120, 100, 50]);
+  assert.deepEqual(payload.light.text, [0, 0, 0]);
+  assert.deepEqual(payload.dark.text, [0, 0, 100]);
   assert.equal(payload.light.theme_sun, h.globalTheme.light.theme_sun);
   assert.equal(payload.dark.theme_moon, h.globalTheme.dark.theme_moon);
-  assert.equal(payload.light.btn_text, 'white');
+  assert.equal(payload.light.btn_text, '#10231b');
 
   const cssText = h.cssFields.find(x => x.dataset.themeCss === 'btn_text');
   cssText.value = 'var(--unsafe);'; cssText.oninput();
@@ -203,7 +306,7 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
   assert.equal(cssText.value, 'var(--unsafe);');
   assert.equal(h.node('theme-status').textContent, 'write unavailable');
 
-  cssText.value = 'white'; cssText.oninput();
+  cssText.value = '#10231b'; cssText.oninput();
   h.holdPut();
   const beforePending = h.calls.filter(x => x.opts.method === 'PUT').length;
   const pending = h.node('theme-save').onclick();
@@ -215,7 +318,7 @@ function harness(messages = {}, language = 'ko', legacyStatus = null) {
   h.rejectPut(Error('write unavailable'));
   await pending;
   assert.equal(h.node('theme-save').disabled, false);
-  assert.equal(h.cssFields.find(x => x.dataset.themeCss === 'btn_text').value, 'white');
+  assert.equal(h.cssFields.find(x => x.dataset.themeCss === 'btn_text').value, '#10231b');
 
   const savedRadius = JSON.parse(put.opts.body).border_radius;
   h.cssFields.find(x => x.dataset.themeCss === 'border_radius').value = '17px';

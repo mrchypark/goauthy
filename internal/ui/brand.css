@@ -22,7 +22,7 @@ body {
   --color-ink: hsl(var(--text-high)); --color-muted: hsl(var(--text));
   --color-line: hsl(var(--text) / .22); --line: var(--color-line); --border: hsl(var(--text) / .4);
   --color-accent: hsl(var(--action)); --focus: hsl(var(--action));
-  --accent-hover: color-mix(in srgb, hsl(var(--action)), hsl(var(--text-high)) 15%);
+  --accent-hover: hsl(var(--action));
   --accent-tint: hsl(var(--bg-high)); --on-accent: var(--btn-text);
   --color-background: var(--color-paper); --color-foreground: var(--color-ink);
   --color-primary: var(--color-accent); --color-primary-foreground: var(--on-accent);
