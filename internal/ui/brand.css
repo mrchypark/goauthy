@@ -1,4 +1,5 @@
 /* Defaults are layered so the existing per-client/theme CSS always wins. */
+:root { color-scheme: light dark; }
 @layer theme {
   body, html[data-theme="light"] body, body.theme-light {
     --text: 150 8% 32%; --text-high: 150 16% 13%;
@@ -48,8 +49,12 @@ body {
   --radius-sm: var(--border-radius); --radius-md: var(--border-radius); --radius-lg: var(--border-radius);
   --ely-control-radius: var(--border-radius);
   background: var(--color-paper); color: var(--color-ink);
+  accent-color: hsl(var(--action));
   font-family: var(--brand-font, Geist, Pretendard, system-ui, sans-serif);
 }
+dialog:modal { overscroll-behavior: contain; }
+dialog::backdrop { overflow: hidden; overscroll-behavior: contain; }
+:is(input, select, textarea):user-invalid { border-color: var(--goauthy-error); }
 /* Advanced Ely components use a color token; GoAuthy stores HSL channels. */
 [data-ely-family] { --error: var(--goauthy-error); }
 /* Ely expects a color here too; retain GoAuthy's HSL channels for legacy CSS. */
