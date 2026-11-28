@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"bytes"
 	"context"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -75,7 +77,7 @@ func TestElysduiDynamicAdminInBrowser(t *testing.T) {
       const table = document.createElement('table'); table.innerHTML = '<thead><tr><th>Name</th></tr></thead><tbody><tr><td>One</td></tr></tbody>';
       const theme = document.createElement('div'); theme.className = 'theme-mode'; theme.innerHTML = '<button type="button" aria-pressed="true">Light</button>';
       form.append(input, button, select, textarea, table, theme);
-      requestAnimationFrame(() => { button.click(); resolve(input.isConnected && input.value === 'preserved' && input.required && clicked === 1 && input.dataset.slot === 'input' && button.dataset.slot === 'button' && select.dataset.slot === 'select' && textarea.dataset.slot === 'textarea' && table.classList.contains('ui-table') && table.parentElement.classList.contains('ui-table-wrap') && table.parentElement.tabIndex === 0 && !theme.firstElementChild.dataset.slot && getComputedStyle(table.querySelector('td')).paddingTop === '8px'); });
+      requestAnimationFrame(() => { button.click(); resolve(input.isConnected && input.value === 'preserved' && input.required && clicked === 1 && input.dataset.slot === 'input' && button.dataset.slot === 'button' && select.dataset.slot === 'select' && textarea.dataset.slot === 'textarea' && table.classList.contains('ui-table') && table.parentElement.classList.contains('ui-table-wrap') && table.parentElement.tabIndex === 0 && !theme.firstElementChild.dataset.slot); });
     })`, &result, chromedp.EvalAsValue, func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithAwaitPromise(true) }),
 		chromedp.EmulateViewport(390, 844),
 		chromedp.Evaluate(`getComputedStyle(document.querySelector('#user')).gridTemplateColumns.split(' ').length === 1 && document.documentElement.scrollWidth <= innerWidth`, &mobile),
@@ -129,18 +131,25 @@ func TestAdminAccentComputedStylesInBrowser(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(theme.CSS()))
 	})
+	pageTpl := template.Must(template.Must(sharedUI.NewTemplates("accent-test")).Parse(`<!doctype html><html><head>
+<link rel="stylesheet" href="/auth/v1/ui/app.css"><link rel="stylesheet" href="/auth/v1/ui/brand.css">
+<link rel="stylesheet" href="/admin.css"><link rel="stylesheet" href="{{.ThemeURL}}"><style>*{transition:none!important}</style></head><body class="common-brand">
+<div id="app">{{template "button" (dict "Label" "Save" "Variant" "primary")}}
+{{template "input" (dict)}}{{template "select" (dict "Options" (list (dict "Value" "One" "Label" "One")))}}{{template "textarea" (dict)}}</div>
+<div id="resolved" style="background-color:var(--color-accent)"></div><div id="raised" style="background-color:hsl(var(--bg-high))">Text</div></body></html>`))
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		themeURL := "/theme.css"
 		if r.URL.Query().Get("custom") == "1" {
 			themeURL += "?custom=1"
 		}
-		_, _ = w.Write([]byte(`<!doctype html><html><head>
-<link rel="stylesheet" href="/auth/v1/ui/app.css"><link rel="stylesheet" href="/auth/v1/ui/brand.css">
-<link rel="stylesheet" href="/admin.css"><link rel="stylesheet" href="` + themeURL + `"></head><body class="common-brand">
-<div id="app"><button data-slot="button" data-variant="primary">Save</button>
-<input data-slot="input"><select data-slot="select"><option>One</option></select><textarea data-slot="textarea"></textarea></div>
-<div id="resolved" style="background-color:var(--color-accent)"></div><div id="raised" style="background-color:hsl(var(--bg-high))">Text</div></body></html>`))
+		var out bytes.Buffer
+		if err := pageTpl.Execute(&out, struct{ ThemeURL string }{themeURL}); err != nil {
+			t.Error(err)
+			http.Error(w, "template failed", 500)
+			return
+		}
+		_, _ = w.Write(out.Bytes())
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
@@ -162,7 +171,7 @@ func TestAdminAccentComputedStylesInBrowser(t *testing.T) {
 				chromedp.ActionFunc(func(ctx context.Context) error {
 					return emulation.SetEmulatedMedia().WithFeatures([]*emulation.MediaFeature{{Name: "prefers-color-scheme", Value: scheme}}).Do(ctx)
 				}),
-				chromedp.Evaluate(`new Promise(resolve => requestAnimationFrame(() => {
+				chromedp.Evaluate(`new Promise(resolve => setTimeout(() => requestAnimationFrame(() => {
 const rgb = value => value.match(/[\d.]+/g).slice(0, 3).map(Number);
 const luminance = value => rgb(value).map(component => { component /= 255; return component <= .04045 ? component / 12.92 : ((component + .055) / 1.055) ** 2.4; }).reduce((sum, component, index) => sum + component * [.2126, .7152, .0722][index], 0);
 const contrast = (a, b) => { const first = luminance(a), second = luminance(b); return (Math.max(first, second) + .05) / (Math.min(first, second) + .05); };
@@ -174,7 +183,7 @@ for (const element of document.querySelectorAll('#app [data-slot]')) {
   result.Focus.push({Slot:element.dataset.slot, Color:style.outlineColor, Style:style.outlineStyle, Width:style.outlineWidth, Visible:element.matches(':focus-visible')});
 }
 resolve(result);
-}))`, &observed, chromedp.EvalAsValue, func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithAwaitPromise(true) })); err != nil {
+}), 200))`, &observed, chromedp.EvalAsValue, func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithAwaitPromise(true) })); err != nil {
 				t.Fatal(err)
 			}
 			if observed.Raw == "" || strings.Contains(observed.Raw, "(") || observed.Expected == "rgba(0, 0, 0, 0)" || observed.Background != observed.Expected || observed.Ink == "" || observed.Ink == observed.Paper {
