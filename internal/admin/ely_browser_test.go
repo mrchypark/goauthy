@@ -125,7 +125,15 @@ func TestElyBrandingBrowser(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	for _, suffix := range []string{"/auth/v1/ui/app.css", "/auth/v1/ui/brand.css", "/auth/v1/admin/admin.css", "/auth/v1/admin/app.js", "/auth/v1/branding/locale.js"} {
-		if !seen[server.URL+"/tenant"+suffix] {
+		wantPrefix := server.URL + "/tenant" + suffix
+		matched := seen[wantPrefix]
+		for url := range seen {
+			if strings.HasPrefix(url, wantPrefix+"?v=") {
+				matched = true
+				break
+			}
+		}
+		if !matched {
 			t.Errorf("asset not requested: %s", suffix)
 		}
 	}

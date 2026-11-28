@@ -188,7 +188,7 @@ func TestElyAdminScreensPreserveNavigationAndAssets(t *testing.T) {
 			r.AddCookie(&http.Cookie{Name: "goauthy_ui_locale", Value: "ko"})
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, r)
-			for _, want := range []string{`lang="ko"`, `href="/tenant/auth/v1/ui/app.css"`, `data-slot="select"`, `data-slot="button"`, `id="admin-menu-toggle"`, `aria-controls="admin-navigation"`, `aria-expanded="false"`, `data-i18n="Menu"`, `id="app"`, `src="/tenant/auth/v1/admin/app.js"`, `</html>`} {
+			for _, want := range []string{`lang="ko"`, `href="/tenant/auth/v1/ui/app.css?v=`, `data-slot="select"`, `data-slot="button"`, `id="admin-menu-toggle"`, `aria-controls="admin-navigation"`, `aria-expanded="false"`, `data-i18n="Menu"`, `id="app"`, `src="/tenant/auth/v1/admin/app.js"`, `</html>`} {
 				if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), want) {
 					t.Errorf("status=%d missing %s", w.Code, want)
 				}
@@ -203,7 +203,7 @@ func TestElyAdminScreensPreserveNavigationAndAssets(t *testing.T) {
 	r.Header.Set("Accept", "text/html")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), `data-slot="button"`) || !strings.Contains(w.Body.String(), `href="/tenant/auth/v1/ui/app.css"`) || !strings.Contains(w.Body.String(), "</html>") {
+	if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), `data-slot="button"`) || !strings.Contains(w.Body.String(), `href="/tenant/auth/v1/ui/app.css?v=`) || !strings.Contains(w.Body.String(), "</html>") {
 		t.Fatal("denied page lost Ely controls, assets, or complete rendering", w.Body.String())
 	}
 }
@@ -222,7 +222,7 @@ func TestElyEmailPreviewAssetsAndEscaping(t *testing.T) {
 	h.SetTemplateProvider(elyPreviewProvider{})
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/auth/v1/admin/email-templates/preview?type=otp&lang=en", nil))
-	for _, want := range []string{`href="/tenant/auth/v1/ui/app.css"`, `Preview &lt;header&gt;`, `123456`, `</html>`} {
+	for _, want := range []string{`href="/tenant/auth/v1/ui/app.css?v=`, `Preview &lt;header&gt;`, `123456`, `</html>`} {
 		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), want) {
 			t.Errorf("status=%d missing %s", w.Code, want)
 		}

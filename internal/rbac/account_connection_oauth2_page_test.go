@@ -94,7 +94,7 @@ func TestElyOAuth2CompletionUsesIssuerAssetsWithoutScripts(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.renderOAuth2CompletionPage(w, httptest.NewRequest(http.MethodGet, "/account/connections/oauth2/callback", nil))
 	body := w.Body.String()
-	for _, want := range []string{`href="/tenant/auth/v1/ui/app.css"`, `href="/tenant/auth/v1/ui/brand.css"`, `href="https://issuer.example.test/tenant/account/account.css"`, `class="ui-alert"`, `id="oauth2-account-link"`, `rel="noreferrer"`, `href="https://issuer.example.test/tenant/account"`, `requires separate explicit approval`} {
+	for _, want := range []string{`href="/tenant/auth/v1/ui/app.css?v=`, `href="/tenant/auth/v1/ui/brand.css?v=`, `href="https://issuer.example.test/tenant/account/account.css"`, `class="ui-alert"`, `id="oauth2-account-link"`, `rel="noreferrer"`, `href="https://issuer.example.test/tenant/account"`, `requires separate explicit approval`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("missing %s", want)
 		}

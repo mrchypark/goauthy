@@ -21,7 +21,7 @@ func TestElysduiAdminIntegration(t *testing.T) {
 	h.SetIssuer("https://example.test/tenant")
 	page := httptest.NewRecorder()
 	h.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/auth/v1/admin/dashboard", nil))
-	for _, want := range []string{`href="/tenant/auth/v1/ui/app.css"`, `href="/tenant/auth/v1/ui/ely-patterns.css"`, `href="/tenant/auth/v1/admin/operators"`, `href="/tenant/auth/v1/admin/users"`, `id="admin-menu-toggle"`, `aria-controls="admin-navigation"`, `aria-expanded="false"`, `data-i18n="Menu"`, `data-slot="button"`, `data-slot="input"`, `id="elysdui-prototypes"`} {
+	for _, want := range []string{`href="/tenant/auth/v1/ui/app.css?v=`, `href="/tenant/auth/v1/ui/ely-patterns.css?v=`, `href="/tenant/auth/v1/admin/operators"`, `href="/tenant/auth/v1/admin/users"`, `id="admin-menu-toggle"`, `aria-controls="admin-navigation"`, `aria-expanded="false"`, `data-i18n="Menu"`, `data-slot="button"`, `data-slot="input"`, `id="elysdui-prototypes"`} {
 		if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), want) {
 			t.Fatalf("status=%d missing %s", page.Code, want)
 		}

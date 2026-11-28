@@ -24,6 +24,25 @@ var stylesheets = []string{
 	"app.css", "ely-controls.css", "ely-patterns.css", "brand.css",
 }
 
+var stylesheetVersions = computeStylesheetVersions()
+
+func computeStylesheetVersions() map[string]string {
+	versions := make(map[string]string, len(stylesheets))
+	for _, name := range stylesheets {
+		body := brandCSS
+		if name != "brand.css" {
+			var err error
+			body, err = ely.Files.ReadFile("assets/" + name)
+			if err != nil {
+				continue
+			}
+		}
+		body = bytes.ReplaceAll(body, []byte("/assets/"), nil)
+		versions[name] = fmt.Sprintf("%x", sha256.Sum256(body))[:12]
+	}
+	return versions
+}
+
 // NewTemplates loads the actual Ely components, a CSS-only goauthy-head, and the
 // shared goauthy-brand header lockup. Pass Base="" to goauthy-brand when LogoURL
 // is already issuer-prefixed; otherwise pass the issuer base path.
@@ -36,7 +55,13 @@ func NewTemplates(name string) (*template.Template, error) {
 	return t.New(name).Funcs(template.FuncMap{
 		"uiStylesheets": func() []string { return stylesheets },
 		"uiAssetBase":   assetBase,
-	}).Parse(`{{define "goauthy-head"}}{{$base := uiAssetBase .}}{{range uiStylesheets}}<link rel="stylesheet" href="{{$base}}{{.}}">
+		"uiAssetQuery": func(name string) string {
+			if v := stylesheetVersions[name]; v != "" {
+				return "?v=" + v
+			}
+			return ""
+		},
+	}).Parse(`{{define "goauthy-head"}}{{$base := uiAssetBase .}}{{range uiStylesheets}}<link rel="stylesheet" href="{{$base}}{{.}}{{uiAssetQuery .}}">
 {{end}}{{end}}{{define "goauthy-brand"}}{{$name := "GoAuthy"}}{{if .Name}}{{$name = .Name}}{{end}}{{if .LogoURL}}<img class="client-login-logo" src="{{.Base}}{{.LogoURL}}" alt="{{$name}}">{{else}}<span class="brand-symbol" aria-hidden="true"></span><span>{{$name}}</span>{{end}}{{end}}`)
 }
 
@@ -78,11 +103,16 @@ func BindAssets(mux *http.ServeMux) error {
 			// Ely's root font URLs must resolve within the issuer namespace.
 			body = bytes.ReplaceAll(body, []byte("/assets/"), nil)
 		}
+		rawHash := fmt.Sprintf("%x", sha256.Sum256(body))[:12]
 		etag := fmt.Sprintf(`"%x"`, sha256.Sum256(body))
 		mux.Handle("GET "+AssetPath+name, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", contentType)
 			w.Header().Set("X-Content-Type-Options", "nosniff")
-			w.Header().Set("Cache-Control", "public, no-cache")
+			if v := r.URL.Query().Get("v"); v != "" && v == rawHash {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			} else {
+				w.Header().Set("Cache-Control", "public, no-cache")
+			}
 			w.Header().Set("ETag", etag)
 			http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(body))
 		}))

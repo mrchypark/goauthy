@@ -106,7 +106,8 @@ func TestElyFedCMPagesUseIssuerPrefix(t *testing.T) {
 			}
 			body := w.Body.String()
 			for _, asset := range []string{"ui/app.css", "ui/ely-controls.css", "ui/ely-patterns.css", "ui/brand.css", "theme/global.css"} {
-				if !strings.Contains(body, `href="/tenant/auth/v1/`+asset+`"`) {
+				prefix := `href="/tenant/auth/v1/` + asset
+				if !strings.Contains(body, prefix+`"`) && !strings.Contains(body, prefix+`?v=`) {
 					t.Errorf("missing tenant asset %s", asset)
 				}
 			}
