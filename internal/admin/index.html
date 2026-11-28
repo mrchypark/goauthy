@@ -6,10 +6,10 @@
   <title>{{if .Brand.Name}}{{.Brand.Name}}{{else}}GoAuthy{{end}} administration</title>{{template "goauthy-head" .BasePath}}<link rel="stylesheet" href="{{.BasePath}}/auth/v1/admin/admin.css">
 <link rel="stylesheet" href="{{.BasePath}}/auth/v1/branding/brand.css">{{if .Brand.ThemeURL}}<link rel="stylesheet" href="{{.BasePath}}{{.Brand.ThemeURL}}">{{end}}</head>
 <body class="common-brand">
-  <main>
+  <main class="ui-card ui-stack">
     <p class="brand-lockup">{{template "goauthy-brand" (dict "Base" .BasePath "LogoURL" .Brand.LogoURL "Name" .Brand.Name)}}</p><h1>Administration</h1><p class="lede">Manage identities, applications and access.</p>
     <nav class="index-nav" aria-label="Administration">
-      <ul>
+      <ul class="ui-stack ui-stack--row">
         {{range .Routes}}<li>{{template "button" (dict "Href" .Path "Label" .Label "Variant" "outline" "Size" "sm")}}</li>{{end}}
       </ul>
     </nav>
