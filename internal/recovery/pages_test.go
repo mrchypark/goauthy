@@ -90,12 +90,12 @@ func TestElyRecoveryControlsAndScripts(t *testing.T) {
 				t.Fatal(err)
 			}
 			body := out.String()
-			for _, want := range []string{`/tenant/auth/v1/ui/`, `data-slot="input"`, `data-slot="button"`, `/tenant/auth/v1/branding/locale.js`, `/tenant/auth/v1/users/recovery.js`} {
+			for _, want := range []string{`/tenant/auth/v1/ui/`, `/tenant/auth/v1/ui/theme.js`, `data-slot="input"`, `data-slot="button"`, `/tenant/auth/v1/branding/locale.js`, `/tenant/auth/v1/users/recovery.js`} {
 				if !strings.Contains(body, want) {
 					t.Errorf("missing %s", want)
 				}
 			}
-			if strings.Count(body, "<script") != 2 || strings.Contains(body, "hx-") {
+			if strings.Count(body, "<script") != 3 || strings.Contains(body, "hx-") {
 				t.Fatal("added script or enhanced submission")
 			}
 			if mode == "register" && !strings.Contains(body, `id="registration-input"`) {
